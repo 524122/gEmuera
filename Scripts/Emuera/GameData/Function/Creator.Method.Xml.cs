@@ -19,19 +19,8 @@ namespace MinorShift.Emuera.GameData.Function
             {
                 this.create = create;
                 ReturnType = typeof(Int64);
-                argumentTypeArray = null;
+                argumentTypeArray = create ? new Type[] { typeof(string), typeof(string) } : new Type[] { typeof(string) };
                 CanRestructure = false;
-            }
-            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
-            {
-                int expected = create ? 2 : 1;
-                if (arguments.Length != expected)
-                    return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
-                if (!IsXmlDocumentKeyArgument(arguments[0]))
-                    return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
-                if (create && (arguments[1] == null || !arguments[1].IsString))
-                    return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 2);
-                return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -55,12 +44,8 @@ namespace MinorShift.Emuera.GameData.Function
             public XmlReleaseMethod()
             {
                 ReturnType = typeof(Int64);
-                argumentTypeArray = null;
+                argumentTypeArray = new Type[] { typeof(string) };
                 CanRestructure = false;
-            }
-            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
-            {
-                return CheckSingleXmlDocumentKeyArgument(name, arguments);
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -77,12 +62,8 @@ namespace MinorShift.Emuera.GameData.Function
             public XmlToStrMethod()
             {
                 ReturnType = typeof(string);
-                argumentTypeArray = null;
+                argumentTypeArray = new Type[] { typeof(string) };
                 CanRestructure = false;
-            }
-            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
-            {
-                return CheckSingleXmlDocumentKeyArgument(name, arguments);
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -351,20 +332,6 @@ namespace MinorShift.Emuera.GameData.Function
                 SaveXmlSourceIfNeeded(arguments[0], exm, document, saveToSource);
                 return nodes.Count;
             }
-        }
-
-        static string CheckSingleXmlDocumentKeyArgument(string name, IOperandTerm[] arguments)
-        {
-            if (arguments.Length != 1)
-                return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
-            if (!IsXmlDocumentKeyArgument(arguments[0]))
-                return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
-            return null;
-        }
-
-        static bool IsXmlDocumentKeyArgument(IOperandTerm term)
-        {
-            return term != null && (term.IsString || term.IsInteger);
         }
 
         static string GetXmlDocumentKey(IOperandTerm term, ExpressionMediator exm)

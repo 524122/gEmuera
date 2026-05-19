@@ -35,7 +35,8 @@ namespace MinorShift.Emuera.GameProc.Function
 
 		#region static
 		//元BuiltInFunctionManager部分
-		readonly static Dictionary<string, FunctionIdentifier> funcDic = new Dictionary<string, FunctionIdentifier>();
+		readonly static Dictionary<string, FunctionIdentifier> funcDic =
+			new Dictionary<string, FunctionIdentifier>(Config.ICVariable ? System.StringComparer.OrdinalIgnoreCase : System.StringComparer.Ordinal);
 		readonly static Dictionary<FunctionCode, string> funcMatch = new Dictionary<FunctionCode, string>();
 		readonly static Dictionary<FunctionCode, FunctionCode> funcParent = new Dictionary<FunctionCode, FunctionCode>();
 		readonly static ArgumentBuilder methodArgumentBuilder = null;

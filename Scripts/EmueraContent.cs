@@ -450,9 +450,14 @@ public partial class EmueraContent : Control
         return label;
     }
 
+    const string BundledConsoleFontPath = "res://Fonts/MS Gothic.ttf";
+
     Font LoadConfiguredFont()
     {
         string requested = Config.FontName;
+        Font bundledFont = ResourceLoader.Load<Font>(BundledConsoleFontPath);
+        if (ShouldUseBundledConsoleFont(requested))
+            return bundledFont;
         if (!string.IsNullOrWhiteSpace(requested))
         {
             return new SystemFont
@@ -470,7 +475,21 @@ public partial class EmueraContent : Control
                 }
             };
         }
-        return ResourceLoader.Load<Font>("res://Fonts/MS Gothic.ttf");
+        return bundledFont;
+    }
+
+    static bool ShouldUseBundledConsoleFont(string requested)
+    {
+        if (OS.GetName() == "Android")
+            return true;
+        if (string.IsNullOrWhiteSpace(requested))
+            return true;
+        string normalized = requested.Trim();
+        if (normalized.StartsWith("@", System.StringComparison.Ordinal))
+            normalized = normalized.Substring(1);
+        return normalized.Equals("MS Gothic", System.StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("MS UI Gothic", System.StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("\uFF2D\uFF33 \u30B4\u30B7\u30C3\u30AF", System.StringComparison.OrdinalIgnoreCase);
     }
 
     int GetPartTop(AConsoleDisplayPart part)

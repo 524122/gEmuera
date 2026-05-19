@@ -148,7 +148,7 @@ namespace MinorShift.Emuera.GameProc
         /// 1806+v6.99 式中関数の引数に無効な#DIM変数を与えている場合に例外になるのを修正
 		/// 1808beta009 REF型に対応
 		/// </summary>
-		public UserDefinedFunctionArgument ConvertArg(IOperandTerm[] srcArgs, out string errMes)
+		public UserDefinedFunctionArgument ConvertArg(IOperandTerm[] srcArgs, out string errMes, bool ignoreExtraArgs = false)
 		{
 			errMes = null;
             if (TopLabel.IsError)
@@ -160,7 +160,7 @@ namespace MinorShift.Emuera.GameProc
 			int variadicIndex = func.VariadicArgIndex;
 			int fixedArgCount = variadicIndex >= 0 ? variadicIndex : func.Arg.Length;
             IOperandTerm[] convertedArg = new IOperandTerm[func.Arg.Length];
-			if(variadicIndex < 0 && convertedArg.Length < srcArgs.Length)
+			if(!ignoreExtraArgs && variadicIndex < 0 && convertedArg.Length < srcArgs.Length)
 			{
 				errMes = "引数の数が関数\"@" + func.LabelName + "\"に設定された数を超えています";
 				return null;

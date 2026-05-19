@@ -3376,7 +3376,7 @@ namespace MinorShift.Emuera.GameProc.Function
 
 				call.IsJump = isJump;
 				string errMes;
-				UserDefinedFunctionArgument arg = call.ConvertArg(args, out errMes);
+				UserDefinedFunctionArgument arg = call.ConvertArg(args, out errMes, isTry);
 				if (arg == null)
 				{
 					if (!isTry)
@@ -3439,7 +3439,7 @@ namespace MinorShift.Emuera.GameProc.Function
 						return;
 					}
 					string errMes;
-					callArg.UDFArgument = call.ConvertArg(callArg.RowArgs, out errMes);
+					callArg.UDFArgument = call.ConvertArg(callArg.RowArgs, out errMes, func.Function.IsTry());
 					if (callArg.UDFArgument == null)
 					{
 						ParserMediator.Warn(errMes, func, 2, true, false);
@@ -3480,9 +3480,15 @@ namespace MinorShift.Emuera.GameProc.Function
 				if (arg == null)
 				{
 					string errMes;
-					arg = call.ConvertArg(spCallArg.RowArgs, out errMes);
+					arg = call.ConvertArg(spCallArg.RowArgs, out errMes, isTry);
 					if (arg == null)
-						throw new CodeEE(errMes);
+					{
+						if (!isTry)
+							throw new CodeEE(errMes);
+						if (func.JumpToEndCatch != null)
+							state.JumpTo(func.JumpToEndCatch);
+						return;
+					}
 				}
 				state.IntoFunction(call, arg, exm);
 			}

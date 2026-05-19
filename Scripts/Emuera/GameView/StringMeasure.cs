@@ -6,6 +6,7 @@ using MinorShift.Emuera.Sub;
 using MinorShift._Library;
 //using System.Windows.Forms;
 using uEmuera.Drawing;
+using GodotFont = Godot.Font;
 
 namespace MinorShift.Emuera.GameView
 {
@@ -16,6 +17,10 @@ namespace MinorShift.Emuera.GameView
 	/// </summary>
 	internal sealed class StringMeasure : IDisposable
 	{
+		const string BundledConsoleFontPath = "res://Fonts/MS Gothic.ttf";
+		static readonly bool UseGodotTextMeasure = Godot.OS.GetName() == "Android";
+		static GodotFont godotMeasureFont;
+
 		public StringMeasure()
 		{
 			textDrawingMode = Config.TextDrawingMode;
@@ -43,6 +48,12 @@ namespace MinorShift.Emuera.GameView
 		{
             if (string.IsNullOrEmpty(s))
             	return 0;
+            if (UseGodotTextMeasure)
+            {
+            	GodotFont measureFont = GetGodotMeasureFont();
+            	if (measureFont != null)
+            		return System.Math.Max(0, (int)System.Math.Ceiling(measureFont.GetStringSize(s, fontSize: (int)System.Math.Round(font.Size)).X));
+            }
             if (textDrawingMode == TextDrawingMode.GRAPHICS)
             {
             	if (s.Contains("\t"))
@@ -71,6 +82,13 @@ namespace MinorShift.Emuera.GameView
             ////    throw new ExeEE("描画モード不明");
 
             return uEmuera.Utils.GetDisplayLength(s, font);
+		}
+
+		static GodotFont GetGodotMeasureFont()
+		{
+			if (godotMeasureFont == null)
+				godotMeasureFont = Godot.ResourceLoader.Load<GodotFont>(BundledConsoleFontPath);
+			return godotMeasureFont;
 		}
 
 
