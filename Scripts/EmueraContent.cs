@@ -1197,7 +1197,7 @@ public partial class EmueraContent : Control
         wrapper.Position = GetHtmlDivPosition(div, relX);
         wrapper.Size = new Vector2(div.DivWidth, div.DivHeight);
         wrapper.CustomMinimumSize = new Vector2(div.DivWidth, div.DivHeight);
-        wrapper.ZIndex = div.Depth;
+        wrapper.ZIndex = GetGodotZIndexForHtmlDepth(div.Depth);
 
         int[] margin = div.StyledBox?.Margin;
         int[] padding = div.StyledBox?.Padding;
@@ -1382,6 +1382,11 @@ public partial class EmueraContent : Control
             default:
                 return new Vector2(div.PointX - relX + div.X, div.Y);
         }
+    }
+
+    static int GetGodotZIndexForHtmlDepth(int depth)
+    {
+        return -depth;
     }
 
     Vector2 GetHtmlImagePosition(ConsoleImagePart imagePart, int relX)
@@ -2563,6 +2568,7 @@ public partial class EmueraContent : Control
         bool restoreQuickInputGate = false;
         string pressedButtonInput = null;
         long pressedButtonGeneration = 0;
+        Control pressedButtonControl = null;
         bool advanceTap = false;
         if (contentDragMoved)
         {
@@ -2573,6 +2579,7 @@ public partial class EmueraContent : Control
         {
             pressedButtonInput = contentDragButtonInput;
             pressedButtonGeneration = contentDragButtonGeneration;
+            pressedButtonControl = contentDragButton;
             handled = true;
         }
         else if (!contentDragStartedOnButton)
@@ -2586,6 +2593,7 @@ public partial class EmueraContent : Control
         ResetContentDragState();
         if (pressedButtonInput != null)
         {
+            UpdatePointerPositionForButton(pressedButtonControl, pointerPosition);
             if (quickButtons != null && quickButtons.IsShow)
                 HideQuickUntilNextButtons(pressedButtonGeneration);
             OnButtonPressed(pressedButtonInput, pressedButtonGeneration);
@@ -2617,6 +2625,24 @@ public partial class EmueraContent : Control
         if (contentScale > 0.001f)
             contentPosition /= contentScale;
         GenericUtils.SetPointerPosition(contentPosition.X, contentPosition.Y);
+    }
+
+    void UpdatePointerPositionForButton(Control button, Vector2 fallbackGlobalPosition)
+    {
+        if (button == null || !GodotObject.IsInstanceValid(button))
+        {
+            UpdatePointerPosition(fallbackGlobalPosition);
+            return;
+        }
+
+        var rect = button.GetGlobalRect();
+        if (rect.Size.X <= 0 || rect.Size.Y <= 0)
+        {
+            UpdatePointerPosition(fallbackGlobalPosition);
+            return;
+        }
+
+        UpdatePointerPosition(rect.GetCenter());
     }
 
     Vector2 ScrollContentBy(Vector2 delta)
