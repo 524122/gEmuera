@@ -35,7 +35,7 @@ namespace MinorShift.Emuera.GameProc
 		static string LazyLoadingConfigFilePath { get { return Path.Combine(Program.ExeDir, "lazyloading.cfg"); } }
 
 		const uint LazyMagicNumber = 0x4C415A59;
-		const uint LazyVersion = 1;
+		const uint LazyVersion = 2;
 
 		public enum LazyStatus
 		{
@@ -211,9 +211,7 @@ namespace MinorShift.Emuera.GameProc
 				return;
 			if (!File.Exists(LazyLoadingDataFilePath) || !File.Exists(LazyLoadingFilesFilePath))
 			{
-				if (IsAndroid() && TryBuildMobileLazyLoadingTable(erbFiles))
-					return;
-				LazyCurrentLazyStatus = LazyStatus.BuildTable;
+				RebuildLazyLoadingIndex(erbFiles);
 				return;
 			}
 
@@ -226,7 +224,7 @@ namespace MinorShift.Emuera.GameProc
 				{
 					if (metaReader.ReadUInt32() != LazyMagicNumber || metaReader.ReadUInt32() != LazyVersion)
 					{
-						LazyCurrentLazyStatus = LazyStatus.BuildTable;
+						RebuildLazyLoadingIndex(erbFiles);
 						return;
 					}
 
@@ -258,7 +256,7 @@ namespace MinorShift.Emuera.GameProc
 				{
 					if (dataReader.ReadUInt32() != LazyMagicNumber || dataReader.ReadUInt32() != LazyVersion)
 					{
-						LazyCurrentLazyStatus = LazyStatus.BuildTable;
+						RebuildLazyLoadingIndex(erbFiles);
 						return;
 					}
 
@@ -285,12 +283,26 @@ namespace MinorShift.Emuera.GameProc
 			catch (Exception e)
 			{
 				console.PrintSystemLine("LazyLoading: failed to read index table: " + e.Message);
-				LazyCurrentLazyStatus = LazyStatus.BuildTable;
+				RebuildLazyLoadingIndex(erbFiles);
 				return;
 			}
 
 			LazyCurrentLazyStatus =
 				ChangedFiles.Count != 0 || DeletedFiles.Count != 0 ? LazyStatus.UpdateTable : LazyStatus.Loaded;
+		}
+
+		private void RebuildLazyLoadingIndex(List<KeyValuePair<string, string>> erbFiles)
+		{
+			lazyLoadingTable.Clear();
+			lazyLoadingFilesTable.Clear();
+			LazyLoadingFiles.Clear();
+			DeletedFiles.Clear();
+			ChangedFiles.Clear();
+
+			if (IsAndroid() && TryBuildMobileLazyLoadingTable(erbFiles))
+				return;
+
+			LazyCurrentLazyStatus = LazyStatus.BuildTable;
 		}
 
 		private HashSet<string> GetLazyFiles(IEnumerable<KeyValuePair<string, string>> erbFiles)

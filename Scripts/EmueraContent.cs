@@ -112,6 +112,7 @@ public partial class EmueraContent : Control
     static readonly Color NormalSystemButtonColor = new Color(1, 1, 1, 1);
 
     public static int ContentWidth { get; private set; }
+    public static int ContentHeight { get; private set; }
     public static int ConfiguredMaxVisibleLines
     {
         get
@@ -139,6 +140,11 @@ public partial class EmueraContent : Control
     static int ClampMaxVisibleLines(int value)
     {
         return System.Math.Max(MinMaxVisibleLines, System.Math.Min(MaxMaxVisibleLines, value));
+    }
+
+    static int GetContentViewportHeight()
+    {
+        return Config.WindowY;
     }
 
     public static float ContentDragSensitivity
@@ -178,8 +184,7 @@ public partial class EmueraContent : Control
         instance = this;
         Size = GetViewportRect().Size;
         ContentWidth = (int)Size.X;
-        if (ContentWidth > Config.WindowX)
-            Config.UpdateWindowWidth(ContentWidth);
+        ContentHeight = (int)Size.Y;
         GetViewport().SizeChanged += OnViewportSizeChanged;
 
         mainFont = LoadConfiguredFont();
@@ -789,6 +794,51 @@ public partial class EmueraContent : Control
         QueueDisplayFollowUp();
     }
 
+    internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update, int lastButtonGeneration)
+    {
+        bool changed = false;
+        batchingDisplayLines = true;
+        try
+        {
+            if (removeBottomCount > 0)
+            {
+                RemoveBottomLines(removeBottomCount);
+                changed = true;
+            }
+
+            if (lines != null && lines.Count > 0)
+            {
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    var item = lines[i];
+                    if (item.Line == null)
+                        continue;
+                    AddLine(item.Line, item.Update);
+                    changed = true;
+                }
+            }
+        }
+        finally
+        {
+            batchingDisplayLines = false;
+        }
+
+        int overflow = lineContainer.GetChildCount() - MaxVisibleLines;
+        if (overflow > 0)
+        {
+            RemoveTopLines(System.Math.Max(LineTrimBatch, overflow));
+            changed = true;
+        }
+
+        if (changed || update)
+        {
+            RefreshQuickInputGate();
+            QueueDisplayFollowUp();
+        }
+
+        SetLastButtonGeneration(lastButtonGeneration);
+    }
+
     void QueueDisplayFollowUp()
     {
         QueueScaleBoundsUpdate();
@@ -1326,7 +1376,7 @@ public partial class EmueraContent : Control
         {
             case DisplayMode.Absolute:
             case DisplayMode.AbsoluteLeftBottom:
-                return new Vector2(div.X, Config.WindowY - div.Y - div.DivHeight);
+                return new Vector2(div.X, GetContentViewportHeight() - div.Y - div.DivHeight);
             case DisplayMode.AbsoluteLeftTop:
                 return new Vector2(div.X, div.Y);
             default:
@@ -1342,14 +1392,14 @@ public partial class EmueraContent : Control
             case DisplayMode.AbsoluteLeftBottom:
                 return new Vector2(
                     imagePart.PositionX + imagePart.dest_rect.X,
-                    Config.WindowY + imagePart.PositionY);
+                    GetContentViewportHeight() + imagePart.PositionY);
             case DisplayMode.AbsoluteLeftTop:
                 return new Vector2(
                     imagePart.PositionX + imagePart.dest_rect.X,
                     imagePart.PositionY);
             default:
                 return new Vector2(
-                    imagePart.PointX - relX + imagePart.dest_rect.X,
+                    imagePart.PointX - relX + imagePart.PositionX + imagePart.dest_rect.X,
                     imagePart.dest_rect.Y);
         }
     }
@@ -2065,7 +2115,7 @@ public partial class EmueraContent : Control
             EmueraThread.instance.Input("", false, skip);
             return;
         }
-        EmueraThread.instance.Input(input, true, skip);
+        EmueraThread.instance.Input(input, true, skip, 1);
     }
 
     void OnBackPressed()
@@ -2293,8 +2343,7 @@ public partial class EmueraContent : Control
     {
         Size = GetViewportRect().Size;
         ContentWidth = (int)Size.X;
-        if (ContentWidth > Config.WindowX)
-            Config.UpdateWindowWidth(ContentWidth);
+        ContentHeight = (int)Size.Y;
         QueueScaleBoundsUpdate();
     }
 
@@ -2537,7 +2586,8 @@ public partial class EmueraContent : Control
         ResetContentDragState();
         if (pressedButtonInput != null)
         {
-            HideQuickUntilNextButtons(pressedButtonGeneration);
+            if (quickButtons != null && quickButtons.IsShow)
+                HideQuickUntilNextButtons(pressedButtonGeneration);
             OnButtonPressed(pressedButtonInput, pressedButtonGeneration);
         }
         else if (advanceTap)
@@ -2564,8 +2614,6 @@ public partial class EmueraContent : Control
 
         var rect = scrollContainer.GetGlobalRect();
         var contentPosition = globalPosition - rect.Position;
-        contentPosition.X += scrollContainer.ScrollHorizontal;
-        contentPosition.Y += scrollContainer.ScrollVertical;
         if (contentScale > 0.001f)
             contentPosition /= contentScale;
         GenericUtils.SetPointerPosition(contentPosition.X, contentPosition.Y);

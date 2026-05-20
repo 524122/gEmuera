@@ -628,6 +628,8 @@ namespace MinorShift.Emuera
                 if (refmethodDic.TryGetValue(codeStr, out ref_method))
 					return new UserDefinedRefMethodTerm(ref_method, arguments);
 				FunctionLabelLine func = labelDic.GetNonEventLabel(codeStr);
+				if (func == null && GlobalStatic.Process != null && GlobalStatic.Process.TryLazyLoadErb(codeStr))
+					func = labelDic.GetNonEventLabel(codeStr);
 				if (func != null)
 				{
 					if (userDefinedOnly && !func.IsMethod)

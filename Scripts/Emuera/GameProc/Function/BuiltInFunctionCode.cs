@@ -386,6 +386,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		TOOLTIP_FORMAT,
 		TOOLTIP_IMG,
 		SKIPLOG,
+		BREAKBUTTON,
 		BINPUT,
 		BINPUTS,
 		ONEBINPUT,

@@ -506,7 +506,7 @@ namespace MinorShift.Emuera.GameData.Function
             if (!saveToSource)
                 return;
             if (source is VariableTerm term && term.Identifier.IsString)
-                term.Identifier.SetValue(document.OuterXml, new long[0]);
+                term.SetValue(document.OuterXml, exm);
         }
 
         #endregion

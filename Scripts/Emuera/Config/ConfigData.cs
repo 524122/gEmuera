@@ -115,6 +115,8 @@ static ConfigData() { }
 			{ "USE ERD FUNCTION", ConfigCode.UseERD },
 			{ "IMITATE ERD TO VARSIZE DIMENSION SPECIFICATION", ConfigCode.VarsizeDimConfig },
 			{ "CHECK DUPLICATED IDENTIFIERS DEFINED BY ERD", ConfigCode.CheckDuplicateIdentifier },
+			{ "CHECK DUPLICATE ERD IDENTIFIER AND PRIVATE VARIABLE", ConfigCode.CheckDuplicateIdentifier },
+			{ "CHECK DUPLICATE ERD IDENTIFIER AND PRIVATE VARIABLEA", ConfigCode.CheckDuplicateIdentifier },
 		};
 
 		private static readonly Dictionary<string, ConfigCode> englishReplaceAliases = new Dictionary<string, ConfigCode>(StringComparer.OrdinalIgnoreCase)
@@ -148,6 +150,40 @@ static ConfigData() { }
 			{ "FIXED DEBUG WINDOW STARTING POSITION", ConfigCode.DebugSetWindowPos },
 			{ "DEBUG WINDOW X POSITION", ConfigCode.DebugWindowPosX },
 			{ "DEBUG WINDOW Y POSITION", ConfigCode.DebugWindowPosY },
+		};
+
+		private static readonly HashSet<string> ignoredEnglishConfigKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		{
+			"SKIASHARP IMAGE QUALITY",
+			"SKIASHARP FONT HINTING",
+			"SKIASHARP FONT EDGING",
+			"RENDERING BACKEND",
+			"DISALLOW UPDATECHECK",
+			"STRING OF REPLACING NEW LINE CODE INSIDE CONTINUATION",
+			"VALID EXTENSIONS FOR LOADTEXT AND SAVETEXT",
+			"OUTPUT ENGLISH ITEMS IN THE CONFIG FILE",
+			"EMUERA INTERFACE LANGUAGE",
+			"PATH TO A CUSTOM WINDOW ICON",
+			"CLIPBOARD- COPY TEXT TO CLIPBOARD DURING GAME",
+			"CLIPBOARD- IGNORE <> TAGS IN TEXT",
+			"CLIPBOARD- REPLACE <> WITH THIS",
+			"CLIPBOARD- SHOW NEW LINES ONLY",
+			"CLIPBOARD- CLEAR BUFFER WHEN GAME CLEARS SCREEN",
+			"CLIPBOARD- LEFTCLICK TRIGGER",
+			"CLIPBOARD- MIDDLECLICK TRIGGER",
+			"CLIPBOARD- DOUBLE LEFT CLICK TRIGGER",
+			"CLIPBOARD- ANYKEY WAIT TRIGGER",
+			"CLIPBOARD- WAIT FOR INPUT TRIGGER",
+			"CLIPBOARD- LENGTH OF CLIPBOARD",
+			"CLIPBOARD- BUFFER SIZE",
+			"CLIPBOARD- SCROLLED LINES PER KEY",
+			"CLIPBOARD- MIN TIME BETWEEN PASTES",
+			"RIKAI- ENABLED",
+			"RIKAI- DICTIONARY FILENAME",
+			"RIKAI- BACK COLOR",
+			"RIKAI- TEXT COLOR",
+			"RIKAI- USE SEPARATE BOXES",
+			"ENABLE UNDO WITH CTRL-Z",
 		};
 
 		private void setDefault()
@@ -442,6 +478,13 @@ static ConfigData() { }
 				normalized = normalized.Replace("  ", " ");
 			return normalized.ToUpper(CultureInfo.InvariantCulture);
 		}
+
+		private static bool IsIgnoredEnglishConfigKey(string key)
+		{
+			if (string.IsNullOrWhiteSpace(key))
+				return false;
+			return ignoredEnglishConfigKeys.Contains(NormalizeEnglishConfigKey(key));
+		}
 		
 		public SingleTerm GetConfigValueInERB(string text, ref string errMes)
 		{
@@ -663,19 +706,26 @@ static ConfigData() { }
 					}
 					var token_0 = tokens[0].Trim();
 					AConfigItem item = GetConfigItem(token_0);
-					if(item == null)
+					bool ignoredConfigKey = item == null && IsIgnoredEnglishConfigKey(token_0);
+					if(item == null && !ignoredConfigKey)
 					{
 						var translated = uEmuera.Utils.SHIFTJIS_to_UTF8(token_0, md5);
 						if(!string.IsNullOrEmpty(translated))
 						{
 							token_0 = translated;
 							item = GetConfigItem(token_0);
+							ignoredConfigKey = item == null && IsIgnoredEnglishConfigKey(token_0);
 						}
-						else
+						else if (!IsIgnoredEnglishConfigKey(token_0))
 						{
 							configDebugLog.AppendLine($"  TRANSLATE_FAIL: key='{token_0}', md5={md5}");
 							GenericUtils.Warn($"[CONFIG] SHIFTJIS translate failed: key='{token_0}', md5={md5}");
 						}
+					}
+					if (ignoredConfigKey)
+					{
+						configDebugLog.AppendLine($"  IGNORED_UNSUPPORTED: '{token_0}'");
+						continue;
 					}
 					if (item == null)
 					{

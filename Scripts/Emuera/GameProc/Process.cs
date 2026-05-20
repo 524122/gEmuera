@@ -284,6 +284,11 @@ namespace MinorShift.Emuera.GameProc
 		{
 			vEvaluator.RESULT = i;
 		}
+		public void InputInteger(Int64 index, Int64 i)
+		{
+			if (index >= 0 && index < vEvaluator.RESULT_ARRAY.Length)
+				vEvaluator.RESULT_ARRAY[index] = i;
+		}
 		public void InputSystemInteger(Int64 i)
 		{
 			systemResult = i;

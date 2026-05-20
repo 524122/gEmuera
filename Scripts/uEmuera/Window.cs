@@ -127,6 +127,12 @@ namespace uEmuera.Window
             var console_count = displayLines.Length;
             if(console_count == 0)
             {
+                if(console_.IsInProcess)
+                {
+                    dirty_ = true;
+                    Volatile.Write(ref processedRefreshGeneration, Volatile.Read(ref refreshRequestGeneration));
+                    return;
+                }
                 //清空
                 GenericUtils.ClearText();
                 Volatile.Write(ref processedRefreshGeneration, Volatile.Read(ref refreshRequestGeneration));
@@ -134,6 +140,8 @@ namespace uEmuera.Window
             }
 
             bool need_update_flag = false;
+            int removeBottomCount = 0;
+            System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd = null;
             int prev = GenericUtils.GetTextMaxLineNo();
             int dis_lineno = prev;
             int index = 0;
@@ -163,15 +171,14 @@ namespace uEmuera.Window
                 }
                 if(prev > dis_lineno)
                 {
-                    var remove = prev - dis_lineno;
-                    GenericUtils.RemoveTextCount(remove);
+                    removeBottomCount = prev - dis_lineno;
                     need_update_flag = true;
                 }
                 index = Math.Max(0, clindex + 1);
             }
             if(index < console_count)
             {
-                var linesToAdd = new System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)>(console_count - index);
+                linesToAdd = new System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)>(console_count - index);
                 while(index < console_count)
                 {
                     var line = displayLines[index];
@@ -179,14 +186,9 @@ namespace uEmuera.Window
                         linesToAdd.Add((line, line.LineNo <= prev));
                     index += 1;
                 }
-
-                if(linesToAdd.Count > 0)
-                    GenericUtils.AddTexts(linesToAdd);
             }
 
-            GenericUtils.SetLastButtonGeneration(console_.LastButtonGeneration);
-            if(need_update_flag)
-                GenericUtils.TextUpdate();
+            GenericUtils.ApplyTextChanges(removeBottomCount, linesToAdd, need_update_flag, console_.LastButtonGeneration);
 
             GenericUtils.ShowIsInProcess(false);
             GenericUtils.RefreshCBG(console_);

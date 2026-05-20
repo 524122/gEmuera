@@ -189,15 +189,6 @@ namespace MinorShift.Emuera
 			if (TextDrawingMode != TextDrawingMode.WINAPI)
 				DrawingParam_ShapePositionShift = Math.Max(2, FontSize / 6);
 			DrawableWidth = WindowX - DrawingParam_ShapePositionShift;
-			if (Godot.OS.GetName() == "Android")
-			{
-				int contentWidth = EmueraContent.ContentWidth;
-				if (contentWidth > 0)
-				{
-					WindowX = Math.Max(WindowX, contentWidth);
-					DrawableWidth = WindowX - DrawingParam_ShapePositionShift;
-				}
-			}
 			ForceSavDir = Program.ExeDir + "sav\\";
 			if (UseSaveFolder)
 				SavDir = Program.ExeDir + "sav/";

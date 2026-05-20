@@ -540,8 +540,8 @@ namespace MinorShift.Emuera.GameView
 			}
 			return true;
 		}
-		public int ClientWidth { get { return Math.Max(Config.WindowX, (int)DisplayServer.WindowGetSize().X); } }
-		public int ClientHeight { get { return Config.WindowY > 0 ? Config.WindowY : (int)DisplayServer.WindowGetSize().Y; } }
+		public int ClientWidth { get { return Config.WindowX; } }
+		public int ClientHeight { get { return Config.WindowY; } }
 #endregion
 
 		const string ErrorButtonsText = "__openFileWithDebug__";

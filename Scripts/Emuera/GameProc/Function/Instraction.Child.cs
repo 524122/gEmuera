@@ -2242,6 +2242,20 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private sealed class BREAKBUTTON_Instruction : AbstractInstruction
+		{
+			public BREAKBUTTON_Instruction()
+			{
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.EXPRESSION_NULLABLE);
+				flag = METHOD_SAFE | EXTENDED;
+			}
+
+			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
+			{
+				exm.Console.forceUpdateGeneration();
+			}
+		}
+
 		private sealed class SNAKE_DT_COLUMN_OPTIONS_Instruction : AbstractInstruction
 		{
 			public SNAKE_DT_COLUMN_OPTIONS_Instruction()

@@ -49,7 +49,7 @@ public class EmueraThread
         return false;
     }
 
-    public void Input(string c, bool from_button, bool skip = false)
+    public void Input(string c, bool from_button, bool skip = false, int mouseButton = 0)
     {
         var console = MinorShift.Emuera.GlobalStatic.Console;
         if(console == null)
@@ -58,6 +58,7 @@ public class EmueraThread
             return;
         input = c;
         skipflag = skip;
+        inputMouseButton = mouseButton;
         inputEvent?.Set();
     }
 
@@ -92,9 +93,12 @@ public class EmueraThread
             {
                 if(console.IsWaitingEnterKey)
                     input = "";
-                console.PressEnterKey(skipflag, input, false);
+                if(inputMouseButton != 0)
+                    MinorShift.Emuera.GlobalStatic.Process?.InputInteger(1, inputMouseButton);
+                console.PressEnterKey(skipflag, input, inputMouseButton != 0);
             }
             input = null;
+            inputMouseButton = 0;
         }
     }
 
@@ -104,4 +108,5 @@ public class EmueraThread
     volatile bool running;
     volatile string input;
     volatile bool skipflag;
+    volatile int inputMouseButton;
 }

@@ -102,6 +102,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.SET_SKIA_QUALITY, new SNAKE_UI_SETTING_Instruction(FunctionCode.SET_SKIA_QUALITY));
 			addFunction(FunctionCode.SET_TEXT_DRAWING_MODE, new SNAKE_UI_SETTING_Instruction(FunctionCode.SET_TEXT_DRAWING_MODE));
 			addFunction(FunctionCode.BITMAP_CACHE_ENABLE, new SNAKE_UI_SETTING_Instruction(FunctionCode.BITMAP_CACHE_ENABLE));
+			addFunction(FunctionCode.BREAKBUTTON, new BREAKBUTTON_Instruction());
 		}
 
 		private static void addV24CompatibilityFunctions()
@@ -450,8 +451,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.CLEARIMAGELAYER_ALL, new CLEARIMAGELAYER_ALL_Instruction());
 			addFunction(FunctionCode.SETANIMETIMER, new SETANIMETIMER_Instruction());
 
-			if (Program.IsSnakeProfile)
-				addSnakeCompatibilityFunctions();
+			addSnakeCompatibilityFunctions();
 			#region 式中関数の引数違い
 			addFunction(FunctionCode.VARSIZE, argb[FunctionArgType.SP_VAR], METHOD_SAFE | EXTENDED);//動作が違うのでMETHOD化できない
 			addFunction(FunctionCode.GETTIME, argb[FunctionArgType.VOID], METHOD_SAFE | EXTENDED);//2つに代入する必要があるのでMETHOD化できない
@@ -481,11 +481,8 @@ namespace MinorShift.Emuera.GameProc.Function
 			funcMatch[FunctionCode.TRYCGOTOFORM] = "CATCH";
 			funcMatch[FunctionCode.TRYCJUMPFORM] = "CATCH";
 			funcMatch[FunctionCode.TRYCCALLFORM] = "CATCH";
-			if (Program.IsSnakeProfile)
-			{
-				funcMatch[FunctionCode.TRYCJUMPSTR] = "CATCH";
-				funcMatch[FunctionCode.TRYCCALLSTR] = "CATCH";
-			}
+			funcMatch[FunctionCode.TRYCJUMPSTR] = "CATCH";
+			funcMatch[FunctionCode.TRYCCALLSTR] = "CATCH";
 			funcMatch[FunctionCode.CATCH] = "ENDCATCH";
 			funcMatch[FunctionCode.DO] = "LOOP";
 			funcMatch[FunctionCode.PRINTDATA] = "ENDDATA";

@@ -329,6 +329,11 @@ internal static class GenericUtils
         EnqueueUI(() => EmueraContent.instance?.AddLines(lines), true);
     }
 
+    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update, int lastButtonGeneration)
+    {
+        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration), true);
+    }
+
     public static void SetLastButtonGeneration(int generation)
     {
         EnqueueUI(() => EmueraContent.instance?.SetLastButtonGeneration(generation), true);
