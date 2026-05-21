@@ -29,10 +29,15 @@ public partial class EmueraContent : Control
     float bgmVolume = 1.0f;
 
     Dictionary<int, ConsoleDisplayLine> lineObjects = new Dictionary<int, ConsoleDisplayLine>();
+    Dictionary<int, Control> lineControls = new Dictionary<int, Control>();
+    Dictionary<int, Vector2> lineSizes = new Dictionary<int, Vector2>();
+    SortedSet<int> lineNumbers = new SortedSet<int>();
     HashSet<string> failedTextureSearches = new HashSet<string>();
     List<EmueraImage> cbgNodes = new List<EmueraImage>();
     List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> renderedCbgLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
     bool batchingDisplayLines = false;
+    float totalLineHeight = 0;
+    float widestLineWidth = 0;
 
     public const int DefaultMaxVisibleLines = 360;
     public const int MinMaxVisibleLines = 120;
@@ -68,9 +73,32 @@ public partial class EmueraContent : Control
     float contentInertiaDeceleration = 900.0f;
     int contentScrollInteractionSerial = 0;
     bool pendingScroll = false;
+    int pendingScrollInteractionSerial = 0;
+    int pendingScrollLastMax = int.MinValue;
+    ulong pendingScrollDeadlineTick = 0;
+    ulong pendingScrollStableSinceTick = 0;
     bool pendingScaleBoundsUpdate = false;
     float contentScale = 1.0f;
+    Dictionary<int, Vector2> contentTouchPositions = new Dictionary<int, Vector2>();
+    bool contentTouchGestureActive = false;
+    bool contentPinchActive = false;
+    bool contentPinchDirty = false;
+    float contentPinchStartSpread = 0.0f;
+    float contentPinchStartScale = 1.0f;
+    int contentPinchTouchCount = 0;
+    bool contentPinchFocusValid = false;
+    Vector2 scaleFocusContentPoint = Vector2.Zero;
+    Vector2 scaleFocusLocalPoint = Vector2.Zero;
     const float ScrollDragThreshold = 10.0f;
+    const float ContentScaleMin = 0.5f;
+    const float ContentScaleMax = 3.0f;
+    const float ContentScaleEpsilon = 0.0005f;
+    const int ContentPinchTouchCount = 2;
+    const float ContentPinchMinSpread = 28.0f;
+    const float ContentPinchScaleDeadZone = 0.006f;
+    const ulong ScrollToBottomRetryMs = 2000;
+    const ulong ScrollToBottomStableMs = 80;
+    const int ScrollToBottomTolerancePx = 1;
     const float ContentInertiaMinVelocity = 80.0f;
     const float ContentInertiaFastVelocity = 4500.0f;
     const float ContentInertiaMaxVelocity = 14000.0f;
@@ -383,7 +411,7 @@ public partial class EmueraContent : Control
         GenericUtils.ClearPointingButton();
         foreach(var child in lineContainer.GetChildren())
             SafeQueueFree(child);
-        lineObjects.Clear();
+        ResetLineIndexes();
         failedTextureSearches.Clear();
         displayRevision++;
         RefreshQuickInputGate();
@@ -725,31 +753,25 @@ public partial class EmueraContent : Control
         }
 
         int fixedLineHeight = lineControl.GetChildCount() == 0 ? 0 : lineHeight;
-        SetFixedControlSize(lineControl, new Vector2(maxLineRight, fixedLineHeight));
+        var lineSize = new Vector2(maxLineRight, fixedLineHeight);
+        SetFixedControlSize(lineControl, lineSize);
 
-        // Handle line updates: replace existing Control if LineNo already exists
         int insertIndex = -1;
-        if (isUpdate && lineObjects.ContainsKey(line.LineNo))
+        if (lineControls.TryGetValue(line.LineNo, out var existingControl))
         {
-            int childCount = lineContainer.GetChildCount();
-            for (int i = 0; i < childCount; i++)
-            {
-                var child = lineContainer.GetChild(i);
-                if (child.HasMeta("line_no") && (int)child.GetMeta("line_no") == line.LineNo)
-                {
-                    SafeQueueFree(child);
-                    insertIndex = i;
-                    break;
-                }
-            }
+            if (existingControl != null && existingControl.GetParent() == lineContainer)
+                insertIndex = existingControl.GetIndex();
+            UnregisterLine(line.LineNo);
+            if (existingControl != null)
+                SafeQueueFree(existingControl);
         }
 
         lineContainer.AddChild(lineControl);
         if (insertIndex >= 0)
-            lineContainer.MoveChild(lineControl, insertIndex);
+            lineContainer.MoveChild(lineControl, System.Math.Min(insertIndex, lineContainer.GetChildCount() - 1));
 
         lineControl.SetMeta("line_no", line.LineNo);
-        lineObjects[line.LineNo] = line;
+        RegisterLine(line.LineNo, line, lineControl, lineSize);
         displayRevision++;
 
         // Enforce node cap to prevent unbounded memory growth
@@ -842,11 +864,7 @@ public partial class EmueraContent : Control
     void QueueDisplayFollowUp()
     {
         QueueScaleBoundsUpdate();
-        if (!pendingScroll)
-        {
-            pendingScroll = true;
-            CallDeferred(nameof(DeferredScrollToBottom), contentScrollInteractionSerial);
-        }
+        RequestScrollToBottom();
     }
 
     void AddLineBackground(ConsoleDisplayLine line, Control lineControl, int lineHeight)
@@ -901,21 +919,102 @@ public partial class EmueraContent : Control
         RefreshQuickInputGate();
     }
 
-    async void DeferredScrollToBottom(int interactionSerial)
+    void RegisterLine(int lineNo, ConsoleDisplayLine line, Control control, Vector2 size)
     {
-        if (scrollContainer != null)
+        lineObjects[lineNo] = line;
+        lineControls[lineNo] = control;
+        lineSizes[lineNo] = size;
+        lineNumbers.Add(lineNo);
+        totalLineHeight += size.Y;
+        if (size.X > widestLineWidth)
+            widestLineWidth = size.X;
+    }
+
+    void UnregisterLine(int lineNo)
+    {
+        lineObjects.Remove(lineNo);
+        lineControls.Remove(lineNo);
+        lineNumbers.Remove(lineNo);
+        if (!lineSizes.TryGetValue(lineNo, out var size))
+            return;
+        lineSizes.Remove(lineNo);
+        totalLineHeight = System.Math.Max(0, totalLineHeight - size.Y);
+        if (size.X >= widestLineWidth)
+            RecalculateWidestLineWidth();
+    }
+
+    void ResetLineIndexes()
+    {
+        lineObjects.Clear();
+        lineControls.Clear();
+        lineSizes.Clear();
+        lineNumbers.Clear();
+        totalLineHeight = 0;
+        widestLineWidth = 0;
+    }
+
+    void RecalculateWidestLineWidth()
+    {
+        widestLineWidth = 0;
+        foreach (var size in lineSizes.Values)
         {
-            for (int i = 0; i < 5; i++)
+            if (size.X > widestLineWidth)
+                widestLineWidth = size.X;
+        }
+    }
+
+    void RequestScrollToBottom()
+    {
+        ulong now = Time.GetTicksMsec();
+        pendingScrollInteractionSerial = contentScrollInteractionSerial;
+        pendingScrollLastMax = int.MinValue;
+        pendingScrollStableSinceTick = 0;
+        pendingScrollDeadlineTick = now + ScrollToBottomRetryMs;
+        if (pendingScroll)
+            return;
+        pendingScroll = true;
+        CallDeferred(nameof(DeferredScrollToBottom));
+    }
+
+    async void DeferredScrollToBottom()
+    {
+        try
+        {
+            while (pendingScroll && scrollContainer != null)
             {
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                if (scrollContainer == null)
+                    break;
+                if (contentDragActive || contentInertiaActive || pendingScrollInteractionSerial != contentScrollInteractionSerial)
+                    break;
+
                 UpdateScaleBounds();
-                if (!contentDragActive && !contentInertiaActive && interactionSerial == contentScrollInteractionSerial)
-                    scrollContainer.ScrollVertical = GetMaxContentVerticalScroll();
-                else
+                int maxScroll = GetMaxContentVerticalScroll();
+                ulong now = Time.GetTicksMsec();
+                if (maxScroll != pendingScrollLastMax)
+                {
+                    pendingScrollLastMax = maxScroll;
+                    pendingScrollStableSinceTick = now;
+                    ulong stableDeadline = now + ScrollToBottomStableMs;
+                    if (pendingScrollDeadlineTick < stableDeadline)
+                        pendingScrollDeadlineTick = stableDeadline;
+                }
+
+                scrollContainer.ScrollVertical = maxScroll;
+                bool atBottom = scrollContainer.ScrollVertical >= maxScroll - ScrollToBottomTolerancePx;
+                bool maxStable = pendingScrollStableSinceTick > 0 && now - pendingScrollStableSinceTick >= ScrollToBottomStableMs;
+                if (atBottom && maxStable)
+                    break;
+                if (now >= pendingScrollDeadlineTick)
                     break;
             }
         }
-        pendingScroll = false;
+        finally
+        {
+            pendingScroll = false;
+            pendingScrollLastMax = int.MinValue;
+            pendingScrollStableSinceTick = 0;
+        }
     }
 
     void QueueScaleBoundsUpdate()
@@ -933,7 +1032,7 @@ public partial class EmueraContent : Control
         UpdateScaleBounds();
     }
 
-    void UpdateScaleBounds()
+    void UpdateScaleBounds(bool allowShrink = true)
     {
         if (scaledContentRoot == null || lineContainer == null)
             return;
@@ -947,6 +1046,11 @@ public partial class EmueraContent : Control
         var scaledSize = new Vector2(
             Mathf.Max(unscaledWidth * contentScale, scrollSize.X),
             Mathf.Max(contentSize.Y * contentScale, scrollSize.Y));
+        if (!allowShrink)
+        {
+            scaledSize.X = Mathf.Max(scaledSize.X, Mathf.Max(scaledContentRoot.CustomMinimumSize.X, scaledContentRoot.Size.X));
+            scaledSize.Y = Mathf.Max(scaledSize.Y, Mathf.Max(scaledContentRoot.CustomMinimumSize.Y, scaledContentRoot.Size.Y));
+        }
         scaledContentRoot.Position = Vector2.Zero;
         scaledContentRoot.CustomMinimumSize = scaledSize;
         scaledContentRoot.Size = scaledSize;
@@ -954,22 +1058,9 @@ public partial class EmueraContent : Control
 
     Vector2 CalculateLineContentSize()
     {
-        float width = Config.DrawableWidth;
-        float height = 0;
-        int visibleRows = 0;
-        int childCount = lineContainer.GetChildCount();
-        for (int i = 0; i < childCount; i++)
-        {
-            if (lineContainer.GetChild(i) is Control row)
-            {
-                var rowSize = row.CustomMinimumSize;
-                if (rowSize.Y <= 0)
-                    rowSize = row.GetCombinedMinimumSize();
-                width = Mathf.Max(width, rowSize.X);
-                height += rowSize.Y;
-                visibleRows++;
-            }
-        }
+        float width = Mathf.Max(Config.DrawableWidth, widestLineWidth);
+        float height = totalLineHeight;
+        int visibleRows = lineNumbers.Count;
         if (visibleRows > 1)
             height += (visibleRows - 1) * lineContainer.GetThemeConstant("separation");
         return new Vector2(width, height);
@@ -1123,7 +1214,7 @@ public partial class EmueraContent : Control
                     emuImg.SourceTexture = texture;
                 }
                 emuImg.DrawOffset = new Vector2(0, 0);
-                emuImg.Position = GetHtmlImagePosition(cip, relX);
+                emuImg.Position = GetHtmlImagePosition(cip, relX) + GetSpriteHtmlDrawOffset(sprite, cip.ResourceName, w, imgH);
                 emuImg.Size = new Vector2(w, imgH);
                 emuImg.FlipX = cip.FlipX;
                 emuImg.FlipY = cip.FlipY;
@@ -1409,6 +1500,43 @@ public partial class EmueraContent : Control
         }
     }
 
+    static Vector2 GetSpriteHtmlDrawOffset(ASprite sprite, string resourceName, int width, int height)
+    {
+        if (width == 0 || height == 0)
+            return Vector2.Zero;
+
+        uEmuera.Drawing.Point basePosition = uEmuera.Drawing.Point.Empty;
+        bool hasPosition = sprite != null && !sprite.DestBasePosition.IsEmpty;
+        if (hasPosition)
+        {
+            basePosition = sprite.DestBasePosition;
+        }
+        else if (AppContents.TryGetSpriteBasePosition(resourceName, out var cachedPosition) && !cachedPosition.IsEmpty)
+        {
+            basePosition = cachedPosition;
+            hasPosition = true;
+        }
+        if (!hasPosition)
+            return Vector2.Zero;
+
+        if (sprite is ASpriteSingle single)
+        {
+            int srcW = single.SrcRectangle.Width;
+            int srcH = single.SrcRectangle.Height;
+            if (srcW == 0 || srcH == 0)
+                return Vector2.Zero;
+            return new Vector2(
+                basePosition.X * width / (float)srcW,
+                basePosition.Y * height / (float)srcH);
+        }
+
+        if (sprite.DestBaseSize.Width == 0 || sprite.DestBaseSize.Height == 0)
+            return Vector2.Zero;
+        return new Vector2(
+            basePosition.X * width / (float)sprite.DestBaseSize.Width,
+            basePosition.Y * height / (float)sprite.DestBaseSize.Height);
+    }
+
     static bool IsDynamicCutinName(string name)
     {
         if (string.IsNullOrEmpty(name) || !name.StartsWith("CUTIN", StringComparison.OrdinalIgnoreCase) || name.Length == 5)
@@ -1527,20 +1655,12 @@ public partial class EmueraContent : Control
 
     public int GetMaxLineNo()
     {
-        int max = -1;
-        foreach(var k in lineObjects.Keys)
-            if(k > max) max = k;
-        return max;
+        return lineNumbers.Count == 0 ? -1 : lineNumbers.Max;
     }
 
     public int GetMinLineNo()
     {
-        if (lineObjects.Count == 0)
-            return -1;
-        int min = int.MaxValue;
-        foreach(var k in lineObjects.Keys)
-            if(k < min) min = k;
-        return min;
+        return lineNumbers.Count == 0 ? -1 : lineNumbers.Min;
     }
 
     public void RemoveTopLines(int count)
@@ -1555,7 +1675,7 @@ public partial class EmueraContent : Control
             if (child.HasMeta("line_no"))
             {
                 int lineNo = (int)child.GetMeta("line_no");
-                lineObjects.Remove(lineNo);
+                UnregisterLine(lineNo);
             }
             SafeQueueFree(child);
         }
@@ -1587,7 +1707,7 @@ public partial class EmueraContent : Control
             if (child.HasMeta("line_no"))
             {
                 int lineNo = (int)child.GetMeta("line_no");
-                lineObjects.Remove(lineNo);
+                UnregisterLine(lineNo);
             }
             SafeQueueFree(child);
         }
@@ -2354,27 +2474,40 @@ public partial class EmueraContent : Control
 
     public void SetContentScale(float scale)
     {
-        contentScale = Mathf.Clamp(scale, 0.5f, 3.0f);
+        SetContentScale(scale, true, true);
+    }
+
+    void SetContentScale(float scale, bool requestScrollToBottom, bool queueBoundsUpdate)
+    {
+        ApplyContentScaleValue(scale);
+        ApplyContentScaleTransform();
+        if (queueBoundsUpdate)
+            QueueScaleBoundsUpdate();
+        if (requestScrollToBottom)
+            RequestScrollToBottom();
+    }
+
+    void ApplyContentScaleValue(float scale)
+    {
+        contentScale = ClampContentScale(scale);
+        scalepad?.SyncScale(contentScale);
+        if (scrollContainer == null)
+            return;
+
+        scrollContainer.HorizontalScrollMode = contentScale > 1.01f
+            ? ScrollContainer.ScrollMode.Auto
+            : ScrollContainer.ScrollMode.Disabled;
+        if (contentScale <= 1.01f)
+            scrollContainer.ScrollHorizontal = 0;
+    }
+
+    void ApplyContentScaleTransform()
+    {
         var scaleVector = new Vector2(contentScale, contentScale);
-        if (scrollContainer != null)
-        {
-            scrollContainer.HorizontalScrollMode = contentScale > 1.01f
-                ? ScrollContainer.ScrollMode.Auto
-                : ScrollContainer.ScrollMode.Disabled;
-            if (contentScale <= 1.01f)
-                scrollContainer.ScrollHorizontal = 0;
-        }
         if (lineContainer != null)
             lineContainer.Scale = scaleVector;
         if (cbgContainer != null)
             cbgContainer.Scale = scaleVector;
-        QueueScaleBoundsUpdate();
-        // Force scroll container to recalculate its scroll area on next frame after layout
-        if (!pendingScroll)
-        {
-            pendingScroll = true;
-            CallDeferred(nameof(DeferredScrollToBottom), contentScrollInteractionSerial);
-        }
     }
 
     public void RefreshFontSize()
@@ -2407,6 +2540,7 @@ public partial class EmueraContent : Control
 
     public override void _Process(double delta)
     {
+        ProcessPendingContentPinchZoom();
         ProcessContentInertia((float)delta);
         PublishAudioPlaybackPositions();
         RefreshCbgFollowScrollPositions();
@@ -2493,6 +2627,9 @@ public partial class EmueraContent : Control
 
     bool HandleContentPointerInput(InputEvent @event, bool acceptEvent, Control button = null, string input = null, long generation = 0)
     {
+        if (HandleContentTouchGesture(@event, acceptEvent))
+            return true;
+
         if (!TryGetPointer(@event, out var pointerPosition, out var pressed, out var released, out var motion))
             return false;
 
@@ -2610,6 +2747,266 @@ public partial class EmueraContent : Control
                 GetViewport().SetInputAsHandled();
         }
         return handled;
+    }
+
+    bool HandleContentTouchGesture(InputEvent @event, bool acceptEvent)
+    {
+        if (scrollContainer == null)
+            return false;
+
+        if (contentTouchGestureActive && (@event is InputEventMouseButton || @event is InputEventMouseMotion))
+        {
+            ConsumeContentPointerEvent(acceptEvent);
+            return true;
+        }
+
+        if (@event is InputEventScreenTouch touch)
+            return HandleContentScreenTouch(touch, acceptEvent);
+        if (@event is InputEventScreenDrag drag)
+            return HandleContentScreenDrag(drag, acceptEvent);
+        return false;
+    }
+
+    bool HandleContentScreenTouch(InputEventScreenTouch touch, bool acceptEvent)
+    {
+        if (touch.Pressed)
+        {
+            var rect = scrollContainer.GetGlobalRect();
+            if (!rect.HasPoint(touch.Position) && contentTouchPositions.Count == 0 && !contentTouchGestureActive)
+                return false;
+
+            contentTouchPositions[touch.Index] = touch.Position;
+            if (contentTouchPositions.Count >= ContentPinchTouchCount)
+            {
+                BeginContentTouchGesture();
+                ConsumeContentPointerEvent(acceptEvent);
+                return true;
+            }
+
+            if (contentTouchGestureActive)
+            {
+                ConsumeContentPointerEvent(acceptEvent);
+                return true;
+            }
+            return false;
+        }
+
+        if (!contentTouchPositions.ContainsKey(touch.Index))
+        {
+            if (!contentTouchGestureActive)
+                return false;
+            ConsumeContentPointerEvent(acceptEvent);
+            return true;
+        }
+
+        contentTouchPositions.Remove(touch.Index);
+        if (!contentTouchGestureActive)
+            return false;
+
+        if (contentTouchPositions.Count >= ContentPinchTouchCount)
+            BeginContentPinch();
+        else if (contentTouchPositions.Count == 0)
+            EndContentTouchGesture();
+        else
+        {
+            contentPinchActive = false;
+            contentPinchDirty = false;
+        }
+
+        ConsumeContentPointerEvent(acceptEvent);
+        return true;
+    }
+
+    bool HandleContentScreenDrag(InputEventScreenDrag drag, bool acceptEvent)
+    {
+        if (!contentTouchPositions.ContainsKey(drag.Index))
+        {
+            if (!contentTouchGestureActive)
+                return false;
+            ConsumeContentPointerEvent(acceptEvent);
+            return true;
+        }
+
+        contentTouchPositions[drag.Index] = drag.Position;
+        if (!contentTouchGestureActive && contentTouchPositions.Count < ContentPinchTouchCount)
+            return false;
+
+        if (!contentTouchGestureActive)
+            BeginContentTouchGesture();
+        else if (!contentPinchActive || contentTouchPositions.Count != contentPinchTouchCount)
+            BeginContentPinch();
+        else
+            contentPinchDirty = true;
+
+        ConsumeContentPointerEvent(acceptEvent);
+        return true;
+    }
+
+    void BeginContentTouchGesture()
+    {
+        if (!contentTouchGestureActive)
+        {
+            contentTouchGestureActive = true;
+            contentScrollInteractionSerial++;
+            StopContentInertia();
+            ResetContentDragState();
+        }
+        BeginContentPinch();
+    }
+
+    void BeginContentPinch()
+    {
+        contentPinchActive = false;
+        contentPinchDirty = false;
+        contentPinchTouchCount = contentTouchPositions.Count;
+        if (contentPinchTouchCount != ContentPinchTouchCount)
+            return;
+
+        if (!TryGetContentTouchMetrics(out _, out _, out var spread) || spread < ContentPinchMinSpread)
+            return;
+
+        contentPinchStartSpread = spread;
+        contentPinchStartScale = contentScale;
+        contentPinchActive = true;
+    }
+
+    void ProcessPendingContentPinchZoom()
+    {
+        if (!contentPinchDirty)
+            return;
+        contentPinchDirty = false;
+        UpdateContentPinchZoom();
+    }
+
+    void UpdateContentPinchZoom()
+    {
+        if (!contentPinchActive)
+            return;
+        if (!TryGetContentTouchMetrics(out var count, out var center, out var spread))
+            return;
+        if (count != ContentPinchTouchCount)
+        {
+            contentPinchActive = false;
+            return;
+        }
+        if (count != contentPinchTouchCount)
+        {
+            BeginContentPinch();
+            return;
+        }
+        if (spread < ContentPinchMinSpread || contentPinchStartSpread < ContentPinchMinSpread)
+            return;
+
+        float ratio = spread / contentPinchStartSpread;
+        if (Mathf.Abs(ratio - 1.0f) < ContentPinchScaleDeadZone)
+            return;
+
+        float targetScale = ClampContentScale(contentPinchStartScale * ratio);
+        bool atLowerLimit = targetScale <= ContentScaleMin + ContentScaleEpsilon && ratio < 1.0f;
+        bool atUpperLimit = targetScale >= ContentScaleMax - ContentScaleEpsilon && ratio > 1.0f;
+        if (Mathf.Abs(targetScale - contentScale) < ContentScaleEpsilon)
+        {
+            if (atLowerLimit || atUpperLimit)
+                RebaseContentPinch(spread);
+            return;
+        }
+
+        SetContentScaleKeepingFocus(targetScale, center);
+        if (atLowerLimit || atUpperLimit)
+            RebaseContentPinch(spread);
+        UpdatePointerPosition(center);
+    }
+
+    static float ClampContentScale(float scale)
+    {
+        return Mathf.Clamp(scale, ContentScaleMin, ContentScaleMax);
+    }
+
+    void RebaseContentPinch(float spread)
+    {
+        contentPinchStartSpread = Mathf.Max(spread, ContentPinchMinSpread);
+        contentPinchStartScale = contentScale;
+    }
+
+    bool TryGetContentTouchMetrics(out int count, out Vector2 center, out float spread)
+    {
+        count = contentTouchPositions.Count;
+        center = Vector2.Zero;
+        spread = 0.0f;
+        if (count != ContentPinchTouchCount)
+            return false;
+
+        using var enumerator = contentTouchPositions.Values.GetEnumerator();
+        if (!enumerator.MoveNext())
+            return false;
+        var first = enumerator.Current;
+        if (!enumerator.MoveNext())
+            return false;
+        var second = enumerator.Current;
+        center = (first + second) * 0.5f;
+        spread = first.DistanceTo(second);
+        return true;
+    }
+
+    void SetContentScaleKeepingFocus(float scale, Vector2 focusGlobalPosition)
+    {
+        if (scrollContainer == null)
+        {
+            SetContentScale(scale, false, true);
+            return;
+        }
+
+        var rect = scrollContainer.GetGlobalRect();
+        var localFocus = focusGlobalPosition - rect.Position;
+        localFocus.X = Mathf.Clamp(localFocus.X, 0.0f, rect.Size.X);
+        localFocus.Y = Mathf.Clamp(localFocus.Y, 0.0f, rect.Size.Y);
+
+        float previousScale = Mathf.Max(contentScale, 0.001f);
+        var previousScroll = new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+        var contentFocus = (previousScroll + localFocus) / previousScale;
+
+        ApplyContentScaleValue(scale);
+        UpdateScaleBounds(false);
+        ApplyContentScaleTransform();
+        RestoreContentScaleFocus(contentFocus, localFocus);
+        scaleFocusContentPoint = contentFocus;
+        scaleFocusLocalPoint = localFocus;
+        contentPinchFocusValid = true;
+    }
+
+    void RestoreContentScaleFocus(Vector2 contentFocus, Vector2 localFocus)
+    {
+        if (scrollContainer == null)
+            return;
+
+        var nextScroll = contentFocus * contentScale - localFocus;
+        scrollContainer.ScrollHorizontal = Mathf.Clamp(Mathf.RoundToInt(nextScroll.X), 0, GetMaxContentHorizontalScroll());
+        scrollContainer.ScrollVertical = Mathf.Clamp(Mathf.RoundToInt(nextScroll.Y), 0, GetMaxContentVerticalScroll());
+    }
+
+    void EndContentTouchGesture()
+    {
+        if (contentPinchFocusValid)
+        {
+            UpdateScaleBounds(true);
+            RestoreContentScaleFocus(scaleFocusContentPoint, scaleFocusLocalPoint);
+        }
+        contentTouchGestureActive = false;
+        contentPinchActive = false;
+        contentPinchDirty = false;
+        contentPinchFocusValid = false;
+        contentPinchStartSpread = 0.0f;
+        contentPinchStartScale = contentScale;
+        contentPinchTouchCount = 0;
+        contentTouchPositions.Clear();
+    }
+
+    void ConsumeContentPointerEvent(bool acceptEvent)
+    {
+        if (acceptEvent)
+            AcceptEvent();
+        else
+            GetViewport().SetInputAsHandled();
     }
 
     void UpdatePointerPosition(Vector2 globalPosition)
@@ -2753,16 +3150,30 @@ public partial class EmueraContent : Control
     {
         if (scrollContainer == null)
             return 0;
-        var hScroll = scrollContainer.GetHScrollBar();
-        return Mathf.RoundToInt(Mathf.Max(0, hScroll.MaxValue));
+        return GetContentScrollLimit().X;
     }
 
     int GetMaxContentVerticalScroll()
     {
         if (scrollContainer == null)
             return 0;
-        var vScroll = scrollContainer.GetVScrollBar();
-        return Mathf.RoundToInt(Mathf.Max(0, vScroll.MaxValue));
+        return GetContentScrollLimit().Y;
+    }
+
+    Vector2I GetContentScrollLimit()
+    {
+        if (scrollContainer == null)
+            return Vector2I.Zero;
+
+        var scrollSize = scrollContainer.Size;
+        var contentSize = CalculateLineContentSize();
+        float safeScale = Mathf.Max(contentScale, 0.001f);
+        float unscaledWidth = Mathf.Max(Mathf.Max(Config.DrawableWidth, scrollSize.X / safeScale), contentSize.X);
+        float scaledWidth = Mathf.Max(unscaledWidth * safeScale, scrollSize.X);
+        float scaledHeight = Mathf.Max(contentSize.Y * safeScale, scrollSize.Y);
+        return new Vector2I(
+            Mathf.RoundToInt(Mathf.Max(0.0f, scaledWidth - scrollSize.X)),
+            Mathf.RoundToInt(Mathf.Max(0.0f, scaledHeight - scrollSize.Y)));
     }
 
     bool TryAdvanceTap(bool acceptEvent)

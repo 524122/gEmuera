@@ -540,16 +540,18 @@ public partial class EmueraMain : Node
             utf8cn_str_list.Add(str);
         }
 
-        if (jis_md5_strs.Count != utf8cn_str_list.Count)
+        if (jis_md5_strs.Count == 0 || utf8_str_list.Count == 0)
             return;
 
         var jis_map = new System.Collections.Generic.Dictionary<string, string>();
-        for (int i = 0; i < jis_md5_strs.Count; ++i)
+        int jisCount = System.Math.Min(jis_md5_strs.Count, utf8_str_list.Count);
+        for (int i = 0; i < jisCount; ++i)
         {
             jis_map[jis_md5_strs[i]] = utf8_str_list[i];
         }
         var utf8cn_map = new System.Collections.Generic.Dictionary<string, string>();
-        for (int i = 0; i < utf8cn_str_list.Count; ++i)
+        int utf8CnCount = System.Math.Min(utf8cn_str_list.Count, utf8_str_list.Count);
+        for (int i = 0; i < utf8CnCount; ++i)
         {
             utf8cn_map[utf8cn_str_list[i]] = utf8_str_list[i];
         }

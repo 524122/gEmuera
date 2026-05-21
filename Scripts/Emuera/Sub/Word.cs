@@ -47,6 +47,19 @@ namespace MinorShift.Emuera.Sub
 		}
 	}
 
+	internal sealed class LiteralFloatWord : Word
+	{
+		public LiteralFloatWord(double d) { code = d; }
+		readonly double code;
+		public double Float { get { return code; } }
+		public Int64 Int { get { return (Int64)code; } }
+		public override char Type { get { return 'R'; } }
+		public override string ToString()
+		{
+			return code.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
+		}
+	}
+
 	internal sealed class LiteralStringWord : Word
 	{
 		public LiteralStringWord(string s) { code = s; }

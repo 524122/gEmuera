@@ -12,6 +12,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		public bool IsConst;
 		public string ConstStr;
 		public Int64 ConstInt;
+		public double ConstFloat;
 	}
 
 	/// <summary>
@@ -75,13 +76,13 @@ namespace MinorShift.Emuera.GameProc.Function
 
 	internal sealed class SpTimesArgument : Argument
 	{
-		public SpTimesArgument(VariableTerm var, double d)
+		public SpTimesArgument(VariableTerm var, IOperandTerm multiplier)
 		{
 			VariableDest = var;
-			DoubleValue = d;
+			Multiplier = multiplier;
 		}
 		readonly public VariableTerm VariableDest;
-		readonly public double DoubleValue;
+		readonly public IOperandTerm Multiplier;
 	}
 
 	internal sealed class SpBarArgument : Argument
@@ -567,10 +568,17 @@ namespace MinorShift.Emuera.GameProc.Function
 			TermList = termList;
 			ConstStrList = constList;
 		}
+		public SpSetArrayArgument(VariableTerm var, IOperandTerm[] termList, double[] constList)
+		{
+			VariableDest = var;
+			TermList = termList;
+			ConstFloatList = constList;
+		}
 		readonly public VariableTerm VariableDest;
 		readonly public IOperandTerm[] TermList;
 		readonly public Int64[] ConstIntList;
 		readonly public string[] ConstStrList;
+		readonly public double[] ConstFloatList;
 	}
 	#endregion
 

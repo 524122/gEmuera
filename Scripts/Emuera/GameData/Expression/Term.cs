@@ -55,6 +55,8 @@ namespace MinorShift.Emuera.GameData.Expression
 
         public override long GetIntValue(ExpressionMediator exm)
         {
+			if (GetOperandType() == typeof(double))
+				return (Int64)fValue;
             return iValue;
         }
         public override string GetStrValue(ExpressionMediator exm)

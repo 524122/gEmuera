@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Globalization;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.GameData;
 
@@ -186,6 +187,34 @@ namespace MinorShift.Emuera.Sub
 			}
 			return significand;
 		}
+
+		public static double ReadDouble(StringStream st, bool retZero)
+		{
+			int startPos = st.CurrentPosition;
+			if (st.Current == '+' || st.Current == '-')
+				st.ShiftNext();
+			while (!st.EOS && char.IsDigit(st.Current))
+				st.ShiftNext();
+			if (st.Current == '.')
+				st.ShiftNext();
+			while (!st.EOS && char.IsDigit(st.Current))
+				st.ShiftNext();
+			if (st.Current == 'e' || st.Current == 'E')
+			{
+				st.ShiftNext();
+				if (st.Current == '+' || st.Current == '-')
+					st.ShiftNext();
+				while (!st.EOS && char.IsDigit(st.Current))
+					st.ShiftNext();
+			}
+			string str = st.Substring(startPos, st.CurrentPosition - startPos);
+			if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out double result))
+				return result;
+			if (retZero)
+				return 0.0;
+			throw new CodeEE("\"" + str + "\"は実数値に変換できません");
+		}
+
 		//static Regex reg = new Regex(@"[0-9A-Fa-f]+", RegexOptions.Compiled);
 		private static Int64 readDigits(StringStream st, int fromBase)
 		{
@@ -304,7 +333,7 @@ namespace MinorShift.Emuera.Sub
 					break;
 				}
 			}
-			return Convert.ToDouble(st.Substring(start, st.CurrentPosition - start));
+			return double.Parse(st.Substring(start, st.CurrentPosition - start), CultureInfo.InvariantCulture);
 		}
 
 		/// <summary>
@@ -862,7 +891,17 @@ namespace MinorShift.Emuera.Sub
 					case '7':
 					case '8':
 					case '9':
-						ret.Add(new LiteralIntegerWord(ReadInt64(st, false)));
+						{
+							int pos = st.CurrentPosition;
+							while (!st.EOS && char.IsDigit(st.Current))
+								st.ShiftNext();
+							bool isFloat = !st.EOS && st.Current == '.';
+							st.CurrentPosition = pos;
+							if (isFloat)
+								ret.Add(new LiteralFloatWord(ReadDouble(st, false)));
+							else
+								ret.Add(new LiteralIntegerWord(ReadInt64(st, false)));
+						}
 						break;
 					case '>':
 						if(endWith == LexEndWith.GreaterThan)

@@ -18,6 +18,7 @@ namespace MinorShift.Emuera.Content
 		static readonly Dictionary<string, AContentFile> resourceDic = new Dictionary<string, AContentFile>();
 		static readonly Dictionary<string, ASprite> imageDictionary = new Dictionary<string, ASprite>();
 		static readonly Dictionary<string, LazySpriteDefinition> lazyImageDictionary = new Dictionary<string, LazySpriteDefinition>();
+		static readonly Dictionary<string, Point> spriteBasePositions = new Dictionary<string, Point>();
 		static readonly Dictionary<int, GraphicsImage> gList;
 
 		private sealed class LazySpriteDefinition
@@ -76,6 +77,23 @@ namespace MinorShift.Emuera.Content
 	            return result;
 		}
 
+		static public void SetSpriteBasePosition(string name, Point position)
+		{
+			if (name == null)
+				return;
+			name = name.ToUpper();
+			spriteBasePositions[name] = position;
+		}
+
+		static public bool TryGetSpriteBasePosition(string name, out Point position)
+		{
+			position = Point.Empty;
+			if (name == null)
+				return false;
+			name = name.ToUpper();
+			return spriteBasePositions.TryGetValue(name, out position);
+		}
+
 		static public void SpriteDispose(string name)
 		{
 			if (name == null)
@@ -88,6 +106,7 @@ namespace MinorShift.Emuera.Content
                 sprite.Dispose();
                 imageDictionary.Remove(name);
             }
+			spriteBasePositions.Remove(name);
 		}
 
 		static public long SpriteDisposeAll(bool delCsvImage)
@@ -96,6 +115,7 @@ namespace MinorShift.Emuera.Content
 			foreach (var sprite in imageDictionary.Values)
 				sprite.Dispose();
 			imageDictionary.Clear();
+			spriteBasePositions.Clear();
 			return count;
 		}
 
@@ -207,6 +227,7 @@ namespace MinorShift.Emuera.Content
 			resourceDic.Clear();
 			imageDictionary.Clear();
 			lazyImageDictionary.Clear();
+			spriteBasePositions.Clear();
 			foreach (var graph in gList.Values)
 				graph.GDispose();
 			gList.Clear();

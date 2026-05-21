@@ -257,20 +257,13 @@ namespace MinorShift.Emuera.GameProc.Function
 				st.ShiftNext();
 				if (st.EOS)
 					{warn("引数が足りません", line, 2, false); return null;}
-				double d ;
-				try
-				{
-					LexicalAnalyzer.SkipWhiteSpace(st);
-					d = LexicalAnalyzer.ReadDouble(st);
-					LexicalAnalyzer.SkipWhiteSpace(st);
-					if (!st.EOS)
-						warn("引数が多すぎます", line, 1, false);
-				}
-				catch
-				{
-					warn("第２引数が実数値ではありません（常に0と解釈されます）", line, 1, false);
-					d = 0.0;
-				}
+				WordCollection wc2 = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
+				IOperandTerm multiplier = ExpressionParser.ReduceExpressionTerm(wc2, TermEndWith.EoL);
+				if (multiplier == null)
+				{ warn("書式が間違っています", line, 2, false); return null; }
+				if (multiplier.IsString)
+				{ warn("第２引数を文字列式にすることはできません", line, 2, false); return null; }
+				multiplier = multiplier.Restructure(exm);
 				IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
 				if (term == null)
 				{ warn("書式が間違っています", line, 2, false); return null; }
@@ -281,7 +274,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				{ warn("第１引数を文字列変数にすることはできません", line, 2, false); return null; }
 				else if (varTerm.Identifier.IsConst)
 				{ warn("第１引数に変更できない変数を指定することはできません", line, 2, false); return null; }
-				return new SpTimesArgument(varTerm, d);
+				return new SpTimesArgument(varTerm, multiplier);
 			}
 		}
 		
@@ -689,10 +682,10 @@ namespace MinorShift.Emuera.GameProc.Function
                     st = new StringStream("");
                 OperatorCode op = line.AssignOperator;
 				IOperandTerm src;
-				if(varTerm.IsInteger)
+				if(varTerm.IsInteger || varTerm.IsFloat)
 				{
 					if (op == OperatorCode.AssignmentStr)
-						{ assignwarn("整数型の代入に演算子"+OperatorManager.ToOperatorString(op) + "は使用できません", line, 2, false); return null; }
+						{ assignwarn("数値型の代入に演算子"+OperatorManager.ToOperatorString(op) + "は使用できません", line, 2, false); return null; }
 					if((op == OperatorCode.Increment)||(op == OperatorCode.Decrement))
 					{
 						LexicalAnalyzer.SkipWhiteSpace(st);
@@ -706,9 +699,12 @@ namespace MinorShift.Emuera.GameProc.Function
 						ret = new SpSetArgument(varTerm, null)
 						{
 							IsConst = true,
-							ConstInt = op == OperatorCode.Increment ? 1 : -1,
 							AddConst = true
                         };
+						if (varTerm.IsFloat)
+							ret.ConstFloat = op == OperatorCode.Increment ? 1.0 : -1.0;
+						else
+							ret.ConstInt = op == OperatorCode.Increment ? 1 : -1;
 						return ret;
 					}
 					WordCollection srcWc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
@@ -721,26 +717,50 @@ namespace MinorShift.Emuera.GameProc.Function
 						if(op != OperatorCode.Assignment)
 						{assignwarn("複合代入演算では右辺に複数の値を含めることはできません", line, 2, false); return null;}
 						bool allConst = true;
-						Int64[] constValues = new Int64[srcTerms.Length];
-						for (int i = 0; i < srcTerms.Length; i++)
+						if (varTerm.IsFloat)
 						{
-							if (srcTerms[i] == null)
-							{ assignwarn("代入式の右辺の値は省略できません", line, 2, false); return null; }
-							if (!srcTerms[i].IsInteger)
-							{ assignwarn("数値型変数に文字列は代入できません", line, 2, false); return null; }
-							srcTerms[i] = srcTerms[i].Restructure(exm);
-							if (allConst && (srcTerms[i] is SingleTerm))
-								constValues[i] = srcTerms[i].GetIntValue(null);
-							else
-								allConst = false;
+							double[] constValues = new double[srcTerms.Length];
+							for (int i = 0; i < srcTerms.Length; i++)
+							{
+								if (srcTerms[i] == null)
+								{ assignwarn("代入式の右辺の値は省略できません", line, 2, false); return null; }
+								if (srcTerms[i].IsString)
+								{ assignwarn("数値型変数に文字列は代入できません", line, 2, false); return null; }
+								srcTerms[i] = srcTerms[i].Restructure(exm);
+								if (allConst && (srcTerms[i] is SingleTerm))
+									constValues[i] = srcTerms[i].GetFloatValue(null);
+								else
+									allConst = false;
+							}
+							SpSetArrayArgument arrayarg = new SpSetArrayArgument(varTerm, srcTerms, constValues)
+							{
+								IsConst = allConst
+							};
+							return arrayarg;
 						}
-                        SpSetArrayArgument arrayarg = new SpSetArrayArgument(varTerm, srcTerms, constValues)
-                        {
-                            IsConst = allConst
-                        };
-                        return arrayarg;
+						else
+						{
+							Int64[] constValues = new Int64[srcTerms.Length];
+							for (int i = 0; i < srcTerms.Length; i++)
+							{
+								if (srcTerms[i] == null)
+								{ assignwarn("代入式の右辺の値は省略できません", line, 2, false); return null; }
+								if (srcTerms[i].IsString)
+								{ assignwarn("数値型変数に文字列は代入できません", line, 2, false); return null; }
+								srcTerms[i] = srcTerms[i].Restructure(exm);
+								if (allConst && (srcTerms[i] is SingleTerm))
+									constValues[i] = srcTerms[i].GetIntValue(null);
+								else
+									allConst = false;
+							}
+							SpSetArrayArgument arrayarg = new SpSetArrayArgument(varTerm, srcTerms, constValues)
+							{
+								IsConst = allConst
+							};
+							return arrayarg;
+						}
 					}
-					if(!srcTerms[0].IsInteger)
+					if(srcTerms[0].IsString)
 						{assignwarn("数値型変数に文字列は代入できません", line, 2, false); return null;}
 					src = srcTerms[0].Restructure(exm);
 					if(op == OperatorCode.Assignment)
@@ -750,7 +770,10 @@ namespace MinorShift.Emuera.GameProc.Function
 						{
 							ret.IsConst = true;
 							ret.AddConst = false;
-							ret.ConstInt = src.GetIntValue(null);
+							if (varTerm.IsFloat)
+								ret.ConstFloat = src.GetFloatValue(null);
+							else
+								ret.ConstInt = src.GetIntValue(null);
 						}
 						return ret;
 					}
@@ -761,9 +784,12 @@ namespace MinorShift.Emuera.GameProc.Function
                             ret = new SpSetArgument(varTerm, null)
                             {
                                 IsConst = true,
-								ConstInt = op == OperatorCode.Plus ? src.GetIntValue(null) : -src.GetIntValue(null),
 								AddConst = true
                             };
+							if (varTerm.IsFloat)
+								ret.ConstFloat = op == OperatorCode.Plus ? src.GetFloatValue(null) : -src.GetFloatValue(null);
+							else
+								ret.ConstInt = op == OperatorCode.Plus ? src.GetIntValue(null) : -src.GetIntValue(null);
 							return ret;
 						}
 					}
@@ -802,7 +828,7 @@ namespace MinorShift.Emuera.GameProc.Function
 						{
 							if (srcTerms.Length == 1)
 							{
-								if (srcTerms[0].IsInteger)
+								if (!srcTerms[0].IsString)
 								{ assignwarn("文字列変数に数値型は代入できません", line, 2, false); return null; }
 								src = srcTerms[0].Restructure(exm);
 								ret = new SpSetArgument(varTerm, src);
@@ -820,7 +846,7 @@ namespace MinorShift.Emuera.GameProc.Function
 							{
 								if (srcTerms[i] == null)
 								{ assignwarn("代入式の右辺の値は省略できません", line, 2, false); return null; }
-								if (srcTerms[i].IsInteger)
+								if (!srcTerms[i].IsString)
 								{ assignwarn("文字列変数に数値型は代入できません", line, 2, false); return null; }
 								srcTerms[i] = srcTerms[i].Restructure(exm);
 								if (allConst && (srcTerms[i] is SingleTerm))

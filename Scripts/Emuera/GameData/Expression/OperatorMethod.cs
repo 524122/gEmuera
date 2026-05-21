@@ -26,9 +26,12 @@ namespace MinorShift.Emuera.GameData.Expression
 		readonly static Dictionary<OperatorCode, OperatorMethod> unaryAfterDic = new Dictionary<OperatorCode, OperatorMethod>();
 		readonly static Dictionary<OperatorCode, OperatorMethod> binaryIntIntDic = new Dictionary<OperatorCode, OperatorMethod>();
 		readonly static Dictionary<OperatorCode, OperatorMethod> binaryStrStrDic = new Dictionary<OperatorCode, OperatorMethod>();
+		readonly static Dictionary<OperatorCode, OperatorMethod> binaryFloatFloatDic = new Dictionary<OperatorCode, OperatorMethod>();
+		readonly static Dictionary<OperatorCode, OperatorMethod> binaryMixedFloatDic = new Dictionary<OperatorCode, OperatorMethod>();
 		readonly static OperatorMethod binaryMultIntStr = null;
 		readonly static OperatorMethod ternaryIntIntInt = null;
 		readonly static OperatorMethod ternaryIntStrStr = null;
+		readonly static OperatorMethod ternaryIntFloatFloat = null;
 
 		static OperatorMethodManager()
 		{
@@ -72,9 +75,32 @@ namespace MinorShift.Emuera.GameData.Expression
 			binaryStrStrDic[OperatorCode.LessEqual] = new LessEqualStrStr();
 			binaryStrStrDic[OperatorCode.NotEqual] = new NotEqualStrStr();
 
+			binaryFloatFloatDic[OperatorCode.Plus] = new PlusFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Minus] = new MinusFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Mult] = new MultFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Div] = new DivFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Equal] = new EqualFloatFloat();
+			binaryFloatFloatDic[OperatorCode.NotEqual] = new NotEqualFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Less] = new LessFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Greater] = new GreaterFloatFloat();
+			binaryFloatFloatDic[OperatorCode.LessEqual] = new LessEqualFloatFloat();
+			binaryFloatFloatDic[OperatorCode.GreaterEqual] = new GreaterEqualFloatFloat();
+
+			binaryMixedFloatDic[OperatorCode.Plus] = new PlusMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Minus] = new MinusMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Mult] = new MultMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Div] = new DivMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Equal] = new EqualMixedFloat();
+			binaryMixedFloatDic[OperatorCode.NotEqual] = new NotEqualMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Less] = new LessMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Greater] = new GreaterMixedFloat();
+			binaryMixedFloatDic[OperatorCode.LessEqual] = new LessEqualMixedFloat();
+			binaryMixedFloatDic[OperatorCode.GreaterEqual] = new GreaterEqualMixedFloat();
+
 			binaryMultIntStr = new MultStrInt();
 			ternaryIntIntInt = new TernaryIntIntInt();
 			ternaryIntStrStr = new TernaryIntStrStr();
+			ternaryIntFloatFloat = new TernaryIntFloatFloat();
 		}
 		
 		
@@ -98,6 +124,13 @@ namespace MinorShift.Emuera.GameData.Expression
 				if (unaryDic.TryGetValue(op, out operator_method))
 					method = operator_method;
 			}
+			else if (o1.GetOperandType() == typeof(double))
+			{
+				if (op == OperatorCode.Plus)
+					return o1;
+				if (op == OperatorCode.Minus)
+					method = new MinusFloat();
+			}
 			if(method != null)
 				return new FunctionMethodTerm(method, new IOperandTerm[] { o1 });
             string errMes = "";
@@ -105,6 +138,8 @@ namespace MinorShift.Emuera.GameData.Expression
                 errMes += "数値型";
             else if (o1.GetOperandType() == typeof(string))
                 errMes += "文字列型";
+            else if (o1.GetOperandType() == typeof(double))
+                errMes += "実数型";
             else
                 errMes += "不定型";
             errMes += "に単項演算子\'" + OperatorManager.ToOperatorString(op) + "\'は適用できません";
@@ -162,6 +197,19 @@ namespace MinorShift.Emuera.GameData.Expression
 				if (op == OperatorCode.Mult)
 					method = binaryMultIntStr;
 			}
+			else if ((left.GetOperandType() == typeof(double)) && (right.GetOperandType() == typeof(double)))
+			{
+                OperatorMethod operator_method = null;
+                if (binaryFloatFloatDic.TryGetValue(op, out operator_method))
+					method = operator_method;
+			}
+			else if (((left.GetOperandType() == typeof(Int64)) && (right.GetOperandType() == typeof(double)))
+				 || ((left.GetOperandType() == typeof(double)) && (right.GetOperandType() == typeof(Int64))))
+			{
+                OperatorMethod operator_method = null;
+                if (binaryMixedFloatDic.TryGetValue(op, out operator_method))
+					method = operator_method;
+			}
 			if (method != null)
 				return new FunctionMethodTerm(method, new IOperandTerm[] { left, right });
 			string errMes = "";
@@ -169,12 +217,16 @@ namespace MinorShift.Emuera.GameData.Expression
                     errMes += "数値型と";
                 else if (left.GetOperandType() == typeof(string))
                     errMes += "文字列型と";
+                else if (left.GetOperandType() == typeof(double))
+                    errMes += "実数型と";
                 else
                     errMes += "不定型と";
                 if (right.GetOperandType() == typeof(Int64))
                     errMes += "数値型の";
                 else if (right.GetOperandType() == typeof(string))
                     errMes += "文字列型の";
+                else if (right.GetOperandType() == typeof(double))
+                    errMes += "実数型の";
                 else
                     errMes += "不定型の";
                 errMes += "演算に二項演算子\'" + OperatorManager.ToOperatorString(op) + "\'は適用できません";
@@ -188,6 +240,8 @@ namespace MinorShift.Emuera.GameData.Expression
 				method = ternaryIntIntInt;
 			else if ((o1.GetOperandType() == typeof(Int64)) && (o2.GetOperandType() == typeof(string)) && (o3.GetOperandType() == typeof(string)))
 				method = ternaryIntStrStr;
+			else if ((o1.GetOperandType() == typeof(Int64)) && (o2.GetOperandType() == typeof(double)) && (o3.GetOperandType() == typeof(double)))
+				method = ternaryIntFloatFloat;
 			if (method != null)
 				return new FunctionMethodTerm(method, new IOperandTerm[] { o1, o2, o3 });
 			throw new CodeEE("三項演算子の使用法が不正です");
@@ -819,6 +873,325 @@ namespace MinorShift.Emuera.GameData.Expression
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
 				return (arguments[0].GetIntValue(exm) != 0) ? arguments[1].GetStrValue(exm) : arguments[2].GetStrValue(exm);
+			}
+		}
+
+		private sealed class TernaryIntFloatFloat : OperatorMethod
+		{
+			public TernaryIntFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return (arguments[0].GetIntValue(exm) != 0) ? arguments[1].GetFloatValue(exm) : arguments[2].GetFloatValue(exm);
+			}
+		}
+
+		private static double ToDouble(IOperandTerm term, ExpressionMediator exm)
+		{
+			return term.GetOperandType() == typeof(Int64) ? term.GetIntValue(exm) : term.GetFloatValue(exm);
+		}
+
+		private sealed class PlusFloatFloat : OperatorMethod
+		{
+			public PlusFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) + arguments[1].GetFloatValue(exm);
+			}
+		}
+
+		private sealed class MinusFloatFloat : OperatorMethod
+		{
+			public MinusFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) - arguments[1].GetFloatValue(exm);
+			}
+		}
+
+		private sealed class MultFloatFloat : OperatorMethod
+		{
+			public MultFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) * arguments[1].GetFloatValue(exm);
+			}
+		}
+
+		private sealed class DivFloatFloat : OperatorMethod
+		{
+			public DivFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				double right = arguments[1].GetFloatValue(exm);
+				if (right == 0.0)
+					throw new CodeEE("ゼロによる除算が行われました");
+				return arguments[0].GetFloatValue(exm) / right;
+			}
+		}
+
+		private sealed class EqualFloatFloat : OperatorMethod
+		{
+			public EqualFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) == arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class NotEqualFloatFloat : OperatorMethod
+		{
+			public NotEqualFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) != arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class LessFloatFloat : OperatorMethod
+		{
+			public LessFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) < arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class GreaterFloatFloat : OperatorMethod
+		{
+			public GreaterFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) > arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class LessEqualFloatFloat : OperatorMethod
+		{
+			public LessEqualFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) <= arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class GreaterEqualFloatFloat : OperatorMethod
+		{
+			public GreaterEqualFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) >= arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class PlusMixedFloat : OperatorMethod
+		{
+			public PlusMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) + ToDouble(arguments[1], exm);
+			}
+		}
+
+		private sealed class MinusMixedFloat : OperatorMethod
+		{
+			public MinusMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) - ToDouble(arguments[1], exm);
+			}
+		}
+
+		private sealed class MultMixedFloat : OperatorMethod
+		{
+			public MultMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) * ToDouble(arguments[1], exm);
+			}
+		}
+
+		private sealed class DivMixedFloat : OperatorMethod
+		{
+			public DivMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				double right = ToDouble(arguments[1], exm);
+				if (right == 0.0)
+					throw new CodeEE("ゼロによる除算が行われました");
+				return ToDouble(arguments[0], exm) / right;
+			}
+		}
+
+		private sealed class EqualMixedFloat : OperatorMethod
+		{
+			public EqualMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) == ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class NotEqualMixedFloat : OperatorMethod
+		{
+			public NotEqualMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) != ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class LessMixedFloat : OperatorMethod
+		{
+			public LessMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) < ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class GreaterMixedFloat : OperatorMethod
+		{
+			public GreaterMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) > ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class LessEqualMixedFloat : OperatorMethod
+		{
+			public LessEqualMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) <= ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class GreaterEqualMixedFloat : OperatorMethod
+		{
+			public GreaterEqualMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(Int64);
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) >= ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class MinusFloat : OperatorMethod
+		{
+			public MinusFloat()
+			{
+				CanRestructure = true;
+				ReturnType = typeof(double);
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return -arguments[0].GetFloatValue(exm);
 			}
 		}
 

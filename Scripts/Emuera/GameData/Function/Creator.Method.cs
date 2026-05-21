@@ -1001,7 +1001,7 @@ namespace MinorShift.Emuera.GameData.Function
                 {
                     if (arguments[i] == null)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数は省略できません";
-                    if (arguments[i].GetOperandType() != typeof(Int64))
+                    if (arguments[i].GetOperandType() != typeof(Int64) && arguments[i].GetOperandType() != typeof(double))
                         return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
                 }
                 return null;
@@ -1025,6 +1025,32 @@ namespace MinorShift.Emuera.GameData.Function
                     }
                 }
                 return (ret);
+            }
+            public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                double ret = ToDouble(arguments[0], exm);
+
+                for (int i = 1; i < arguments.Length; i++)
+                {
+                    double newRet = ToDouble(arguments[i], exm);
+                    if (isMax)
+                    {
+                        if (ret < newRet)
+                            ret = newRet;
+                    }
+                    else
+                    {
+                        if (ret > newRet)
+                            ret = newRet;
+                    }
+                }
+                return ret;
+            }
+            public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                if (HasFloatArg(arguments))
+                    return new SingleTerm(GetFloatValue(exm, arguments));
+                return new SingleTerm(GetIntValue(exm, arguments));
             }
         }
 
@@ -1071,8 +1097,18 @@ namespace MinorShift.Emuera.GameData.Function
             public SqrtMethod()
             {
                 ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                argumentTypeArray = null;
                 CanRestructure = true;
+            }
+            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+            {
+                if (arguments.Length != 1)
+                    return name + "関数の引数の数が正しくありません";
+                if (arguments[0] == null)
+                    return name + "関数の1番目の引数は省略できません";
+                if (arguments[0].GetOperandType() != typeof(Int64) && arguments[0].GetOperandType() != typeof(double))
+                    return name + "関数の1番目の引数の型が正しくありません";
+                return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -1080,6 +1116,19 @@ namespace MinorShift.Emuera.GameData.Function
                 if (ret < 0)
                     throw new CodeEE("SQRT関数の引数に負の値が指定されました");
                 return ((Int64)Math.Sqrt(ret));
+            }
+            public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                double ret = ToDouble(arguments[0], exm);
+                if (ret < 0)
+                    throw new CodeEE("SQRT関数の引数に負の値が指定されました");
+                return Math.Sqrt(ret);
+            }
+            public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                if (HasFloatArg(arguments))
+                    return new SingleTerm(GetFloatValue(exm, arguments));
+                return new SingleTerm(GetIntValue(exm, arguments));
             }
         }
 
@@ -1183,8 +1232,21 @@ namespace MinorShift.Emuera.GameData.Function
             public GetLimitMethod()
             {
                 ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+                argumentTypeArray = null;
                 CanRestructure = true;
+            }
+            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+            {
+                if (arguments.Length != 3)
+                    return name + "関数の引数の数が正しくありません";
+                for (int i = 0; i < arguments.Length; i++)
+                {
+                    if (arguments[i] == null)
+                        return name + "関数の" + (i + 1).ToString() + "番目の引数は省略できません";
+                    if (arguments[i].GetOperandType() != typeof(Int64) && arguments[i].GetOperandType() != typeof(double))
+                        return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
+                }
+                return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -1200,6 +1262,35 @@ namespace MinorShift.Emuera.GameData.Function
                     ret = value;
                 return (ret);
             }
+            public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                double value = ToDouble(arguments[0], exm);
+                double min = ToDouble(arguments[1], exm);
+                double max = ToDouble(arguments[2], exm);
+                if (value < min)
+                    return min;
+                if (value > max)
+                    return max;
+                return value;
+            }
+            public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                if (HasFloatArg(arguments))
+                    return new SingleTerm(GetFloatValue(exm, arguments));
+                return new SingleTerm(GetIntValue(exm, arguments));
+            }
+        }
+        private static double ToDouble(IOperandTerm term, ExpressionMediator exm)
+        {
+            return term.GetOperandType() == typeof(Int64) ? term.GetIntValue(exm) : term.GetFloatValue(exm);
+        }
+
+        private static bool HasFloatArg(IOperandTerm[] arguments)
+        {
+            for (int i = 0; i < arguments.Length; i++)
+                if (arguments[i] != null && arguments[i].GetOperandType() == typeof(double))
+                    return true;
+            return false;
         }
         #endregion
 
@@ -3530,9 +3621,11 @@ namespace MinorShift.Emuera.GameData.Function
 				{
 					case "SPRITEMOVE":
 						img.DestBasePosition.Offset(p);
+						AppContents.SetSpriteBasePosition(imgname, img.DestBasePosition);
 						return 1;
 					case "SPRITESETPOS":
 						img.DestBasePosition = p;
+						AppContents.SetSpriteBasePosition(imgname, img.DestBasePosition);
 						return 1;
 				}
 				throw new ExeEE("SpriteStateMethod:" + Name + ":異常な分岐");

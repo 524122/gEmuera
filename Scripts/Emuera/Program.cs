@@ -108,6 +108,7 @@ namespace MinorShift.Emuera
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
 			ConfigData.Instance.LoadConfig();
+			ApplyAndroidWindowWidthLimit();
 			global::FrameRateHelper.ApplyConfigFps();
 			//二重起動の禁止かつ二重起動
 			//if ((!Config.AllowMultipleInstances) && (Sys.PrevInstance()))
@@ -246,6 +247,21 @@ namespace MinorShift.Emuera
 		}
 		public static bool SupportsLazyLoading { get { return true; } }
 		public static bool IsSnakeModernMobileProfile { get { return CoreProfile == EmueraCoreProfile.SnakeModernMobile; } }
+
+		private static void ApplyAndroidWindowWidthLimit()
+		{
+			if (Godot.OS.GetName() != "Android")
+				return;
+
+			int viewportWidth = global::EmueraContent.ContentWidth;
+			if (viewportWidth <= 0)
+				viewportWidth = Godot.DisplayServer.WindowGetSize().X;
+			if (viewportWidth <= 0 || Config.WindowX <= viewportWidth)
+				return;
+
+			Config.UpdateWindowWidth(viewportWidth);
+			GenericUtils.Info($"[LOAD] Android window width limited to viewport: {viewportWidth}");
+		}
 
 		public static void AppendSnakeStartupErrorLog(string text)
 		{

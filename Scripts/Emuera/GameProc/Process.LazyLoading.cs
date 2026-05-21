@@ -35,7 +35,7 @@ namespace MinorShift.Emuera.GameProc
 		static string LazyLoadingConfigFilePath { get { return Path.Combine(Program.ExeDir, "lazyloading.cfg"); } }
 
 		const uint LazyMagicNumber = 0x4C415A59;
-		const uint LazyVersion = 2;
+		const uint LazyVersion = 3;
 
 		public enum LazyStatus
 		{
@@ -435,7 +435,7 @@ namespace MinorShift.Emuera.GameProc
 					else if (line.Current == '#' && currentLabel != null)
 					{
 						LogicalLineParser.ParseSharpLine(currentLabel, line, position, onlyEvents);
-						if (currentLabel.IsMethod || currentLabel.IsEvent)
+						if (currentLabel.IsEvent)
 						{
 							canLazyLoad = false;
 							break;
@@ -464,7 +464,7 @@ namespace MinorShift.Emuera.GameProc
 			{
 				if (label.Position == null || !files.Contains(NormalizeRelativePath(label.Position.Filename)))
 					continue;
-				if (label.IsMethod || label.IsEvent)
+				if (label.IsEvent)
 					files.Remove(NormalizeRelativePath(label.Position.Filename));
 			}
 
@@ -518,7 +518,7 @@ namespace MinorShift.Emuera.GameProc
 						continue;
 
 					anyLabel = true;
-					if (label.IsMethod || label.IsEvent)
+					if (label.IsEvent)
 					{
 						valid = false;
 						break;

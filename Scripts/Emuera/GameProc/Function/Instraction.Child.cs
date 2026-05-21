@@ -456,6 +456,20 @@ namespace MinorShift.Emuera.GameProc.Function
 							arg.VariableDest.SetValue(values, exm);
 						}
 					}
+					else if (arg.VariableDest.IsFloat)
+					{
+						if (arg.IsConst)
+							arg.VariableDest.SetValue(arg.ConstFloatList, exm);
+						else
+						{
+							double[] values = new double[arg.TermList.Length];
+							for (int i = 0; i < values.Length; i++)
+							{
+								values[i] = arg.TermList[i].GetFloatValue(exm);
+							}
+							arg.VariableDest.SetValue(values, exm);
+						}
+					}
 					else
 					{
 						if (arg.IsConst)
@@ -478,6 +492,14 @@ namespace MinorShift.Emuera.GameProc.Function
 					Int64 src = spsetarg.IsConst ? spsetarg.ConstInt : spsetarg.Term.GetIntValue(exm);
 					if (spsetarg.AddConst)
 						spsetarg.VariableDest.PlusValue(src, exm);
+					else
+						spsetarg.VariableDest.SetValue(src, exm);
+				}
+				else if (spsetarg.VariableDest.IsFloat)
+				{
+					double src = spsetarg.IsConst ? spsetarg.ConstFloat : spsetarg.Term.GetFloatValue(exm);
+					if (spsetarg.AddConst)
+						spsetarg.VariableDest.SetValue(spsetarg.VariableDest.GetFloatValue(exm) + src, exm);
 					else
 						spsetarg.VariableDest.SetValue(src, exm);
 				}
@@ -1090,9 +1112,16 @@ namespace MinorShift.Emuera.GameProc.Function
 			{
 				SpTimesArgument timesArg = (SpTimesArgument)func.Argument;
 				VariableTerm var = timesArg.VariableDest;
-				if (Config.TimesNotRigorousCalculation)
+				double multiplier = timesArg.Multiplier.IsFloat
+					? timesArg.Multiplier.GetFloatValue(exm)
+					: (double)timesArg.Multiplier.GetIntValue(exm);
+				if (var.IsFloat)
 				{
-					double d = (double)var.GetIntValue(exm) * timesArg.DoubleValue;
+					var.SetValue(var.GetFloatValue(exm) * multiplier, exm);
+				}
+				else if (Config.TimesNotRigorousCalculation)
+				{
+					double d = (double)var.GetIntValue(exm) * multiplier;
 					try
 					{
 						checked { var.SetValue((Int64)d, exm); }
@@ -1106,7 +1135,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				}
 				else
 				{
-					decimal d = var.GetIntValue(exm) * (decimal)timesArg.DoubleValue;
+					decimal d = var.GetIntValue(exm) * (decimal)multiplier;
 					if (d <= Int64.MaxValue && d >= Int64.MinValue)
 						var.SetValue((Int64)d, exm);
 					else

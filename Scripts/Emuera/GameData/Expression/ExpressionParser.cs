@@ -374,6 +374,9 @@ namespace MinorShift.Emuera.GameData.Expression
 					case '0'://LiteralIntegerWT
 						stack.Add(((LiteralIntegerWord)token).Int);
 						break;
+					case 'R'://LiteralFloatWT
+						stack.Add(((LiteralFloatWord)token).Float);
+						break;
 					case 'F'://FormattedStringWT
 						stack.Add(ToStrFormTerm((StrFormWord)token));
 						break;
@@ -545,6 +548,7 @@ namespace MinorShift.Emuera.GameData.Expression
                 throw new CodeEE("式が異常です");
             }
             public void Add(Int64 i) { Add(new SingleTerm(i)); }
+            public void Add(double d) { Add(new SingleTerm(d)); }
             public void Add(string s) { Add(new SingleTerm(s)); }
             public void Add(IOperandTerm term)
             {

@@ -92,8 +92,11 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.TEXT_BGC_OFF, new SNAKE_TEXT_BGC_OFF_Instruction());
 			addFunction(FunctionCode.TEXT_BGC_ON, new SNAKE_TEXT_BGC_ON_Instruction());
 			addFunction(FunctionCode.DT_COLUMN_OPTIONS, new SNAKE_DT_COLUMN_OPTIONS_Instruction());
-			addFunction(FunctionCode.VARI, new SNAKE_VARI_Instruction(false));
-			addFunction(FunctionCode.VARS, new SNAKE_VARI_Instruction(true));
+			if (Program.IsSnakeProfile)
+			{
+				addFunction(FunctionCode.VARI, new SNAKE_VARI_Instruction(false));
+				addFunction(FunctionCode.VARS, new SNAKE_VARI_Instruction(true));
+			}
 			addFunction(FunctionCode.HTML_PRINT_ISLAND, new SNAKE_HTML_PRINT_ISLAND_Instruction());
 			addFunction(FunctionCode.HTML_PRINT_ISLAND_CLEAR, new SNAKE_HTML_PRINT_ISLAND_CLEAR_Instruction());
 			addFunction(FunctionCode.HTML_PRINTC, new SNAKE_HTML_PRINTC_Instruction(true));

@@ -112,6 +112,12 @@ public partial class Scalepad : Control
 
     public void SetScale(float scale)
     {
+        SyncScale(scale);
+        EmueraContent.instance?.SetContentScale(scale);
+    }
+
+    public void SyncScale(float scale)
+    {
         if (slider != null)
         {
             slider.SetBlockSignals(true);
@@ -120,7 +126,6 @@ public partial class Scalepad : Control
         }
         if (valueLabel != null)
             valueLabel.Text = string.Format("{0:F1}x", scale);
-        EmueraContent.instance?.SetContentScale(scale);
     }
 
     public void ShowPad()
