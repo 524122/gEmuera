@@ -343,10 +343,7 @@ namespace MinorShift.Emuera.Sub
 		/// <returns></returns>
 		public static IdentifierWord ReadFirstIdentifierWord(StringStream st)
 		{
-			//int startpos = st.CurrentPosition;
-			string str = ReadSingleIdentifier(st);
-			if (string.IsNullOrEmpty(str))
-				throw new CodeEE("不正な文字で行が始まっています");
+			string str = ReadFirstIdentifier(st);
 			//1808a3 先頭1単語の展開をやめる。－命令の置換を禁止。
 			//if (UseMacro)
 			//{
@@ -369,6 +366,14 @@ namespace MinorShift.Emuera.Sub
 			//    }
 			//}
 			return new IdentifierWord(str);
+		}
+
+		public static string ReadFirstIdentifier(StringStream st)
+		{
+			string str = ReadSingleIdentifier(st);
+			if (string.IsNullOrEmpty(str))
+				throw new CodeEE("不正な文字で行が始まっています");
+			return str;
 		}
 
 		/// <summary>
@@ -400,41 +405,48 @@ namespace MinorShift.Emuera.Sub
 			return new IdentifierWord(str);
 		}
 
-        static readonly HashSet<char> kHashSet_ReadSingleIdentifier = new HashSet<char>
-        {
-            ' ',
-            '\t',
-            '+',
-            '-',
-            '*',
-            '/',
-            '%',
-            '=',
-            '!',
-            '<',
-            '>',
-            '|',
-            '&',
-            '^',
-            '~',
-            '?',
-            '#',
-            ')',
-            '}',
-            ']',
-            ',',
-            ':',
-            '(',
-            '{',
-            '[',
-            '$',
-            '\\',
-            '\'',
-            '\"',
-            '@',
-            '.',
-            ';',
-        };
+		private static bool IsIdentifierDelimiter(char c)
+		{
+			switch (c)
+			{
+				case ' ':
+				case '\t':
+				case '+':
+				case '-':
+				case '*':
+				case '/':
+				case '%':
+				case '=':
+				case '!':
+				case '<':
+				case '>':
+				case '|':
+				case '&':
+				case '^':
+				case '~':
+				case '?':
+				case '#':
+				case ')':
+				case '}':
+				case ']':
+				case ',':
+				case ':':
+				case '(':
+				case '{':
+				case '[':
+				case '$':
+				case '\\':
+				case '\'':
+				case '\"':
+				case '@':
+				case '.':
+				case ';':
+					return true;
+				default:
+					return false;
+			}
+		}
+
         /// <summary>
         /// 単語を文字列で取得。マクロ適用なし
         /// </summary>
@@ -492,7 +504,7 @@ namespace MinorShift.Emuera.Sub
                 //}
 
                 c = st.Current;
-                if(kHashSet_ReadSingleIdentifier.Contains(c))
+                if(IsIdentifierDelimiter(c))
                     goto end;
                 else if(c == '　')
                 {

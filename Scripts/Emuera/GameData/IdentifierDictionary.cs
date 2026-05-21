@@ -8,7 +8,6 @@ using MinorShift.Emuera.GameData.Function;
 using MinorShift.Emuera.GameProc;
 using MinorShift.Emuera.GameView;
 using System.IO;
-using System.Text.RegularExpressions;
 using MinorShift.Emuera.GameProc.Function;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift._Library;
@@ -40,9 +39,6 @@ namespace MinorShift.Emuera
 			'\\', '@', '$', '#', '?', ';', '\'',
 			//'_'はOK
 		};
-		readonly static Regex regexCom = new Regex("^COM[0-9]+$");
-		readonly static Regex regexComAble = new Regex("^COM_ABLE[0-9]+$");
-		readonly static Regex regexAblup = new Regex("^ABLUP[0-9]+$");
 		#region static
 		
 		public static bool IsEventLabelName(string labelName)
@@ -96,17 +92,26 @@ namespace MinorShift.Emuera
 					return true;
 			}
 
-			if (labelName.StartsWith("COM"))
-			{
-				if (regexCom.IsMatch(labelName))
-					return true;
-				if (regexComAble.IsMatch(labelName))
-					return true;
-			}
-			if (labelName.StartsWith("ABLUP"))
-				if (regexAblup.IsMatch(labelName))
-					return true;
+			if (IsPrefixedAsciiNumber(labelName, "COM"))
+				return true;
+			if (IsPrefixedAsciiNumber(labelName, "COM_ABLE"))
+				return true;
+			if (IsPrefixedAsciiNumber(labelName, "ABLUP"))
+				return true;
 			return false;
+		}
+
+		private static bool IsPrefixedAsciiNumber(string value, string prefix)
+		{
+			if (!value.StartsWith(prefix, StringComparison.Ordinal) || value.Length == prefix.Length)
+				return false;
+			for (int i = prefix.Length; i < value.Length; i++)
+			{
+				char c = value[i];
+				if (c < '0' || c > '9')
+					return false;
+			}
+			return true;
 		}
 		#endregion
 
@@ -575,12 +580,9 @@ namespace MinorShift.Emuera
 
 		public FunctionIdentifier GetFunctionIdentifier(string str)
 		{
-			string key = str;
-            if (string.IsNullOrEmpty(key))
+            if (string.IsNullOrEmpty(str))
                 return null;
-            if (Config.ICFunction)
-				key = key.ToUpper();
-			if (instructionDic.TryGetValue(key, out FunctionIdentifier ret))
+			if (instructionDic.TryGetValue(str, out FunctionIdentifier ret))
 				return ret;
 			else
 				return null;

@@ -14,6 +14,28 @@ namespace MinorShift.Emuera.GameProc
 {
 	internal static class LogicalLineParser
 	{
+		private static readonly HashSet<string> AllowedSharpTokens = new HashSet<string>(StringComparer.Ordinal)
+		{
+			"SINGLE",
+			"LATER",
+			"PRI",
+			"ONLY",
+			"FUNCTION",
+			"FUNCTIONS",
+			"FUNCTIONF",
+			"LOCALSIZE",
+			"LOCALSSIZE",
+			"DIM",
+			"DIMS",
+			"DIMF",
+			"REF",
+			"REFS",
+			"REFF",
+		};
+
+		private static readonly Regex SnakeFloatLiteralRegex =
+			new Regex(@"(?<![A-Za-z0-9_])([+-]?\d+)\.\d+(?![A-Za-z0-9_])", RegexOptions.Compiled);
+
 		static Type GetFunctionReturnType(string token)
 		{
 			if (token == "FUNCTIONS")
@@ -317,22 +339,14 @@ namespace MinorShift.Emuera.GameProc
 
 		private static bool IsAllowedSharpToken(string token)
 		{
-			if (token == null)
-				return false;
-			if (token == "SINGLE" || token == "LATER" || token == "PRI" || token == "ONLY"
-				|| token == "FUNCTION" || token == "FUNCTIONS" || token == "FUNCTIONF"
-				|| token == "LOCALSIZE" || token == "LOCALSSIZE"
-				|| token == "DIM" || token == "DIMS" || token == "DIMF"
-				|| token == "REF" || token == "REFS" || token == "REFF")
-				return true;
-			return false;
+			return token != null && AllowedSharpTokens.Contains(token);
 		}
 
 		private static string NormalizeSnakeFloatLiterals(string source)
 		{
 			if (string.IsNullOrEmpty(source))
 				return source;
-			return Regex.Replace(source, @"(?<![A-Za-z0-9_])([+-]?\d+)\.\d+(?![A-Za-z0-9_])", "$1");
+			return SnakeFloatLiteralRegex.Replace(source, "$1");
 		}
 		
 		public static LogicalLine ParseLine(string str, EmueraConsole console)
@@ -472,10 +486,10 @@ namespace MinorShift.Emuera.GameProc
 					return new InstructionLine(position, FunctionIdentifier.SETFunction, opWT.Code, wc, null);
 				}
 				#endregion
-				IdentifierWord idWT = LexicalAnalyzer.ReadFirstIdentifierWord(stream);
-				if (idWT != null)
+				string idCode = LexicalAnalyzer.ReadFirstIdentifier(stream);
+				if (idCode != null)
 				{
-					FunctionIdentifier func = GlobalStatic.IdentifierDictionary.GetFunctionIdentifier(idWT.Code);
+					FunctionIdentifier func = GlobalStatic.IdentifierDictionary.GetFunctionIdentifier(idCode);
 					//命令文
 					if (func != null)//関数文
 					{

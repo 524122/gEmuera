@@ -48,8 +48,6 @@ namespace MinorShift.Emuera.GameProc.Function
 		private static void addFunction(FunctionCode code, AbstractInstruction inst, int additionalFlag)
 		{
 			string key = code.ToString();
-			if (Config.ICFunction)
-				key = key.ToUpper();
 			funcDic.Add(key, new FunctionIdentifier(key, code, inst, additionalFlag));
 		}
 
@@ -59,8 +57,6 @@ namespace MinorShift.Emuera.GameProc.Function
 		private static void addFunction(FunctionCode code, ArgumentBuilder arg, int flag)
 		{
 			string key = code.ToString();
-			if (Config.ICFunction)
-				key = key.ToUpper();
 			funcDic.Add(key, new FunctionIdentifier(key, code, arg, flag));
 		}
 
