@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Text;
 using System.IO;
 using System.IO.Compression;
+using System.Xml;
 
 namespace MinorShift.Emuera.Sub
 {
@@ -21,10 +23,15 @@ namespace MinorShift.Emuera.Sub
 		IntArray = 0x01,
 		IntArray2D = 0x02,
 		IntArray3D = 0x03,
+		PcFloat = 0x04,
+		PcFloatArray = 0x05,
+		PcFloatArray2D = 0x06,
+		PcFloatArray3D = 0x07,
 		Str = 0x10,
 		StrArray = 0x11,
 		StrArray2D = 0x12,
 		StrArray3D = 0x13,
+		// gEmuera legacy float codes. PC lazyloading uses 0x04-0x07 and reserves 0x20-0x22 for EM private data.
 		Float = 0x20,
 		FloatArray = 0x21,
 		FloatArray2D = 0x22,
@@ -127,12 +134,35 @@ namespace MinorShift.Emuera.Sub
 
 		public abstract EraSaveFileType ReadFileType();
 
+		public bool EOF()
+		{
+			return reader == null || reader.BaseStream.Position >= reader.BaseStream.Length;
+		}
+
+		public byte PeekByte()
+		{
+			if (EOF())
+				throw new EndOfStreamException();
+			long position = reader.BaseStream.Position;
+			byte value = reader.ReadByte();
+			reader.BaseStream.Position = position;
+			return value;
+		}
+
+		public EraSaveDataType ReadDataType()
+		{
+			return (EraSaveDataType)reader.ReadByte();
+		}
+
 		/// <summary>
 		/// システム用の特殊処理・圧縮なし
 		/// </summary>
 		/// <returns></returns>
 		public abstract Int64 ReadInt64();
 
+		public abstract Dictionary<string, string> ReadMap();
+		public abstract XmlDocument ReadXml();
+		public abstract DataTable ReadDataTable();
 		public abstract string ReadString();
 		public abstract Int64 ReadInt();
 		public abstract void ReadIntArray(Int64[] refArray, bool needInit);
@@ -145,6 +175,9 @@ namespace MinorShift.Emuera.Sub
 		public abstract void ReadFloatArray(double[] refArray, bool needInit);
 		public abstract void ReadFloatArray2D(double[,] refArray, bool needInit);
 		public abstract void ReadFloatArray3D(double[, ,] refArray, bool needInit);
+		public abstract void ReadPcFloatArray(double[] refArray, bool needInit);
+		public abstract void ReadPcFloatArray2D(double[,] refArray, bool needInit);
+		public abstract void ReadPcFloatArray3D(double[, ,] refArray, bool needInit);
 		public abstract KeyValuePair<string, EraSaveDataType> ReadVariableCode();
 		#region IDisposable メンバ
 
@@ -202,6 +235,32 @@ namespace MinorShift.Emuera.Sub
 			public override Int64 ReadInt64()
 			{
 				return reader.ReadInt64();
+			}
+
+			public override Dictionary<string, string> ReadMap()
+			{
+				int count = reader.ReadInt32();
+				var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+				for (int i = 0; i < count; i++)
+					dict[reader.ReadString()] = reader.ReadString();
+				return dict;
+			}
+
+			public override XmlDocument ReadXml()
+			{
+				var doc = new XmlDocument();
+				doc.LoadXml(reader.ReadString());
+				return doc;
+			}
+
+			public override DataTable ReadDataTable()
+			{
+				var table = new DataTable();
+				using (var schemaReader = new StringReader(reader.ReadString()))
+					table.ReadXmlSchema(schemaReader);
+				using (var dataReader = new StringReader(reader.ReadString()))
+					table.ReadXml(dataReader);
+				return table;
 			}
 
 			public override KeyValuePair<string, EraSaveDataType> ReadVariableCode()
@@ -634,6 +693,81 @@ namespace MinorShift.Emuera.Sub
 			public override double ReadFloat()
 			{
 				return reader.ReadDouble();
+			}
+
+			public override void ReadPcFloatArray(double[] refArray, bool needInit)
+			{
+				int saveLength0 = reader.ReadInt32();
+				int length0 = refArray != null ? refArray.Length : 0;
+				int copyLength = Math.Min(length0, saveLength0);
+				for (int x = 0; x < copyLength; x++)
+					refArray[x] = reader.ReadDouble();
+				for (int x = copyLength; x < saveLength0; x++)
+					reader.ReadDouble();
+				if (needInit && refArray != null)
+					for (int x = copyLength; x < length0; x++)
+						refArray[x] = 0;
+			}
+
+			public override void ReadPcFloatArray2D(double[,] refArray, bool needInit)
+			{
+				int saveLength0 = reader.ReadInt32();
+				int saveLength1 = reader.ReadInt32();
+				int length0 = refArray != null ? refArray.GetLength(0) : 0;
+				int length1 = refArray != null ? refArray.GetLength(1) : 0;
+				int copyLength0 = Math.Min(length0, saveLength0);
+				int copyLength1 = Math.Min(length1, saveLength1);
+
+				for (int x = 0; x < saveLength0; x++)
+				{
+					for (int y = 0; y < saveLength1; y++)
+					{
+						double value = reader.ReadDouble();
+						if (x < copyLength0 && y < copyLength1)
+							refArray[x, y] = value;
+					}
+				}
+				if (needInit && refArray != null)
+				{
+					for (int x = 0; x < length0; x++)
+						for (int y = 0; y < length1; y++)
+							if (x >= copyLength0 || y >= copyLength1)
+								refArray[x, y] = 0;
+				}
+			}
+
+			public override void ReadPcFloatArray3D(double[, ,] refArray, bool needInit)
+			{
+				int saveLength0 = reader.ReadInt32();
+				int saveLength1 = reader.ReadInt32();
+				int saveLength2 = reader.ReadInt32();
+				int length0 = refArray != null ? refArray.GetLength(0) : 0;
+				int length1 = refArray != null ? refArray.GetLength(1) : 0;
+				int length2 = refArray != null ? refArray.GetLength(2) : 0;
+				int copyLength0 = Math.Min(length0, saveLength0);
+				int copyLength1 = Math.Min(length1, saveLength1);
+				int copyLength2 = Math.Min(length2, saveLength2);
+
+				for (int x = 0; x < saveLength0; x++)
+				{
+					for (int y = 0; y < saveLength1; y++)
+					{
+						for (int z = 0; z < saveLength2; z++)
+						{
+							double value = reader.ReadDouble();
+							if (x < copyLength0 && y < copyLength1 && z < copyLength2)
+								refArray[x, y, z] = value;
+						}
+					}
+				}
+				if (needInit && refArray != null)
+				{
+					for (int x = 0; x < length0; x++)
+						for (int y = 0; y < length1; y++)
+							for (int z = 0; z < length2; z++)
+								if (x >= copyLength0 || y >= copyLength1 || z >= copyLength2)
+									refArray[x, y, z] = 0;
+				}
 			}
 
 			public override void ReadFloatArray(double[] refArray, bool needInit)

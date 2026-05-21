@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Text;
 using System.IO;
 using System.IO.Compression;
+using System.Xml;
 
 namespace MinorShift.Emuera.Sub
 {
@@ -33,6 +35,9 @@ namespace MinorShift.Emuera.Sub
 		BinaryWriter writer = null;
 		BinaryWriter fileWriter = null;
 		MemoryStream memoryStream = null;
+		const byte EmMapDataType = 0x20;
+		const byte EmXmlDataType = 0x21;
+		const byte EmDataTableDataType = 0x22;
 		
 		public void WriteHeader()
 		{
@@ -135,27 +140,61 @@ namespace MinorShift.Emuera.Sub
 			}
 			else if (v is double)
 			{
-				writer.Write((byte)EraSaveDataType.Float);
+				writer.Write((byte)EraSaveDataType.PcFloat);
 				writer.Write(key);
 				writeData((double)v);
 			}
 			else if (v is double[])
 			{
-				writer.Write((byte)EraSaveDataType.FloatArray);
+				writer.Write((byte)EraSaveDataType.PcFloatArray);
 				writer.Write(key);
 				writeData((double[])v);
 			}
 			else if (v is double[,])
 			{
-				writer.Write((byte)EraSaveDataType.FloatArray2D);
+				writer.Write((byte)EraSaveDataType.PcFloatArray2D);
 				writer.Write(key);
 				writeData((double[,])v);
 			}
 			else if (v is double[, ,])
 			{
-				writer.Write((byte)EraSaveDataType.FloatArray3D);
+				writer.Write((byte)EraSaveDataType.PcFloatArray3D);
 				writer.Write(key);
 				writeData((double[, ,])v);
+			}
+			else if (v is Dictionary<string, string>)
+			{
+				var map = (Dictionary<string, string>)v;
+				writer.Write(EmMapDataType);
+				writer.Write(key);
+				writer.Write(map.Count);
+				foreach (var pair in map)
+				{
+					writer.Write(pair.Key ?? "");
+					writer.Write(pair.Value ?? "");
+				}
+			}
+			else if (v is XmlDocument)
+			{
+				var doc = (XmlDocument)v;
+				writer.Write(EmXmlDataType);
+				writer.Write(key);
+				writer.Write(doc.OuterXml ?? "");
+			}
+			else if (v is DataTable)
+			{
+				var table = (DataTable)v;
+				writer.Write(EmDataTableDataType);
+				writer.Write(key);
+				var builder = new StringBuilder();
+				using (var stringWriter = new StringWriter(builder))
+				{
+					table.WriteXmlSchema(stringWriter);
+					writer.Write(builder.ToString());
+					builder.Clear();
+					table.WriteXml(stringWriter);
+					writer.Write(builder.ToString());
+				}
 			}
 		}
 
@@ -448,70 +487,23 @@ namespace MinorShift.Emuera.Sub
 		private void writeData(double[] array)
 		{
 			writer.Write((Int32)array.Length);
-			int countZero = 0;
 			for(int x = 0; x < array.Length; x++)
-			{
-				if (array[x] == 0)
-					countZero++;
-				else
-				{
-					if (countZero > 0)
-					{
-						writer.Write(Ebdb.Zero);
-						this.m_WriteInt(countZero);
-						countZero = 0;
-					}
-					writer.Write(array[x]);
-				}
-			}
-			writer.Write(Ebdb.EoD);
+				writer.Write(array[x]);
 		}
 
 		private void writeData(double[,] array)
 		{
-			int countZero = 0;
-			int countAllZero = 0;
 			int length0 = array.GetLength(0);
 			int length1 = array.GetLength(1);
 			writer.Write(length0);
 			writer.Write(length1);
 			for(int x = 0; x < length0; x++)
-			{
 				for(int y = 0; y < length1; y++)
-				{
-					if (array[x,y] == 0)
-						countZero++;
-					else
-					{
-						if (countAllZero > 0)
-						{
-							writer.Write(Ebdb.ZeroA1);
-							this.m_WriteInt(countAllZero);
-							countAllZero = 0;
-						}
-						if (countZero > 0)
-						{
-							writer.Write(Ebdb.Zero);
-							this.m_WriteInt(countZero);
-							countZero = 0;
-						}
-						writer.Write(array[x,y]);
-					}
-				}
-				if (countZero == length1)
-					countAllZero++;
-				else
-					writer.Write(Ebdb.EoA1);
-				countZero = 0;
-			}
-			writer.Write(Ebdb.EoD);
+					writer.Write(array[x,y]);
 		}
 
 		private void writeData(double[, ,] array)
 		{
-			int countZero = 0;
-			int countAllZero = 0;
-			int countAllZero2D = 0;
 			int length0 = array.GetLength(0);
 			int length1 = array.GetLength(1);
 			int length2 = array.GetLength(2);
@@ -519,49 +511,9 @@ namespace MinorShift.Emuera.Sub
 			writer.Write(length1);
 			writer.Write(length2);
 			for(int x = 0; x < length0; x++)
-			{
 				for(int y = 0; y < length1; y++)
-				{
 					for(int z = 0; z < length2; z++)
-					{
-						if (array[x,y,z] == 0)
-							countZero++;
-						else
-						{
-							if (countAllZero2D > 0)
-							{
-								writer.Write(Ebdb.ZeroA2);
-								this.m_WriteInt(countAllZero2D);
-								countAllZero2D = 0;
-							}
-							if (countAllZero > 0)
-							{
-								writer.Write(Ebdb.ZeroA1);
-								this.m_WriteInt(countAllZero);
-								countAllZero = 0;
-							}
-							if (countZero > 0)
-							{
-								writer.Write(Ebdb.Zero);
-								this.m_WriteInt(countZero);
-								countZero = 0;
-							}
-							writer.Write(array[x,y,z]);
-						}
-					}
-					if (countZero == length2)
-						countAllZero++;
-					else
-						writer.Write(Ebdb.EoA1);
-					countZero = 0;
-				}
-				if (countAllZero == length1)
-					countAllZero2D++;
-				else
-					writer.Write(Ebdb.EoA2);
-				countAllZero = 0;
-			}
-			writer.Write(Ebdb.EoD);
+						writer.Write(array[x,y,z]);
 		}
 		#endregion
 		#region IDisposable メンバ

@@ -1506,6 +1506,30 @@ namespace MinorShift.Emuera.GameData.Variable
 					else
 						reader.ReadStrArray3D((string[, ,])vToken.GetArray(), true);
 					break;
+				case EraSaveDataType.PcFloat:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 0)
+						reader.ReadFloat();
+					else
+						vToken.SetValue(reader.ReadFloat(), null);
+					break;
+				case EraSaveDataType.PcFloatArray:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 1)
+						reader.ReadPcFloatArray(null, true);
+					else
+						reader.ReadPcFloatArray((double[])vToken.GetArray(), true);
+					break;
+				case EraSaveDataType.PcFloatArray2D:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 2)
+						reader.ReadPcFloatArray2D(null, true);
+					else
+						reader.ReadPcFloatArray2D((double[,])vToken.GetArray(), true);
+					break;
+				case EraSaveDataType.PcFloatArray3D:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 3)
+						reader.ReadPcFloatArray3D(null, true);
+					else
+						reader.ReadPcFloatArray3D((double[, ,])vToken.GetArray(), true);
+					break;
 				case EraSaveDataType.Float:
 					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 0)
 						reader.ReadFloat();

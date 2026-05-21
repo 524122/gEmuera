@@ -565,6 +565,34 @@ namespace MinorShift.Emuera.GameData.Variable
 					case EraSaveDataType.EOF:
 					case EraSaveDataType.EOC:
 						goto whilebreak;
+					case EraSaveDataType.PcFloat:
+						if (vToken == null || !vToken.IsFloat || vToken.Dimension != 0)
+							reader.ReadFloat();
+						else
+							dataFloat[codeInt] = reader.ReadFloat();
+						break;
+					case EraSaveDataType.PcFloatArray:
+						if (userDefineData && array != null)
+							reader.ReadPcFloatArray(array as double[], true);
+						else if (vToken == null || !vToken.IsFloat || vToken.Dimension != 1)
+							reader.ReadPcFloatArray(null, true);
+						else
+							reader.ReadPcFloatArray(dataFloatArray[codeInt], true);
+						break;
+					case EraSaveDataType.PcFloatArray2D:
+						if (userDefineData && array != null)
+							reader.ReadPcFloatArray2D(array as double[,], true);
+						else if (vToken == null || !vToken.IsFloat || vToken.Dimension != 2)
+							reader.ReadPcFloatArray2D(null, true);
+						else
+							throw new FileEE("組み込みの2次元小数配列型キャラ変数は存在しません");
+						break;
+					case EraSaveDataType.PcFloatArray3D:
+						if (userDefineData && array != null)
+							reader.ReadPcFloatArray3D(array as double[, ,], true);
+						else
+							reader.ReadPcFloatArray3D(null, true);
+						break;
 					case EraSaveDataType.Int:
 						if (vToken == null || !vToken.IsInteger || vToken.Dimension != 0)
 							reader.ReadInt();

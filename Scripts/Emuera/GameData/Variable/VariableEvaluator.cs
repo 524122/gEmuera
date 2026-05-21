@@ -27,6 +27,9 @@ namespace MinorShift.Emuera.GameData.Variable
 		const string RuntimeDataStoreBinaryMarker = "__RDS__";
 		const string RuntimeDataStoreTextMarker = "__RDS_TEXT__";
 		const string RuntimeDataStoreTextEndMarker = "__RDS_TEXT_END__";
+		const byte EmMapDataType = 0x20;
+		const byte EmXmlDataType = 0x21;
+		const byte EmDataTableDataType = 0x22;
 
 		public VariableData VariableData { get { return varData; } }
 		public ConstantData Constant { get { return constant; } }
@@ -2422,6 +2425,7 @@ namespace MinorShift.Emuera.GameData.Variable
 						return false;
 					bReader.ReadString();//saveMes
 					varData.LoadFromStreamBinary(bReader);
+					LoadRuntimeDataStoreTail(bReader, false);
 				}
 				else
 				{
@@ -2498,47 +2502,114 @@ namespace MinorShift.Emuera.GameData.Variable
 				chara.LoadFromStreamBinary(bReader);
 			}
 			varData.LoadFromStreamBinary(bReader);
-			try
-			{
-				LoadRuntimeDataStore(bReader);
-			}
-			catch (EndOfStreamException)
-			{
-				RuntimeDataStore.Clear();
-			}
+			LoadRuntimeDataStoreTail(bReader, true);
 		}
 
 		void SaveRuntimeDataStore(EraBinaryDataWriter bWriter)
 		{
-			bWriter.WriteString(RuntimeDataStoreBinaryMarker);
-			bWriter.WriteInt64(RuntimeDataStore.Maps.Count);
 			foreach (var mapPair in RuntimeDataStore.Maps)
-			{
-				bWriter.WriteString(mapPair.Key);
-				bWriter.WriteInt64(mapPair.Value.Count);
-				foreach (var entry in mapPair.Value)
-				{
-					bWriter.WriteString(entry.Key);
-					bWriter.WriteString(entry.Value ?? "");
-				}
-			}
-			bWriter.WriteInt64(RuntimeDataStore.XmlDocuments.Count);
+				bWriter.WriteWithKey(mapPair.Key, mapPair.Value);
 			foreach (var xmlPair in RuntimeDataStore.XmlDocuments)
-			{
-				bWriter.WriteString(xmlPair.Key);
-				bWriter.WriteString(xmlPair.Value?.OuterXml ?? "");
-			}
-			bWriter.WriteInt64(RuntimeDataStore.DataTables.Count);
+				if (xmlPair.Value != null)
+					bWriter.WriteWithKey(xmlPair.Key, xmlPair.Value);
 			foreach (var dtPair in RuntimeDataStore.DataTables)
+				if (dtPair.Value != null)
+					bWriter.WriteWithKey(dtPair.Key, dtPair.Value);
+		}
+
+		void LoadRuntimeDataStoreTail(EraBinaryDataReader bReader, bool clearIfMissing)
+		{
+			if (bReader.EOF())
 			{
-				bWriter.WriteString(dtPair.Key);
-				using (var sw = new System.IO.StringWriter())
+				if (clearIfMissing)
+					RuntimeDataStore.Clear();
+				return;
+			}
+
+			byte next = bReader.PeekByte();
+			if (next == (byte)EraSaveDataType.EOF)
+			{
+				bReader.ReadDataType();
+				if (clearIfMissing)
+					RuntimeDataStore.Clear();
+				return;
+			}
+
+			if (next == EmMapDataType || next == EmXmlDataType || next == EmDataTableDataType)
+			{
+				LoadRuntimeDataStoreEmData(bReader, clearIfMissing);
+				return;
+			}
+
+			LoadRuntimeDataStore(bReader);
+		}
+
+		void LoadRuntimeDataStoreEmData(EraBinaryDataReader bReader, bool clearBeforeLoad)
+		{
+			if (clearBeforeLoad)
+				RuntimeDataStore.Clear();
+			while (!bReader.EOF())
+			{
+				byte type = (byte)bReader.ReadDataType();
+				if (type == (byte)EraSaveDataType.EOF)
 				{
-					dtPair.Value.WriteXml(sw, System.Data.XmlWriteMode.WriteSchema);
-					bWriter.WriteString(sw.ToString());
+					RefreshRuntimeDataStoreNextRowId();
+					return;
+				}
+
+				string key = bReader.ReadString();
+				switch (type)
+				{
+					case EmMapDataType:
+						RuntimeDataStore.Maps[key] = bReader.ReadMap();
+						break;
+					case EmXmlDataType:
+						RuntimeDataStore.XmlDocuments[key] = bReader.ReadXml();
+						break;
+					case EmDataTableDataType:
+						DataTable table = bReader.ReadDataTable();
+						NormalizeRuntimeDataTable(table);
+						RuntimeDataStore.DataTables[key] = table;
+						break;
+					default:
+						throw new FileEE("セーブデータのRuntimeDataStoreデータ型が異常です");
 				}
 			}
-			bWriter.WriteInt64(RuntimeDataStore.NextDataTableRowId);
+			RefreshRuntimeDataStoreNextRowId();
+		}
+
+		static void NormalizeRuntimeDataTable(DataTable table)
+		{
+			if (table == null)
+				return;
+			if ((table.PrimaryKey == null || table.PrimaryKey.Length == 0) && table.Columns.Contains("id"))
+				table.PrimaryKey = new[] { table.Columns["id"] };
+		}
+
+		static void RefreshRuntimeDataStoreNextRowId()
+		{
+			long nextId = Math.Max(1, RuntimeDataStore.NextDataTableRowId);
+			foreach (DataTable table in RuntimeDataStore.DataTables.Values)
+			{
+				NormalizeRuntimeDataTable(table);
+				if (table == null || !table.Columns.Contains("id"))
+					continue;
+				foreach (DataRow row in table.Rows)
+				{
+					if (row == null || row.IsNull("id"))
+						continue;
+					try
+					{
+						long id = Convert.ToInt64(row["id"]);
+						if (id >= nextId)
+							nextId = id + 1;
+					}
+					catch (InvalidCastException) { }
+					catch (FormatException) { }
+					catch (OverflowException) { }
+				}
+			}
+			RuntimeDataStore.NextDataTableRowId = nextId;
 		}
 
 		void LoadRuntimeDataStore(EraBinaryDataReader bReader)
