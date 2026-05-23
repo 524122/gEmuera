@@ -7,14 +7,29 @@ using MinorShift.Emuera.Content;
 using EmuFont = uEmuera.Drawing.Font;
 using EmuColor = uEmuera.Drawing.Color;
 
+/// <summary>
+/// Godot-side presentation surface for the emuera console.
+/// This node owns the mobile-facing UI tree: rendered console lines, command
+/// buttons, quick buttons, scaling, scroll state, background images, and audio
+/// players. The emuera core remains the source of game state; this class only
+/// translates core output into Godot Controls and translates user input back
+/// into emuera input events.
+/// </summary>
 public partial class EmueraContent : Control
 {
+    // Global access point used by legacy bridge code and overlay helpers.
     public static EmueraContent instance { get; private set; }
 
+    // Core UI nodes. scrollContainer clips the console viewport, scaledContentRoot
+    // provides a stable scaled scroll area, and lineContainer holds one Control per
+    // console line. htmlIslandContainer renders floating/div-like console islands.
     ScrollContainer scrollContainer;
     Control scaledContentRoot;
     VBoxContainer lineContainer;
     VBoxContainer htmlIslandContainer;
+
+    // Overlay and tool UI. These are Canvas/Control overlays above the console and
+    // should not own emuera state directly.
     HBoxContainer menuBar;
     Inputpad inputpad;
     QuickButtons quickButtons;
@@ -22,29 +37,50 @@ public partial class EmueraContent : Control
     ColorRect bgRect;
     Control cbgContainer;
     OptionWindow optionWindow;
+
+    // Audio players are pooled by logical emuera sound channel. Channel indexes
+    // are stable so script commands can pause/stop/speed-change the same channel.
     AudioStreamPlayer bgmPlayer;
     List<AudioStreamPlayer> soundPlayers = new List<AudioStreamPlayer>();
     List<int> soundRepeatRemaining = new List<int>();
     float soundVolume = 1.0f;
     float bgmVolume = 1.0f;
 
+    // Rendered line indexes. The dictionaries let update/remove operations target
+    // a line by emuera LineNo without scanning the Godot child list on every call.
+    // lineSizes/lineNumbers keep layout metrics O(1) for mobile scroll performance.
     Dictionary<int, ConsoleDisplayLine> lineObjects = new Dictionary<int, ConsoleDisplayLine>();
     Dictionary<int, Control> lineControls = new Dictionary<int, Control>();
     Dictionary<int, Vector2> lineSizes = new Dictionary<int, Vector2>();
     SortedSet<int> lineNumbers = new SortedSet<int>();
+
+    // Texture lookup failures are memoized to avoid repeated recursive file scans
+    // on Android storage where I/O stalls are very visible.
     HashSet<string> failedTextureSearches = new HashSet<string>();
+
+    // CBG nodes are reused instead of recreated whenever possible. This reduces
+    // CanvasItem churn and texture upload pressure during rapid script updates.
     List<EmueraImage> cbgNodes = new List<EmueraImage>();
     List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> renderedCbgLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
+
+    // Batched display updates defer expensive follow-up work until a group of
+    // lines has been applied.
     bool batchingDisplayLines = false;
     float totalLineHeight = 0;
     float widestLineWidth = 0;
 
+    // Visible line cap. Android memory pressure is the main constraint here, so
+    // old Controls are trimmed in batches instead of letting the scene tree grow
+    // without bound.
     public const int DefaultMaxVisibleLines = 360;
     public const int MinMaxVisibleLines = 120;
     public const int MaxMaxVisibleLines = 3000;
     static int MaxVisibleLines => ConfiguredMaxVisibleLines;
     static int LineTrimBatch => System.Math.Max(40, System.Math.Min(200, MaxVisibleLines / 6));
 
+    // Button generation and quick-button cache state. emuera reuses button text
+    // across waits, so generation guards prevent an old visible button from
+    // submitting into a newer input prompt.
     Font mainFont;
     int lastButtonGeneration = -1;
     int displayRevision = 0;
@@ -58,6 +94,10 @@ public partial class EmueraContent : Control
     ulong quickInputGateTick = 0;
     int lastCbgScrollVertical = int.MinValue;
     uint lastClickTick = 0;
+
+    // Drag and inertia state for the main console viewport. The code handles both
+    // mouse emulation and real touch events because Android can deliver either
+    // depending on project input settings.
     bool contentDragActive = false;
     bool contentDragMoved = false;
     bool contentDragStartedOnButton = false;
@@ -72,12 +112,26 @@ public partial class EmueraContent : Control
     bool contentInertiaActive = false;
     float contentInertiaDeceleration = 900.0f;
     int contentScrollInteractionSerial = 0;
+
+    // Desired scroll is a mirror of the viewport position we want after Godot has
+    // completed its layout pass. This prevents layout refreshes from snapping the
+    // ScrollContainer back to the top-left after buttons are regenerated.
+    bool desiredContentScrollValid = false;
+    int desiredContentScrollHorizontal = 0;
+    int desiredContentScrollVertical = 0;
+
+    // Pending bottom-scroll retry state. Console output often arrives across
+    // multiple frames, so bottom snapping waits for layout height to stabilize.
     bool pendingScroll = false;
     int pendingScrollInteractionSerial = 0;
     int pendingScrollLastMax = int.MinValue;
     ulong pendingScrollDeadlineTick = 0;
     ulong pendingScrollStableSinceTick = 0;
     bool pendingScaleBoundsUpdate = false;
+    ulong lastScrollTraceDragTick = 0;
+
+    // Scale and pinch gesture state. Pinch zoom is opt-in because accidental
+    // two-finger input is common on phones while tapping dense command buttons.
     float contentScale = 1.0f;
     Dictionary<int, Vector2> contentTouchPositions = new Dictionary<int, Vector2>();
     bool contentTouchGestureActive = false;
@@ -89,6 +143,9 @@ public partial class EmueraContent : Control
     bool contentPinchFocusValid = false;
     Vector2 scaleFocusContentPoint = Vector2.Zero;
     Vector2 scaleFocusLocalPoint = Vector2.Zero;
+
+    // Input and physics constants are kept together so mobile feel can be tuned
+    // without hunting through the gesture code.
     const float ScrollDragThreshold = 10.0f;
     const float ContentScaleMin = 0.5f;
     const float ContentScaleMax = 3.0f;
@@ -99,6 +156,7 @@ public partial class EmueraContent : Control
     const ulong ScrollToBottomRetryMs = 2000;
     const ulong ScrollToBottomStableMs = 80;
     const int ScrollToBottomTolerancePx = 1;
+    const ulong ScrollTraceDragIntervalMs = 120;
     const float ContentInertiaMinVelocity = 80.0f;
     const float ContentInertiaFastVelocity = 4500.0f;
     const float ContentInertiaMaxVelocity = 14000.0f;
@@ -112,13 +170,17 @@ public partial class EmueraContent : Control
     const string ContentDragSensitivityKey = "ContentDragSensitivity";
     const string ButtonDragSensitivityKey = "ButtonDragSensitivity";
     const string MaxVisibleLinesKey = "MaxVisibleLines";
+    const string ContentPinchZoomEnabledKey = "ContentPinchZoomEnabled";
     const ulong QuickInputGateFallbackMs = 500;
     static float contentDragSensitivity = -1.0f;
     static int configuredMaxVisibleLines = -1;
+    static bool contentPinchZoomEnabled = false;
+    static bool contentPinchZoomEnabledLoaded = false;
 
+    // Processing label shown while the emuera worker is busy.
     Label inProcessLabel;
 
-    // Message box
+    // Shared modal confirmation/message box used by menu actions.
     PopupPanel msgBox;
     Label msgBoxTitle;
     Label msgBoxMessage;
@@ -127,6 +189,9 @@ public partial class EmueraContent : Control
     System.Action msgBoxConfirmCallback;
     System.Action msgBoxCancelCallback;
 
+    // Top-right system menu overlay. It lives on a high CanvasLayer so it remains
+    // tappable above the console but uses narrow hit areas to avoid blocking
+    // click-to-advance.
     CanvasLayer menuLayer;
     HBoxContainer menuExpandedBar;
     bool menuExpanded = false;
@@ -141,6 +206,9 @@ public partial class EmueraContent : Control
 
     public static int ContentWidth { get; private set; }
     public static int ContentHeight { get; private set; }
+
+    // User-configurable cap for rendered console rows. The value is persisted in
+    // user:// so exported APK builds can keep device-specific settings.
     public static int ConfiguredMaxVisibleLines
     {
         get
@@ -170,11 +238,17 @@ public partial class EmueraContent : Control
         return System.Math.Max(MinMaxVisibleLines, System.Math.Min(MaxMaxVisibleLines, value));
     }
 
+    // emuera still exposes the console viewport through Config.WindowY. Keeping
+    // this helper isolated makes it easier to replace later with actual viewport
+    // measurements if the core API changes.
     static int GetContentViewportHeight()
     {
         return Config.WindowY;
     }
 
+    // Drag sensitivity shared by the main console and quick-button panel. It is
+    // clamped tightly because too high a multiplier makes touch scrolling skip
+    // command rows on small screens.
     public static float ContentDragSensitivity
     {
         get
@@ -207,6 +281,43 @@ public partial class EmueraContent : Control
         set => ContentDragSensitivity = value;
     }
 
+    // Optional mobile pinch zoom. Disabled by default to preserve legacy tap
+    // behavior unless the user explicitly enables it in settings.
+    public static bool ContentPinchZoomEnabled
+    {
+        get
+        {
+            EnsureContentPinchZoomSettingLoaded();
+            return contentPinchZoomEnabled;
+        }
+        set
+        {
+            if (contentPinchZoomEnabledLoaded && contentPinchZoomEnabled == value)
+                return;
+            contentPinchZoomEnabled = value;
+            contentPinchZoomEnabledLoaded = true;
+            var cfg = new ConfigFile();
+            cfg.Load(SettingsPath);
+            cfg.SetValue(SettingsSection, ContentPinchZoomEnabledKey, contentPinchZoomEnabled);
+            cfg.Save(SettingsPath);
+            if (!contentPinchZoomEnabled)
+                instance?.ResetContentTouchGestureState();
+        }
+    }
+
+    static void EnsureContentPinchZoomSettingLoaded()
+    {
+        if (contentPinchZoomEnabledLoaded)
+            return;
+        var cfg = new ConfigFile();
+        cfg.Load(SettingsPath);
+        contentPinchZoomEnabled = (bool)cfg.GetValue(SettingsSection, ContentPinchZoomEnabledKey, false);
+        contentPinchZoomEnabledLoaded = true;
+    }
+
+    // Build the UI tree entirely in code because the emulator surface is dynamic:
+    // lines, buttons, overlays, and background images are all generated from ERB
+    // output rather than fixed scene resources.
     public override void _Ready()
     {
         instance = this;
@@ -217,6 +328,8 @@ public partial class EmueraContent : Control
 
         mainFont = LoadConfiguredFont();
 
+        // Background is a full-screen ColorRect so emuera's configured back color
+        // can be applied without touching the generated line nodes.
         bgRect = new ColorRect();
         bgRect.AnchorLeft = 0;
         bgRect.AnchorTop = 0;
@@ -289,6 +402,8 @@ public partial class EmueraContent : Control
         WireSystemButton(menuToggleBtn, OnMenuTogglePressed);
         menuRoot.AddChild(menuToggleBtn);
 
+        // Tool overlays are siblings of the console so their CanvasLayer/z-order
+        // and input capture are independent from the scrollable console content.
         quickButtons = new QuickButtons();
         AddChild(quickButtons);
 
@@ -301,13 +416,15 @@ public partial class EmueraContent : Control
         optionWindow = new OptionWindow();
         AddChild(optionWindow);
 
+        // Main console viewport. The scrollbars are left in Auto mode so Godot
+        // owns the internal range, but their visual nodes are hidden because this
+        // emulator uses direct touch drag instead of visible scrollbars on mobile.
         scrollContainer = new ScrollContainer();
         scrollContainer.AnchorLeft = 0;
         scrollContainer.AnchorTop = 0;
         scrollContainer.AnchorRight = 1;
         scrollContainer.AnchorBottom = 1;
-        scrollContainer.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
-        scrollContainer.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+        ConfigureContentScrollContainer();
         scrollContainer.FollowFocus = false;
         scrollContainer.ClipContents = true;
         scrollContainer.MouseFilter = MouseFilterEnum.Pass;
@@ -329,9 +446,12 @@ public partial class EmueraContent : Control
         inProcessLabel.Visible = false;
         rootVBox.AddChild(inProcessLabel);
 
+        // scaledContentRoot is the actual ScrollContainer child. lineContainer is
+        // scaled inside it so ScrollContainer receives the scaled minimum size and
+        // can compute a correct scroll range.
         scaledContentRoot = new Control();
         scaledContentRoot.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        scaledContentRoot.SizeFlagsVertical = SizeFlags.ExpandFill;
+        scaledContentRoot.SizeFlagsVertical = SizeFlags.ShrinkBegin;
         scaledContentRoot.MouseFilter = MouseFilterEnum.Pass;
         scaledContentRoot.GuiInput += OnContentGuiInput;
         scrollContainer.AddChild(scaledContentRoot);
@@ -396,6 +516,9 @@ public partial class EmueraContent : Control
         ApplyFont(msgBoxConfirmBtn);
         ApplyFont(msgBoxCancelBtn);
 
+        // CBG is drawn above the background but below text overlays. It is not a
+        // child of the ScrollContainer because some layers follow scroll through
+        // their own emuera z-depth semantics.
         cbgContainer = new Control();
         cbgContainer.AnchorLeft = 0;
         cbgContainer.AnchorTop = 0;
@@ -406,6 +529,8 @@ public partial class EmueraContent : Control
         AddChild(cbgContainer);
     }
 
+    // Clear all generated console state. This is used for title changes/reloads
+    // and must reset both Godot nodes and the O(1) lookup indexes.
     public void Clear()
     {
         GenericUtils.ClearPointingButton();
@@ -429,6 +554,8 @@ public partial class EmueraContent : Control
 
     int FontSize => Config.FontSize > 0 ? Config.FontSize : 18;
 
+    // Cached line height derived from the active font. Console rows are fixed
+    // height for predictable emuera layout and fast scroll-size calculation.
     int _effectiveLineHeight = -1;
     int EffectiveLineHeight
     {
@@ -458,12 +585,16 @@ public partial class EmueraContent : Control
         control.AddThemeFontSizeOverride("font_size", FontSize);
     }
 
+    // Godot containers respect CustomMinimumSize during layout, while direct Size
+    // is needed here because many console parts are absolutely positioned.
     static void SetFixedControlSize(Control control, Vector2 size)
     {
         control.CustomMinimumSize = size;
         control.Size = size;
     }
 
+    // Render a text fragment as a fixed-size Label. emuera gives absolute X/width
+    // for console text, so autowrap is deliberately disabled here.
     Label CreateTextPart(string text, EmuColor color, EmuFont font, float width)
     {
         var label = new Label();
@@ -485,6 +616,8 @@ public partial class EmueraContent : Control
 
     const string BundledConsoleFontPath = "res://Fonts/MS Gothic.ttf";
 
+    // Prefer the bundled console font on Android to avoid missing glyphs and
+    // device-specific font metric differences in exported APKs.
     Font LoadConfiguredFont()
     {
         string requested = Config.FontName;
@@ -525,6 +658,9 @@ public partial class EmueraContent : Control
             || normalized.Equals("\uFF2D\uFF33 \u30B4\u30B7\u30C3\u30AF", System.StringComparison.OrdinalIgnoreCase);
     }
 
+    // The following helpers compute absolute row bounds from every part in a
+    // ConsoleDisplayLine. Images and div-like parts can extend outside the normal
+    // baseline, so row height cannot rely on font height alone.
     int GetPartTop(AConsoleDisplayPart part)
     {
         if (part == null)
@@ -585,6 +721,8 @@ public partial class EmueraContent : Control
         return bottom;
     }
 
+    // Transparent styles keep emuera buttons visually driven by their child text
+    // and image parts while still providing a Godot input target.
     static StyleBoxFlat _btnNormalStyle;
     static StyleBoxFlat _btnHoverStyle;
 
@@ -623,6 +761,8 @@ public partial class EmueraContent : Control
         btn.AddThemeColorOverride("font_focus_color", focusColor);
     }
 
+    // Add a small menu icon and wire it through pointer-tracking code instead of
+    // Button.Pressed so touch drags do not accidentally trigger menu actions.
     TextureButton AddIconButton(string iconPath, System.Action callback)
     {
         var btn = new TextureButton();
@@ -681,6 +821,9 @@ public partial class EmueraContent : Control
         };
     }
 
+    // Add or replace one rendered console line. The method preserves the emuera
+    // LineNo index, registers exact layout metrics, and creates Panel hit targets
+    // for command buttons without using Button's focus behavior.
     internal void AddLine(ConsoleDisplayLine line, bool isUpdate)
     {
         if (line == null)
@@ -816,6 +959,8 @@ public partial class EmueraContent : Control
         QueueDisplayFollowUp();
     }
 
+    // Apply a core display delta: remove from bottom, add/update lines, trim old
+    // top rows, then schedule one layout/scroll follow-up for the whole batch.
     internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update, int lastButtonGeneration)
     {
         bool changed = false;
@@ -858,6 +1003,7 @@ public partial class EmueraContent : Control
             QueueDisplayFollowUp();
         }
 
+        TraceScroll("apply_text_changes", $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} changed={changed} update={update} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
         SetLastButtonGeneration(lastButtonGeneration);
     }
 
@@ -867,6 +1013,8 @@ public partial class EmueraContent : Control
         RequestScrollToBottom();
     }
 
+    // Background color rectangles are attached per line so PRINT background color
+    // semantics scroll together with the corresponding text row.
     void AddLineBackground(ConsoleDisplayLine line, Control lineControl, int lineHeight)
     {
         if (line.TextBackgroundColor == null)
@@ -909,6 +1057,9 @@ public partial class EmueraContent : Control
         QueueScaleBoundsUpdate();
     }
 
+    // Remove any temporary HTML island output. The island container is separate
+    // from normal rows because some emuera HTML/div output is positioned as a
+    // composite overlay rather than as ordinary text.
     internal void ClearHtmlIsland()
     {
         if (htmlIslandContainer == null)
@@ -919,6 +1070,8 @@ public partial class EmueraContent : Control
         RefreshQuickInputGate();
     }
 
+    // Register one row in all lookup tables and aggregate metrics used by the
+    // manual layout calculator.
     void RegisterLine(int lineNo, ConsoleDisplayLine line, Control control, Vector2 size)
     {
         lineObjects[lineNo] = line;
@@ -930,6 +1083,8 @@ public partial class EmueraContent : Control
             widestLineWidth = size.X;
     }
 
+    // Remove one row from lookup tables and subtract its cached contribution from
+    // the aggregate layout metrics.
     void UnregisterLine(int lineNo)
     {
         lineObjects.Remove(lineNo);
@@ -943,6 +1098,7 @@ public partial class EmueraContent : Control
             RecalculateWidestLineWidth();
     }
 
+    // Reset every line cache after a full clear.
     void ResetLineIndexes()
     {
         lineObjects.Clear();
@@ -953,6 +1109,7 @@ public partial class EmueraContent : Control
         widestLineWidth = 0;
     }
 
+    // Width is only rescanned when the removed row may have been the widest one.
     void RecalculateWidestLineWidth()
     {
         widestLineWidth = 0;
@@ -963,6 +1120,34 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Scroll tracing is intentionally centralized so noisy diagnostics can be
+    // toggled from GenericUtils without leaving prints in mobile hot paths.
+    void TraceScroll(string action, string detail = null)
+    {
+        if (!GenericUtils.ScrollTraceEnabled)
+            return;
+        string suffix = string.IsNullOrEmpty(detail) ? "" : " " + detail;
+        GenericUtils.ScrollTrace("ui", $"{action}{suffix} {GetScrollTraceState()}");
+    }
+
+    string GetScrollTraceState()
+    {
+        if (scrollContainer == null)
+            return "scroll=null";
+
+        var limit = GetContentScrollLimit();
+        var vScroll = scrollContainer.GetVScrollBar();
+        int vMax = Mathf.RoundToInt(Mathf.Max(0, vScroll?.MaxValue ?? 0.0));
+        int vPage = Mathf.RoundToInt(Mathf.Max(0, vScroll?.Page ?? 0.0));
+        int vRangeMax = Mathf.Max(0, vMax - vPage);
+        var scrollSize = scrollContainer.Size;
+        var rootSize = scaledContentRoot != null ? scaledContentRoot.Size : Vector2.Zero;
+        int lineCount = lineContainer != null ? lineContainer.GetChildCount() : -1;
+        return $"scroll=({scrollContainer.ScrollHorizontal},{scrollContainer.ScrollVertical}) max=({limit.X},{vMax}) pageY={vPage} barY={vRangeMax} calcY={limit.Y} desired=({desiredContentScrollHorizontal},{desiredContentScrollVertical},valid={desiredContentScrollValid}) pending={pendingScroll} serial={pendingScrollInteractionSerial}/{contentScrollInteractionSerial} drag={contentDragActive}/{contentDragMoved}/btn={contentDragStartedOnButton} inertia={contentInertiaActive} lines={lineCount} totalH={Mathf.RoundToInt(totalLineHeight)} view=({Mathf.RoundToInt(scrollSize.X)},{Mathf.RoundToInt(scrollSize.Y)}) root=({Mathf.RoundToInt(rootSize.X)},{Mathf.RoundToInt(rootSize.Y)}) scale={contentScale:0.###}";
+    }
+
+    // Schedule a deferred scroll-to-bottom. We wait across frames because Godot
+    // updates ScrollContainer range after child minimum sizes settle.
     void RequestScrollToBottom()
     {
         ulong now = Time.GetTicksMsec();
@@ -971,24 +1156,74 @@ public partial class EmueraContent : Control
         pendingScrollStableSinceTick = 0;
         pendingScrollDeadlineTick = now + ScrollToBottomRetryMs;
         if (pendingScroll)
+        {
+            TraceScroll("scroll_bottom_request_merge", $"deadline={pendingScrollDeadlineTick}");
             return;
+        }
         pendingScroll = true;
+        TraceScroll("scroll_bottom_request", $"deadline={pendingScrollDeadlineTick}");
         CallDeferred(nameof(DeferredScrollToBottom));
     }
 
+    // Retry bottom scrolling until content height has remained stable long enough
+    // or a user interaction starts. This prevents output batches from ending one
+    // frame before the final buttons are laid out.
     async void DeferredScrollToBottom()
     {
+        string endReason = "loop_end";
+        bool loggedDragWait = false;
+        TraceScroll("scroll_bottom_start");
         try
         {
             while (pendingScroll && scrollContainer != null)
             {
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                 if (scrollContainer == null)
+                {
+                    endReason = "scroll_null";
                     break;
-                if (contentDragActive || contentInertiaActive || pendingScrollInteractionSerial != contentScrollInteractionSerial)
+                }
+                if (contentInertiaActive || pendingScrollInteractionSerial != contentScrollInteractionSerial)
+                {
+                    endReason = contentInertiaActive ? "inertia_active" : "interaction_changed";
                     break;
+                }
+                if (contentDragActive)
+                {
+                    if (!loggedDragWait)
+                    {
+                        loggedDragWait = true;
+                        TraceScroll("scroll_bottom_wait_drag");
+                    }
+                    continue;
+                }
 
-                UpdateScaleBounds();
+                bool layoutChanged = UpdateScaleBounds();
+                if (layoutChanged)
+                {
+                    TraceScroll("scroll_bottom_wait_layout");
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    if (scrollContainer == null)
+                    {
+                        endReason = "scroll_null_after_layout";
+                        break;
+                    }
+                    if (contentInertiaActive || pendingScrollInteractionSerial != contentScrollInteractionSerial)
+                    {
+                        endReason = contentInertiaActive ? "inertia_active" : "interaction_changed";
+                        break;
+                    }
+                    if (contentDragActive)
+                    {
+                        if (!loggedDragWait)
+                        {
+                            loggedDragWait = true;
+                            TraceScroll("scroll_bottom_wait_drag");
+                        }
+                        continue;
+                    }
+                }
+                SyncContentVerticalScrollRange();
                 int maxScroll = GetMaxContentVerticalScroll();
                 ulong now = Time.GetTicksMsec();
                 if (maxScroll != pendingScrollLastMax)
@@ -998,25 +1233,36 @@ public partial class EmueraContent : Control
                     ulong stableDeadline = now + ScrollToBottomStableMs;
                     if (pendingScrollDeadlineTick < stableDeadline)
                         pendingScrollDeadlineTick = stableDeadline;
+                    TraceScroll("scroll_bottom_max", $"max={maxScroll} stableDeadline={stableDeadline}");
                 }
 
                 scrollContainer.ScrollVertical = maxScroll;
+                RememberDesiredContentScroll(scrollContainer.ScrollHorizontal, maxScroll);
                 bool atBottom = scrollContainer.ScrollVertical >= maxScroll - ScrollToBottomTolerancePx;
                 bool maxStable = pendingScrollStableSinceTick > 0 && now - pendingScrollStableSinceTick >= ScrollToBottomStableMs;
                 if (atBottom && maxStable)
+                {
+                    endReason = "at_bottom";
                     break;
+                }
                 if (now >= pendingScrollDeadlineTick)
+                {
+                    endReason = "deadline";
                     break;
+                }
             }
         }
         finally
         {
+            TraceScroll("scroll_bottom_end", $"reason={endReason}");
             pendingScroll = false;
             pendingScrollLastMax = int.MinValue;
             pendingScrollStableSinceTick = 0;
         }
     }
 
+    // Queue one scale/layout pass for the next frame. Multiple line changes in
+    // the same frame collapse into a single update.
     void QueueScaleBoundsUpdate()
     {
         if (pendingScaleBoundsUpdate)
@@ -1025,6 +1271,7 @@ public partial class EmueraContent : Control
         CallDeferred(nameof(DeferredUpdateScaleBounds));
     }
 
+    // Run deferred layout after Godot has processed pending child additions.
     async void DeferredUpdateScaleBounds()
     {
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -1032,30 +1279,140 @@ public partial class EmueraContent : Control
         UpdateScaleBounds();
     }
 
-    void UpdateScaleBounds(bool allowShrink = true)
+    // Configure scroll modes while hiding visual bars. Auto mode is required so
+    // Godot owns the internal scrollbar range; the bars are only visually hidden.
+    void ConfigureContentScrollContainer()
     {
-        if (scaledContentRoot == null || lineContainer == null)
+        if (scrollContainer == null)
             return;
 
+        scrollContainer.HorizontalScrollMode = ScrollContainer.ScrollMode.Auto;
+        scrollContainer.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+        HideContentScrollBar(scrollContainer.GetHScrollBar());
+        HideContentScrollBar(scrollContainer.GetVScrollBar());
+    }
+
+    // Hide a ScrollBar without disabling the ScrollContainer's internal range
+    // calculation.
+    static void HideContentScrollBar(Godot.ScrollBar scrollBar)
+    {
+        if (scrollBar == null)
+            return;
+        scrollBar.Visible = false;
+        scrollBar.MouseFilter = MouseFilterEnum.Ignore;
+        scrollBar.CustomMinimumSize = Vector2.Zero;
+    }
+
+    // Recompute unscaled and scaled content bounds, then restore the intended
+    // scroll position. When pendingScroll is active, vertical scroll is pinned to
+    // the latest bottom limit.
+    bool UpdateScaleBounds(bool allowShrink = true)
+    {
+        if (scaledContentRoot == null || lineContainer == null)
+            return false;
+
+        int previousHorizontal = desiredContentScrollValid
+            ? desiredContentScrollHorizontal
+            : (scrollContainer != null ? scrollContainer.ScrollHorizontal : 0);
+        int previousVertical = desiredContentScrollValid
+            ? desiredContentScrollVertical
+            : (scrollContainer != null ? scrollContainer.ScrollVertical : 0);
         var scrollSize = scrollContainer != null ? scrollContainer.Size : Vector2.Zero;
         var contentSize = CalculateLineContentSize();
-        float unscaledWidth = Mathf.Max(Mathf.Max(Config.DrawableWidth, scrollSize.X / contentScale), contentSize.X);
-        lineContainer.CustomMinimumSize = new Vector2(unscaledWidth, contentSize.Y);
-        lineContainer.Position = Vector2.Zero;
-        lineContainer.Size = new Vector2(unscaledWidth, contentSize.Y);
-        var scaledSize = new Vector2(
-            Mathf.Max(unscaledWidth * contentScale, scrollSize.X),
-            Mathf.Max(contentSize.Y * contentScale, scrollSize.Y));
+        var layoutSize = CalculateContentLayoutSize(contentSize);
+        float safeScale = GetSafeContentScale();
+        var scaledSize = CalculateScaledContentRootSize(layoutSize, scrollSize, safeScale);
         if (!allowShrink)
         {
             scaledSize.X = Mathf.Max(scaledSize.X, Mathf.Max(scaledContentRoot.CustomMinimumSize.X, scaledContentRoot.Size.X));
             scaledSize.Y = Mathf.Max(scaledSize.Y, Mathf.Max(scaledContentRoot.CustomMinimumSize.Y, scaledContentRoot.Size.Y));
         }
+
+        bool layoutChanged =
+            lineContainer.CustomMinimumSize != layoutSize ||
+            lineContainer.Size != layoutSize ||
+            scaledContentRoot.CustomMinimumSize != scaledSize ||
+            scaledContentRoot.Size != scaledSize;
+
+        lineContainer.CustomMinimumSize = layoutSize;
+        lineContainer.Position = Vector2.Zero;
+        lineContainer.Size = layoutSize;
         scaledContentRoot.Position = Vector2.Zero;
         scaledContentRoot.CustomMinimumSize = scaledSize;
         scaledContentRoot.Size = scaledSize;
+        SyncContentVerticalScrollRange();
+
+        if (scrollContainer != null)
+        {
+            var limit = GetContentScrollLimit();
+            int targetHorizontal = Mathf.Clamp(previousHorizontal, 0, limit.X);
+            int targetVertical = pendingScroll ? limit.Y : Mathf.Clamp(previousVertical, 0, limit.Y);
+            int oldHorizontal = scrollContainer.ScrollHorizontal;
+            int oldVertical = scrollContainer.ScrollVertical;
+            scrollContainer.ScrollHorizontal = targetHorizontal;
+            scrollContainer.ScrollVertical = targetVertical;
+            RememberDesiredContentScroll(targetHorizontal, targetVertical);
+            if (oldHorizontal != targetHorizontal || oldVertical != targetVertical)
+                TraceScroll("scale_bounds_scroll_set", $"allowShrink={allowShrink} from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
+        }
+
+        return layoutChanged;
     }
 
+    // Keep scrollbar visuals hidden after Godot recreates or reconfigures them.
+    // This intentionally does not write Page or MaxValue.
+    void SyncContentVerticalScrollRange()
+    {
+        if (scrollContainer == null)
+            return;
+
+        // Keep ScrollContainer's own range calculation authoritative. Manually
+        // writing ScrollBar.Page/MaxValue during content relayout can race
+        // Godot's internal layout pass and temporarily snap the viewport.
+        HideContentScrollBar(scrollContainer.GetHScrollBar());
+        HideContentScrollBar(scrollContainer.GetVScrollBar());
+    }
+
+    // Capture the live viewport as the desired scroll target before sending input
+    // to the core or before a layout-changing action.
+    void RememberCurrentContentScroll()
+    {
+        if (scrollContainer == null)
+            return;
+        RememberDesiredContentScroll(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+    }
+
+    // Store the scroll target that ProcessContentScrollCorrection will preserve
+    // across Godot layout passes.
+    void RememberDesiredContentScroll(int horizontal, int vertical)
+    {
+        desiredContentScrollHorizontal = horizontal;
+        desiredContentScrollVertical = vertical;
+        desiredContentScrollValid = true;
+    }
+
+    // Protect divisions and scroll math from zero scale.
+    float GetSafeContentScale()
+    {
+        return Mathf.Max(contentScale, 0.001f);
+    }
+
+    // Unscaled console layout must never be narrower than emuera's drawable area.
+    Vector2 CalculateContentLayoutSize(Vector2 contentSize)
+    {
+        return new Vector2(Mathf.Max(Config.DrawableWidth, contentSize.X), contentSize.Y);
+    }
+
+    // Scaled root size is what ScrollContainer sees. It is clamped to viewport
+    // size so empty or short output still fills the phone screen.
+    Vector2 CalculateScaledContentRootSize(Vector2 layoutSize, Vector2 scrollSize, float safeScale)
+    {
+        return new Vector2(
+            Mathf.Ceil(Mathf.Max(layoutSize.X * safeScale, scrollSize.X)),
+            Mathf.Ceil(Mathf.Max(layoutSize.Y * safeScale, scrollSize.Y)));
+    }
+
+    // Fast layout size calculation from cached line metrics.
     Vector2 CalculateLineContentSize()
     {
         float width = Mathf.Max(Config.DrawableWidth, widestLineWidth);
@@ -1066,6 +1423,8 @@ public partial class EmueraContent : Control
         return new Vector2(width, height);
     }
 
+    // Convert one emuera display part into Godot Controls under container.
+    // relX is used for button/div-local coordinates.
     int AddPartToContainer(AConsoleDisplayPart part, Control container, int relX)
     {
         if(part is ConsoleStyledString css)
@@ -1271,6 +1630,7 @@ public partial class EmueraContent : Control
         return EffectiveLineHeight;
     }
 
+    // Add an HTML-like div part and return the row height it contributes.
     int AddDivPartToContainer(ConsoleDivPart div, Control container, int relX)
     {
         var wrapper = BuildDivControl(div, relX);
@@ -1280,6 +1640,9 @@ public partial class EmueraContent : Control
         return System.Math.Max(EffectiveLineHeight, div.Y + div.DivHeight);
     }
 
+    // Build a nested Control tree for styled div output. Margins, borders, and
+    // padding are drawn manually because this is emuera console layout rather
+    // than Godot theme layout.
     Control BuildDivControl(ConsoleDivPart div, int relX)
     {
         var wrapper = new Control();
@@ -1346,6 +1709,8 @@ public partial class EmueraContent : Control
         return wrapper;
     }
 
+    // Render a child ConsoleDisplayLine into an existing container at yOffset.
+    // Used by nested divs and island output.
     int AddDisplayLineToContainer(ConsoleDisplayLine line, Control container, int yOffset)
     {
         if (line == null)
@@ -1411,6 +1776,7 @@ public partial class EmueraContent : Control
         return maxHeight;
     }
 
+    // Compute the right edge of a console line for manual minimum-size tracking.
     static int GetLineRight(ConsoleDisplayLine line)
     {
         int right = 0;
@@ -1425,6 +1791,8 @@ public partial class EmueraContent : Control
         return right;
     }
 
+    // Draw each div border side as a ColorRect so per-side widths and colors match
+    // emuera HTML styling.
     void AddDivBorder(Control wrapper, int[] border, int[] borderColor, float boxX, float boxY, float boxW, float boxH)
     {
         if (border == null || borderColor == null || boxW <= 0 || boxH <= 0)
@@ -1435,6 +1803,7 @@ public partial class EmueraContent : Control
         AddBorderRect(wrapper, boxX, boxY, BoxValue(border, BoxDirection.Left), boxH, ColorValue(borderColor, BoxDirection.Left));
     }
 
+    // Add one border rectangle if the side has positive thickness.
     void AddBorderRect(Control wrapper, float x, float y, float w, float h, int color)
     {
         if (w <= 0 || h <= 0 || color < 0)
@@ -1447,6 +1816,7 @@ public partial class EmueraContent : Control
         wrapper.AddChild(rect);
     }
 
+    // Safe CSS-like four-value lookup.
     static int BoxValue(int[] values, int index)
     {
         if (values == null || index < 0 || index >= values.Length)
@@ -1454,6 +1824,7 @@ public partial class EmueraContent : Control
         return values[index];
     }
 
+    // Safe border-color lookup with transparent fallback.
     static int ColorValue(int[] values, int index)
     {
         if (values == null || index < 0 || index >= values.Length)
@@ -1461,6 +1832,7 @@ public partial class EmueraContent : Control
         return values[index];
     }
 
+    // Resolve div coordinates into the target container's local coordinate space.
     Vector2 GetHtmlDivPosition(ConsoleDivPart div, int relX)
     {
         switch (div.Display)
@@ -1475,11 +1847,13 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Keep emuera HTML depth order stable while mapping it into Godot's ZIndex.
     static int GetGodotZIndexForHtmlDepth(int depth)
     {
         return -depth;
     }
 
+    // Resolve absolute/relative image placement for HTML-style output.
     Vector2 GetHtmlImagePosition(ConsoleImagePart imagePart, int relX)
     {
         switch (imagePart.Display)
@@ -1500,6 +1874,7 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Apply sprite-origin metadata when HTML images use emuera sprite resources.
     static Vector2 GetSpriteHtmlDrawOffset(ASprite sprite, string resourceName, int width, int height)
     {
         if (width == 0 || height == 0)
@@ -1537,6 +1912,7 @@ public partial class EmueraContent : Control
             basePosition.Y * height / (float)sprite.DestBaseSize.Height);
     }
 
+    // Dynamic cut-ins are generated by script and may not exist as files yet.
     static bool IsDynamicCutinName(string name)
     {
         if (string.IsNullOrEmpty(name) || !name.StartsWith("CUTIN", StringComparison.OrdinalIgnoreCase) || name.Length == 5)
@@ -1549,6 +1925,8 @@ public partial class EmueraContent : Control
         return true;
     }
 
+    // Convert emuera sprite/image abstractions into Godot textures. AtlasTexture
+    // is used when a frame only references a source rectangle.
     Texture2D GetSpriteTexture(ASprite sprite)
     {
         if (sprite == null)
@@ -1647,22 +2025,26 @@ public partial class EmueraContent : Control
         return null;
     }
 
+    // Lookup a currently rendered console line by emuera line number.
     internal ConsoleDisplayLine GetLine(int lineno)
     {
         lineObjects.TryGetValue(lineno, out var line);
         return line;
     }
 
+    // Highest currently retained emuera line number.
     public int GetMaxLineNo()
     {
         return lineNumbers.Count == 0 ? -1 : lineNumbers.Max;
     }
 
+    // Lowest currently retained emuera line number after trimming.
     public int GetMinLineNo()
     {
         return lineNumbers.Count == 0 ? -1 : lineNumbers.Min;
     }
 
+    // Trim old rows from the top to cap memory and scene-tree size.
     public void RemoveTopLines(int count)
     {
         bool removedAny = false;
@@ -1686,6 +2068,7 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Re-apply the row cap after the user changes MaxVisibleLines.
     public void TrimVisibleLinesToLimit()
     {
         if (lineContainer == null)
@@ -1695,6 +2078,7 @@ public partial class EmueraContent : Control
             RemoveTopLines(overflow);
     }
 
+    // Remove recent rows when the core overwrites or updates the bottom output.
     public void RemoveBottomLines(int count)
     {
         bool removedAny = false;
@@ -1718,6 +2102,8 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Remove a node from the tree before QueueFree so container layout updates
+    // immediately and no stale input callbacks keep firing.
     static void SafeQueueFree(Node node)
     {
         node.SetProcess(false);
@@ -1729,11 +2115,15 @@ public partial class EmueraContent : Control
         node.QueueFree();
     }
 
+    // Kept for compatibility with older callers. Layout is now updated through
+    // deferred size passes instead of a separate imperative redraw call.
     public void UpdateDisplay()
     {
         // Layout is handled automatically by Godot containers
     }
 
+    // Refresh client background graphics from the core. Nodes are reused by index
+    // so animated/background-heavy scenes avoid repeated allocation.
     internal void RefreshCBG(List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> list)
     {
         if (cbgContainer == null)
@@ -1789,6 +2179,8 @@ public partial class EmueraContent : Control
         TrimCbgNodes(nodeIndex);
     }
 
+    // Convert emuera CBG z-depth rules into a Godot position. Positive z-depth
+    // layers follow content scroll, while other depths remain screen-relative.
     Vector2 GetCbgLayerPosition(MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage cbg, int currentScrollY)
     {
         int y = cbg.y;
@@ -1801,11 +2193,13 @@ public partial class EmueraContent : Control
         return new Vector2(cbg.x, y);
     }
 
+    // Current vertical scroll used by CBG positioning and animation culling.
     int GetCurrentContentScrollY()
     {
         return scrollContainer != null ? scrollContainer.ScrollVertical : 0;
     }
 
+    // Keep scroll-following CBG layers in sync without rebuilding their nodes.
     void RefreshCbgFollowScrollPositions()
     {
         if (renderedCbgLayers.Count == 0 || cbgNodes.Count == 0)
@@ -1835,11 +2229,14 @@ public partial class EmueraContent : Control
         return cbgNodes[index];
     }
 
+    // Compatibility overload for legacy callers that pass a loop flag.
     public void PlaySoundFile(string path, bool loop, int channel)
     {
         PlaySoundFile(path, loop ? -1 : 1, channel);
     }
 
+    // Play a sound effect on a logical emuera channel. repeat < 0 means loop,
+    // repeat > 0 means replay a fixed number of times.
     public void PlaySoundFile(string path, int repeat, int channel)
     {
         bool loop = repeat < 0;
@@ -1867,6 +2264,7 @@ public partial class EmueraContent : Control
         GenericUtils.NotifySoundPlaybackStarted(channel, path, GetAudioStreamLengthMs(stream));
     }
 
+    // Replay or stop a channel when Godot reports that playback finished.
     void OnSoundPlayerFinished(int channel)
     {
         if (channel < 0 || channel >= soundPlayers.Count || channel >= soundRepeatRemaining.Count)
@@ -1880,6 +2278,7 @@ public partial class EmueraContent : Control
             soundPlayers[channel].Play();
     }
 
+    // Stop all sound effect channels without touching BGM.
     public void StopSounds()
     {
         for (int i = 0; i < soundPlayers.Count; i++)
@@ -1889,6 +2288,7 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Stop one sound effect channel if it exists.
     public void StopSoundChannel(int channel)
     {
         if (channel < 0 || channel >= soundPlayers.Count)
@@ -1898,6 +2298,7 @@ public partial class EmueraContent : Control
         soundPlayers[channel].Stop();
     }
 
+    // Pause/resume one sound channel for emuera SOUNDSTOP/SOUNDPLAY semantics.
     public void PauseSoundChannel(int channel, bool paused)
     {
         if (channel < 0 || channel >= soundPlayers.Count)
@@ -1905,6 +2306,7 @@ public partial class EmueraContent : Control
         soundPlayers[channel].StreamPaused = paused;
     }
 
+    // Adjust playback speed for one sound effect channel.
     public void SetSoundChannelSpeed(int channel, float speed)
     {
         if (channel < 0 || channel >= soundPlayers.Count)
@@ -1912,6 +2314,7 @@ public partial class EmueraContent : Control
         soundPlayers[channel].PitchScale = Mathf.Max(0.01f, speed);
     }
 
+    // Start BGM, replacing any existing track.
     public void PlayBgmFile(string path)
     {
         var stream = LoadAudioStream(path, true);
@@ -1932,11 +2335,13 @@ public partial class EmueraContent : Control
         GenericUtils.NotifyBgmPlaybackStarted(path, GetAudioStreamLengthMs(stream));
     }
 
+    // Stop the active BGM track.
     public void StopBgm()
     {
         bgmPlayer?.Stop();
     }
 
+    // Pause or resume BGM without releasing the stream.
     public void PauseBgm(bool paused)
     {
         if (bgmPlayer == null)
@@ -1944,6 +2349,7 @@ public partial class EmueraContent : Control
         bgmPlayer.StreamPaused = paused;
     }
 
+    // Adjust BGM pitch/tempo through Godot's pitch scale.
     public void SetBgmSpeed(float speed)
     {
         if (bgmPlayer == null)
@@ -1951,6 +2357,7 @@ public partial class EmueraContent : Control
         bgmPlayer.PitchScale = Mathf.Max(0.01f, speed);
     }
 
+    // Set global sound effect volume from emuera's 0-100 scale.
     public void SetSoundVolume(int volume)
     {
         soundVolume = NormalizeEraVolume(volume);
@@ -1958,6 +2365,7 @@ public partial class EmueraContent : Control
             player.VolumeDb = LinearToDb(soundVolume);
     }
 
+    // Set BGM volume from emuera's 0-100 scale.
     public void SetBgmVolume(int volume)
     {
         bgmVolume = NormalizeEraVolume(volume);
@@ -1965,6 +2373,9 @@ public partial class EmueraContent : Control
             bgmPlayer.VolumeDb = LinearToDb(bgmVolume);
     }
 
+    // Load a Godot AudioStream from an emuera file path. This stays synchronous
+    // because sound commands expect immediate playback, so callers should avoid
+    // using very large audio files in hot loops on mobile.
     AudioStream LoadAudioStream(string path, bool loop)
     {
         if (string.IsNullOrEmpty(path))
@@ -2001,6 +2412,7 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Convert Godot stream length to milliseconds for status callbacks.
     static long GetAudioStreamLengthMs(AudioStream stream)
     {
         if (stream == null)
@@ -2011,6 +2423,7 @@ public partial class EmueraContent : Control
         return (long)(length * 1000.0);
     }
 
+    // Convert emuera integer volume to Godot linear volume.
     static float NormalizeEraVolume(int volume)
     {
         if (volume <= 0)
@@ -2020,6 +2433,7 @@ public partial class EmueraContent : Control
         return volume / 100.0f;
     }
 
+    // Godot audio buses use dB, with a hard mute floor for zero volume.
     static float LinearToDb(float linear)
     {
         if (linear <= 0.0001f)
@@ -2027,6 +2441,7 @@ public partial class EmueraContent : Control
         return Mathf.LinearToDb(linear);
     }
 
+    // Drop unused CBG nodes after a background refresh with fewer layers.
     void TrimCbgNodes(int keepCount)
     {
         for (int i = cbgNodes.Count - 1; i >= keepCount; i--)
@@ -2037,6 +2452,8 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Update the active emuera button generation and rebuild quick buttons if the
+    // currently displayed quick-button cache no longer matches.
     public void SetLastButtonGeneration(int generation)
     {
         bool shouldAutoShowQuick = quickAutoHiddenUntilNextButtons
@@ -2102,6 +2519,8 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Recursively collect command buttons from visible console lines and nested
+    // divs for the quick-button overlay.
     void CollectQuickButtons(ConsoleDisplayLine line, List<(string text, Godot.Color color, string code)> output)
     {
         if (line?.Buttons == null || output == null)
@@ -2126,6 +2545,8 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Submit input from the quick-button overlay using the same generation guard
+    // as inline console buttons.
     public void SubmitQuickButtonInput(string input, long generation)
     {
         if (quickInputGateActive && quickInputGateGeneration == generation && quickInputGateRevision == displayRevision)
@@ -2136,6 +2557,8 @@ public partial class EmueraContent : Control
         OnButtonPressed(input, generation);
     }
 
+    // Hide quick buttons after one is pressed until a new button generation is
+    // rendered. This prevents double-submits during core processing.
     void HideQuickUntilNextButtons(long generation)
     {
         if (generation < lastButtonGeneration)
@@ -2152,11 +2575,14 @@ public partial class EmueraContent : Control
         UpdateSystemButtonVisuals();
     }
 
+    // Re-apply quick-button sizing after settings change.
     public void RefreshQuickButtonSettings()
     {
         quickButtons?.RefreshSizing();
     }
 
+    // Re-enable quick-button input when display revision or button generation has
+    // advanced past the submitted prompt.
     void RefreshQuickInputGate()
     {
         if (!quickInputGateActive)
@@ -2175,6 +2601,8 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Fallback unlock for cases where the core finishes without changing visible
+    // button generation.
     void RestoreQuickInputGate()
     {
         quickInputGateActive = false;
@@ -2184,6 +2612,7 @@ public partial class EmueraContent : Control
         quickButtons?.SetInputEnabled(true);
     }
 
+    // Use the command button's final colored part as the quick-button text color.
     Godot.Color GetQuickButtonColor(ConsoleButtonString button)
     {
         if (button.StrArray != null && button.StrArray.Length > 0)
@@ -2197,18 +2626,21 @@ public partial class EmueraContent : Control
         return new Godot.Color(Config.ForeColor.r, Config.ForeColor.g, Config.ForeColor.b, Config.ForeColor.a);
     }
 
+    // Apply emuera background color to the full viewport.
     public void SetBackgroundColor(uEmuera.Drawing.Color color)
     {
         if (bgRect != null)
             bgRect.Color = new Godot.Color(color.r, color.g, color.b, color.a);
     }
 
+    // Toggle the processing label while the worker thread is busy.
     public void ShowIsInProcess(bool show)
     {
         if (inProcessLabel != null)
             inProcessLabel.Visible = show;
     }
 
+    // Show/hide the input pad and sync its input type from the console.
     public void ShowInput(bool show)
     {
         if (inputpad == null)
@@ -2227,22 +2659,30 @@ public partial class EmueraContent : Control
         UpdateSystemButtonVisuals();
     }
 
+    // Expose input-pad visibility to legacy callers.
     public bool IsInputVisible()
     {
         return inputpad != null && inputpad.IsShow;
     }
 
+    // Submit an inline or quick command button to the core. Old generations are
+    // treated as a plain advance, matching emuera's stale-button behavior.
     void OnButtonPressed(string input, long generation, bool skip = false)
     {
+        RememberCurrentContentScroll();
+        TraceScroll("button_pressed", $"input={GenericUtils.ClipTrace(input, 64)} gen={generation} lastGen={lastButtonGeneration} skip={skip}");
+        GenericUtils.StartScrollTraceCoreWindow($"button input={GenericUtils.ClipTrace(input, 64)} gen={generation} skip={skip}");
         if (generation < lastButtonGeneration)
         {
             // Old button clicked - send empty input (acts as skip/advance)
+            TraceScroll("button_pressed_old_generation", $"gen={generation} lastGen={lastButtonGeneration}");
             EmueraThread.instance.Input("", false, skip);
             return;
         }
         EmueraThread.instance.Input(input, true, skip, 1);
     }
 
+    // Return to the first scene after confirming the emuera worker is idle.
     void OnBackPressed()
     {
         if (EmueraThread.instance.Running())
@@ -2262,6 +2702,7 @@ public partial class EmueraContent : Control
             });
     }
 
+    // Restart the current game scene after user confirmation.
     void OnRestartPressed()
     {
         if (EmueraThread.instance.Running())
@@ -2281,22 +2722,26 @@ public partial class EmueraContent : Control
             });
     }
 
+    // Deferred scene reload target.
     void RestartScene()
     {
         GetTree().ReloadCurrentScene();
     }
 
+    // ERB command hook for script-driven restart.
     public void RequestRestartFromErb()
     {
         EmueraThread.instance.End();
         CallDeferred(nameof(RestartScene));
     }
 
+    // Open the option dialog overlay.
     void OnOptionsPressed()
     {
         optionWindow?.ShowPopup();
     }
 
+    // Toggle the input pad and hide mutually exclusive overlays.
     void OnInputTogglePressed()
     {
         if (inputpad.IsShow)
@@ -2312,6 +2757,7 @@ public partial class EmueraContent : Control
         UpdateSystemButtonVisuals();
     }
 
+    // Toggle quick buttons and rebuild them for the current button generation.
     void OnQuickTogglePressed()
     {
         if (quickButtons.IsShow)
@@ -2332,6 +2778,7 @@ public partial class EmueraContent : Control
         UpdateSystemButtonVisuals();
     }
 
+    // Toggle automatic click-to-advance while the console waits for input.
     void OnAutoSkipTogglePressed()
     {
         autoClickSkipEnabled = !autoClickSkipEnabled;
@@ -2339,6 +2786,7 @@ public partial class EmueraContent : Control
         UpdateSystemButtonVisuals();
     }
 
+    // Show an informational modal with only an OK button.
     public void ShowMessageBox(string title, string message)
     {
         msgBoxTitle.Text = title;
@@ -2349,6 +2797,7 @@ public partial class EmueraContent : Control
         msgBox.PopupCentered();
     }
 
+    // Show a confirmation modal and invoke callbacks after the user responds.
     public void ShowConfirmDialog(string title, string message, System.Action onConfirm, System.Action onCancel = null)
     {
         msgBoxTitle.Text = title;
@@ -2359,6 +2808,7 @@ public partial class EmueraContent : Control
         msgBox.PopupCentered();
     }
 
+    // Confirm button handler for the shared modal.
     void OnMsgConfirm()
     {
         msgBox.Hide();
@@ -2367,6 +2817,7 @@ public partial class EmueraContent : Control
         msgBoxCancelCallback = null;
     }
 
+    // Cancel button handler for the shared modal.
     void OnMsgCancel()
     {
         msgBox.Hide();
@@ -2375,6 +2826,7 @@ public partial class EmueraContent : Control
         msgBoxCancelCallback = null;
     }
 
+    // Save emuera output log beside the game executable/content path.
     void OnSaveLogPressed()
     {
         var path = MinorShift.Emuera.Program.ExeDir;
@@ -2391,6 +2843,7 @@ public partial class EmueraContent : Control
             result ? $"{MultiLanguage.Get("[SavePath]", "Path")}:\n{path}" : MultiLanguage.Get("[Failure]", "Failure"));
     }
 
+    // Ask the core to return to the title screen after confirmation.
     void OnGotoTitlePressed()
     {
         if (EmueraThread.instance.Running())
@@ -2409,6 +2862,7 @@ public partial class EmueraContent : Control
             });
     }
 
+    // Quit the Godot app after confirmation.
     void OnExitPressed()
     {
         if (EmueraThread.instance.Running())
@@ -2427,6 +2881,8 @@ public partial class EmueraContent : Control
             });
     }
 
+    // Toggle scale controls and hide other overlays to avoid overlapping touch
+    // targets on phone screens.
     void OnScaleTogglePressed()
     {
         if (scalepad.IsShow)
@@ -2442,6 +2898,7 @@ public partial class EmueraContent : Control
         UpdateSystemButtonVisuals();
     }
 
+    // Reflect overlay/auto-skip state in the menu icon tint.
     void UpdateSystemButtonVisuals()
     {
         SetSystemButtonActive(inputMenuButton, inputpad != null && inputpad.IsShow);
@@ -2450,6 +2907,7 @@ public partial class EmueraContent : Control
         SetSystemButtonActive(scaleMenuButton, scalepad != null && scalepad.IsShow);
     }
 
+    // Apply active/inactive tint to one menu icon.
     static void SetSystemButtonActive(TextureButton button, bool active)
     {
         if (button == null)
@@ -2457,6 +2915,7 @@ public partial class EmueraContent : Control
         button.SelfModulate = active ? ActiveSystemButtonColor : NormalSystemButtonColor;
     }
 
+    // Expand or collapse the top-right system menu.
     void OnMenuTogglePressed()
     {
         menuExpanded = !menuExpanded;
@@ -2464,6 +2923,8 @@ public partial class EmueraContent : Control
             panel.Visible = menuExpanded;
     }
 
+    // React to orientation/resolution changes. Android exports can resize when
+    // system UI or rotation changes.
     void OnViewportSizeChanged()
     {
         Size = GetViewportRect().Size;
@@ -2472,11 +2933,18 @@ public partial class EmueraContent : Control
         QueueScaleBoundsUpdate();
     }
 
+    // Public scale entry point used by Scalepad. It keeps the viewport center
+    // anchored so zooming does not jump to the top-left.
     public void SetContentScale(float scale)
     {
-        SetContentScale(scale, true, true);
+        if (scrollContainer != null)
+            SetContentScaleKeepingFocus(scale, scrollContainer.GetGlobalRect().GetCenter(), false);
+        else
+            SetContentScale(scale, false, true);
     }
 
+    // Internal scale setter used by fallback paths where focus preservation is
+    // not possible.
     void SetContentScale(float scale, bool requestScrollToBottom, bool queueBoundsUpdate)
     {
         ApplyContentScaleValue(scale);
@@ -2487,6 +2955,7 @@ public partial class EmueraContent : Control
             RequestScrollToBottom();
     }
 
+    // Store clamped scale and sync dependent UI.
     void ApplyContentScaleValue(float scale)
     {
         contentScale = ClampContentScale(scale);
@@ -2494,13 +2963,11 @@ public partial class EmueraContent : Control
         if (scrollContainer == null)
             return;
 
-        scrollContainer.HorizontalScrollMode = contentScale > 1.01f
-            ? ScrollContainer.ScrollMode.Auto
-            : ScrollContainer.ScrollMode.Disabled;
-        if (contentScale <= 1.01f)
-            scrollContainer.ScrollHorizontal = 0;
+        ConfigureContentScrollContainer();
     }
 
+    // Apply the visual scale to console rows and CBG layers. The root minimum
+    // size is handled separately by UpdateScaleBounds.
     void ApplyContentScaleTransform()
     {
         var scaleVector = new Vector2(contentScale, contentScale);
@@ -2510,6 +2977,7 @@ public partial class EmueraContent : Control
             cbgContainer.Scale = scaleVector;
     }
 
+    // Re-apply font size to existing generated controls after Config changes.
     public void RefreshFontSize()
     {
         int size = FontSize;
@@ -2538,10 +3006,14 @@ public partial class EmueraContent : Control
         ApplyFont(msgBoxCancelBtn);
     }
 
+    // Per-frame maintenance. The expensive parts are guarded by flags, and the
+    // always-on pieces are O(1) so Android frame time remains predictable.
     public override void _Process(double delta)
     {
         ProcessPendingContentPinchZoom();
         ProcessContentInertia((float)delta);
+        ProcessContentScrollCorrection();
+        SyncContentVerticalScrollRange();
         PublishAudioPlaybackPositions();
         RefreshCbgFollowScrollPositions();
         RefreshCbgAnimationPauseState();
@@ -2560,9 +3032,13 @@ public partial class EmueraContent : Control
         if (now - lastAutoClickSkipTick < 80)
             return;
         lastAutoClickSkipTick = now;
+        TraceScroll("auto_skip_input");
+        GenericUtils.StartScrollTraceCoreWindow("auto_skip");
         EmueraThread.instance.Input("", false, true);
     }
 
+    // Pause animated CBG sprites when outside the visible viewport to save mobile
+    // CPU/GPU work.
     void RefreshCbgAnimationPauseState()
     {
         if (renderedCbgLayers.Count == 0 || cbgNodes.Count == 0 || cbgContainer == null)
@@ -2587,6 +3063,7 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Publish audio playback positions to the bridge for status queries.
     void PublishAudioPlaybackPositions()
     {
         if (bgmPlayer != null)
@@ -2604,27 +3081,42 @@ public partial class EmueraContent : Control
         }
     }
 
+    // Continue pointer tracking outside the original Control when a drag started
+    // inside the console.
     public override void _Input(InputEvent @event)
     {
         if (contentDragActive)
+        {
+            if (contentDragStartedOnButton && !contentDragMoved && IsPointerRelease(@event))
+            {
+                CallDeferred(nameof(ResetButtonTapDragStateIfStillPending));
+                return;
+            }
             HandleContentPointerInput(@event, false);
+        }
     }
 
+    // Root-level GUI input fallback.
     public override void _GuiInput(InputEvent @event)
     {
         HandleContentPointerInput(@event, true);
     }
 
+    // ScrollContainer/scaled root GUI input handler.
     void OnContentGuiInput(InputEvent @event)
     {
         HandleContentPointerInput(@event, true);
     }
 
+    // Inline command button GUI input handler. Button identity is passed through
+    // so release can submit the correct generation even after layout changes.
     void OnContentButtonGuiInput(InputEvent @event, Control btn, string input, long generation)
     {
         HandleContentPointerInput(@event, true, btn, input, generation);
     }
 
+    // Unified pointer handler for mouse, touch emulation, inline buttons, drag
+    // scrolling, inertia, and click-to-advance.
     bool HandleContentPointerInput(InputEvent @event, bool acceptEvent, Control button = null, string input = null, long generation = 0)
     {
         if (HandleContentTouchGesture(@event, acceptEvent))
@@ -2660,6 +3152,8 @@ public partial class EmueraContent : Control
             contentDragStartPosition = pointerPosition;
             contentDragLastPosition = pointerPosition;
             contentLastDragTick = Time.GetTicksMsec();
+            lastScrollTraceDragTick = contentLastDragTick;
+            TraceScroll("pointer_press", $"button={contentDragStartedOnButton} input={GenericUtils.ClipTrace(input, 64)} gen={generation} pos=({Mathf.RoundToInt(pointerPosition.X)},{Mathf.RoundToInt(pointerPosition.Y)}) accept={acceptEvent}");
             if (contentDragStartedOnButton)
             {
                 if (acceptEvent)
@@ -2681,12 +3175,19 @@ public partial class EmueraContent : Control
             {
                 contentDragMoved = true;
                 contentScrollInteractionSerial++;
+                TraceScroll("drag_start", $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
             }
             if (contentDragMoved)
             {
                 var rawScrollDelta = contentDragLastPosition - pointerPosition;
                 var appliedDelta = ScrollContentBy(rawScrollDelta);
                 UpdateContentScrollVelocity(rawScrollDelta, appliedDelta);
+                ulong now = Time.GetTicksMsec();
+                if (now - lastScrollTraceDragTick >= ScrollTraceDragIntervalMs)
+                {
+                    lastScrollTraceDragTick = now;
+                    TraceScroll("drag_move", $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
+                }
                 contentDragLastPosition = pointerPosition;
                 if (acceptEvent)
                     AcceptEvent();
@@ -2727,6 +3228,7 @@ public partial class EmueraContent : Control
             restoreQuickInputGate = advanceTap;
         }
 
+        TraceScroll("pointer_release", $"moved={contentDragMoved} button={contentDragStartedOnButton} pressedInput={GenericUtils.ClipTrace(pressedButtonInput, 64)} advance={advanceTap} handled={handled}");
         ResetContentDragState();
         if (pressedButtonInput != null)
         {
@@ -2749,6 +3251,8 @@ public partial class EmueraContent : Control
         return handled;
     }
 
+    // Detect multi-touch gestures before normal drag/tap handling. Single touch
+    // is allowed to fall through as ordinary pointer input.
     bool HandleContentTouchGesture(InputEvent @event, bool acceptEvent)
     {
         if (scrollContainer == null)
@@ -2767,6 +3271,7 @@ public partial class EmueraContent : Control
         return false;
     }
 
+    // Track touch press/release state for pinch gestures.
     bool HandleContentScreenTouch(InputEventScreenTouch touch, bool acceptEvent)
     {
         if (touch.Pressed)
@@ -2817,6 +3322,7 @@ public partial class EmueraContent : Control
         return true;
     }
 
+    // Update multi-touch positions during pinch gestures.
     bool HandleContentScreenDrag(InputEventScreenDrag drag, bool acceptEvent)
     {
         if (!contentTouchPositions.ContainsKey(drag.Index))
@@ -2842,6 +3348,7 @@ public partial class EmueraContent : Control
         return true;
     }
 
+    // Switch from ordinary drag/tap handling to multi-touch gesture mode.
     void BeginContentTouchGesture()
     {
         if (!contentTouchGestureActive)
@@ -2850,15 +3357,21 @@ public partial class EmueraContent : Control
             contentScrollInteractionSerial++;
             StopContentInertia();
             ResetContentDragState();
+            TraceScroll("touch_gesture_begin", $"touches={contentTouchPositions.Count}");
         }
         BeginContentPinch();
     }
 
+    // Initialize pinch measurements if two valid touches are active and pinch
+    // zoom is enabled.
     void BeginContentPinch()
     {
         contentPinchActive = false;
         contentPinchDirty = false;
         contentPinchTouchCount = contentTouchPositions.Count;
+        if (!ContentPinchZoomEnabled)
+            return;
+
         if (contentPinchTouchCount != ContentPinchTouchCount)
             return;
 
@@ -2870,6 +3383,7 @@ public partial class EmueraContent : Control
         contentPinchActive = true;
     }
 
+    // Apply deferred pinch zoom once per frame instead of on every raw drag event.
     void ProcessPendingContentPinchZoom()
     {
         if (!contentPinchDirty)
@@ -2878,6 +3392,8 @@ public partial class EmueraContent : Control
         UpdateContentPinchZoom();
     }
 
+    // Convert pinch spread ratio into a scale value while keeping the pinch center
+    // visually anchored.
     void UpdateContentPinchZoom()
     {
         if (!contentPinchActive)
@@ -2917,17 +3433,20 @@ public partial class EmueraContent : Control
         UpdatePointerPosition(center);
     }
 
+    // Clamp requested zoom to the supported mobile range.
     static float ClampContentScale(float scale)
     {
         return Mathf.Clamp(scale, ContentScaleMin, ContentScaleMax);
     }
 
+    // Reset pinch baseline when the gesture hits a zoom limit.
     void RebaseContentPinch(float spread)
     {
         contentPinchStartSpread = Mathf.Max(spread, ContentPinchMinSpread);
         contentPinchStartScale = contentScale;
     }
 
+    // Return center/spread for the active two-finger gesture.
     bool TryGetContentTouchMetrics(out int count, out Vector2 center, out float spread)
     {
         count = contentTouchPositions.Count;
@@ -2948,7 +3467,8 @@ public partial class EmueraContent : Control
         return true;
     }
 
-    void SetContentScaleKeepingFocus(float scale, Vector2 focusGlobalPosition)
+    // Change scale while preserving the content point under focusGlobalPosition.
+    void SetContentScaleKeepingFocus(float scale, Vector2 focusGlobalPosition, bool trackGestureFocus = true)
     {
         if (scrollContainer == null)
         {
@@ -2962,28 +3482,41 @@ public partial class EmueraContent : Control
         localFocus.Y = Mathf.Clamp(localFocus.Y, 0.0f, rect.Size.Y);
 
         float previousScale = Mathf.Max(contentScale, 0.001f);
-        var previousScroll = new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+        var previousScroll = desiredContentScrollValid
+            ? new Vector2(desiredContentScrollHorizontal, desiredContentScrollVertical)
+            : new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
         var contentFocus = (previousScroll + localFocus) / previousScale;
+        TraceScroll("scale_focus_begin", $"from={contentScale:0.###} to={ClampContentScale(scale):0.###} focus=({Mathf.RoundToInt(localFocus.X)},{Mathf.RoundToInt(localFocus.Y)})");
 
         ApplyContentScaleValue(scale);
         UpdateScaleBounds(false);
         ApplyContentScaleTransform();
         RestoreContentScaleFocus(contentFocus, localFocus);
-        scaleFocusContentPoint = contentFocus;
-        scaleFocusLocalPoint = localFocus;
-        contentPinchFocusValid = true;
+        if (trackGestureFocus)
+        {
+            scaleFocusContentPoint = contentFocus;
+            scaleFocusLocalPoint = localFocus;
+            contentPinchFocusValid = true;
+        }
     }
 
+    // Restore scroll after a scale change so the same content point remains under
+    // the same screen coordinate.
     void RestoreContentScaleFocus(Vector2 contentFocus, Vector2 localFocus)
     {
         if (scrollContainer == null)
             return;
 
         var nextScroll = contentFocus * contentScale - localFocus;
-        scrollContainer.ScrollHorizontal = Mathf.Clamp(Mathf.RoundToInt(nextScroll.X), 0, GetMaxContentHorizontalScroll());
-        scrollContainer.ScrollVertical = Mathf.Clamp(Mathf.RoundToInt(nextScroll.Y), 0, GetMaxContentVerticalScroll());
+        int targetHorizontal = Mathf.Clamp(Mathf.RoundToInt(nextScroll.X), 0, GetMaxContentHorizontalScroll());
+        int targetVertical = Mathf.Clamp(Mathf.RoundToInt(nextScroll.Y), 0, GetMaxContentVerticalScroll());
+        scrollContainer.ScrollHorizontal = targetHorizontal;
+        scrollContainer.ScrollVertical = targetVertical;
+        RememberDesiredContentScroll(targetHorizontal, targetVertical);
+        TraceScroll("scale_focus_restore", $"target=({targetHorizontal},{targetVertical})");
     }
 
+    // Finish a multi-touch gesture and lock in the final focused scroll position.
     void EndContentTouchGesture()
     {
         if (contentPinchFocusValid)
@@ -2991,6 +3524,13 @@ public partial class EmueraContent : Control
             UpdateScaleBounds(true);
             RestoreContentScaleFocus(scaleFocusContentPoint, scaleFocusLocalPoint);
         }
+        TraceScroll("touch_gesture_end", $"focus={contentPinchFocusValid}");
+        ResetContentTouchGestureState();
+    }
+
+    // Clear all multi-touch tracking state.
+    void ResetContentTouchGestureState()
+    {
         contentTouchGestureActive = false;
         contentPinchActive = false;
         contentPinchDirty = false;
@@ -3001,6 +3541,7 @@ public partial class EmueraContent : Control
         contentTouchPositions.Clear();
     }
 
+    // Mark an event handled from either GUI input or raw input context.
     void ConsumeContentPointerEvent(bool acceptEvent)
     {
         if (acceptEvent)
@@ -3009,6 +3550,7 @@ public partial class EmueraContent : Control
             GetViewport().SetInputAsHandled();
     }
 
+    // Update the emuera pointer position in unscaled console coordinates.
     void UpdatePointerPosition(Vector2 globalPosition)
     {
         if (scrollContainer == null)
@@ -3019,11 +3561,14 @@ public partial class EmueraContent : Control
 
         var rect = scrollContainer.GetGlobalRect();
         var contentPosition = globalPosition - rect.Position;
+        contentPosition += new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
         if (contentScale > 0.001f)
             contentPosition /= contentScale;
         GenericUtils.SetPointerPosition(contentPosition.X, contentPosition.Y);
     }
 
+    // Use the button center for command submission so the core receives a stable
+    // pointer position even if the finger releases slightly outside the button.
     void UpdatePointerPositionForButton(Control button, Vector2 fallbackGlobalPosition)
     {
         if (button == null || !GodotObject.IsInstanceValid(button))
@@ -3032,16 +3577,18 @@ public partial class EmueraContent : Control
             return;
         }
 
-        var rect = button.GetGlobalRect();
-        if (rect.Size.X <= 0 || rect.Size.Y <= 0)
+        if (button.Size.X <= 0 || button.Size.Y <= 0 || lineContainer == null || !GodotObject.IsInstanceValid(lineContainer))
         {
             UpdatePointerPosition(fallbackGlobalPosition);
             return;
         }
 
-        UpdatePointerPosition(rect.GetCenter());
+        var globalCenter = button.GetGlobalTransformWithCanvas() * (button.Size * 0.5f);
+        var contentCenter = lineContainer.GetGlobalTransformWithCanvas().AffineInverse() * globalCenter;
+        GenericUtils.SetPointerPosition(contentCenter.X, contentCenter.Y);
     }
 
+    // Apply user-configured sensitivity to a scroll delta.
     Vector2 ScrollContentBy(Vector2 delta)
     {
         if (scrollContainer == null)
@@ -3050,6 +3597,8 @@ public partial class EmueraContent : Control
         return ApplyContentScrollDelta(delta);
     }
 
+    // Clamp and apply scroll changes, then remember the target for correction
+    // after Godot's next layout pass.
     Vector2 ApplyContentScrollDelta(Vector2 delta)
     {
         if (scrollContainer == null)
@@ -3061,9 +3610,37 @@ public partial class EmueraContent : Control
         int nextVertical = Mathf.Clamp(oldVertical + Mathf.RoundToInt(delta.Y), 0, GetMaxContentVerticalScroll());
         scrollContainer.ScrollHorizontal = nextHorizontal;
         scrollContainer.ScrollVertical = nextVertical;
-        return new Vector2(nextHorizontal - oldHorizontal, nextVertical - oldVertical);
+        RememberDesiredContentScroll(nextHorizontal, nextVertical);
+        var applied = new Vector2(nextHorizontal - oldHorizontal, nextVertical - oldVertical);
+        if (applied.LengthSquared() > 0.01f && !contentDragActive && !contentInertiaActive)
+            TraceScroll("scroll_delta", $"delta=({Mathf.RoundToInt(delta.X)},{Mathf.RoundToInt(delta.Y)}) applied=({Mathf.RoundToInt(applied.X)},{Mathf.RoundToInt(applied.Y)})");
+        return applied;
     }
 
+    // Correct transient ScrollContainer snaps caused by internal layout updates.
+    // This is especially important after button rendering on Android.
+    void ProcessContentScrollCorrection()
+    {
+        if (scrollContainer == null || !desiredContentScrollValid || pendingScroll || contentDragActive || contentInertiaActive)
+            return;
+        if (scrollContainer.ScrollHorizontal == desiredContentScrollHorizontal && scrollContainer.ScrollVertical == desiredContentScrollVertical)
+            return;
+
+        var limit = GetContentScrollLimit();
+        int targetHorizontal = Mathf.Clamp(desiredContentScrollHorizontal, 0, limit.X);
+        int targetVertical = Mathf.Clamp(desiredContentScrollVertical, 0, limit.Y);
+        if (targetHorizontal == scrollContainer.ScrollHorizontal && targetVertical == scrollContainer.ScrollVertical)
+            return;
+
+        int oldHorizontal = scrollContainer.ScrollHorizontal;
+        int oldVertical = scrollContainer.ScrollVertical;
+        scrollContainer.ScrollHorizontal = targetHorizontal;
+        scrollContainer.ScrollVertical = targetVertical;
+        RememberDesiredContentScroll(targetHorizontal, targetVertical);
+        TraceScroll("scroll_correction", $"from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
+    }
+
+    // Estimate drag velocity for inertial scrolling.
     void UpdateContentScrollVelocity(Vector2 rawScrollDelta, Vector2 appliedDelta)
     {
         ulong now = Time.GetTicksMsec();
@@ -3092,6 +3669,7 @@ public partial class EmueraContent : Control
         contentLastDragTick = now;
     }
 
+    // Start inertial scrolling using a speed-dependent boost/deceleration curve.
     void StartContentInertia()
     {
         float releaseSpeed = contentScrollVelocity.Length();
@@ -3105,19 +3683,27 @@ public partial class EmueraContent : Control
         if (contentScrollVelocity.Length() > ContentInertiaMaxVelocity)
             contentScrollVelocity = contentScrollVelocity.Normalized() * ContentInertiaMaxVelocity;
         if (contentScrollVelocity.Length() >= ContentInertiaMinVelocity)
+        {
             contentInertiaActive = true;
+            TraceScroll("inertia_start", $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())} decel={Mathf.RoundToInt(contentInertiaDeceleration)}");
+        }
         else
             StopContentInertia();
     }
 
+    // Stop inertial scrolling and clear fractional remainder.
     void StopContentInertia()
     {
+        bool shouldLog = contentInertiaActive || contentScrollVelocity.LengthSquared() > 0.01f || contentInertiaRemainder.LengthSquared() > 0.01f;
+        if (shouldLog)
+            TraceScroll("inertia_stop", $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())}");
         contentInertiaActive = false;
         contentScrollVelocity = Vector2.Zero;
         contentInertiaRemainder = Vector2.Zero;
         contentLastDragTick = 0;
     }
 
+    // Advance inertial scrolling each frame.
     void ProcessContentInertia(float delta)
     {
         if (!contentInertiaActive || contentDragActive || scrollContainer == null)
@@ -3146,6 +3732,7 @@ public partial class EmueraContent : Control
         contentScrollVelocity = contentScrollVelocity.Normalized() * speed;
     }
 
+    // Current horizontal scroll limit from calculated content bounds.
     int GetMaxContentHorizontalScroll()
     {
         if (scrollContainer == null)
@@ -3153,6 +3740,7 @@ public partial class EmueraContent : Control
         return GetContentScrollLimit().X;
     }
 
+    // Current vertical scroll limit from calculated content bounds.
     int GetMaxContentVerticalScroll()
     {
         if (scrollContainer == null)
@@ -3160,6 +3748,8 @@ public partial class EmueraContent : Control
         return GetContentScrollLimit().Y;
     }
 
+    // Calculate scroll limits from viewport size, scaled content size, and the
+    // current Godot root size.
     Vector2I GetContentScrollLimit()
     {
         if (scrollContainer == null)
@@ -3167,15 +3757,20 @@ public partial class EmueraContent : Control
 
         var scrollSize = scrollContainer.Size;
         var contentSize = CalculateLineContentSize();
-        float safeScale = Mathf.Max(contentScale, 0.001f);
-        float unscaledWidth = Mathf.Max(Mathf.Max(Config.DrawableWidth, scrollSize.X / safeScale), contentSize.X);
-        float scaledWidth = Mathf.Max(unscaledWidth * safeScale, scrollSize.X);
-        float scaledHeight = Mathf.Max(contentSize.Y * safeScale, scrollSize.Y);
+        var layoutSize = CalculateContentLayoutSize(contentSize);
+        float safeScale = GetSafeContentScale();
+        var scaledSize = CalculateScaledContentRootSize(layoutSize, scrollSize, safeScale);
+        if (scaledContentRoot != null)
+        {
+            scaledSize.X = Mathf.Max(scaledSize.X, Mathf.Max(scaledContentRoot.CustomMinimumSize.X, scaledContentRoot.Size.X));
+            scaledSize.Y = Mathf.Max(scaledSize.Y, Mathf.Max(scaledContentRoot.CustomMinimumSize.Y, scaledContentRoot.Size.Y));
+        }
         return new Vector2I(
-            Mathf.RoundToInt(Mathf.Max(0.0f, scaledWidth - scrollSize.X)),
-            Mathf.RoundToInt(Mathf.Max(0.0f, scaledHeight - scrollSize.Y)));
+            Mathf.CeilToInt(Mathf.Max(0.0f, scaledSize.X - scrollSize.X)),
+            Mathf.CeilToInt(Mathf.Max(0.0f, scaledSize.Y - scrollSize.Y)));
     }
 
+    // Submit an empty input when the console is waiting for enter/any key.
     bool TryAdvanceTap(bool acceptEvent)
     {
         var console = GlobalStatic.Console;
@@ -3184,11 +3779,14 @@ public partial class EmueraContent : Control
 
         uint nowTick = MinorShift._Library.WinmmTimer.TickCount;
         bool skipFlag = (nowTick - lastClickTick < 200);
+        TraceScroll("advance_tap", $"skip={skipFlag}");
+        GenericUtils.StartScrollTraceCoreWindow($"advance_tap skip={skipFlag}");
         EmueraThread.instance.Input("", false, skipFlag);
         lastClickTick = nowTick;
         return true;
     }
 
+    // Clear ordinary drag/tap tracking state.
     void ResetContentDragState()
     {
         contentDragActive = false;
@@ -3199,6 +3797,28 @@ public partial class EmueraContent : Control
         contentDragButtonGeneration = 0;
     }
 
+    // Defensive cleanup for a button press that was consumed by raw input before
+    // the button release handler could run.
+    void ResetButtonTapDragStateIfStillPending()
+    {
+        if (contentDragActive && contentDragStartedOnButton && !contentDragMoved)
+        {
+            TraceScroll("button_tap_drag_reset");
+            ResetContentDragState();
+        }
+    }
+
+    // Identify left mouse or screen-touch release events.
+    static bool IsPointerRelease(InputEvent @event)
+    {
+        if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
+            return !mb.Pressed;
+        if (@event is InputEventScreenTouch touch)
+            return !touch.Pressed;
+        return false;
+    }
+
+    // Normalize Godot mouse and screen touch/drag events into one pointer shape.
     static bool TryGetPointer(InputEvent @event, out Vector2 position, out bool pressed, out bool released, out bool motion)
     {
         position = Vector2.Zero;
@@ -3235,6 +3855,9 @@ public partial class EmueraContent : Control
         return false;
     }
 
+    // Keyboard fallback for desktop testing and for Android devices with hardware
+    // keyboards. Pointer events are also handled here when they were not captured
+    // by GUI controls.
     public override void _UnhandledInput(InputEvent @event)
     {
         if (HandleContentPointerInput(@event, false))
