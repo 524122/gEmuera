@@ -43,6 +43,8 @@ namespace MinorShift.Emuera.GameProc
 						GenericUtils.Info($"[PROC] runScriptProc {(now - snakeStart)}ms lines={state.lineCount - snakeStartLineCount} at {position}{label}");
 					}
 				}
+				if (GenericUtils.TryConsumeScrollTraceCoreLine())
+					GenericUtils.ScrollTrace("core", BuildCoreLineTrace(line));
 				InstructionLine func = line as InstructionLine;
 				//これがNULLになる様な処理は現状ないはず
 				//if (line == null)
@@ -105,6 +107,16 @@ namespace MinorShift.Emuera.GameProc
 				if (!console.IsRunning || state.ScriptEnd)
 					return;
 			}
+		}
+
+		string BuildCoreLineTrace(LogicalLine line)
+		{
+			if (line == null)
+				return $"exec count={state.lineCount} line=<null>";
+			string position = line.Position == null ? "<unknown>" : $"{line.Position.Filename}:{line.Position.LineNo}";
+			string label = line.ParentLabelLine == null ? "" : $"@{line.ParentLabelLine.LabelName}";
+			string op = line is InstructionLine instruction ? instruction.Function.Name : line.GetType().Name;
+			return $"exec count={state.lineCount} pos={position} label={label} op={op} system={state.SystemState}";
 		}
 
 		public void DoDebugNormalFunction(InstructionLine func, bool munchkin)

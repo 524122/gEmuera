@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using MinorShift.Emuera.Sub;
 using System;
 //using System.Windows.Forms;

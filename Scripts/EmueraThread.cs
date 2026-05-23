@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using Godot;
+using MinorShift.Emuera.GameProc;
 
 public class EmueraThread
 {
@@ -55,7 +56,12 @@ public class EmueraThread
         if(console == null)
             return;
         if(!from_button && console.IsWaitingInputSomething)
+        {
+            GenericUtils.ScrollTrace("input", $"submit_ignored fromButton={from_button} skip={skip} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)} {FormatCurrentCoreLineForTrace()}");
             return;
+        }
+        GenericUtils.ScrollTrace("input", $"submit fromButton={from_button} skip={skip} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)} waiting={console.IsWaitingInput} enter={console.IsWaitingEnterKey} any={console.IsWaitAnyKey} {FormatCurrentCoreLineForTrace()}");
+        GenericUtils.StartScrollTraceCoreWindow($"input fromButton={from_button} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)}");
         input = c;
         skipflag = skip;
         inputMouseButton = mouseButton;
@@ -91,6 +97,7 @@ public class EmueraThread
 
             if(console.IsWaitingInput)
             {
+                GenericUtils.ScrollTrace("input", $"consume skip={skipflag} mouse={inputMouseButton} value={GenericUtils.ClipTrace(input, 64)} enter={console.IsWaitingEnterKey} any={console.IsWaitAnyKey} {FormatCurrentCoreLineForTrace()}");
                 if(console.IsWaitingEnterKey)
                     input = "";
                 if(inputMouseButton != 0)
@@ -109,4 +116,15 @@ public class EmueraThread
     volatile string input;
     volatile bool skipflag;
     volatile int inputMouseButton;
+
+    static string FormatCurrentCoreLineForTrace()
+    {
+        var line = MinorShift.Emuera.GlobalStatic.Process?.getCurrentLine;
+        if (line == null)
+            return "line=<null>";
+        string position = line.Position == null ? "<unknown>" : $"{line.Position.Filename}:{line.Position.LineNo}";
+        string label = line.ParentLabelLine == null ? "" : $"@{line.ParentLabelLine.LabelName}";
+        string op = line is InstructionLine instruction ? instruction.Function.Name : line.GetType().Name;
+        return $"line={position} label={label} op={op}";
+    }
 }

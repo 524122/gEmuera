@@ -28,10 +28,20 @@ internal static class GenericUtils
     static string pointingButtonInput = "";
     static long pointingButtonGeneration = long.MinValue;
     static bool pointingButtonActive = false;
+    static int scrollTraceEnabled = 1;
+    static int scrollTraceSequence = 0;
+    static int scrollTraceCoreLinesRemaining = 0;
+    const string ScrollTracePrefix = "[SCROLL_TRACE]";
+    const int ScrollTraceCoreBurstLineCount = 120;
 
     public static bool HasPendingUIWork => Volatile.Read(ref pendingUiActions) > 0;
     public static bool HasPendingDisplayWork => Volatile.Read(ref pendingDisplayActions) > 0;
     public static int UiFrameGeneration => Volatile.Read(ref uiFrameGeneration);
+    public static bool ScrollTraceEnabled
+    {
+        get => Volatile.Read(ref scrollTraceEnabled) != 0;
+        set => Volatile.Write(ref scrollTraceEnabled, value ? 1 : 0);
+    }
 
     sealed class SnakeAudioState
     {
@@ -232,6 +242,50 @@ internal static class GenericUtils
                 GD.Print(message ?? "");
                 break;
         }
+    }
+
+    public static void ScrollTrace(string category, string message)
+    {
+        if (!ScrollTraceEnabled)
+            return;
+        int seq = Interlocked.Increment(ref scrollTraceSequence);
+        string formatted = $"{ScrollTracePrefix} #{seq} t={GetTickMs()} {category}: {message}";
+        if (IsMainThread())
+            WriteLog(0, formatted);
+        else
+            logQueue.Enqueue((0, formatted));
+    }
+
+    public static void StartScrollTraceCoreWindow(string reason)
+    {
+        if (!ScrollTraceEnabled)
+            return;
+        Interlocked.Exchange(ref scrollTraceCoreLinesRemaining, ScrollTraceCoreBurstLineCount);
+        ScrollTrace("core", $"window_start lines={ScrollTraceCoreBurstLineCount} reason={ClipTrace(reason)}");
+    }
+
+    public static bool TryConsumeScrollTraceCoreLine()
+    {
+        if (!ScrollTraceEnabled)
+            return false;
+        while (true)
+        {
+            int current = Volatile.Read(ref scrollTraceCoreLinesRemaining);
+            if (current <= 0)
+                return false;
+            if (Interlocked.CompareExchange(ref scrollTraceCoreLinesRemaining, current - 1, current) == current)
+                return true;
+        }
+    }
+
+    public static string ClipTrace(string value, int maxLength = 96)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+        value = value.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
+        if (value.Length <= maxLength)
+            return value;
+        return value.Substring(0, maxLength) + "...";
     }
 
     public static List<string> CalcMd5List(byte[] bytes)

@@ -10,14 +10,21 @@ public partial class FirstWindow : Control
 	const string LauncherSettingsSection = "launcher";
 	const string LauncherLastGamePathKey = "last_game_path";
 	const string LauncherLastCoreProfileKey = "last_core_profile";
+	const int LauncherScrollBarWidth = 24;
 	public const string CoreProfileV24Pure = "v24pure";
 	public const string CoreProfileSnake = "snake";
 
 	enum LauncherGameCategory
 	{
 		V24Pure,
+		Snake
+	}
+
+	enum LauncherTab
+	{
+		V24Pure,
 		Snake,
-		All
+		Announcement
 	}
 
 	public static string SelectedGamePath { get; private set; }
@@ -26,11 +33,16 @@ public partial class FirstWindow : Control
 	ItemList gameList;
 	Button startButton;
 	Label statusLabel;
-	OptionButton categoryButton;
 	Label categoryHintLabel;
-	Control announcementOverlay;
 	Label announcementStatusLabel;
+	Button v24TabButton;
+	Button snakeTabButton;
+	Button announcementTabButton;
+	Control gameTabContent;
+	Control announcementTabContent;
+	Tween tabFadeTween;
 	LauncherGameCategory currentCategory = LauncherGameCategory.V24Pure;
+	LauncherTab currentTab = LauncherTab.V24Pure;
 	bool androidPermissionCheckPending = false;
 	bool androidPermissionResultReceived = false;
 
@@ -58,7 +70,7 @@ public partial class FirstWindow : Control
 	void BuildLauncherUi()
 	{
 		var background = new ColorRect();
-		background.Color = new Color(0.07f, 0.085f, 0.105f);
+		background.Color = new Color(0.075f, 0.083f, 0.088f);
 		background.MouseFilter = MouseFilterEnum.Ignore;
 		background.SetAnchorsPreset(LayoutPreset.FullRect);
 		AddChild(background);
@@ -78,7 +90,7 @@ public partial class FirstWindow : Control
 		margin.AddChild(root);
 
 		root.AddChild(CreateHeader());
-		root.AddChild(CreateGamePanel());
+		root.AddChild(CreateLauncherTabs());
 
 		statusLabel = new Label();
 		statusLabel.HorizontalAlignment = HorizontalAlignment.Center;
@@ -105,95 +117,173 @@ public partial class FirstWindow : Control
 		title.AddThemeColorOverride("font_color", new Color(0.96f, 0.98f, 1.0f));
 		titleBlock.AddChild(title);
 
-		var noticeButton = new Button();
-		noticeButton.Text = MultiLanguage.Get("FirstWindow.NoticeButton", "公告");
-		noticeButton.CustomMinimumSize = new Vector2(96, 44);
-		noticeButton.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
-		noticeButton.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-		noticeButton.AddThemeFontSizeOverride("font_size", 17);
-		noticeButton.Pressed += ShowAnnouncementDialog;
-		header.AddChild(noticeButton);
-
 		return header;
 	}
 
-	void ShowAnnouncementDialog()
+	Control CreateLauncherTabs()
 	{
-		if (announcementOverlay == null)
-			announcementOverlay = CreateAnnouncementOverlay();
-
-		announcementOverlay.Visible = true;
-		announcementOverlay.MoveToFront();
-	}
-
-	Control CreateAnnouncementOverlay()
-	{
-		var overlay = new Control();
-		overlay.SetAnchorsPreset(LayoutPreset.FullRect);
-		overlay.MouseFilter = MouseFilterEnum.Stop;
-		overlay.Visible = false;
-		AddChild(overlay);
-
-		var dim = new ColorRect();
-		dim.Color = new Color(0, 0, 0, 0.52f);
-		dim.MouseFilter = MouseFilterEnum.Stop;
-		dim.SetAnchorsPreset(LayoutPreset.FullRect);
-		overlay.AddChild(dim);
+		var panel = CreatePanel(new Color(0.105f, 0.118f, 0.118f), new Color(0.2f, 0.25f, 0.28f), true);
+		panel.SizeFlagsVertical = SizeFlags.ExpandFill;
 
 		var margin = new MarginContainer();
-		margin.SetAnchorsPreset(LayoutPreset.FullRect);
-		margin.AddThemeConstantOverride("margin_left", 18);
-		margin.AddThemeConstantOverride("margin_top", 28);
-		margin.AddThemeConstantOverride("margin_right", 18);
-		margin.AddThemeConstantOverride("margin_bottom", 28);
-		overlay.AddChild(margin);
+		margin.AddThemeConstantOverride("margin_left", 12);
+		margin.AddThemeConstantOverride("margin_top", 12);
+		margin.AddThemeConstantOverride("margin_right", 12);
+		margin.AddThemeConstantOverride("margin_bottom", 12);
+		panel.AddChild(margin);
 
-		var panel = CreatePanel(new Color(0.105f, 0.125f, 0.15f), new Color(0.26f, 0.33f, 0.39f));
-		panel.SizeFlagsVertical = SizeFlags.ExpandFill;
-		margin.AddChild(panel);
+		var body = new HBoxContainer();
+		body.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		body.SizeFlagsVertical = SizeFlags.ExpandFill;
+		body.AddThemeConstantOverride("separation", 12);
+		margin.AddChild(body);
 
-		var content = CreatePanelContent(panel, 14);
-		content.AddThemeConstantOverride("separation", 10);
+		body.AddChild(CreateTabRail());
 
-		var header = new HBoxContainer();
-		header.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		header.AddThemeConstantOverride("separation", 12);
-		content.AddChild(header);
+		var contentStack = new Control();
+		contentStack.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		contentStack.SizeFlagsVertical = SizeFlags.ExpandFill;
+		body.AddChild(contentStack);
 
-		var title = CreateSectionTitle(MultiLanguage.Get("FirstWindow.NoticeTitle", "公告"));
-		title.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		header.AddChild(title);
+		gameTabContent = CreateGameContent();
+		gameTabContent.SetAnchorsPreset(LayoutPreset.FullRect);
+		contentStack.AddChild(gameTabContent);
 
-		var closeButton = new Button();
-		closeButton.Text = "X";
-		closeButton.CustomMinimumSize = new Vector2(44, 40);
-		closeButton.Pressed += HideAnnouncementOverlay;
-		header.AddChild(closeButton);
+		announcementTabContent = CreateAnnouncementContent();
+		announcementTabContent.SetAnchorsPreset(LayoutPreset.FullRect);
+		announcementTabContent.Visible = false;
+		contentStack.AddChild(announcementTabContent);
 
-		var tabs = new TabContainer();
-		tabs.CustomMinimumSize = new Vector2(0, 120);
-		tabs.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		tabs.SizeFlagsVertical = SizeFlags.ExpandFill;
-		content.AddChild(tabs);
-
-		tabs.AddChild(CreateNoticeTab());
-		tabs.AddChild(CreateFeedbackTab());
-		tabs.AddChild(CreateProjectTab());
-
-		var okButton = new Button();
-		okButton.Text = "OK";
-		okButton.CustomMinimumSize = new Vector2(0, 44);
-		okButton.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		okButton.Pressed += HideAnnouncementOverlay;
-		content.AddChild(okButton);
-
-		return overlay;
+		UpdateTabButtonStyles();
+		return panel;
 	}
 
-	void HideAnnouncementOverlay()
+	Control CreateTabRail()
 	{
-		if (announcementOverlay != null)
-			announcementOverlay.Visible = false;
+		var rail = new VBoxContainer();
+		rail.CustomMinimumSize = new Vector2(88, 0);
+		rail.SizeFlagsVertical = SizeFlags.ExpandFill;
+		rail.AddThemeConstantOverride("separation", 8);
+
+		v24TabButton = CreateRailButton("v24", () => SelectLauncherTab(LauncherTab.V24Pure));
+		snakeTabButton = CreateRailButton("snake", () => SelectLauncherTab(LauncherTab.Snake));
+		announcementTabButton = CreateRailButton(MultiLanguage.Get("FirstWindow.NoticeButton", "公告"), () => SelectLauncherTab(LauncherTab.Announcement));
+
+		rail.AddChild(v24TabButton);
+		rail.AddChild(snakeTabButton);
+		rail.AddChild(announcementTabButton);
+
+		var spacer = new Control();
+		spacer.SizeFlagsVertical = SizeFlags.ExpandFill;
+		rail.AddChild(spacer);
+
+		return rail;
+	}
+
+	Button CreateRailButton(string text, System.Action pressed)
+	{
+		var button = new Button();
+		button.Text = text;
+		button.CustomMinimumSize = new Vector2(88, 58);
+		button.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		button.AddThemeFontSizeOverride("font_size", text.Length > 4 ? 15 : 17);
+		button.Pressed += pressed;
+		button.ButtonDown += () => AnimateButtonScale(button, 0.97f);
+		button.ButtonUp += () => AnimateButtonScale(button, 1.0f);
+		button.MouseExited += () => AnimateButtonScale(button, 1.0f);
+		return button;
+	}
+
+	void SelectLauncherTab(LauncherTab tab)
+	{
+		if (currentTab == tab && tab != LauncherTab.Announcement)
+			return;
+
+		currentTab = tab;
+		if (tab == LauncherTab.Snake)
+			currentCategory = LauncherGameCategory.Snake;
+		else if (tab == LauncherTab.V24Pure)
+			currentCategory = LauncherGameCategory.V24Pure;
+
+		bool showingAnnouncement = tab == LauncherTab.Announcement;
+		gameTabContent.Visible = !showingAnnouncement;
+		announcementTabContent.Visible = showingAnnouncement;
+		UpdateTabButtonStyles();
+
+		if (showingAnnouncement)
+			FadeInContent(announcementTabContent);
+		else
+		{
+			UpdateCategoryHint();
+			ScanGames();
+			FadeInContent(gameTabContent);
+		}
+	}
+
+	void UpdateTabButtonStyles()
+	{
+		ApplyRailButtonStyle(v24TabButton, currentTab == LauncherTab.V24Pure);
+		ApplyRailButtonStyle(snakeTabButton, currentTab == LauncherTab.Snake);
+		ApplyRailButtonStyle(announcementTabButton, currentTab == LauncherTab.Announcement);
+	}
+
+	void ApplyRailButtonStyle(Button button, bool active)
+	{
+		if (button == null)
+			return;
+
+		button.AddThemeStyleboxOverride("normal", CreateRailButtonStyle(active, false));
+		button.AddThemeStyleboxOverride("hover", CreateRailButtonStyle(true, false));
+		button.AddThemeStyleboxOverride("pressed", CreateRailButtonStyle(active, true));
+		button.AddThemeStyleboxOverride("focus", CreateRailButtonStyle(true, false));
+		button.AddThemeColorOverride("font_color", active ? new Color(0.98f, 0.98f, 0.94f) : new Color(0.74f, 0.79f, 0.8f));
+		button.AddThemeColorOverride("font_hover_color", new Color(1.0f, 0.97f, 0.86f));
+		button.AddThemeColorOverride("font_pressed_color", new Color(0.98f, 0.95f, 0.82f));
+	}
+
+	StyleBoxFlat CreateRailButtonStyle(bool active, bool pressed)
+	{
+		var style = new StyleBoxFlat();
+		style.BgColor = active ? new Color(0.22f, 0.27f, 0.25f) : new Color(0.12f, 0.14f, 0.14f);
+		style.BorderColor = active ? new Color(0.52f, 0.58f, 0.42f) : new Color(0.18f, 0.21f, 0.21f);
+		style.SetBorderWidthAll(active ? 1 : 0);
+		style.SetCornerRadiusAll(8);
+		style.ContentMarginLeft = 8;
+		style.ContentMarginRight = 8;
+		style.ContentMarginTop = 6;
+		style.ContentMarginBottom = 6;
+		style.ShadowColor = active ? new Color(0, 0, 0, 0.35f) : new Color(0, 0, 0, 0.2f);
+		style.ShadowSize = pressed ? 1 : active ? 5 : 2;
+		style.ShadowOffset = new Vector2(0, pressed ? 1 : 3);
+		return style;
+	}
+
+	void AnimateButtonScale(Button button, float targetScale)
+	{
+		if (button == null)
+			return;
+
+		button.PivotOffset = button.Size * 0.5f;
+		var tween = CreateTween();
+		tween.BindNode(button);
+		tween.SetTrans(Tween.TransitionType.Cubic);
+		tween.SetEase(Tween.EaseType.Out);
+		tween.TweenProperty(button, "scale", new Vector2(targetScale, targetScale), 0.08);
+	}
+
+	void FadeInContent(Control content)
+	{
+		if (content == null)
+			return;
+		if (tabFadeTween != null && tabFadeTween.IsRunning())
+			tabFadeTween.Kill();
+
+		content.Modulate = new Color(1, 1, 1, 0.72f);
+		tabFadeTween = CreateTween();
+		tabFadeTween.BindNode(content);
+		tabFadeTween.SetTrans(Tween.TransitionType.Cubic);
+		tabFadeTween.SetEase(Tween.EaseType.Out);
+		tabFadeTween.TweenProperty(content, "modulate:a", 1.0, 0.16);
 	}
 
 	Control CreateNoticeTab()
@@ -201,7 +291,11 @@ public partial class FirstWindow : Control
 		var content = CreateDialogTab(MultiLanguage.Get("FirstWindow.NoticeTitle", "公告"));
 
 		var body = CreateDialogText(MultiLanguage.Get("FirstWindow.NoticeBody",
-			"如果遇到 bug、兼容性问题或游戏无法正常运行，可以加入 QQ 群反馈。\n\n选择游戏时请先确认分类：v24 用普通 emuera 游戏（兼容 v18）；snake 用蛇版 TW 等 snake 核心游戏；All 会显示所有可识别游戏。"));
+			"游戏放置说明:\n\n"
+			+ "新版蛇 TW 请放入 snake 文件夹下。详细路径: Android 为 /storage/emulated/0/emuera/snake/你的游戏文件夹；Windows 或编辑器测试时，为程序目录或项目目录下的 snake/你的游戏文件夹。放好后从左侧 snake 标签启动，会使用 snake 核心。\n\n"
+			+ "旧版蛇 TW 和其他 era 游戏请放入 emuera 文件夹下。详细路径: Android 为 /storage/emulated/0/emuera/你的游戏文件夹；Windows 或编辑器测试时，为程序目录或项目目录下的你的游戏文件夹。放好后从左侧 v24 标签启动。\n\n"
+			+ "如果出现 v24 无法启动、解析报错、资源路径异常等情况，可以把同一个游戏文件夹移动到 snake 文件夹下，再从 snake 标签启动，尝试放入 snake 核心。\n\n"
+			+ "每个游戏文件夹内通常需要包含 ERB 文件夹，并至少包含 CSV、DAT 或 resources 其中之一。"));
 		content.AddChild(body);
 
 		return content;
@@ -260,7 +354,7 @@ public partial class FirstWindow : Control
 		var content = new VBoxContainer();
 		content.Name = name;
 		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		content.SizeFlagsVertical = SizeFlags.ExpandFill;
+		content.SizeFlagsVertical = SizeFlags.ShrinkBegin;
 		content.AddThemeConstantOverride("separation", 12);
 		return content;
 	}
@@ -275,16 +369,35 @@ public partial class FirstWindow : Control
 		return label;
 	}
 
-	Control CreateGamePanel()
+	Control CreateAnnouncementContent()
 	{
-		var panel = CreatePanel(new Color(0.105f, 0.125f, 0.15f), new Color(0.2f, 0.25f, 0.31f));
-		panel.SizeFlagsVertical = SizeFlags.ExpandFill;
+		var scroll = new ScrollContainer();
+		scroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+		ApplyWideVerticalScrollbar(scroll.GetVScrollBar());
 
-		var content = CreatePanelContent(panel, 16);
+		var content = new VBoxContainer();
+		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		content.AddThemeConstantOverride("separation", 14);
+		scroll.AddChild(content);
+
+		content.AddChild(CreateSectionTitle(MultiLanguage.Get("FirstWindow.NoticeTitle", "公告")));
+		content.AddChild(CreateNoticeTab());
+		content.AddChild(CreateFeedbackTab());
+		content.AddChild(CreateProjectTab());
+
+		return scroll;
+	}
+
+	Control CreateGameContent()
+	{
+		var content = new VBoxContainer();
+		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		content.SizeFlagsVertical = SizeFlags.ExpandFill;
 		content.AddThemeConstantOverride("separation", 12);
 
 		content.AddChild(CreateSectionTitle(MultiLanguage.Get("FirstWindow.SelectGame", "选择游戏")));
-		content.AddChild(CreateCategorySelector());
 
 		categoryHintLabel = new Label();
 		categoryHintLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
@@ -299,6 +412,7 @@ public partial class FirstWindow : Control
 		gameList.AddThemeFontSizeOverride("font_size", 20);
 		gameList.AddThemeConstantOverride("v_separation", 12);
 		gameList.AddThemeConstantOverride("line_separation", 8);
+		ApplyWideVerticalScrollbar(gameList.GetVScrollBar());
 		gameList.ItemSelected += OnGameSelected;
 		gameList.ItemActivated += OnGameActivated;
 		content.AddChild(gameList);
@@ -308,43 +422,18 @@ public partial class FirstWindow : Control
 		startButton.Disabled = true;
 		startButton.CustomMinimumSize = new Vector2(0, 52);
 		startButton.AddThemeFontSizeOverride("font_size", 18);
+		ApplyPrimaryButtonStyle(startButton);
 		startButton.Pressed += OnStartPressed;
 		content.AddChild(startButton);
 
-		return panel;
+		return content;
 	}
 
-	Control CreateCategorySelector()
-	{
-		var box = new VBoxContainer();
-		box.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		box.AddThemeConstantOverride("separation", 6);
-
-		var label = new Label();
-		label.Text = MultiLanguage.Get("FirstWindow.Category", "分类");
-		label.AddThemeFontSizeOverride("font_size", 14);
-		label.AddThemeColorOverride("font_color", new Color(0.84f, 0.89f, 0.94f));
-		box.AddChild(label);
-
-		categoryButton = new OptionButton();
-		categoryButton.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		categoryButton.CustomMinimumSize = new Vector2(0, 44);
-		categoryButton.AddThemeFontSizeOverride("font_size", 17);
-		categoryButton.AddItem(MultiLanguage.Get("FirstWindow.CategoryV24Pure", "v24"), (int)LauncherGameCategory.V24Pure);
-		categoryButton.AddItem(MultiLanguage.Get("FirstWindow.CategorySnake", "snake"), (int)LauncherGameCategory.Snake);
-		categoryButton.AddItem(MultiLanguage.Get("FirstWindow.CategoryAll", "All"), (int)LauncherGameCategory.All);
-		categoryButton.Select((int)currentCategory);
-		categoryButton.ItemSelected += OnCategorySelected;
-		box.AddChild(categoryButton);
-
-		return box;
-	}
-
-	PanelContainer CreatePanel(Color backgroundColor, Color borderColor)
+	PanelContainer CreatePanel(Color backgroundColor, Color borderColor, bool shadow = false)
 	{
 		var panel = new PanelContainer();
 		panel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		panel.AddThemeStyleboxOverride("panel", CreatePanelStyle(backgroundColor, borderColor));
+		panel.AddThemeStyleboxOverride("panel", CreatePanelStyle(backgroundColor, borderColor, shadow));
 		return panel;
 	}
 
@@ -373,13 +462,85 @@ public partial class FirstWindow : Control
 		return label;
 	}
 
-	StyleBoxFlat CreatePanelStyle(Color backgroundColor, Color borderColor)
+	StyleBoxFlat CreatePanelStyle(Color backgroundColor, Color borderColor, bool shadow = false)
 	{
 		var style = new StyleBoxFlat();
 		style.BgColor = backgroundColor;
 		style.BorderColor = borderColor;
 		style.SetBorderWidthAll(1);
 		style.SetCornerRadiusAll(8);
+		if (shadow)
+		{
+			style.ShadowColor = new Color(0, 0, 0, 0.34f);
+			style.ShadowSize = 8;
+			style.ShadowOffset = new Vector2(0, 4);
+		}
+		return style;
+	}
+
+	void ApplyPrimaryButtonStyle(Button button)
+	{
+		if (button == null)
+			return;
+
+		button.AddThemeStyleboxOverride("normal", CreatePrimaryButtonStyle(new Color(0.33f, 0.39f, 0.31f), new Color(0.58f, 0.64f, 0.44f), 5));
+		button.AddThemeStyleboxOverride("hover", CreatePrimaryButtonStyle(new Color(0.38f, 0.45f, 0.35f), new Color(0.68f, 0.72f, 0.5f), 6));
+		button.AddThemeStyleboxOverride("pressed", CreatePrimaryButtonStyle(new Color(0.25f, 0.3f, 0.25f), new Color(0.5f, 0.56f, 0.4f), 2));
+		button.AddThemeStyleboxOverride("disabled", CreatePrimaryButtonStyle(new Color(0.16f, 0.18f, 0.18f), new Color(0.22f, 0.24f, 0.24f), 0));
+		button.AddThemeColorOverride("font_color", new Color(0.98f, 0.98f, 0.92f));
+		button.AddThemeColorOverride("font_disabled_color", new Color(0.5f, 0.54f, 0.54f));
+		button.ButtonDown += () => AnimateButtonScale(button, 0.985f);
+		button.ButtonUp += () => AnimateButtonScale(button, 1.0f);
+		button.MouseExited += () => AnimateButtonScale(button, 1.0f);
+	}
+
+	StyleBoxFlat CreatePrimaryButtonStyle(Color backgroundColor, Color borderColor, int shadowSize)
+	{
+		var style = new StyleBoxFlat();
+		style.BgColor = backgroundColor;
+		style.BorderColor = borderColor;
+		style.SetBorderWidthAll(1);
+		style.SetCornerRadiusAll(8);
+		style.ContentMarginTop = 8;
+		style.ContentMarginBottom = 8;
+		style.ShadowColor = new Color(0, 0, 0, shadowSize > 0 ? 0.28f : 0);
+		style.ShadowSize = shadowSize;
+		style.ShadowOffset = new Vector2(0, shadowSize > 0 ? 3 : 0);
+		return style;
+	}
+
+	void ApplyWideVerticalScrollbar(VScrollBar scrollbar)
+	{
+		if (scrollbar == null)
+			return;
+
+		scrollbar.CustomMinimumSize = new Vector2(LauncherScrollBarWidth, 0);
+		scrollbar.AddThemeConstantOverride("scroll_width", LauncherScrollBarWidth);
+		scrollbar.AddThemeStyleboxOverride("scroll", CreateScrollTrackStyle());
+		scrollbar.AddThemeStyleboxOverride("grabber", CreateScrollGrabberStyle(new Color(0.42f, 0.48f, 0.45f)));
+		scrollbar.AddThemeStyleboxOverride("grabber_highlight", CreateScrollGrabberStyle(new Color(0.52f, 0.58f, 0.5f)));
+		scrollbar.AddThemeStyleboxOverride("grabber_pressed", CreateScrollGrabberStyle(new Color(0.6f, 0.64f, 0.52f)));
+	}
+
+	StyleBoxFlat CreateScrollTrackStyle()
+	{
+		var style = new StyleBoxFlat();
+		style.BgColor = new Color(0.065f, 0.072f, 0.072f, 0.9f);
+		style.SetCornerRadiusAll(8);
+		style.ContentMarginLeft = 4;
+		style.ContentMarginRight = 4;
+		return style;
+	}
+
+	StyleBoxFlat CreateScrollGrabberStyle(Color color)
+	{
+		var style = new StyleBoxFlat();
+		style.BgColor = color;
+		style.SetCornerRadiusAll(8);
+		style.ContentMarginLeft = 5;
+		style.ContentMarginRight = 5;
+		style.ContentMarginTop = 4;
+		style.ContentMarginBottom = 4;
 		return style;
 	}
 
@@ -392,16 +553,6 @@ public partial class FirstWindow : Control
 			statusLabel.Text = "";
 	}
 
-	void OnCategorySelected(long index)
-	{
-		if (categoryButton == null)
-			return;
-
-		currentCategory = (LauncherGameCategory)categoryButton.GetItemId((int)index);
-		UpdateCategoryHint();
-		ScanGames();
-	}
-
 	void UpdateCategoryHint()
 	{
 		if (categoryHintLabel == null)
@@ -409,9 +560,8 @@ public partial class FirstWindow : Control
 
 		categoryHintLabel.Text = currentCategory switch
 		{
-			LauncherGameCategory.Snake => MultiLanguage.Get("FirstWindow.SnakeHint", $"snake：蛇版 TW 请放入 {GetSnakeRootHint()}，启动时会使用 snake 核心。"),
-			LauncherGameCategory.All => MultiLanguage.Get("FirstWindow.AllHint", $"All：显示 {GetNormalRootHint()} 下所有可识别游戏，包括 snake 目录。"),
-			_ => MultiLanguage.Get("FirstWindow.V24PureHint", $"v24：扫描 {GetNormalRootHint()} 下的普通游戏（兼容 v18），不显示 snake 目录。")
+			LauncherGameCategory.Snake => MultiLanguage.Get("FirstWindow.SnakeHint", $"snake: 扫描 {GetSnakeRootHint()} 新版蛇 TW 放这里；v24 启动失败时也可以放这里试 snake 核心。"),
+			_ => MultiLanguage.Get("FirstWindow.V24PureHint", $"v24: 扫描 {GetNormalRootHint()}。旧版蛇 TW 和其他 era 游戏放这里，snake 文件夹不会显示。")
 		};
 	}
 
@@ -696,24 +846,7 @@ public partial class FirstWindow : Control
 	{
 		if (currentCategory == LauncherGameCategory.Snake)
 			return CoreProfileSnake;
-		if (currentCategory == LauncherGameCategory.All && IsUnderSnakeRoot(selectedPath))
-			return CoreProfileSnake;
 		return CoreProfileV24Pure;
-	}
-
-	bool IsUnderSnakeRoot(string path)
-	{
-		if (string.IsNullOrEmpty(path))
-			return false;
-
-		foreach (string root in GetBaseScanRoots())
-		{
-			string snakeRoot = root.TrimEnd('/', '\\') + "/snake";
-			if (PathsEqual(path, snakeRoot)
-				|| path.TrimEnd('/', '\\').StartsWith(snakeRoot.TrimEnd('/', '\\') + "/", System.StringComparison.OrdinalIgnoreCase))
-				return true;
-		}
-		return false;
 	}
 
 	static void SetSelectedGamePath(string path, string coreProfileName = CoreProfileV24Pure)
