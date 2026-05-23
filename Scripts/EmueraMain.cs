@@ -97,6 +97,10 @@ public partial class EmueraMain : Node
     bool startupStarted = false;
     Control startupOverlay;
     Label startupStatusLabel;
+    // Root-level Android lifecycle state. The main node owns frame-rate throttling
+    // while EmueraContent owns reversible audio pause state for script channels.
+    bool applicationPauseActive = false;
+    int maxFpsBeforeApplicationPause = -1;
 
     void SetupGpuRenderer()
     {
@@ -305,6 +309,43 @@ public partial class EmueraMain : Node
 
         CreateStartupOverlay();
         CallDeferred(nameof(StartGameDeferred));
+    }
+
+    public override void _Notification(int what)
+    {
+        // Godot delivers these notifications for APK background/foreground
+        // transitions. Handle them centrally so the emulator core does not need to
+        // know about platform lifecycle details.
+        if (what == NotificationApplicationPaused)
+            SetApplicationPaused(true);
+        else if (what == NotificationApplicationResumed)
+            SetApplicationPaused(false);
+    }
+
+    void SetApplicationPaused(bool paused)
+    {
+        if (applicationPauseActive == paused)
+            return;
+        applicationPauseActive = paused;
+        if (paused)
+        {
+            // Keep the main loop alive at a low cadence instead of stopping it.
+            // This avoids a burst of queued work on resume while reducing battery
+            // use when Android backgrounds the APK.
+            maxFpsBeforeApplicationPause = Engine.MaxFps;
+            Engine.MaxFps = 5;
+            EmueraContent.instance?.SetApplicationPaused(true);
+            return;
+        }
+
+        // Restore the user's configured frame-rate policy after the temporary
+        // lifecycle cap; FrameRateHelper re-applies config in case it changed
+        // while the app was backgrounded.
+        Engine.MaxFps = maxFpsBeforeApplicationPause > 0
+            ? maxFpsBeforeApplicationPause
+            : FrameRateHelper.CurrentFrameRate;
+        FrameRateHelper.ApplyConfigFps();
+        EmueraContent.instance?.SetApplicationPaused(false);
     }
 
     async void StartGameDeferred()

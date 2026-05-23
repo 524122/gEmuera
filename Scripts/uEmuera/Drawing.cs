@@ -70,6 +70,9 @@ namespace uEmuera.Drawing
 		}
 	}
 
+	// BitmapTexture is a file-backed image handle that defers full decode until a
+	// texture or source pixels are actually required. This keeps APK/mobile startup
+	// and script parsing from paying texture upload costs for unused assets.
 	public class BitmapTexture : Bitmap
 	{
 		public BitmapTexture(string path)
@@ -86,12 +89,22 @@ namespace uEmuera.Drawing
 		{
 			get { return EnsureTextureInfo()?.image; }
 		}
+		// Expose the SpriteManager owner record to rendering code so visible Godot
+		// Controls can pin the underlying texture without duplicating cache lookup
+		// or ownership logic in the UI layer.
+		internal SpriteManager.TextureInfo TextureInfo
+		{
+			get { return EnsureTextureInfo(); }
+		}
 		SpriteManager.TextureInfo textureinfo = null;
 
 		SpriteManager.TextureInfo EnsureTextureInfo()
 		{
-			if (textureinfo != null)
+			// SpriteManager may evict an old TextureInfo between frames. Treat a
+			// disposed cached handle as a cache miss and resolve it again by path/name.
+			if (textureinfo != null && !textureinfo.IsDisposed)
 				return textureinfo;
+			textureinfo = null;
 			textureinfo = SpriteManager.GetTextureInfo(path, path);
 			if (textureinfo == null && !string.IsNullOrEmpty(filename))
 				textureinfo = SpriteManager.GetTextureInfo(filename, path);
@@ -105,6 +118,9 @@ namespace uEmuera.Drawing
 
 		static bool TryReadImageSize(string path, out Size imageSize)
 		{
+			// Header-only size probing avoids decoding large CG files merely to set
+			// layout metadata. The actual Godot.Image is created lazily by
+			// SpriteManager when rendering needs it.
 			imageSize = new Size();
 			if (string.IsNullOrEmpty(path) || !File.Exists(path))
 				return false;

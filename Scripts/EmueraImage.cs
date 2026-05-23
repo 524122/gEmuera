@@ -1,5 +1,8 @@
 using Godot;
 
+// Lightweight CanvasItem used for CBG/image presentation. It owns draw parameters
+// only; texture lifetime remains in SpriteManager/EmueraContent so cache eviction
+// and UI ownership stay centralized.
 public partial class EmueraImage : Control
 {
 	private Texture2D _sourceTexture;
@@ -7,6 +10,10 @@ public partial class EmueraImage : Control
 	private Vector2 _drawOffset;
 	private bool _flipX;
 	private bool _flipY;
+	// Last applied ColorMatrix key. Avoiding redundant Material assignment reduces
+	// CanvasItem invalidation when animated CBG layers refresh with the same matrix.
+	private ulong _colorMatrixKey;
+	private bool _hasColorMatrixKey;
 
 	public Texture2D SourceTexture
 	{
@@ -67,16 +74,19 @@ public partial class EmueraImage : Control
 		if (cm == null)
 		{
 			Material = null;
+			_hasColorMatrixKey = false;
 			return;
 		}
-		if (Material is ShaderMaterial sm && sm.Shader == ColorMatrixGPU.Shader)
-		{
-			ColorMatrixGPU.SetMatrixUniforms(sm, cm);
-		}
-		else
-		{
-			Material = ColorMatrixGPU.CreateMaterial(cm);
-		}
+		ulong matrixKey = ColorMatrixGPU.GetMatrixKey(cm);
+		if (_hasColorMatrixKey && _colorMatrixKey == matrixKey && Material is ShaderMaterial sm && sm.Shader == ColorMatrixGPU.Shader)
+			return;
+
+		// Shared materials are treated as read-only. A new key selects a different
+		// cached ShaderMaterial instead of mutating uniforms that may be used by
+		// other visible EmueraImage nodes.
+		Material = ColorMatrixGPU.GetSharedMaterial(cm, matrixKey);
+		_colorMatrixKey = matrixKey;
+		_hasColorMatrixKey = true;
 	}
 
 	public EmueraImage()

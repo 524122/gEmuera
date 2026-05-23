@@ -1,6 +1,8 @@
 using Godot;
 using MinorShift.Emuera.GameProc;
 
+// Mobile-first input overlay for emuera prompts. It follows virtual keyboard
+// geometry instead of relying on desktop-style fixed placement.
 public partial class Inputpad : Control
 {
 	PanelContainer panel;
@@ -9,7 +11,10 @@ public partial class Inputpad : Control
 	Button confirmBtn;
 	Button repeatBtn;
 	string lastInput;
-	const int PanelHeight = 58;
+	int lastKeyboardHeight = -1;
+	// Controls are sized for touch operation in exported APKs. Keep these values
+	// coordinated with EmueraContent system-button minimums when changing UI scale.
+	const int PanelHeight = 64;
 	const int SideMargin = 10;
 	const int BottomMargin = 12;
 
@@ -19,6 +24,7 @@ public partial class Inputpad : Control
 		ZIndex = 96;
 		SetAnchorsPreset(LayoutPreset.FullRect);
 		MouseFilter = MouseFilterEnum.Ignore;
+		SetProcess(false);
 
 		panel = new PanelContainer();
 		panel.SetAnchorsPreset(LayoutPreset.TopLeft);
@@ -41,20 +47,20 @@ public partial class Inputpad : Control
 
 		inputField = new LineEdit();
 		inputField.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-		inputField.CustomMinimumSize = new Vector2(0, 44);
+		inputField.CustomMinimumSize = new Vector2(0, 48);
 		inputField.TextSubmitted += OnTextSubmitted;
 		hbox.AddChild(inputField);
 
 		confirmBtn = new Button();
 		confirmBtn.Text = MultiLanguage.Get("Inputpad.Confirm", "OK");
-		confirmBtn.CustomMinimumSize = new Vector2(64, 44);
+		confirmBtn.CustomMinimumSize = new Vector2(64, 48);
 		EmueraContent.StyleButton(confirmBtn);
 		confirmBtn.Pressed += OnConfirm;
 		hbox.AddChild(confirmBtn);
 
 		repeatBtn = new Button();
 		repeatBtn.Text = MultiLanguage.Get("Inputpad.Repeat", "Repeat");
-		repeatBtn.CustomMinimumSize = new Vector2(82, 44);
+		repeatBtn.CustomMinimumSize = new Vector2(82, 48);
 		EmueraContent.StyleButton(repeatBtn);
 		repeatBtn.Pressed += OnRepeat;
 		hbox.AddChild(repeatBtn);
@@ -68,18 +74,46 @@ public partial class Inputpad : Control
 			ApplyPanelLayout();
 	}
 
+	public override void _Process(double delta)
+	{
+		if (!Visible)
+			return;
+		// Android reports virtual keyboard height asynchronously after focus. Poll
+		// only while visible so the panel tracks IME animation without adding idle
+		// work during normal console rendering.
+		int keyboardHeight = GetVirtualKeyboardHeight();
+		if (keyboardHeight != lastKeyboardHeight)
+			ApplyPanelLayout();
+	}
+
 	void ApplyPanelLayout()
 	{
+		// Position the prompt above the virtual keyboard without adding display
+		// cutout/notch margins. Era coordinates remain mapped to the full viewport.
 		if (panel == null)
 			return;
 
 		var viewportSize = GetViewport().GetVisibleRect().Size;
+		int keyboardHeight = GetVirtualKeyboardHeight();
+		lastKeyboardHeight = keyboardHeight;
 		Position = Vector2.Zero;
 		Size = viewportSize;
-		var width = Mathf.Max(1, viewportSize.X - SideMargin * 2);
-		panel.Position = new Vector2(SideMargin, Mathf.Max(0, viewportSize.Y - BottomMargin - PanelHeight));
+		float left = SideMargin;
+		float right = SideMargin;
+		float bottomInset = BottomMargin + keyboardHeight;
+		var width = Mathf.Max(1, viewportSize.X - left - right);
+		panel.Position = new Vector2(left, Mathf.Max(0, viewportSize.Y - bottomInset - PanelHeight));
 		panel.Size = new Vector2(width, PanelHeight);
 		panel.CustomMinimumSize = panel.Size;
+	}
+
+	static int GetVirtualKeyboardHeight()
+	{
+		// Desktop/editor returns zero to preserve the existing testing workflow.
+		// Android values can briefly be negative or stale, so clamp at the boundary.
+		if (!OS.HasFeature("mobile"))
+			return 0;
+		return System.Math.Max(0, DisplayServer.VirtualKeyboardGetHeight());
 	}
 
 	internal void UpdateInputType(InputType type)
@@ -138,14 +172,19 @@ public partial class Inputpad : Control
 	{
 		ApplyPanelLayout();
 		Visible = true;
+		SetProcess(true);
 		GetParent()?.MoveChild(this, GetParent().GetChildCount() - 1);
 		inputField.Text = "";
+		inputField.GrabFocus();
 	}
 
 	public void HidePad()
 	{
 		Visible = false;
+		SetProcess(false);
+		lastKeyboardHeight = -1;
 		inputField.Text = "";
+		inputField.ReleaseFocus();
 	}
 
 	public bool IsShow => Visible;

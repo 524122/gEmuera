@@ -103,14 +103,13 @@ namespace MinorShift.Emuera.Content
 			int y1 = Math.Max(0, rect.Y);
 			int x2 = Math.Min(width, rect.X + rect.Width);
 			int y2 = Math.Min(height, rect.Y + rect.Height);
+			if (x2 <= x1 || y2 <= y1)
+				return;
 			var gc = new Godot.Color(c.r, c.g, c.b, c.a);
-			for (int y = y1; y < y2; y++)
-			{
-				for (int x = x1; x < x2; x++)
-				{
-					godotImage.SetPixel(x, y, gc);
-				}
-			}
+			// Use Godot's native rectangle fill instead of per-pixel writes. GFILL
+			// commands are common in era UI scripts, and this keeps the hot path in
+			// engine code for mobile CPU efficiency.
+			godotImage.FillRect(new Godot.Rect2I(x1, y1, x2 - x1, y2 - y1), gc);
 		}
 
 		/// <summary>
@@ -276,41 +275,71 @@ namespace MinorShift.Emuera.Content
 
 		static Godot.Image ApplyColorMatrix(Godot.Image src, Godot.Rect2I region, float[][] cm)
 		{
+			// CPU fallback is intentionally byte-buffer based. Godot GetPixel/SetPixel
+			// performs bounds/format work per call, which is too expensive for large
+			// CG regions on Android.
 			if (src.GetFormat() != Godot.Image.Format.Rgba8)
 				src.Convert(Godot.Image.Format.Rgba8);
 			var sub = src.GetRegion(region);
 			if (sub == null) return src;
 			if (sub.GetFormat() != Godot.Image.Format.Rgba8)
 				sub.Convert(Godot.Image.Format.Rgba8);
+			if (IsIdentityColorMatrix(cm))
+				return sub;
 			int w = sub.GetWidth();
 			int h = sub.GetHeight();
 
+			// Hoist matrix entries out of the pixel loop so each pixel only performs
+			// arithmetic and byte writes. This path is used when GPU submission is not
+			// available or times out.
 			float m00 = cm[0][0], m10 = cm[1][0], m20 = cm[2][0], m30 = cm[3][0], m40 = cm[4][0];
 			float m01 = cm[0][1], m11 = cm[1][1], m21 = cm[2][1], m31 = cm[3][1], m41 = cm[4][1];
 			float m02 = cm[0][2], m12 = cm[1][2], m22 = cm[2][2], m32 = cm[3][2], m42 = cm[4][2];
 			float m03 = cm[0][3], m13 = cm[1][3], m23 = cm[2][3], m33 = cm[3][3], m43 = cm[4][3];
 
-			for (int y = 0; y < h; y++)
+			byte[] data = sub.GetData();
+			for (int i = 0; i + 3 < data.Length; i += 4)
 			{
-				for (int x = 0; x < w; x++)
-				{
-					var color = sub.GetPixel(x, y);
-					float r = color.R, g = color.G, b = color.B, a = color.A;
+				float r = data[i] / 255.0f;
+				float g = data[i + 1] / 255.0f;
+				float b = data[i + 2] / 255.0f;
+				float a = data[i + 3] / 255.0f;
 
-					float nr = m00*r + m10*g + m20*b + m30*a + m40;
-					float ng = m01*r + m11*g + m21*b + m31*a + m41;
-					float nb = m02*r + m12*g + m22*b + m32*a + m42;
-					float na = m03*r + m13*g + m23*b + m33*a + m43;
+				float nr = m00*r + m10*g + m20*b + m30*a + m40;
+				float ng = m01*r + m11*g + m21*b + m31*a + m41;
+				float nb = m02*r + m12*g + m22*b + m32*a + m42;
+				float na = m03*r + m13*g + m23*b + m33*a + m43;
 
-					sub.SetPixel(x, y, new Godot.Color(
-						Godot.Mathf.Clamp(nr, 0f, 1f),
-						Godot.Mathf.Clamp(ng, 0f, 1f),
-						Godot.Mathf.Clamp(nb, 0f, 1f),
-						Godot.Mathf.Clamp(na, 0f, 1f)));
-				}
+				data[i] = ToByte(nr);
+				data[i + 1] = ToByte(ng);
+				data[i + 2] = ToByte(nb);
+				data[i + 3] = ToByte(na);
 			}
 
+			// Write the transformed buffer back once. Keeping the image mutation
+			// batched avoids repeated native interop calls and minimizes GC pressure.
+			sub.SetData(w, h, false, Godot.Image.Format.Rgba8, data);
 			return sub;
+		}
+
+		static byte ToByte(float value)
+		{
+			return (byte)Godot.Mathf.Clamp(Godot.Mathf.RoundToInt(value * 255.0f), 0, 255);
+		}
+
+		static bool IsIdentityColorMatrix(float[][] cm)
+		{
+			const float epsilon = 0.00001f;
+			for (int row = 0; row < 5; row++)
+			{
+				for (int col = 0; col < 4; col++)
+				{
+					float expected = row == col ? 1.0f : 0.0f;
+					if (Math.Abs(cm[row][col] - expected) > epsilon)
+						return false;
+				}
+			}
+			return true;
 		}
 
 		/// <summary>
@@ -430,7 +459,12 @@ namespace MinorShift.Emuera.Content
 				}
 			}
 			if (modified)
+			{
+				// Push mask-composited bytes only when a pixel actually changed. Some
+				// mask commands are no-ops after clipping, and skipping SetData avoids a
+				// full image upload on mobile.
 				godotImage.SetData(dw, dh, false, Godot.Image.Format.Rgba8, dstData);
+			}
 		}
 
 		public void GSetFont(uEmuera.Drawing.Font r)

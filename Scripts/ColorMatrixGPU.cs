@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Godot;
 
 /// <summary>
@@ -14,8 +16,14 @@ using Godot;
 /// </summary>
 public static class ColorMatrixGPU
 {
+	// Shared display materials are immutable after creation and keyed by the exact
+	// matrix bits. The hard cap prevents rare script-generated matrix floods from
+	// turning ShaderMaterial reuse into an unbounded APK memory sink.
+	const int SharedMaterialCacheLimit = 128;
 	private static Shader _shader;
 	private static Shader _compositShader;
+	private static readonly object materialCacheLock = new object();
+	private static readonly Dictionary<ulong, ShaderMaterial> sharedMaterialCache = new Dictionary<ulong, ShaderMaterial>();
 
 	public static Shader Shader
 	{
@@ -51,6 +59,53 @@ public static class ColorMatrixGPU
 		mat.Shader = Shader;
 		SetMatrixUniforms(mat, cm);
 		return mat;
+	}
+
+	/// <summary>
+	/// Return an immutable shared material for display-only ColorMatrix usage.
+	/// EmueraImage swaps shared materials by matrix key instead of mutating them,
+	/// so multiple visible images can safely reuse the same ShaderMaterial.
+	/// </summary>
+	public static ShaderMaterial GetSharedMaterial(float[][] cm, ulong matrixKey)
+	{
+		lock (materialCacheLock)
+		{
+			if (sharedMaterialCache.TryGetValue(matrixKey, out var cached))
+				return cached;
+			if (sharedMaterialCache.Count >= SharedMaterialCacheLimit)
+			{
+				// Full-cache clear is intentional: the cache is small, matrix reuse is
+				// typically clustered, and avoiding LRU bookkeeping keeps the hot path
+				// predictable on mobile.
+				sharedMaterialCache.Clear();
+			}
+			var mat = CreateMaterial(cm);
+			sharedMaterialCache[matrixKey] = mat;
+			return mat;
+		}
+	}
+
+	/// <summary>
+	/// Build a stable bit-level key for a 5x4 GDI+ ColorMatrix payload.
+	/// Float bits are hashed directly so semantically different script matrices do
+	/// not accidentally share a mutable material state.
+	/// </summary>
+	public static ulong GetMatrixKey(float[][] cm)
+	{
+		unchecked
+		{
+			ulong hash = 14695981039346656037UL;
+			for (int row = 0; row < 5; row++)
+			{
+				for (int col = 0; col < 4; col++)
+				{
+					uint bits = (uint)BitConverter.SingleToInt32Bits(cm[row][col]);
+					hash ^= bits;
+					hash *= 1099511628211UL;
+				}
+			}
+			return hash;
+		}
 	}
 
 	/// <summary>
