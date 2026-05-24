@@ -1364,21 +1364,27 @@ public partial class EmueraContent : Control
 		UpdateScaleBounds();
 	}
 
-	// Configure scroll modes while hiding visual bars. Auto mode is required so
-	// Godot owns the internal scrollbar range; the bars are only visually hidden.
+	// Enterprise UI policy for the exported APK console viewport:
+	// the ScrollContainer must stay fully scrollable, but its visual scrollbars
+	// are intentionally hidden. Phone users scroll by touch/drag, and exposing
+	// thin desktop-style bars costs visible text width, creates misleading touch
+	// targets, and can overlap emulator content. Do not change these modes back
+	// to Auto/ShowAlways unless a concrete accessibility or debugging requirement
+	// needs visible bars for a specific build.
 	void ConfigureContentScrollContainer()
 	{
 		if (scrollContainer == null)
 			return;
 
-		scrollContainer.HorizontalScrollMode = ScrollContainer.ScrollMode.Auto;
+		scrollContainer.HorizontalScrollMode = ScrollContainer.ScrollMode.ShowNever;
 		scrollContainer.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
 		HideContentScrollBar(scrollContainer.GetHScrollBar());
 		HideContentScrollBar(scrollContainer.GetVScrollBar());
 	}
 
-	// Hide a ScrollBar without disabling the ScrollContainer's internal range
-	// calculation.
+	// Defense in depth for themes/platform defaults: ShowNever is the authoritative
+	// policy, and this keeps the child bars non-interactive and size-free if Godot
+	// or a future theme still instantiates them internally.
 	static void HideContentScrollBar(Godot.ScrollBar scrollBar)
 	{
 		if (scrollBar == null)

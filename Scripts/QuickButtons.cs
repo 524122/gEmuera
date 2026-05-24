@@ -142,8 +142,7 @@ public partial class QuickButtons : CanvasLayer
 		resizeHandle.AddChild(resizeStripe);
 
 		scroll = new ScrollContainer();
-		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Auto;
-		scroll.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+		ConfigureQuickScrollContainer();
 		scroll.MouseFilter = Control.MouseFilterEnum.Pass;
 		scroll.GuiInput += inputEvent => OnQuickGuiInput(inputEvent, scroll);
 		panel.AddChild(scroll);
@@ -159,6 +158,35 @@ public partial class QuickButtons : CanvasLayer
 		currentRow = new HBoxContainer();
 		currentRow.AddThemeConstantOverride("separation", QuickButtonSpacing);
 		rowsContainer.AddChild(currentRow);
+	}
+
+	// Enterprise UI policy for the exported APK quick-command panel:
+	// the panel must remain drag-scrollable, but the ScrollContainer bars are
+	// intentionally hidden. The quick panel sits above gameplay text on phone
+	// screens, so visible bars waste command space and look like tappable controls.
+	// Do not enable Auto/ShowAlways unless a concrete accessibility or debugging
+	// build requires visible scrollbars and that change is tested on Android.
+	void ConfigureQuickScrollContainer()
+	{
+		if (scroll == null)
+			return;
+
+		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.ShowNever;
+		scroll.VerticalScrollMode = ScrollContainer.ScrollMode.ShowNever;
+		HideQuickScrollBar(scroll.GetHScrollBar());
+		HideQuickScrollBar(scroll.GetVScrollBar());
+	}
+
+	// Defense in depth for theme/platform updates: ShowNever is the policy, and
+	// this keeps any internal ScrollBar child non-interactive and size-free if
+	// Godot still creates it for range management.
+	static void HideQuickScrollBar(Godot.ScrollBar scrollBar)
+	{
+		if (scrollBar == null)
+			return;
+		scrollBar.Visible = false;
+		scrollBar.MouseFilter = Control.MouseFilterEnum.Ignore;
+		scrollBar.CustomMinimumSize = Vector2.Zero;
 	}
 
 	public override void _Process(double delta)

@@ -6,6 +6,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using Godot;
 using MinorShift.Emuera.GameView;
@@ -58,13 +59,16 @@ internal static class GenericUtils
     static string pointingButtonInput = "";
     static long pointingButtonGeneration = long.MinValue;
     static bool pointingButtonActive = false;
-    static int scrollTraceEnabled = OS.IsDebugBuild() ? 1 : 0;
+    static int scrollTraceEnabled = 0;
     static int scrollTraceSequence = 0;
     static int scrollTraceCoreLinesRemaining = 0;
     const string ScrollTracePrefix = "[SCROLL_TRACE]";
     const int ScrollTraceCoreBurstLineCount = 120;
     const int DiagnosticLogCapacity = 1000;
     const int MaxLogMessageChars = 8192;
+    const string RuntimeConfigFileName = "config.json";
+    const string RuntimeConfigPath = "res://config.json";
+    const string RuntimeDebugModelKey = "debug_model";
     static readonly object diagnosticLogLock = new object();
     static readonly LogRecord[] diagnosticLogRing = new LogRecord[DiagnosticLogCapacity];
     static int diagnosticLogStart = 0;
@@ -75,9 +79,9 @@ internal static class GenericUtils
 #else
     const bool VerboseLogBuild = false;
 #endif
-    static int runtimeLogLevel = (int)(OS.IsDebugBuild() ? EmueraLogLevel.Debug : EmueraLogLevel.Error);
+    static int runtimeLogLevel = (int)EmueraLogLevel.Error;
     static int runtimeLogCategories = (int)EmueraLogCategory.All;
-    static int mirrorNonErrorLogsToGodot = OS.IsDebugBuild() ? 1 : 0;
+    static int mirrorNonErrorLogsToGodot = 0;
 
     public static bool HasPendingUIWork => Volatile.Read(ref pendingUiActions) > 0;
     public static bool HasPendingDisplayWork => Volatile.Read(ref pendingDisplayActions) > 0;
@@ -315,11 +319,92 @@ internal static class GenericUtils
 
     public static void InitializeLogging()
     {
-        if (VerboseLogBuild && HasVerboseCommandLine())
+        // Mobile Debug APK policy: unsigned Debug APKs are used as playable builds,
+        // so diagnostics must stay production-like unless config.json explicitly opts in.
+        // Do not enable noisy Debug/ScrollTrace output by default; core trace can run in
+        // script and input hot paths and will hurt Android gameplay performance.
+        bool diagnosticLoggingEnabled = VerboseLogBuild && IsDiagnosticLoggingRequested();
+        RuntimeLogLevel = diagnosticLoggingEnabled ? EmueraLogLevel.Debug : EmueraLogLevel.Error;
+        RuntimeLogCategories = EmueraLogCategory.All;
+        MirrorNonErrorLogsToGodot = diagnosticLoggingEnabled;
+        ScrollTraceEnabled = diagnosticLoggingEnabled;
+    }
+
+    static bool IsDiagnosticLoggingRequested()
+    {
+        return HasVerboseCommandLine() || IsDebugModelEnabledFromConfig();
+    }
+
+    static bool IsDebugModelEnabledFromConfig()
+    {
+        if (!TryReadRuntimeConfigText(out string configText) || string.IsNullOrWhiteSpace(configText))
+            return false;
+
+        try
         {
-            RuntimeLogLevel = EmueraLogLevel.Debug;
-            RuntimeLogCategories = EmueraLogCategory.All;
-            MirrorNonErrorLogsToGodot = true;
+            using var document = JsonDocument.Parse(configText);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty(RuntimeDebugModelKey, out JsonElement debugModel)
+                && debugModel.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    static bool TryReadRuntimeConfigText(out string configText)
+    {
+        configText = "";
+        if (Godot.FileAccess.FileExists(RuntimeConfigPath))
+        {
+            using var configFile = Godot.FileAccess.Open(RuntimeConfigPath, Godot.FileAccess.ModeFlags.Read);
+            if (configFile != null)
+            {
+                configText = configFile.GetAsText();
+                return true;
+            }
+        }
+
+        if (TryReadRuntimeConfigTextFromFile(Path.Combine(AppContext.BaseDirectory, RuntimeConfigFileName), out configText))
+            return true;
+
+        try
+        {
+            string currentDirectory = Directory.GetCurrentDirectory();
+            if (!string.Equals(currentDirectory, AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase)
+                && TryReadRuntimeConfigTextFromFile(Path.Combine(currentDirectory, RuntimeConfigFileName), out configText))
+            {
+                return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+            || ex is UnauthorizedAccessException
+            || ex is ArgumentException
+            || ex is NotSupportedException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    static bool TryReadRuntimeConfigTextFromFile(string path, out string configText)
+    {
+        configText = "";
+        try
+        {
+            if (!File.Exists(path))
+                return false;
+            configText = File.ReadAllText(path, Encoding.UTF8);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException
+            || ex is UnauthorizedAccessException
+            || ex is ArgumentException
+            || ex is NotSupportedException)
+        {
+            return false;
         }
     }
 
