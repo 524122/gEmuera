@@ -4106,7 +4106,7 @@ namespace MinorShift.Emuera.GameData.Function
 				ASprite img = AppContents.GetSprite(imgname);
 				if (img == null || !img.IsCreated)
 				{
-					Godot.GD.PushWarning($"[GDRAWSPRITE] Sprite not found or not created: '{imgname}'");
+					global::GenericUtils.Warn(global::EmueraLogCategory.Sprite, () => $"[GDRAWSPRITE] Sprite not found or not created: '{imgname}'");
 					return 0;
 				}
 

@@ -325,8 +325,9 @@ namespace MinorShift.Emuera.Content
 			}
 			Rectangle rect = new Rectangle(new Point(0, 0), parentImage.Bitmap.Size);
 			Point pos = new Point();
+			Size destSize = rect.Size;
 			int delay = 1000;
-			//name,parentname, x,y,w,h ,offset_x,offset_y, delayTime
+			//name,parentname, x,y,w,h ,offset_x,offset_y, delayTime, dest_w,dest_h
 			if(tokens.Length >= 6)//x,y,w,h
 			{
 				int[] rectValue = new int[4];
@@ -342,6 +343,7 @@ namespace MinorShift.Emuera.Content
 						ParserMediator.Warn("スプライトの高さまたは幅には正の値のみ指定できます: " + name, sp, 1);
 						return null;
 					}
+					destSize = rect.Size;
                     // uEmueraではこの時点で画像寸法を取得していない。
 					//if (!rect.IntersectsWith(new Rectangle(0,0,parentImage.Bitmap.Width, parentImage.Bitmap.Height)))
 					//{
@@ -366,6 +368,13 @@ namespace MinorShift.Emuera.Content
 						}
 					}
 				}
+				if (tokens.Length >= 11)
+				{
+					int destWidth;
+					int destHeight;
+					if (int.TryParse(tokens[9], out destWidth) && int.TryParse(tokens[10], out destHeight) && destWidth > 0 && destHeight > 0)
+						destSize = new Size(destWidth, destHeight);
+				}
 			}
 			// 既存のスプライトに対するフレーム追加
 			if (currentAnime != null && currentAnime.Name == name)
@@ -378,7 +387,7 @@ namespace MinorShift.Emuera.Content
 				return null;
 			}
 
-			ASprite image = new SpriteF(name, parentImage, rect, pos);
+			ASprite image = new SpriteF(name, parentImage, rect, pos, destSize);
 			return image;
 		}
 

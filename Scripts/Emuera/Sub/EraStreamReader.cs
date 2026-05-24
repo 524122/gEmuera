@@ -44,7 +44,7 @@ namespace MinorShift.Emuera.Sub
 			}
 			catch (Exception ex)
 			{
-				Godot.GD.PrintErr($"Failed to open text file: {filepath}, {ex.GetType().Name}: {ex.Message}");
+				global::GenericUtils.Error(global::EmueraLogCategory.FileSystem, () => $"[FS] Failed to open text file: {filepath}, {ex.GetType().Name}: {ex.Message}");
 				this.Dispose();
 				return false;
 			}

@@ -299,22 +299,22 @@ namespace uEmuera.Drawing
 		public void DrawImage(Bitmap texture, Rectangle destrect,
 							Rectangle srcrect, GraphicsUnit unit)
 		{
-			uEmuera.Logger.Info("Graphics.DrawImage " + texture.name);
+			uEmuera.Logger.Debug(EmueraLogCategory.UI, () => "Graphics.DrawImage " + texture.name);
 		}
 		public void DrawImage(Bitmap texture, Rectangle destrect,
 							int x, int y, int w, int h, GraphicsUnit unit, ImageAttributes ia)
 		{
-			uEmuera.Logger.Info("Graphics.DrawImage " + texture.name);
+			uEmuera.Logger.Debug(EmueraLogCategory.UI, () => "Graphics.DrawImage " + texture.name);
 		}
 		public void DrawString(string s, Font font, Brush brush, Point point)
 		{
-			uEmuera.Logger.Info("Graphics.DrawString " + s);
+			uEmuera.Logger.Debug(EmueraLogCategory.UI, () => "Graphics.DrawString " + s);
 		}
 		public void FillRectangel(SolidBrush brush, Rectangle rect)
 		{ }
 		public void Clear(Color color)
 		{
-			uEmuera.Logger.Info("Graphics.Clear " + color.ToArgb());
+			uEmuera.Logger.Debug(EmueraLogCategory.UI, () => "Graphics.Clear " + color.ToArgb());
 		}
 	}
 
@@ -597,7 +597,7 @@ namespace uEmuera.Drawing
 			case "tomato":
 				return new Color(0xFF, 0x63, 0x47);
 			}
-			uEmuera.Logger.Info("Not Match Color '" + name + "'");
+			uEmuera.Logger.Warn(EmueraLogCategory.UI, () => "Not Match Color '" + name + "'");
 			return Black;
 		}
 

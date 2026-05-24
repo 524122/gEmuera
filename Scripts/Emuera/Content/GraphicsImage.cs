@@ -166,11 +166,7 @@ namespace MinorShift.Emuera.Content
 					}
 				}
 
-				if (!single.DestBasePosition.IsEmpty)
-				{
-					drawRect.X = drawRect.X + single.DestBasePosition.X * drawRect.Width / single.SrcRectangle.Width;
-					drawRect.Y = drawRect.Y + single.DestBasePosition.Y * drawRect.Height / single.SrcRectangle.Height;
-				}
+				drawRect = single.ApplyDestBaseCanvas(drawRect);
 			}
 			else if (img is SpriteAnime anime)
 			{
@@ -210,7 +206,7 @@ namespace MinorShift.Emuera.Content
 
 			if (srcImage == null)
 			{
-				Godot.GD.PushWarning($"[GraphicsImage.DrawSpriteTo] srcImage is null for sprite '{img.Name}' (needsCm={needsCm})");
+				global::GenericUtils.Warn(global::EmueraLogCategory.Sprite, () => $"[GraphicsImage.DrawSpriteTo] srcImage is null for sprite '{img.Name}' (needsCm={needsCm})");
 				return;
 			}
 

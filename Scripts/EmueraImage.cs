@@ -8,6 +8,7 @@ public partial class EmueraImage : Control
 	private Texture2D _sourceTexture;
 	private Rect2 _sourceRegion;
 	private Vector2 _drawOffset;
+	private Vector2 _drawSize;
 	private bool _flipX;
 	private bool _flipY;
 	// Last applied ColorMatrix key. Avoiding redundant Material assignment reduces
@@ -41,6 +42,16 @@ public partial class EmueraImage : Control
 		set
 		{
 			_drawOffset = value;
+			QueueRedraw();
+		}
+	}
+
+	public Vector2 DrawSize
+	{
+		get => _drawSize;
+		set
+		{
+			_drawSize = value;
 			QueueRedraw();
 		}
 	}
@@ -103,7 +114,8 @@ public partial class EmueraImage : Control
 	{
 		if (SourceTexture == null) return;
 
-		var destRect = new Rect2(DrawOffset.X, DrawOffset.Y, Size.X, Size.Y);
+		var drawSize = DrawSize.X > 0 && DrawSize.Y > 0 ? DrawSize : Size;
+		var destRect = new Rect2(DrawOffset.X, DrawOffset.Y, drawSize.X, drawSize.Y);
 
 		bool flip = FlipX || FlipY;
 		if (flip)

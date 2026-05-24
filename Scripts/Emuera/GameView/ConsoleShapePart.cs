@@ -27,7 +27,7 @@ namespace MinorShift.Emuera.GameView
 			switch (type)
 			{
 				case "space":
-					if (paramPixel.Length == 1 && paramPixel[0] >= 0)
+					if (paramPixel.Length == 1)
 					{
 						rectF = new RectangleF(0, 0, paramPixel[0], lineHeight);
 						ret = new ConsoleSpacePart(rectF);

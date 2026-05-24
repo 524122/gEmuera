@@ -1,29 +1,130 @@
 ﻿using System;
 using System.IO;
+using System.Diagnostics;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace uEmuera
 {
     public static class Logger
     {
-        public static void Info(object content)
+        public delegate void StructuredLogSink(global::EmueraLogLevel level, global::EmueraLogCategory category,
+            object content, Func<string> messageFactory, string member, string file, int line);
+
+        [Conditional("DEBUG")]
+        [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+        public static void Debug(object content,
+            global::EmueraLogCategory category = global::EmueraLogCategory.General,
+            [CallerMemberName] string member = "",
+            [CallerFilePath] string file = "",
+            [CallerLineNumber] int line = 0)
         {
-            if(info == null)
-                return;
-            info(content);
+            Emit(global::EmueraLogLevel.Debug, category, content, null, member, file, line);
         }
-        public static void Warn(object content)
+
+        [Conditional("DEBUG")]
+        [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+        public static void Debug(global::EmueraLogCategory category, Func<string> messageFactory,
+            [CallerMemberName] string member = "",
+            [CallerFilePath] string file = "",
+            [CallerLineNumber] int line = 0)
         {
-            if(warn == null)
-                return;
-            warn(content);
+            Emit(global::EmueraLogLevel.Debug, category, null, messageFactory, member, file, line);
         }
-        public static void Error(object content)
+
+        [Conditional("DEBUG")]
+        [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+        public static void Info(object content,
+            global::EmueraLogCategory category = global::EmueraLogCategory.General,
+            [CallerMemberName] string member = "",
+            [CallerFilePath] string file = "",
+            [CallerLineNumber] int line = 0)
         {
-            if(error == null)
-                return;
-            error(content);
+            Emit(global::EmueraLogLevel.Info, category, content, null, member, file, line);
         }
+
+        [Conditional("DEBUG")]
+        [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+        public static void Info(global::EmueraLogCategory category, Func<string> messageFactory,
+            [CallerMemberName] string member = "",
+            [CallerFilePath] string file = "",
+            [CallerLineNumber] int line = 0)
+        {
+            Emit(global::EmueraLogLevel.Info, category, null, messageFactory, member, file, line);
+        }
+
+        [Conditional("DEBUG")]
+        [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+        public static void Warn(object content,
+            global::EmueraLogCategory category = global::EmueraLogCategory.General,
+            [CallerMemberName] string member = "",
+            [CallerFilePath] string file = "",
+            [CallerLineNumber] int line = 0)
+        {
+            Emit(global::EmueraLogLevel.Warn, category, content, null, member, file, line);
+        }
+
+        [Conditional("DEBUG")]
+        [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+        public static void Warn(global::EmueraLogCategory category, Func<string> messageFactory,
+            [CallerMemberName] string member = "",
+            [CallerFilePath] string file = "",
+            [CallerLineNumber] int line = 0)
+        {
+            Emit(global::EmueraLogLevel.Warn, category, null, messageFactory, member, file, line);
+        }
+
+        public static void Error(object content,
+            global::EmueraLogCategory category = global::EmueraLogCategory.General,
+            [CallerMemberName] string member = "",
+            [CallerFilePath] string file = "",
+            [CallerLineNumber] int line = 0)
+        {
+            Emit(global::EmueraLogLevel.Error, category, content, null, member, file, line);
+        }
+
+        public static void Error(global::EmueraLogCategory category, Func<string> messageFactory,
+            [CallerMemberName] string member = "",
+            [CallerFilePath] string file = "",
+            [CallerLineNumber] int line = 0)
+        {
+            Emit(global::EmueraLogLevel.Error, category, null, messageFactory, member, file, line);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsEnabled(global::EmueraLogLevel level,
+            global::EmueraLogCategory category = global::EmueraLogCategory.General)
+        {
+            return isEnabled == null || isEnabled(level, category);
+        }
+
+        static void Emit(global::EmueraLogLevel level, global::EmueraLogCategory category, object content,
+            Func<string> messageFactory, string member, string file, int line)
+        {
+            if(sink != null)
+            {
+                sink(level, category, content, messageFactory, member, file, line);
+                return;
+            }
+
+            // Legacy delegates keep early startup and older bridge code functional
+            // before the Godot-side structured sink is installed.
+            switch(level)
+            {
+                case global::EmueraLogLevel.Warn:
+                    warn?.Invoke(messageFactory != null ? messageFactory() : content);
+                    break;
+                case global::EmueraLogLevel.Error:
+                    error?.Invoke(messageFactory != null ? messageFactory() : content);
+                    break;
+                default:
+                    info?.Invoke(messageFactory != null ? messageFactory() : content);
+                    break;
+            }
+        }
+
+        public static StructuredLogSink sink;
+        public static Func<global::EmueraLogLevel, global::EmueraLogCategory, bool> isEnabled;
         public static System.Action<object> info;
         public static System.Action<object> warn;
         public static System.Action<object> error;
@@ -256,7 +357,7 @@ namespace uEmuera
                     if (file2 == null)
                     {
                         var error = Godot.FileAccess.GetOpenError();
-                        Godot.GD.PrintErr($"FileAccess open failed: {path}, error: {error}");
+                        global::GenericUtils.Error(global::EmueraLogCategory.FileSystem, () => $"[FS] FileAccess open failed: {path}, error: {error}");
                         throw new IOException($"FileAccess open failed: {path}, error: {error}");
                     }
                     return file2.GetBuffer((long)file2.GetLength());
@@ -356,7 +457,7 @@ namespace uEmuera
             using var dir = Godot.DirAccess.Open(search);
             if (dir == null)
             {
-                Godot.GD.PrintErr($"DirAccess open failed: {search}, error: {Godot.DirAccess.GetOpenError()}");
+                global::GenericUtils.Error(global::EmueraLogCategory.FileSystem, () => $"[FS] DirAccess open failed: {search}, error: {Godot.DirAccess.GetOpenError()}");
                 return result;
             }
             dir.IncludeHidden = true;
@@ -466,7 +567,7 @@ namespace uEmuera
             using var dir = Godot.DirAccess.Open(search);
             if (dir == null)
             {
-                Godot.GD.PrintErr($"DirAccess open failed: {search}, error: {Godot.DirAccess.GetOpenError()}");
+                global::GenericUtils.Error(global::EmueraLogCategory.FileSystem, () => $"[FS] DirAccess open failed: {search}, error: {Godot.DirAccess.GetOpenError()}");
                 return;
             }
             dir.IncludeHidden = true;

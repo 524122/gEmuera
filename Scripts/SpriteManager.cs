@@ -163,7 +163,7 @@ internal static class SpriteManager
 					}
 					catch (Exception ex)
 					{
-						GD.PushWarning($"[SpriteManager] Failed to create ImageTexture for {imagename}: {ex.Message}");
+						GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager] Failed to create ImageTexture for {imagename}: {ex.Message}");
 					}
 				}
 				return _texture;
@@ -185,7 +185,7 @@ internal static class SpriteManager
 			catch (Exception ex)
 			{
 				_texture = null;
-				GD.PushWarning($"[SpriteManager] Failed to recreate ImageTexture for {imagename}: {ex.Message}");
+				GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager] Failed to recreate ImageTexture for {imagename}: {ex.Message}");
 			}
 		}
 
@@ -285,7 +285,7 @@ internal static class SpriteManager
 
 		if(!uEmuera.Utils.FileExists(filename))
 		{
-			GD.PushWarning($"[SpriteManager.GetTextureInfo] file not found: {filename}");
+			GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager.GetTextureInfo] file not found: {filename}");
 			ti = CreatePlaceholderTextureInfo(name, filename, "file not found");
 			CacheTextureInfo(name, filename, ti);
 			return ti;
@@ -397,27 +397,29 @@ internal static class SpriteManager
 				return img;
 
 			img.Dispose();
-			LogSpriteWarning($"[SpriteManager] image decode failed, using transparent placeholder: {filename}, err={err}");
+			LogSpriteWarning(() => $"[SpriteManager] image decode failed, using transparent placeholder: {filename}, err={err}");
 		}
 		catch (Exception ex)
 		{
-			LogSpriteWarning($"[SpriteManager] image load exception, using transparent placeholder: {filename}, error={ex.Message}");
+			LogSpriteWarning(() => $"[SpriteManager] image load exception, using transparent placeholder: {filename}, error={ex.Message}");
 		}
 		return CreatePlaceholderImage();
 	}
 
 	static TextureInfo CreatePlaceholderTextureInfo(string name, string filename, string reason)
 	{
-		LogSpriteWarning($"[SpriteManager] using transparent placeholder for {filename}: {reason}");
+		LogSpriteWarning(() => $"[SpriteManager] using transparent placeholder for {filename}: {reason}");
 		return new TextureInfo(name, CreatePlaceholderImage());
 	}
 
-	static void LogSpriteWarning(string message)
+	[System.Diagnostics.Conditional("DEBUG")]
+	[System.Diagnostics.Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+	static void LogSpriteWarning(Func<string> messageFactory,
+		[System.Runtime.CompilerServices.CallerMemberName] string member = "",
+		[System.Runtime.CompilerServices.CallerFilePath] string file = "",
+		[System.Runtime.CompilerServices.CallerLineNumber] int line = 0)
 	{
-		if (OS.GetName() == "Android")
-			uEmuera.Logger.Info(message);
-		else
-			GD.PushWarning(message);
+		GenericUtils.Warn(EmueraLogCategory.Sprite, messageFactory, member, file, line);
 	}
 
 	static Image CreatePlaceholderImage()

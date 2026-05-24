@@ -303,9 +303,12 @@ public partial class EmueraMain : Node
         FrameRateHelper.Apply();
         ResolutionHelper.Apply();
         GenericUtils.SetMainThread();
-        uEmuera.Logger.info = GenericUtils.Info;
-        uEmuera.Logger.warn = GenericUtils.Warn;
-        uEmuera.Logger.error = GenericUtils.Error;
+        GenericUtils.InitializeLogging();
+        uEmuera.Logger.isEnabled = GenericUtils.IsLogEnabled;
+        uEmuera.Logger.sink = GenericUtils.LogFromBridge;
+        uEmuera.Logger.info = content => GenericUtils.Info(content);
+        uEmuera.Logger.warn = content => GenericUtils.Warn(content);
+        uEmuera.Logger.error = content => GenericUtils.Error(content);
 
         CreateStartupOverlay();
         CallDeferred(nameof(StartGameDeferred));

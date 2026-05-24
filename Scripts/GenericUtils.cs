@@ -1,15 +1,45 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using Godot;
 using MinorShift.Emuera.GameView;
 
+public enum EmueraLogLevel
+{
+    Debug = 0,
+    Info = 1,
+    Warn = 2,
+    Error = 3,
+    None = 4
+}
+
+[Flags]
+public enum EmueraLogCategory
+{
+    None = 0,
+    General = 1 << 0,
+    Sprite = 1 << 1,
+    Audio = 1 << 2,
+    Input = 1 << 3,
+    Script = 1 << 4,
+    UI = 1 << 5,
+    FileSystem = 1 << 6,
+    Load = 1 << 7,
+    Save = 1 << 8,
+    Config = 1 << 9,
+    Performance = 1 << 10,
+    All = int.MaxValue
+}
+
 internal static class GenericUtils
 {
-    static readonly ConcurrentQueue<(int Level, string Message)> logQueue = new ConcurrentQueue<(int, string)>();
+    static readonly ConcurrentQueue<LogRecord> logQueue = new ConcurrentQueue<LogRecord>();
     static readonly ConcurrentQueue<Action> uiQueue = new ConcurrentQueue<Action>();
     static int mainThreadId = -1;
     static int pendingUiActions = 0;
@@ -28,11 +58,26 @@ internal static class GenericUtils
     static string pointingButtonInput = "";
     static long pointingButtonGeneration = long.MinValue;
     static bool pointingButtonActive = false;
-    static int scrollTraceEnabled = 1;
+    static int scrollTraceEnabled = OS.IsDebugBuild() ? 1 : 0;
     static int scrollTraceSequence = 0;
     static int scrollTraceCoreLinesRemaining = 0;
     const string ScrollTracePrefix = "[SCROLL_TRACE]";
     const int ScrollTraceCoreBurstLineCount = 120;
+    const int DiagnosticLogCapacity = 1000;
+    const int MaxLogMessageChars = 8192;
+    static readonly object diagnosticLogLock = new object();
+    static readonly LogRecord[] diagnosticLogRing = new LogRecord[DiagnosticLogCapacity];
+    static int diagnosticLogStart = 0;
+    static int diagnosticLogCount = 0;
+    static long diagnosticLogSequence = 0;
+#if DEBUG || GEMUERA_DIAGNOSTIC_LOGS
+    const bool VerboseLogBuild = true;
+#else
+    const bool VerboseLogBuild = false;
+#endif
+    static int runtimeLogLevel = (int)(OS.IsDebugBuild() ? EmueraLogLevel.Debug : EmueraLogLevel.Error);
+    static int runtimeLogCategories = (int)EmueraLogCategory.All;
+    static int mirrorNonErrorLogsToGodot = OS.IsDebugBuild() ? 1 : 0;
 
     public static bool HasPendingUIWork => Volatile.Read(ref pendingUiActions) > 0;
     public static bool HasPendingDisplayWork => Volatile.Read(ref pendingDisplayActions) > 0;
@@ -41,6 +86,53 @@ internal static class GenericUtils
     {
         get => Volatile.Read(ref scrollTraceEnabled) != 0;
         set => Volatile.Write(ref scrollTraceEnabled, value ? 1 : 0);
+    }
+
+    readonly struct LogRecord
+    {
+        public readonly long Sequence;
+        public readonly DateTimeOffset UtcTime;
+        public readonly long MonoMs;
+        public readonly EmueraLogLevel Level;
+        public readonly EmueraLogCategory Category;
+        public readonly int ThreadId;
+        public readonly string Source;
+        public readonly string Member;
+        public readonly int Line;
+        public readonly string Message;
+
+        public LogRecord(long sequence, DateTimeOffset utcTime, long monoMs, EmueraLogLevel level,
+            EmueraLogCategory category, int threadId, string source, string member, int line, string message)
+        {
+            Sequence = sequence;
+            UtcTime = utcTime;
+            MonoMs = monoMs;
+            Level = level;
+            Category = category;
+            ThreadId = threadId;
+            Source = source ?? "";
+            Member = member ?? "";
+            Line = line;
+            Message = message ?? "";
+        }
+
+        public string FormatForGodot()
+        {
+            return $"[{Level.ToString().ToUpperInvariant()}][{Category}] {Source}:{Line} {Member} | {Message}";
+        }
+
+        public string FormatForExport()
+        {
+            return "seq=" + Sequence.ToString("D6")
+                + " utc=" + UtcTime.ToString("O")
+                + " mono_ms=" + MonoMs
+                + " level=" + Level.ToString().ToUpperInvariant()
+                + " category=" + Category
+                + " thread=" + ThreadId
+                + " source=" + Source + ":" + Line
+                + " member=" + Member
+                + " message=\"" + EscapeForSingleLine(Message) + "\"";
+        }
     }
 
     sealed class SnakeAudioState
@@ -136,7 +228,7 @@ internal static class GenericUtils
         int count = 0;
         while (count < maxLogs && logQueue.TryDequeue(out var item))
         {
-            WriteLog(item.Level, item.Message);
+            WriteLog(item);
             count++;
         }
     }
@@ -155,7 +247,7 @@ internal static class GenericUtils
             }
             catch (Exception ex)
             {
-                GD.PushError($"[UI Queue] {ex}");
+                Error(EmueraLogCategory.UI, () => $"[UI Queue] {ex}");
             }
             count++;
             if (Time.GetTicksUsec() - startUsec >= budgetUsec)
@@ -203,57 +295,414 @@ internal static class GenericUtils
         });
     }
 
-    public static void Info(object content)
+    public static EmueraLogLevel RuntimeLogLevel
     {
-        Log(0, content);
-    }
-    public static void Warn(object content)
-    {
-        Log(1, content);
-    }
-    public static void Error(object content)
-    {
-        Log(2, content);
+        get => (EmueraLogLevel)Volatile.Read(ref runtimeLogLevel);
+        set => Volatile.Write(ref runtimeLogLevel, (int)value);
     }
 
-    static void Log(int level, object content)
+    public static EmueraLogCategory RuntimeLogCategories
     {
-        if (level == 0 && !OS.IsDebugBuild())
+        get => (EmueraLogCategory)Volatile.Read(ref runtimeLogCategories);
+        set => Volatile.Write(ref runtimeLogCategories, (int)value);
+    }
+
+    public static bool MirrorNonErrorLogsToGodot
+    {
+        get => Volatile.Read(ref mirrorNonErrorLogsToGodot) != 0;
+        set => Volatile.Write(ref mirrorNonErrorLogsToGodot, value ? 1 : 0);
+    }
+
+    public static void InitializeLogging()
+    {
+        if (VerboseLogBuild && HasVerboseCommandLine())
+        {
+            RuntimeLogLevel = EmueraLogLevel.Debug;
+            RuntimeLogCategories = EmueraLogCategory.All;
+            MirrorNonErrorLogsToGodot = true;
+        }
+    }
+
+    /// <summary>
+    /// Central runtime gate for all diagnostic logs. Normal Release APKs compile out
+    /// non-error call sites; this gate remains for Debug and diagnostic APKs where
+    /// players may enable only the categories needed for a bug report.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsLogEnabled(EmueraLogLevel level, EmueraLogCategory category = EmueraLogCategory.General)
+    {
+        if (level == EmueraLogLevel.None)
+            return false;
+        if (!VerboseLogBuild && level < EmueraLogLevel.Error)
+            return false;
+        if ((int)level < Volatile.Read(ref runtimeLogLevel))
+            return false;
+        if (level < EmueraLogLevel.Error
+            && category != EmueraLogCategory.None
+            && (Volatile.Read(ref runtimeLogCategories) & (int)category) == 0)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    [Conditional("DEBUG")]
+    [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+    public static void Debug(object content,
+        EmueraLogCategory category = EmueraLogCategory.General,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        LogInternal(EmueraLogLevel.Debug, category, content, null, member, file, line);
+    }
+
+    [Conditional("DEBUG")]
+    [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+    public static void Debug(EmueraLogCategory category, Func<string> messageFactory,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        LogInternal(EmueraLogLevel.Debug, category, null, messageFactory, member, file, line);
+    }
+
+    [Conditional("DEBUG")]
+    [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+    public static void Info(object content,
+        EmueraLogCategory category = EmueraLogCategory.General,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        LogInternal(EmueraLogLevel.Info, category, content, null, member, file, line);
+    }
+
+    [Conditional("DEBUG")]
+    [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+    public static void Info(EmueraLogCategory category, Func<string> messageFactory,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        LogInternal(EmueraLogLevel.Info, category, null, messageFactory, member, file, line);
+    }
+
+    [Conditional("DEBUG")]
+    [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+    public static void Warn(object content,
+        EmueraLogCategory category = EmueraLogCategory.General,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        LogInternal(EmueraLogLevel.Warn, category, content, null, member, file, line);
+    }
+
+    [Conditional("DEBUG")]
+    [Conditional("GEMUERA_DIAGNOSTIC_LOGS")]
+    public static void Warn(EmueraLogCategory category, Func<string> messageFactory,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        LogInternal(EmueraLogLevel.Warn, category, null, messageFactory, member, file, line);
+    }
+
+    public static void Error(object content,
+        EmueraLogCategory category = EmueraLogCategory.General,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        LogInternal(EmueraLogLevel.Error, category, content, null, member, file, line);
+    }
+
+    public static void Error(EmueraLogCategory category, Func<string> messageFactory,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        LogInternal(EmueraLogLevel.Error, category, null, messageFactory, member, file, line);
+    }
+
+    public static void LogFromBridge(EmueraLogLevel level, EmueraLogCategory category, object content,
+        Func<string> messageFactory, string member, string file, int line)
+    {
+        LogInternal(level, category, content, messageFactory, member, file, line);
+    }
+
+    static void LogInternal(EmueraLogLevel level, EmueraLogCategory category, object content,
+        Func<string> messageFactory, string member, string file, int line)
+    {
+        if (!IsLogEnabled(level, category))
             return;
 
-        var message = content?.ToString();
-        if (IsMainThread())
-            WriteLog(level, message);
-        else
-            logQueue.Enqueue((level, message));
+        string message = BuildLogMessage(content, messageFactory);
+        category = NormalizeLogCategory(category, message);
+        var record = new LogRecord(
+            Interlocked.Increment(ref diagnosticLogSequence),
+            DateTimeOffset.UtcNow,
+            (long)Time.GetTicksMsec(),
+            level,
+            category,
+            System.Environment.CurrentManagedThreadId,
+            NormalizeSourcePath(file),
+            member,
+            line,
+            message);
+
+        AppendDiagnosticLog(record);
+        if (ShouldMirrorToGodot(level))
+        {
+            if (IsMainThread())
+                WriteLog(record);
+            else
+                logQueue.Enqueue(record);
+        }
     }
 
-    static void WriteLog(int level, string message)
+    static string BuildLogMessage(object content, Func<string> messageFactory)
     {
-        switch (level)
+        string message;
+        try
         {
-            case 1:
-                GD.PushWarning(message ?? "");
+            message = messageFactory != null ? messageFactory() : content?.ToString();
+        }
+        catch (Exception ex)
+        {
+            message = "[LOGGER] message factory failed: " + ex.GetType().Name + ": " + ex.Message;
+        }
+        return ClipLogMessage(message);
+    }
+
+    static bool ShouldMirrorToGodot(EmueraLogLevel level)
+    {
+        return level >= EmueraLogLevel.Error || Volatile.Read(ref mirrorNonErrorLogsToGodot) != 0;
+    }
+
+    static void WriteLog(LogRecord record)
+    {
+        string message = record.FormatForGodot();
+        switch (record.Level)
+        {
+            case EmueraLogLevel.Warn:
+                GD.PushWarning(message);
                 break;
-            case 2:
-                GD.PushError(message ?? "");
+            case EmueraLogLevel.Error:
+                GD.PushError(message);
                 break;
             default:
-                GD.Print(message ?? "");
+                GD.Print(message);
                 break;
         }
     }
 
+    static void AppendDiagnosticLog(LogRecord record)
+    {
+        lock (diagnosticLogLock)
+        {
+            int index = (diagnosticLogStart + diagnosticLogCount) % DiagnosticLogCapacity;
+            if (diagnosticLogCount == DiagnosticLogCapacity)
+            {
+                diagnosticLogRing[diagnosticLogStart] = record;
+                diagnosticLogStart = (diagnosticLogStart + 1) % DiagnosticLogCapacity;
+                return;
+            }
+            diagnosticLogRing[index] = record;
+            diagnosticLogCount++;
+        }
+    }
+
+    static LogRecord[] SnapshotDiagnosticLog()
+    {
+        lock (diagnosticLogLock)
+        {
+            var snapshot = new LogRecord[diagnosticLogCount];
+            for (int i = 0; i < snapshot.Length; i++)
+                snapshot[i] = diagnosticLogRing[(diagnosticLogStart + i) % DiagnosticLogCapacity];
+            return snapshot;
+        }
+    }
+
+    public static string GetDefaultDiagnosticLogPath(string stamp = null)
+    {
+        if (string.IsNullOrEmpty(stamp))
+            stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        return $"user://diagnostics/gemuera-{stamp}-diagnostic.log";
+    }
+
+    /// <summary>
+    /// Writes the in-memory diagnostic ring buffer only when the user asks for it.
+    /// This avoids persistent storage I/O during Android gameplay while still
+    /// producing a source/line-oriented report that humans and AI tools can inspect.
+    /// </summary>
+    public static bool ExportDiagnosticLog(string path, out string errorMessage)
+    {
+        errorMessage = "";
+        if (string.IsNullOrEmpty(path))
+            path = GetDefaultDiagnosticLogPath();
+
+        try
+        {
+            string report = BuildDiagnosticReport();
+            if (path.Contains("://", StringComparison.Ordinal))
+            {
+                if (!EnsureGodotDirectoryForFile(path, out errorMessage))
+                    return false;
+                using var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Write);
+                if (file == null)
+                {
+                    errorMessage = Godot.FileAccess.GetOpenError().ToString();
+                    return false;
+                }
+                file.StoreString(report);
+                return true;
+            }
+
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+            File.WriteAllText(path, report, Encoding.UTF8);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.GetType().Name + ": " + ex.Message;
+            return false;
+        }
+    }
+
+    static string BuildDiagnosticReport()
+    {
+        var snapshot = SnapshotDiagnosticLog();
+        var builder = new StringBuilder(snapshot.Length * 160 + 512);
+        builder.AppendLine("# gEmuera diagnostic log");
+        builder.AppendLine("# GeneratedUtc=" + DateTimeOffset.UtcNow.ToString("O"));
+        builder.AppendLine("# Platform=" + OS.GetName()
+            + " DebugBuild=" + OS.IsDebugBuild()
+            + " VerboseLogBuild=" + VerboseLogBuild
+            + " RuntimeLevel=" + RuntimeLogLevel
+            + " Categories=" + RuntimeLogCategories
+            + " Capacity=" + DiagnosticLogCapacity);
+        builder.AppendLine("# Columns: seq utc mono_ms level category thread source member message");
+        builder.AppendLine();
+        foreach (var record in snapshot)
+            builder.AppendLine(record.FormatForExport());
+        return builder.ToString();
+    }
+
+    static bool EnsureGodotDirectoryForFile(string path, out string errorMessage)
+    {
+        errorMessage = "";
+        string normalized = path.Replace('\\', '/');
+        int slash = normalized.LastIndexOf('/');
+        if (slash < 0)
+            return true;
+        string dirPath = normalized.Substring(0, slash);
+        if (dirPath.EndsWith("://", StringComparison.Ordinal))
+            return true;
+
+        if (dirPath.StartsWith("user://", StringComparison.OrdinalIgnoreCase))
+        {
+            using var root = DirAccess.Open("user://");
+            if (root == null)
+            {
+                errorMessage = DirAccess.GetOpenError().ToString();
+                return false;
+            }
+            string relative = dirPath.Substring("user://".Length);
+            var result = root.MakeDirRecursive(relative);
+            if (result != Godot.Error.Ok)
+            {
+                errorMessage = result.ToString();
+                return false;
+            }
+            return true;
+        }
+
+        var absoluteResult = DirAccess.MakeDirRecursiveAbsolute(dirPath);
+        if (absoluteResult != Godot.Error.Ok)
+        {
+            errorMessage = absoluteResult.ToString();
+            return false;
+        }
+        return true;
+    }
+
+    static string NormalizeSourcePath(string file)
+    {
+        if (string.IsNullOrEmpty(file))
+            return "<unknown>";
+        string normalized = file.Replace('\\', '/');
+        int scripts = normalized.LastIndexOf("/Scripts/", StringComparison.OrdinalIgnoreCase);
+        if (scripts >= 0)
+            return normalized.Substring(scripts + 1);
+        return Path.GetFileName(normalized);
+    }
+
+    static EmueraLogCategory NormalizeLogCategory(EmueraLogCategory category, string message)
+    {
+        if (category != EmueraLogCategory.General || string.IsNullOrEmpty(message))
+            return category;
+        if (message.StartsWith("[IMG]", StringComparison.Ordinal) || message.Contains("[SpriteManager]", StringComparison.Ordinal))
+            return EmueraLogCategory.Sprite;
+        if (message.StartsWith("[AUDIO]", StringComparison.Ordinal))
+            return EmueraLogCategory.Audio;
+        if (message.StartsWith("[LOADSAVE]", StringComparison.Ordinal))
+            return EmueraLogCategory.Save;
+        if (message.StartsWith("[LOAD]", StringComparison.Ordinal) || message.StartsWith("[LOADTIME]", StringComparison.Ordinal))
+            return EmueraLogCategory.Load;
+        if (message.StartsWith("[PROC]", StringComparison.Ordinal))
+            return EmueraLogCategory.Script;
+        if (message.StartsWith("[CONFIG]", StringComparison.Ordinal))
+            return EmueraLogCategory.Config;
+        if (message.StartsWith("[FS]", StringComparison.Ordinal))
+            return EmueraLogCategory.FileSystem;
+        if (message.StartsWith("[UI Queue]", StringComparison.Ordinal))
+            return EmueraLogCategory.UI;
+        if (message.StartsWith(ScrollTracePrefix, StringComparison.Ordinal))
+            return EmueraLogCategory.Script;
+        return category;
+    }
+
+    static string ClipLogMessage(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+        value = value.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
+        if (value.Length <= MaxLogMessageChars)
+            return value;
+        return value.Substring(0, MaxLogMessageChars) + "...<truncated>";
+    }
+
+    static string EscapeForSingleLine(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "";
+        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
+    static bool HasVerboseCommandLine()
+    {
+        foreach (string arg in OS.GetCmdlineArgs())
+        {
+            if (string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static void ScrollTrace(string category, string message)
     {
-        if (!ScrollTraceEnabled)
+        if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
             return;
         int seq = Interlocked.Increment(ref scrollTraceSequence);
         string formatted = $"{ScrollTracePrefix} #{seq} t={GetTickMs()} {category}: {message}";
-        if (IsMainThread())
-            WriteLog(0, formatted);
-        else
-            logQueue.Enqueue((0, formatted));
+        LogInternal(EmueraLogLevel.Debug, EmueraLogCategory.Script, formatted, null, nameof(ScrollTrace), "Scripts/GenericUtils.cs", 0);
     }
 
     public static void StartScrollTraceCoreWindow(string reason)
@@ -266,7 +715,7 @@ internal static class GenericUtils
 
     public static bool TryConsumeScrollTraceCoreLine()
     {
-        if (!ScrollTraceEnabled)
+        if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
             return false;
         while (true)
         {
@@ -760,7 +1209,7 @@ internal static class GenericUtils
             found = FindSimilarSoundFile(soundDir, name);
             if (!string.IsNullOrEmpty(found) && uEmuera.Utils.FileExists(found))
             {
-                Info($"[AUDIO] Resolved similar sound \"{name}\" -> \"{found}\"");
+                Info(EmueraLogCategory.Audio, () => $"[AUDIO] Resolved similar sound \"{name}\" -> \"{found}\"");
                 return found;
             }
         }

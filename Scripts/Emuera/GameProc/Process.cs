@@ -514,7 +514,7 @@ namespace MinorShift.Emuera.GameProc
 		
 		private void handleException(Exception exc, LogicalLine current, bool playSound)
 		{
-            uEmuera.Logger.Info(exc);
+            uEmuera.Logger.Error(exc, EmueraLogCategory.Script);
 
 			console.ThrowError(playSound);
 			ScriptPosition position = null;

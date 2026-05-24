@@ -1597,7 +1597,7 @@ public partial class EmueraContent : Control
 							var ti = SpriteManager.GetTextureInfo(resName, found);
 							if (ti != null)
 							{
-								GenericUtils.Info($"[IMG] Found \"{resName}\" via subdirectory search: {found}");
+								GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] Found \"{resName}\" via subdirectory search: {found}");
 								texture = ti.texture;
 								break;
 							}
@@ -1607,7 +1607,7 @@ public partial class EmueraContent : Control
 				if (texture == null)
 				{
 					failedTextureSearches.Add(resName);
-					GenericUtils.Info($"[IMG] All fallback paths failed for \"{resName}\"");
+					GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] All fallback paths failed for \"{resName}\"");
 				}
 			}
 			if (texture != null)
@@ -1657,8 +1657,9 @@ public partial class EmueraContent : Control
 				{
 					emuImg.SourceTexture = texture;
 				}
-				emuImg.DrawOffset = new Vector2(0, 0);
-				emuImg.Position = GetHtmlImagePosition(cip, relX) + GetSpriteHtmlDrawOffset(sprite, cip.ResourceName, w, imgH);
+				emuImg.DrawOffset = GetSpriteHtmlDrawOffset(sprite, cip.ResourceName, w, imgH);
+				emuImg.DrawSize = GetSpriteHtmlDrawSize(sprite, cip.ResourceName, w, imgH);
+				emuImg.Position = GetHtmlImagePosition(cip, relX);
 				emuImg.Size = new Vector2(w, imgH);
 				emuImg.FlipX = cip.FlipX;
 				emuImg.FlipY = cip.FlipY;
@@ -1695,11 +1696,14 @@ public partial class EmueraContent : Control
 			}
 			else if (csp is ConsoleSpacePart)
 			{
-				var spacer = new Control();
-				spacer.MouseFilter = MouseFilterEnum.Ignore;
-				spacer.CustomMinimumSize = new Vector2(csp.Width, FontSize);
-				spacer.Position = new Vector2(csp.PointX - relX, 0);
-				container.AddChild(spacer);
+				if (csp.Width > 0)
+				{
+					var spacer = new Control();
+					spacer.MouseFilter = MouseFilterEnum.Ignore;
+					spacer.CustomMinimumSize = new Vector2(csp.Width, FontSize);
+					spacer.Position = new Vector2(csp.PointX - relX, 0);
+					container.AddChild(spacer);
+				}
 				return EffectiveLineHeight;
 			}
 			else if (csp is ConsoleErrorShapePart errShape)
@@ -1960,34 +1964,52 @@ public partial class EmueraContent : Control
 	}
 
 	// Apply sprite-origin metadata when HTML images use emuera sprite resources.
+	static bool TryGetSpriteHtmlBasePosition(ASprite sprite, string resourceName, out uEmuera.Drawing.Point basePosition)
+	{
+		basePosition = uEmuera.Drawing.Point.Empty;
+		if (sprite != null && !sprite.DestBasePosition.IsEmpty)
+		{
+			basePosition = sprite.DestBasePosition;
+			return true;
+		}
+		if (AppContents.TryGetSpriteBasePosition(resourceName, out var cachedPosition) && !cachedPosition.IsEmpty)
+		{
+			basePosition = cachedPosition;
+			return true;
+		}
+		return false;
+	}
+
+	static bool ShouldUseSpriteHtmlCanvas(ASpriteSingle single, string resourceName)
+	{
+		if (single == null || single.DestBaseSize.Width <= 0 || single.DestBaseSize.Height <= 0)
+			return false;
+		int srcW = System.Math.Abs(single.SrcRectangle.Width);
+		int srcH = System.Math.Abs(single.SrcRectangle.Height);
+		if (srcW == 0 || srcH == 0)
+			return false;
+		return srcW != single.DestBaseSize.Width
+			|| srcH != single.DestBaseSize.Height
+			|| TryGetSpriteHtmlBasePosition(single, resourceName, out _);
+	}
+
 	static Vector2 GetSpriteHtmlDrawOffset(ASprite sprite, string resourceName, int width, int height)
 	{
 		if (width == 0 || height == 0)
 			return Vector2.Zero;
-
-		uEmuera.Drawing.Point basePosition = uEmuera.Drawing.Point.Empty;
-		bool hasPosition = sprite != null && !sprite.DestBasePosition.IsEmpty;
-		if (hasPosition)
-		{
-			basePosition = sprite.DestBasePosition;
-		}
-		else if (AppContents.TryGetSpriteBasePosition(resourceName, out var cachedPosition) && !cachedPosition.IsEmpty)
-		{
-			basePosition = cachedPosition;
-			hasPosition = true;
-		}
-		if (!hasPosition)
+		if (sprite == null)
 			return Vector2.Zero;
 
-		if (sprite is ASpriteSingle single)
+		if (!TryGetSpriteHtmlBasePosition(sprite, resourceName, out var basePosition))
+			return Vector2.Zero;
+
+		if (sprite is ASpriteSingle)
 		{
-			int srcW = single.SrcRectangle.Width;
-			int srcH = single.SrcRectangle.Height;
-			if (srcW == 0 || srcH == 0)
+			if (sprite.DestBaseSize.Width == 0 || sprite.DestBaseSize.Height == 0)
 				return Vector2.Zero;
 			return new Vector2(
-				basePosition.X * width / (float)srcW,
-				basePosition.Y * height / (float)srcH);
+				basePosition.X * width / (float)sprite.DestBaseSize.Width,
+				basePosition.Y * height / (float)sprite.DestBaseSize.Height);
 		}
 
 		if (sprite.DestBaseSize.Width == 0 || sprite.DestBaseSize.Height == 0)
@@ -1995,6 +2017,25 @@ public partial class EmueraContent : Control
 		return new Vector2(
 			basePosition.X * width / (float)sprite.DestBaseSize.Width,
 			basePosition.Y * height / (float)sprite.DestBaseSize.Height);
+	}
+
+	static Vector2 GetSpriteHtmlDrawSize(ASprite sprite, string resourceName, int width, int height)
+	{
+		if (width == 0 || height == 0)
+			return new Vector2(width, height);
+		if (sprite is ASpriteSingle single
+			&& ShouldUseSpriteHtmlCanvas(single, resourceName))
+		{
+			int srcW = single.SrcRectangle.Width;
+			int srcH = single.SrcRectangle.Height;
+			if (srcW > 0 && srcH > 0)
+			{
+				return new Vector2(
+					srcW * width / (float)sprite.DestBaseSize.Width,
+					srcH * height / (float)sprite.DestBaseSize.Height);
+			}
+		}
+		return new Vector2(width, height);
 	}
 
 	// Dynamic cut-ins are generated by script and may not exist as files yet.
@@ -2264,12 +2305,13 @@ public partial class EmueraContent : Control
 					emuImg.SourceTexture = texture;
 					emuImg.SourceRegion = default;
 				}
-				emuImg.DrawOffset = new Vector2(0, 0);
-				emuImg.Position = GetCbgLayerPosition(cbg, currentScrollY);
 				bool flipX = cbg.width < 0;
 				bool flipY = cbg.height < 0;
 				int w = cbg.width != 0 ? System.Math.Abs(cbg.width) : (cbg.Img.DestBaseSize.Width > 0 ? cbg.Img.DestBaseSize.Width : texture.GetWidth());
 				int h = cbg.height != 0 ? System.Math.Abs(cbg.height) : (cbg.Img.DestBaseSize.Height > 0 ? cbg.Img.DestBaseSize.Height : texture.GetHeight());
+				emuImg.DrawOffset = GetSpriteHtmlDrawOffset(cbg.Img, cbg.Img.Name, w, h);
+				emuImg.DrawSize = GetSpriteHtmlDrawSize(cbg.Img, cbg.Img.Name, w, h);
+				emuImg.Position = GetCbgLayerPosition(cbg, currentScrollY);
 				emuImg.Size = new Vector2(w, h);
 				emuImg.FlipX = flipX;
 				emuImg.FlipY = flipY;
@@ -2532,7 +2574,7 @@ public partial class EmueraContent : Control
 		path = uEmuera.Utils.ResolveExistingFilePath(path);
 		if (!uEmuera.Utils.FileExists(path))
 		{
-			GenericUtils.Info($"[AUDIO] File not found: {path}");
+			GenericUtils.Warn(EmueraLogCategory.Audio, () => $"[AUDIO] File not found: {path}");
 			return null;
 		}
 		string ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
@@ -2553,10 +2595,10 @@ public partial class EmueraContent : Control
 				if (mp3 != null)
 					mp3.Loop = loop;
 				else
-					GenericUtils.Info($"[AUDIO] Failed to load MP3: {path}");
+					GenericUtils.Warn(EmueraLogCategory.Audio, () => $"[AUDIO] Failed to load MP3: {path}");
 				return mp3;
 			default:
-				GenericUtils.Info($"[AUDIO] Unsupported audio extension \"{ext}\": {path}");
+				GenericUtils.Warn(EmueraLogCategory.Audio, () => $"[AUDIO] Unsupported audio extension \"{ext}\": {path}");
 				return null;
 		}
 	}
@@ -2986,10 +3028,14 @@ public partial class EmueraContent : Control
 		var console = GlobalStatic.Console;
 		if (console != null)
 			result = console.OutputLog(path);
+		string diagnosticPath = GenericUtils.GetDefaultDiagnosticLogPath(fname);
+		bool diagnosticResult = GenericUtils.ExportDiagnosticLog(diagnosticPath, out string diagnosticError);
 
 		ShowMessageBox(
 			MultiLanguage.Get("[SaveLog]", "Save Log"),
-			result ? $"{MultiLanguage.Get("[SavePath]", "Path")}:\n{path}" : MultiLanguage.Get("[Failure]", "Failure"));
+			result
+				? $"{MultiLanguage.Get("[SavePath]", "Path")}:\n{path}\nDiagnostic:\n{(diagnosticResult ? diagnosticPath : diagnosticError)}"
+				: MultiLanguage.Get("[Failure]", "Failure"));
 	}
 
 	// Ask the core to return to the title screen after confirmation.
