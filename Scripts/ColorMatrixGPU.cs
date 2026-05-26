@@ -24,6 +24,8 @@ public static class ColorMatrixGPU
 	private static Shader _compositShader;
 	private static readonly object materialCacheLock = new object();
 	private static readonly Dictionary<ulong, ShaderMaterial> sharedMaterialCache = new Dictionary<ulong, ShaderMaterial>();
+	private static readonly Dictionary<ulong, LinkedListNode<ulong>> sharedMaterialLruNodes = new Dictionary<ulong, LinkedListNode<ulong>>();
+	private static readonly LinkedList<ulong> sharedMaterialLru = new LinkedList<ulong>();
 
 	public static Shader Shader
 	{
@@ -71,18 +73,46 @@ public static class ColorMatrixGPU
 		lock (materialCacheLock)
 		{
 			if (sharedMaterialCache.TryGetValue(matrixKey, out var cached))
-				return cached;
-			if (sharedMaterialCache.Count >= SharedMaterialCacheLimit)
 			{
-				// Full-cache clear is intentional: the cache is small, matrix reuse is
-				// typically clustered, and avoiding LRU bookkeeping keeps the hot path
-				// predictable on mobile.
-				sharedMaterialCache.Clear();
+				TouchSharedMaterialKey(matrixKey);
+				return cached;
 			}
+			if (sharedMaterialCache.Count >= SharedMaterialCacheLimit)
+				EvictOldestSharedMaterial();
 			var mat = CreateMaterial(cm);
 			sharedMaterialCache[matrixKey] = mat;
+			AddSharedMaterialKey(matrixKey);
 			return mat;
 		}
+	}
+
+	static void TouchSharedMaterialKey(ulong matrixKey)
+	{
+		if (!sharedMaterialLruNodes.TryGetValue(matrixKey, out var node))
+			return;
+		sharedMaterialLru.Remove(node);
+		sharedMaterialLru.AddLast(node);
+	}
+
+	static void AddSharedMaterialKey(ulong matrixKey)
+	{
+		var node = sharedMaterialLru.AddLast(matrixKey);
+		sharedMaterialLruNodes[matrixKey] = node;
+	}
+
+	static void EvictOldestSharedMaterial()
+	{
+		var node = sharedMaterialLru.First;
+		if (node == null)
+			return;
+
+		// Do not Dispose the evicted material here. Visible EmueraImage nodes may
+		// still reference it as CanvasItem.Material; eviction only removes the cache
+		// root so new matrices do not force a full ShaderMaterial cache rebuild.
+		ulong evictedKey = node.Value;
+		sharedMaterialLru.RemoveFirst();
+		sharedMaterialLruNodes.Remove(evictedKey);
+		sharedMaterialCache.Remove(evictedKey);
 	}
 
 	/// <summary>

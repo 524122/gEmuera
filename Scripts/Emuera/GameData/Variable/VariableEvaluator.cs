@@ -303,65 +303,80 @@ namespace MinorShift.Emuera.GameData.Variable
 
         public string GetJoinedStr(FixedVariableTerm p, string delimiter, Int64 index1, Int64 length)
         {
-            string sum = "";
             var pIdentifier = p.Identifier;
+            int count = (int)length;
 
             if (p.IsString)
             {
                 if (pIdentifier.IsArray1D)
                 {
-                    return string.Join(delimiter, (string[])pIdentifier.GetArray(), (int)index1, (int)length);
+                    return string.Join(delimiter, (string[])pIdentifier.GetArray(), (int)index1, count);
                 }
-                else if (pIdentifier.IsArray2D)
+                // JOIN系関数は大量配列で呼ばれるため、+= による累積コピーを避ける。
+                // Android/Mono では短命な中間文字列が GC スパイクに直結する。
+                var builder = new StringBuilder();
+                if (pIdentifier.IsArray2D)
                 {
                     var arguments = new long[] { p.Index1, 0 };
-                    for(int i = 0; i < (int)length; i++)
+                    for(int i = 0; i < count; i++)
                     {
                         arguments[1] = index1 + i;
-                        sum += pIdentifier.GetStrValue(GlobalStatic.EMediator, arguments) + ((i < ((int)length - 1)) ? delimiter : "");
+                        if (i > 0)
+                            builder.Append(delimiter);
+                        builder.Append(pIdentifier.GetStrValue(GlobalStatic.EMediator, arguments));
                     }
                 }
                 else
                 {
                     var arguments = new long[] { p.Index1, p.Index2, 0 };
-                    for(int i = 0; i < (int)length; i++)
+                    for(int i = 0; i < count; i++)
                     {
                         arguments[2] = index1 + i;
-                        sum += pIdentifier.GetStrValue(GlobalStatic.EMediator, arguments) + ((i < ((int)length - 1)) ? delimiter : "");
+                        if (i > 0)
+                            builder.Append(delimiter);
+                        builder.Append(pIdentifier.GetStrValue(GlobalStatic.EMediator, arguments));
                     }
                 }
+                return builder.ToString();
             }
             else
             {
+                var builder = new StringBuilder();
                 if (pIdentifier.IsArray1D)
                 {
                     var arguments = new long[] { 0 };
-                    for(int i = 0; i < (int)length; i++)
+                    for(int i = 0; i < count; i++)
                     {
                         arguments[0] = index1 + i;
-                        sum += (pIdentifier.GetIntValue(GlobalStatic.EMediator, arguments)).ToString() + ((i < ((int)length - 1)) ? delimiter : "");
+                        if (i > 0)
+                            builder.Append(delimiter);
+                        builder.Append(pIdentifier.GetIntValue(GlobalStatic.EMediator, arguments));
                     }
                 }
                 else if (pIdentifier.IsArray2D)
                 {
                     var arguments = new long[] { p.Index1, 0 };
-                    for(int i = 0; i < (int)length; i++)
+                    for(int i = 0; i < count; i++)
                     {
                         arguments[1] = index1 + i;
-                        sum += (pIdentifier.GetIntValue(GlobalStatic.EMediator, arguments)).ToString() + ((i < ((int)length - 1)) ? delimiter : "");
+                        if (i > 0)
+                            builder.Append(delimiter);
+                        builder.Append(pIdentifier.GetIntValue(GlobalStatic.EMediator, arguments));
                     }
                 }
                 else
                 {
                     var arguments = new long[] { p.Index1, p.Index2, 0 };
-                    for(int i = 0; i < (int)length; i++)
+                    for(int i = 0; i < count; i++)
                     {
                         arguments[2] = index1 + i;
-                        sum += (pIdentifier.GetIntValue(GlobalStatic.EMediator, arguments)).ToString() + ((i < ((int)length - 1)) ? delimiter : "");
+                        if (i > 0)
+                            builder.Append(delimiter);
+                        builder.Append(pIdentifier.GetIntValue(GlobalStatic.EMediator, arguments));
                     }
                 }
+                return builder.ToString();
             }
-            return sum;
         }
 
         public Int64 GetMatch(FixedVariableTerm p, Int64 target, Int64 start, Int64 end)
@@ -405,8 +420,9 @@ namespace MinorShift.Emuera.GameData.Variable
             for(int i = (int)start; i < (int)end; ++i)
             {
                 arguments[idx] = i;
-                if((identifier.GetStrValue(GlobalStatic.EMediator, arguments) == target) || 
-                    (targetIsNullOrEmpty && string.IsNullOrEmpty(identifier.GetStrValue(GlobalStatic.EMediator, arguments))))
+                string value = identifier.GetStrValue(GlobalStatic.EMediator, arguments);
+                if((value == target) ||
+                    (targetIsNullOrEmpty && string.IsNullOrEmpty(value)))
                     ++ret;
             }
 
@@ -439,8 +455,9 @@ namespace MinorShift.Emuera.GameData.Variable
             for (int i = (int)start; i < (int)end; ++i)
             {
                 arguments[0] = i;
-                if ((identifier.GetStrValue(GlobalStatic.EMediator, arguments) == target) || 
-                    (targetIsNullOrEmpty && string.IsNullOrEmpty(identifier.GetStrValue(GlobalStatic.EMediator, arguments))))
+                string value = identifier.GetStrValue(GlobalStatic.EMediator, arguments);
+                if ((value == target) ||
+                    (targetIsNullOrEmpty && string.IsNullOrEmpty(value)))
                     ret++;
             }
 

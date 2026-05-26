@@ -11,6 +11,8 @@ public partial class QuickButtons : CanvasLayer
 	VBoxContainer rowsContainer;
 	HBoxContainer currentRow;
 	List<Control> buttons = new List<Control>();
+	Stack<Panel> buttonPool = new Stack<Panel>();
+	Stack<HBoxContainer> rowPool = new Stack<HBoxContainer>();
 	Font fontFile;
 	int fontSize;
 	bool layoutUpdateQueued;
@@ -56,6 +58,8 @@ public partial class QuickButtons : CanvasLayer
 	const float QuickInertiaSlowDeceleration = 1800.0f;
 	const float QuickInertiaFastDeceleration = 520.0f;
 	const float QuickInertiaStopVelocity = 6.0f;
+	const int MaxPooledButtons = 256;
+	const int MaxPooledRows = 64;
 	static int configuredButtonWidth = -1;
 	static int configuredFontSize = -1;
 
@@ -155,8 +159,7 @@ public partial class QuickButtons : CanvasLayer
 		rowsContainer.AddThemeConstantOverride("separation", QuickButtonSpacing);
 		scroll.AddChild(rowsContainer);
 
-		currentRow = new HBoxContainer();
-		currentRow.AddThemeConstantOverride("separation", QuickButtonSpacing);
+		currentRow = AcquireRow();
 		rowsContainer.AddChild(currentRow);
 	}
 
@@ -248,28 +251,41 @@ public partial class QuickButtons : CanvasLayer
 		dragPointerIsTouch = false;
 		dragPointerIndex = -1;
 		buttons.Clear();
-		foreach (var child in rowsContainer.GetChildren())
+		var children = rowsContainer.GetChildren();
+		for (int i = 0; i < children.Count; i++)
 		{
-			rowsContainer.RemoveChild(child);
-			child.QueueFree();
+			if (children[i] is HBoxContainer row)
+				ReleaseRow(row);
+			else
+				children[i].QueueFree();
 		}
-		currentRow = new HBoxContainer();
-		currentRow.AddThemeConstantOverride("separation", QuickButtonSpacing);
+		currentRow = AcquireRow();
 		rowsContainer.AddChild(currentRow);
 		UpdatePanelSize(true);
 	}
 
 	public void AddButton(string text, Godot.Color color, string code, long generation)
 	{
+		var btn = AcquireButton();
+		ConfigureButton(btn, text, color, code, generation);
+		currentRow.AddChild(btn);
+		buttons.Add(btn);
+		UpdatePanelSize(ShouldStickToBottom());
+	}
+
+	Panel AcquireButton()
+	{
+		while (buttonPool.Count > 0)
+		{
+			var pooled = buttonPool.Pop();
+			if (IsControlAlive(pooled))
+				return pooled;
+		}
+
 		var btn = new Panel();
 		btn.FocusMode = Control.FocusModeEnum.None;
 		btn.MouseForcePassScrollEvents = false;
-		btn.MouseFilter = quickInputEnabled ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
-		StyleQuickButton(btn, color);
-		btn.Modulate = quickInputEnabled ? Colors.White : new Color(1, 1, 1, 0.55f);
-		btn.CustomMinimumSize = new Vector2(EffectiveButtonWidth, QuickButtonHeight);
-		btn.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
-		btn.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
+		btn.GuiInput += inputEvent => OnQuickButtonGuiInput(inputEvent, btn);
 
 		var label = new Label();
 		label.SetAnchorsPreset(Control.LayoutPreset.FullRect);
@@ -278,30 +294,106 @@ public partial class QuickButtons : CanvasLayer
 		label.OffsetRight = -QuickButtonPadding;
 		label.OffsetBottom = -QuickButtonPadding;
 		label.MouseFilter = Control.MouseFilterEnum.Ignore;
-		label.Text = text.Trim();
-		label.AddThemeColorOverride("font_color", color);
-		if (fontFile != null)
-			label.AddThemeFontOverride("font", fontFile);
-		label.AddThemeFontSizeOverride("font_size", EffectiveFontSize);
 		label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		label.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
 		label.VerticalAlignment = VerticalAlignment.Center;
 		btn.AddChild(label);
+		return btn;
+	}
+
+	void ConfigureButton(Panel btn, string text, Godot.Color color, string code, long generation)
+	{
+		btn.MouseFilter = quickInputEnabled ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
+		StyleQuickButton(btn, color);
+		btn.Modulate = quickInputEnabled ? Colors.White : new Color(1, 1, 1, 0.55f);
+		btn.CustomMinimumSize = new Vector2(EffectiveButtonWidth, QuickButtonHeight);
+		btn.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
+		btn.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
+
+		var label = GetButtonLabel(btn);
+		if (label != null)
+		{
+			label.Text = (text ?? "").Trim();
+			label.AddThemeColorOverride("font_color", color);
+			if (fontFile != null)
+				label.AddThemeFontOverride("font", fontFile);
+			label.AddThemeFontSizeOverride("font_size", EffectiveFontSize);
+		}
 
 		string inputCode = code;
 		btn.SetMeta("input_code", inputCode);
 		btn.SetMeta("input_generation", generation);
-		btn.GuiInput += inputEvent => OnQuickButtonGuiInput(inputEvent, btn, inputCode);
-		currentRow.AddChild(btn);
-		buttons.Add(btn);
-		UpdatePanelSize(ShouldStickToBottom());
 	}
 
-	void OnQuickButtonGuiInput(InputEvent @event, Control btn, string inputCode)
+	void OnQuickButtonGuiInput(InputEvent @event, Control btn)
 	{
 		if (!IsControlAlive(btn))
 			return;
-		HandleQuickPointerInput(@event, true, btn, inputCode, btn);
+		HandleQuickPointerInput(@event, true, btn, null, btn);
+	}
+
+	HBoxContainer AcquireRow()
+	{
+		while (rowPool.Count > 0)
+		{
+			var row = rowPool.Pop();
+			if (IsControlAlive(row))
+				return row;
+		}
+		var fresh = new HBoxContainer();
+		fresh.AddThemeConstantOverride("separation", QuickButtonSpacing);
+		return fresh;
+	}
+
+	void ReleaseRow(HBoxContainer row)
+	{
+		if (!IsControlAlive(row))
+			return;
+
+		var children = row.GetChildren();
+		for (int i = 0; i < children.Count; i++)
+		{
+			if (children[i] is Panel button)
+				ReleaseButton(button);
+			else
+				children[i].QueueFree();
+		}
+
+		if (row.GetParent() != null)
+			row.GetParent().RemoveChild(row);
+		if (rowPool.Count < MaxPooledRows)
+			rowPool.Push(row);
+		else
+			row.QueueFree();
+	}
+
+	void ReleaseButton(Panel btn)
+	{
+		if (!IsControlAlive(btn))
+			return;
+
+		if (btn.GetParent() != null)
+			btn.GetParent().RemoveChild(btn);
+		ResetButtonForPool(btn);
+		if (buttonPool.Count < MaxPooledButtons)
+			buttonPool.Push(btn);
+		else
+			btn.QueueFree();
+	}
+
+	void ResetButtonForPool(Panel btn)
+	{
+		// The quick panel is rebuilt often when the emulator prints a new command
+		// generation. Pooling keeps Godot nodes and signal connections stable while
+		// clearing all script-visible state before the next reuse.
+		btn.Visible = true;
+		btn.Modulate = Colors.White;
+		btn.MouseFilter = Control.MouseFilterEnum.Ignore;
+		btn.SetMeta("input_code", "");
+		btn.SetMeta("input_generation", -1L);
+		var label = GetButtonLabel(btn);
+		if (label != null)
+			label.Text = "";
 	}
 
 	bool HandleQuickPointerInput(InputEvent @event, bool acceptEvent, Control button = null, string inputCode = null, Control eventSource = null)
@@ -475,8 +567,7 @@ public partial class QuickButtons : CanvasLayer
 	{
 		if (currentRow.GetChildCount() == 0)
 			return;
-		currentRow = new HBoxContainer();
-		currentRow.AddThemeConstantOverride("separation", QuickButtonSpacing);
+		currentRow = AcquireRow();
 		rowsContainer.AddChild(currentRow);
 		UpdatePanelSize(ShouldStickToBottom());
 	}
@@ -581,18 +672,25 @@ public partial class QuickButtons : CanvasLayer
 
 	void ApplyFontToButtonLabel(Control btn)
 	{
-		if (btn == null)
+		var label = GetButtonLabel(btn);
+		if (label == null)
 			return;
-		foreach (var child in btn.GetChildren())
+		if (fontFile != null)
+			label.AddThemeFontOverride("font", fontFile);
+		label.AddThemeFontSizeOverride("font_size", EffectiveFontSize);
+	}
+
+	Label GetButtonLabel(Control btn)
+	{
+		if (btn == null)
+			return null;
+		var children = btn.GetChildren();
+		for (int i = 0; i < children.Count; i++)
 		{
-			if (child is Label label)
-			{
-				if (fontFile != null)
-					label.AddThemeFontOverride("font", fontFile);
-				label.AddThemeFontSizeOverride("font_size", EffectiveFontSize);
-				return;
-			}
+			if (children[i] is Label label)
+				return label;
 		}
+		return null;
 	}
 
 	void ApplyButtonMetrics(Control btn)

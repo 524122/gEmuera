@@ -3580,6 +3580,9 @@ namespace MinorShift.Emuera.GameData.Function
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
 				string imgname = arguments[0].GetStrValue(exm);
+				if (Name == "SPRITECREATED")
+					return AppContents.SpriteExists(imgname) ? 1 : 0;
+
 				ASprite img = AppContents.GetSprite(imgname);
 				if (img == null || !img.IsCreated)
 					return 0;
@@ -3587,8 +3590,6 @@ namespace MinorShift.Emuera.GameData.Function
 					return 0;
 				switch (Name)
 				{
-					case "SPRITECREATED":
-						return 1;
 					case "SPRITEWIDTH":
 						return img.DestBaseSize.Width;
 					case "SPRITEHEIGHT":

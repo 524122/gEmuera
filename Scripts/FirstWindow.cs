@@ -51,6 +51,11 @@ public partial class FirstWindow : Control
 		FrameRateHelper.Apply();
 		ResolutionHelper.Apply();
 
+		// 企业级说明：Android APK 首屏可能停留在启动器和权限流程，尚未进入 EmueraMain。
+		// 这里提前初始化诊断系统，确保冷启动、权限失败和游戏路径选择都能写入 breadcrumb。
+		GenericUtils.SetMainThread();
+		GenericUtils.InitializeLogging();
+
 		BuildLauncherUi();
 
 		if (OS.GetName() == "Android")

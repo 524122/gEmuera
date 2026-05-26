@@ -5,6 +5,7 @@ using MinorShift.Emuera.GameView;
 using System.Collections.Concurrent;
 using System.Threading;
 using MinorShift.Emuera.Content;
+using gEmuera.Diagnostics;
 
 public partial class EmueraMain : Node
 {
@@ -304,6 +305,7 @@ public partial class EmueraMain : Node
         ResolutionHelper.Apply();
         GenericUtils.SetMainThread();
         GenericUtils.InitializeLogging();
+        RuntimeDiagnosticsPanel.AttachFloatingTo(this);
         uEmuera.Logger.isEnabled = GenericUtils.IsLogEnabled;
         uEmuera.Logger.sink = GenericUtils.LogFromBridge;
         uEmuera.Logger.info = content => GenericUtils.Info(content);
@@ -320,9 +322,15 @@ public partial class EmueraMain : Node
         // transitions. Handle them centrally so the emulator core does not need to
         // know about platform lifecycle details.
         if (what == NotificationApplicationPaused)
+        {
             SetApplicationPaused(true);
+            GenericUtils.NotifyLifecycleState("android_pause");
+        }
         else if (what == NotificationApplicationResumed)
+        {
             SetApplicationPaused(false);
+            GenericUtils.NotifyLifecycleState("android_resume");
+        }
     }
 
     void SetApplicationPaused(bool paused)
@@ -377,6 +385,7 @@ public partial class EmueraMain : Node
         {
             Sys.ExeDir = uEmuera.Utils.NormalizePath(OS.GetExecutablePath().GetBaseDir() + "/");
         }
+        GenericUtils.NotifyGamePathSelected(Sys.ExeDir, FirstWindow.SelectedCoreProfileName);
 
         // Load SHIFT-JIS / UTF-8 config maps
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -428,6 +437,8 @@ public partial class EmueraMain : Node
         GenericUtils.FlushLogs();
         GenericUtils.FlushUI();
         ProcessTextRenderQueue();
+        if (GenericUtils.IsPerformanceSamplingEnabled)
+            GenericUtils.SamplePerformanceFrame(delta, gpuQueue.Count + textRenderQueue.Count);
 
         if (!working)
             return;
@@ -466,6 +477,7 @@ public partial class EmueraMain : Node
 
     public override void _ExitTree()
     {
+        GenericUtils.NotifyApplicationShutdown();
         EmueraThread.instance.End();
         working = false;
         GlobalStatic.Reset();

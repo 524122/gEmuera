@@ -37,6 +37,7 @@ public partial class EmueraContent : Control
 	ColorRect bgRect;
 	Control cbgContainer;
 	OptionWindow optionWindow;
+	UiDiagnosticOverlay uiDiagnosticOverlay;
 
 	// Audio players are pooled by logical emuera sound channel. Channel indexes
 	// are stable so script commands can pause/stop/speed-change the same channel.
@@ -97,7 +98,9 @@ public partial class EmueraContent : Control
 	int quickRenderedRevision = -1;
 	bool quickInputGateActive = false;
 	bool quickAutoHiddenUntilNextButtons = false;
+	bool quickAutoHiddenWasVisible = false;
 	int quickAutoHiddenGeneration = int.MinValue;
+	ulong quickAutoHiddenTick = 0;
 	long quickInputGateGeneration = -1;
 	int quickInputGateRevision = -1;
 	ulong quickInputGateTick = 0;
@@ -698,12 +701,22 @@ public partial class EmueraContent : Control
 		if (part is ConsoleImagePart image)
 		{
 			if (image.Display == DisplayMode.Relative)
-				return EffectiveLineHeight;
+				return GetRelativeImagePartBottom(image);
 			return EffectiveLineHeight;
 		}
 		if (part is ConsoleDivPart div && div.IsRelative)
 			return System.Math.Max(EffectiveLineHeight, div.Y + div.DivHeight);
 		return System.Math.Max(EffectiveLineHeight, part.Bottom);
+	}
+
+	int GetRelativeImagePartBottom(ConsoleImagePart image)
+	{
+		if (image == null)
+			return EffectiveLineHeight;
+		// 企业级说明：角色立绘等相对图片会生成真实 EmueraImage 节点；如果行高仍按字体高度计算，
+		// Android 的 ScrollContainer/VBoxContainer 只会为该行预留一行文字空间，表现为节点存在但图片不可见或被后续行覆盖。
+		int imageBottom = image.dest_rect.Y + System.Math.Abs(image.dest_rect.Height);
+		return System.Math.Max(EffectiveLineHeight, imageBottom);
 	}
 
 	int GetButtonTop(ConsoleButtonString button)
@@ -903,6 +916,8 @@ public partial class EmueraContent : Control
 					btn.Position = new Vector2(button.PointX, buttonTop);
 					btn.Size = new Vector2(button.Width, buttonHeight);
 					lineControl.AddChild(btn);
+					if (GenericUtils.IsUiLayoutTraceEnabled("button"))
+						QueueUiLayoutTrace(btn, "button", "", button.PointX, buttonTop, button.Width, buttonHeight);
 
 					int btnRight = button.PointX + button.Width;
 					if (btnRight > maxLineRight) maxLineRight = btnRight;
@@ -958,6 +973,163 @@ public partial class EmueraContent : Control
 			else
 				QueueDisplayFollowUp();
 		}
+	}
+
+	void QueueUiLayoutTrace(Control control, string kind, string resourceName, int targetX, int targetY, int targetW, int targetH)
+	{
+		if (!GenericUtils.IsUiLayoutTraceEnabled(kind))
+			return;
+		// 企业级说明：本方法在行节点注册完成前调用，而注册成功会推进一次 displayRevision。
+		// 记录“预期稳定修订号”可区分当前行自身完成注册和后续 UPDATE 批次替换旧节点。
+		int expectedDisplayRevision = displayRevision + 1;
+		TraceUiLayoutAfterLayout(control, kind, resourceName ?? "", targetX, targetY, targetW, targetH,
+			expectedDisplayRevision, GenericUtils.UiFrameGeneration);
+	}
+
+	async void TraceUiLayoutAfterLayout(Control control, string kind, string resourceName,
+		int targetX, int targetY, int targetW, int targetH,
+		int expectedDisplayRevision, int queuedUiFrameGeneration)
+	{
+		// 企业级说明：Godot 容器的最终 Control rect 可能在当前帧结束后才稳定。
+		// UI 几何诊断只在调试开关开启时排队到下一帧采样，不阻塞主线程，也不修改布局行为。
+		var tree = GetTree();
+		if (tree != null)
+			await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
+
+		if (control == null || !GodotObject.IsInstanceValid(control) || control.IsQueuedForDeletion())
+		{
+			// 企业级说明：LOAD/UPDATE 会在 Android 上分帧重建大量控制台行。
+			// 如果等待布局帧期间显示修订号已经推进，当前采样对象属于旧批次，
+			// 节点失效是正常生命周期结束，不能记录为立绘未加载或实际矩形缺失。
+			if (displayRevision != expectedDisplayRevision)
+				return;
+			if (GenericUtils.IsUiLayoutMismatchTraceEnabled())
+				GenericUtils.UiLayoutTrace("UI_LAYOUT.MISSING_ACTUAL",
+					() => kind + " actual rect missing",
+					() => BuildUiLayoutData(kind, resourceName, targetX, targetY, targetW, targetH, 0, 0, 0, 0)
+						+ $" reason=node_missing expected_display_revision={expectedDisplayRevision} queued_render_batch_id={queuedUiFrameGeneration}");
+			return;
+		}
+
+		int actualX = Mathf.RoundToInt(control.Position.X);
+		int actualY = Mathf.RoundToInt(control.Position.Y);
+		int actualW = Mathf.RoundToInt(control.Size.X);
+		int actualH = Mathf.RoundToInt(control.Size.Y);
+		EmitUiLayoutTrace(kind, resourceName, targetX, targetY, targetW, targetH, actualX, actualY, actualW, actualH);
+		EmitUiOverlayTrace(control, kind, targetX, targetY, targetW, targetH, actualX, actualY, actualW, actualH);
+	}
+
+	void EmitUiLayoutTrace(string kind, string resourceName,
+		int targetX, int targetY, int targetW, int targetH,
+		int actualX, int actualY, int actualW, int actualH)
+	{
+		int dx = targetX - actualX;
+		int dy = targetY - actualY;
+		int dw = targetW - actualW;
+		int dh = targetH - actualH;
+		string dataFactory() => BuildUiLayoutData(kind, resourceName, targetX, targetY, targetW, targetH, actualX, actualY, actualW, actualH);
+
+		if (GenericUtils.IsUiLayoutTargetRectTraceEnabled())
+			GenericUtils.UiLayoutTrace("UI_LAYOUT.TARGET.RECORDED", () => kind + " target rect", dataFactory);
+		if (GenericUtils.IsUiLayoutActualRectTraceEnabled())
+			GenericUtils.UiLayoutTrace("UI_LAYOUT.ACTUAL.RECORDED", () => kind + " actual rect", dataFactory);
+
+		int threshold = GenericUtils.UiLayoutMismatchThresholdPx;
+		if (GenericUtils.IsUiLayoutMismatchTraceEnabled()
+			&& (Mathf.Abs(dx) > threshold || Mathf.Abs(dy) > threshold || Mathf.Abs(dw) > threshold || Mathf.Abs(dh) > threshold))
+		{
+			GenericUtils.UiLayoutTrace("UI_LAYOUT.MISMATCH", () => kind + " mismatch", dataFactory);
+		}
+	}
+
+	static string BuildUiLayoutData(string kind, string resourceName,
+		int targetX, int targetY, int targetW, int targetH,
+		int actualX, int actualY, int actualW, int actualH)
+	{
+		string resource = string.IsNullOrEmpty(resourceName) ? "" : " resource=" + resourceName;
+		return $"kind={kind}{resource} target=({targetX},{targetY},{targetW},{targetH}) actual=({actualX},{actualY},{actualW},{actualH}) delta=({targetX - actualX},{targetY - actualY},{targetW - actualW},{targetH - actualH})";
+	}
+
+	void EmitUiOverlayTrace(Control control, string kind,
+		int targetX, int targetY, int targetW, int targetH,
+		int actualX, int actualY, int actualW, int actualH)
+	{
+		if (control == null || !GenericUtils.IsUiOverlayEnabled())
+			return;
+		if (kind == "button" && !GenericUtils.UiOverlayButtonRectEnabled)
+			return;
+		if (kind == "image" && !GenericUtils.UiOverlayImageRectEnabled)
+			return;
+
+		var overlay = EnsureUiDiagnosticOverlay();
+		if (overlay == null)
+			return;
+
+		// 企业级说明：overlay 只复用 UI_LAYOUT 已经采样到的矩形，不主动遍历 UI 树。
+		// 默认关闭时没有节点、没有绘制、没有额外 I/O；开启后也不修改布局或触摸命中，只画临时线框。
+		var actualRect = ConvertGlobalRectToOverlay(control.GetGlobalRect());
+		var targetRect = ConvertTargetRectToOverlay(control, targetX, targetY, targetW, targetH, actualX, actualY, actualW, actualH);
+		int threshold = GenericUtils.UiLayoutMismatchThresholdPx;
+		bool mismatch = Mathf.Abs(targetX - actualX) > threshold
+			|| Mathf.Abs(targetY - actualY) > threshold
+			|| Mathf.Abs(targetW - actualW) > threshold
+			|| Mathf.Abs(targetH - actualH) > threshold;
+
+		if (GenericUtils.UiOverlayTargetRectEnabled)
+			overlay.AddRect(targetRect, new Color(0.2f, 0.55f, 1.0f, 0.95f));
+		if (GenericUtils.UiOverlayActualRectEnabled)
+			overlay.AddRect(actualRect, new Color(0.35f, 1.0f, 0.45f, 0.95f));
+		if (mismatch && GenericUtils.UiOverlayMismatchEnabled)
+			overlay.AddRect(actualRect, new Color(1.0f, 0.2f, 0.35f, 1.0f));
+	}
+
+	UiDiagnosticOverlay EnsureUiDiagnosticOverlay()
+	{
+		if (!GenericUtils.IsUiOverlayEnabled())
+			return null;
+		if (uiDiagnosticOverlay == null || !GodotObject.IsInstanceValid(uiDiagnosticOverlay))
+		{
+			uiDiagnosticOverlay = new UiDiagnosticOverlay();
+			uiDiagnosticOverlay.Name = "UiDiagnosticOverlay";
+			uiDiagnosticOverlay.MouseFilter = MouseFilterEnum.Ignore;
+			uiDiagnosticOverlay.ZIndex = 4096;
+			uiDiagnosticOverlay.SetAnchorsPreset(LayoutPreset.FullRect);
+			AddChild(uiDiagnosticOverlay);
+		}
+		uiDiagnosticOverlay.Visible = true;
+		uiDiagnosticOverlay.MaxRects = GenericUtils.UiOverlayMaxDrawnRects;
+		return uiDiagnosticOverlay;
+	}
+
+	void RefreshUiDiagnosticOverlay()
+	{
+		if (uiDiagnosticOverlay == null || !GodotObject.IsInstanceValid(uiDiagnosticOverlay))
+			return;
+		bool enabled = GenericUtils.IsUiOverlayEnabled();
+		uiDiagnosticOverlay.Visible = enabled;
+		uiDiagnosticOverlay.MaxRects = GenericUtils.UiOverlayMaxDrawnRects;
+		if (!enabled)
+			uiDiagnosticOverlay.ClearRects();
+	}
+
+	Rect2 ConvertTargetRectToOverlay(Control control,
+		int targetX, int targetY, int targetW, int targetH,
+		int actualX, int actualY, int actualW, int actualH)
+	{
+		Rect2 actualGlobal = control.GetGlobalRect();
+		float scaleX = actualW != 0 ? actualGlobal.Size.X / actualW : 1.0f;
+		float scaleY = actualH != 0 ? actualGlobal.Size.Y / actualH : 1.0f;
+		var targetGlobal = new Rect2(
+			actualGlobal.Position + new Vector2((targetX - actualX) * scaleX, (targetY - actualY) * scaleY),
+			new Vector2(targetW * scaleX, targetH * scaleY));
+		return ConvertGlobalRectToOverlay(targetGlobal);
+	}
+
+	Rect2 ConvertGlobalRectToOverlay(Rect2 globalRect)
+	{
+		if (uiDiagnosticOverlay == null || !GodotObject.IsInstanceValid(uiDiagnosticOverlay))
+			return globalRect;
+		return new Rect2(globalRect.Position - uiDiagnosticOverlay.GetGlobalRect().Position, globalRect.Size);
 	}
 
 	internal void AddLines(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
@@ -1032,7 +1204,7 @@ public partial class EmueraContent : Control
 			QueueDisplayFollowUp();
 		}
 
-		TraceScroll("apply_text_changes", $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} changed={changed} update={update} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
+		TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} changed={changed} update={update} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
 		SetLastButtonGeneration(lastButtonGeneration);
 	}
 
@@ -1215,6 +1387,15 @@ public partial class EmueraContent : Control
 		GenericUtils.ScrollTrace("ui", $"{action}{suffix} {GetScrollTraceState()}");
 	}
 
+	void TraceScroll(string action, Func<string> detailFactory)
+	{
+		// 企业级说明：滚动追踪覆盖触摸、惯性和 UI 自动滚动路径。
+		// Android/APK 默认关闭时必须避免构造 detail 字符串，降低触摸帧中的 GC 压力。
+		if (!GenericUtils.ScrollTraceEnabled)
+			return;
+		TraceScroll(action, detailFactory != null ? detailFactory() : null);
+	}
+
 	string GetScrollTraceState()
 	{
 		if (scrollContainer == null)
@@ -1242,11 +1423,11 @@ public partial class EmueraContent : Control
 		pendingScrollDeadlineTick = now + ScrollToBottomRetryMs;
 		if (pendingScroll)
 		{
-			TraceScroll("scroll_bottom_request_merge", $"deadline={pendingScrollDeadlineTick}");
+			TraceScroll("scroll_bottom_request_merge", () => $"deadline={pendingScrollDeadlineTick}");
 			return;
 		}
 		pendingScroll = true;
-		TraceScroll("scroll_bottom_request", $"deadline={pendingScrollDeadlineTick}");
+		TraceScroll("scroll_bottom_request", () => $"deadline={pendingScrollDeadlineTick}");
 		CallDeferred(nameof(DeferredScrollToBottom));
 	}
 
@@ -1318,7 +1499,7 @@ public partial class EmueraContent : Control
 					ulong stableDeadline = now + ScrollToBottomStableMs;
 					if (pendingScrollDeadlineTick < stableDeadline)
 						pendingScrollDeadlineTick = stableDeadline;
-					TraceScroll("scroll_bottom_max", $"max={maxScroll} stableDeadline={stableDeadline}");
+					TraceScroll("scroll_bottom_max", () => $"max={maxScroll} stableDeadline={stableDeadline}");
 				}
 
 				scrollContainer.ScrollVertical = maxScroll;
@@ -1339,7 +1520,7 @@ public partial class EmueraContent : Control
 		}
 		finally
 		{
-			TraceScroll("scroll_bottom_end", $"reason={endReason}");
+			TraceScroll("scroll_bottom_end", () => $"reason={endReason}");
 			pendingScroll = false;
 			pendingScrollLastMax = int.MinValue;
 			pendingScrollStableSinceTick = 0;
@@ -1444,7 +1625,7 @@ public partial class EmueraContent : Control
 			scrollContainer.ScrollVertical = targetVertical;
 			RememberDesiredContentScroll(targetHorizontal, targetVertical);
 			if (oldHorizontal != targetHorizontal || oldVertical != targetVertical)
-				TraceScroll("scale_bounds_scroll_set", $"allowShrink={allowShrink} from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
+				TraceScroll("scale_bounds_scroll_set", () => $"allowShrink={allowShrink} from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
 		}
 
 		return layoutChanged;
@@ -1674,6 +1855,11 @@ public partial class EmueraContent : Control
 				// Giving them a minimum size lets Godot containers add blank vertical space.
 				emuImg.CustomMinimumSize = Vector2.Zero;
 				container.AddChild(emuImg);
+				if (GenericUtils.IsImageDebugEnabled("render_rect"))
+					GenericUtils.ImageTrace("IMAGE.RENDER.TARGET", () => "image render target",
+						() => $"resource={cip.ResourceName} target=({Mathf.RoundToInt(emuImg.Position.X)},{Mathf.RoundToInt(emuImg.Position.Y)},{w},{imgH})");
+				if (GenericUtils.IsUiLayoutTraceEnabled("image"))
+					QueueUiLayoutTrace(emuImg, "image", cip.ResourceName, Mathf.RoundToInt(emuImg.Position.X), Mathf.RoundToInt(emuImg.Position.Y), w, imgH);
 				return EffectiveLineHeight;
 			}
 			else
@@ -2654,6 +2840,7 @@ public partial class EmueraContent : Control
 	public void SetLastButtonGeneration(int generation)
 	{
 		bool shouldAutoShowQuick = quickAutoHiddenUntilNextButtons
+			&& quickAutoHiddenWasVisible
 			&& generation >= 0
 			&& generation != quickAutoHiddenGeneration;
 		lastButtonGeneration = generation;
@@ -2665,8 +2852,7 @@ public partial class EmueraContent : Control
 			{
 				if (shouldAutoShowQuick)
 				{
-					quickAutoHiddenUntilNextButtons = false;
-					quickAutoHiddenGeneration = int.MinValue;
+					ClearQuickAutoHiddenState();
 					quickButtons.ShowPad();
 					UpdateSystemButtonVisuals();
 				}
@@ -2697,8 +2883,7 @@ public partial class EmueraContent : Control
 
 			if (shouldAutoShowQuick)
 			{
-				quickAutoHiddenUntilNextButtons = false;
-				quickAutoHiddenGeneration = int.MinValue;
+				ClearQuickAutoHiddenState();
 				quickButtons.ShowPad();
 				quickButtons.SetInputEnabled(true);
 				UpdateSystemButtonVisuals();
@@ -2766,7 +2951,9 @@ public partial class EmueraContent : Control
 		quickInputGateRevision = displayRevision;
 		quickInputGateTick = Time.GetTicksMsec();
 		quickAutoHiddenUntilNextButtons = true;
+		quickAutoHiddenWasVisible = quickButtons != null && quickButtons.IsShow;
 		quickAutoHiddenGeneration = (int)generation;
+		quickAutoHiddenTick = quickInputGateTick;
 		quickButtons?.SetInputEnabled(true);
 		quickButtons?.HidePad();
 		UpdateSystemButtonVisuals();
@@ -2807,6 +2994,31 @@ public partial class EmueraContent : Control
 		quickInputGateRevision = -1;
 		quickInputGateTick = 0;
 		quickButtons?.SetInputEnabled(true);
+		RestoreAutoHiddenQuickButtonsIfCurrent();
+	}
+
+	void ClearQuickAutoHiddenState()
+	{
+		quickAutoHiddenUntilNextButtons = false;
+		quickAutoHiddenWasVisible = false;
+		quickAutoHiddenGeneration = int.MinValue;
+		quickAutoHiddenTick = 0;
+	}
+
+	void RestoreAutoHiddenQuickButtonsIfCurrent()
+	{
+		if (!quickAutoHiddenUntilNextButtons || !quickAutoHiddenWasVisible || quickButtons == null)
+			return;
+		if (quickAutoHiddenGeneration != lastButtonGeneration)
+			return;
+
+		// 企业级说明：部分 ERB 流程会在同一按钮代内完成处理并继续等待输入。
+		// 快捷按钮此前为了防止连点被临时隐藏；核心空闲后必须恢复面板，否则手机端会失去“移动”等唯一触摸入口。
+		ClearQuickAutoHiddenState();
+		quickButtons.ShowPad();
+		quickButtons.SetInputEnabled(true);
+		SetLastButtonGeneration(lastButtonGeneration);
+		UpdateSystemButtonVisuals();
 	}
 
 	// Use the command button's final colored part as the quick-button text color.
@@ -2867,12 +3079,12 @@ public partial class EmueraContent : Control
 	void OnButtonPressed(string input, long generation, bool skip = false)
 	{
 		RememberCurrentContentScroll();
-		TraceScroll("button_pressed", $"input={GenericUtils.ClipTrace(input, 64)} gen={generation} lastGen={lastButtonGeneration} skip={skip}");
-		GenericUtils.StartScrollTraceCoreWindow($"button input={GenericUtils.ClipTrace(input, 64)} gen={generation} skip={skip}");
+		TraceScroll("button_pressed", () => $"input={GenericUtils.ClipTrace(input, 64)} gen={generation} lastGen={lastButtonGeneration} skip={skip}");
+		GenericUtils.StartScrollTraceCoreWindow(() => $"button input={GenericUtils.ClipTrace(input, 64)} gen={generation} skip={skip}");
 		if (generation < lastButtonGeneration)
 		{
 			// Old button clicked - send empty input (acts as skip/advance)
-			TraceScroll("button_pressed_old_generation", $"gen={generation} lastGen={lastButtonGeneration}");
+			TraceScroll("button_pressed_old_generation", () => $"gen={generation} lastGen={lastButtonGeneration}");
 			EmueraThread.instance.Input("", false, skip);
 			return;
 		}
@@ -2941,6 +3153,7 @@ public partial class EmueraContent : Control
 	// Toggle the input pad and hide mutually exclusive overlays.
 	void OnInputTogglePressed()
 	{
+		ClearQuickAutoHiddenState();
 		if (inputpad.IsShow)
 		{
 			inputpad.HidePad();
@@ -2959,14 +3172,12 @@ public partial class EmueraContent : Control
 	{
 		if (quickButtons.IsShow)
 		{
-			quickAutoHiddenUntilNextButtons = false;
-			quickAutoHiddenGeneration = int.MinValue;
+			ClearQuickAutoHiddenState();
 			quickButtons.HidePad();
 		}
 		else
 		{
-			quickAutoHiddenUntilNextButtons = false;
-			quickAutoHiddenGeneration = int.MinValue;
+			ClearQuickAutoHiddenState();
 			inputpad?.HidePad();
 			scalepad?.HidePad();
 			quickButtons.ShowPad();
@@ -3029,19 +3240,22 @@ public partial class EmueraContent : Control
 		var path = MinorShift.Emuera.Program.ExeDir;
 		var time = System.DateTime.Now;
 		string fname = time.ToString("yyyyMMdd-HHmmss");
-		path = System.IO.Path.Combine(path, fname + ".log");
+		path = System.IO.Path.Combine(path, $"emuera_{fname}.log");
 		bool result = false;
 		var console = GlobalStatic.Console;
 		if (console != null)
 			result = console.OutputLog(path);
 		string diagnosticPath = GenericUtils.GetDefaultDiagnosticLogPath(fname);
 		bool diagnosticResult = GenericUtils.ExportDiagnosticLog(diagnosticPath, out string diagnosticError);
+		string diagnosticDisplayPath = diagnosticResult
+			? GenericUtils.ResolveDiagnosticPathForDisplay(diagnosticPath)
+			: diagnosticError;
 
 		ShowMessageBox(
 			MultiLanguage.Get("[SaveLog]", "Save Log"),
-			result
-				? $"{MultiLanguage.Get("[SavePath]", "Path")}:\n{path}\nDiagnostic:\n{(diagnosticResult ? diagnosticPath : diagnosticError)}"
-				: MultiLanguage.Get("[Failure]", "Failure"));
+			$"{MultiLanguage.Get("[SavePath]", "Path")}:\n"
+			+ $"emuera: {(result ? path : MultiLanguage.Get("[Failure]", "Failure"))}\n"
+			+ $"gemuera: {diagnosticDisplayPath}");
 	}
 
 	// Ask the core to return to the title screen after confirmation.
@@ -3086,6 +3300,7 @@ public partial class EmueraContent : Control
 	// targets on phone screens.
 	void OnScaleTogglePressed()
 	{
+		ClearQuickAutoHiddenState();
 		if (scalepad.IsShow)
 		{
 			scalepad.HidePad();
@@ -3219,9 +3434,19 @@ public partial class EmueraContent : Control
 		RefreshCbgFollowScrollPositions();
 		RefreshCbgAnimationPauseState();
 		RefreshQuickInputGate();
+		RefreshUiDiagnosticOverlay();
 		if (quickInputGateActive && Time.GetTicksMsec() - quickInputGateTick >= QuickInputGateFallbackMs && !EmueraThread.instance.Running())
 		{
 			RestoreQuickInputGate();
+		}
+		else if (!quickInputGateActive
+			&& quickAutoHiddenUntilNextButtons
+			&& quickAutoHiddenWasVisible
+			&& quickAutoHiddenTick > 0
+			&& Time.GetTicksMsec() - quickAutoHiddenTick >= QuickInputGateFallbackMs
+			&& !EmueraThread.instance.Running())
+		{
+			RestoreAutoHiddenQuickButtonsIfCurrent();
 		}
 
 		if (!autoClickSkipEnabled)
@@ -3354,7 +3579,12 @@ public partial class EmueraContent : Control
 			contentDragLastPosition = pointerPosition;
 			contentLastDragTick = Time.GetTicksMsec();
 			lastScrollTraceDragTick = contentLastDragTick;
-			TraceScroll("pointer_press", $"button={contentDragStartedOnButton} input={GenericUtils.ClipTrace(input, 64)} gen={generation} pos=({Mathf.RoundToInt(pointerPosition.X)},{Mathf.RoundToInt(pointerPosition.Y)}) accept={acceptEvent}");
+		TraceScroll("pointer_press", () => $"button={contentDragStartedOnButton} input={GenericUtils.ClipTrace(input, 64)} gen={generation} pos=({Mathf.RoundToInt(pointerPosition.X)},{Mathf.RoundToInt(pointerPosition.Y)}) accept={acceptEvent}");
+			if (GenericUtils.IsTouchTraceEnabled("pointer"))
+				GenericUtils.TouchTrace("TOUCH.POINTER.PRESS", () => "pointer press",
+					() => $"button={contentDragStartedOnButton} pos=({Mathf.RoundToInt(pointerPosition.X)},{Mathf.RoundToInt(pointerPosition.Y)}) accept={acceptEvent}");
+			CaptureInputReplayEvent(contentDragStartedOnButton ? "button_press" : "touch_press",
+				input, pointerPosition, contentDragStartedOnButton);
 			if (contentDragStartedOnButton)
 			{
 				if (acceptEvent)
@@ -3376,7 +3606,10 @@ public partial class EmueraContent : Control
 			{
 				contentDragMoved = true;
 				contentScrollInteractionSerial++;
-				TraceScroll("drag_start", $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
+				TraceScroll("drag_start", () => $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
+				if (GenericUtils.IsTouchTraceEnabled("drag"))
+					GenericUtils.TouchTrace("TOUCH.DRAG.START", () => "drag start",
+						() => $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
 			}
 			if (contentDragMoved)
 			{
@@ -3387,7 +3620,10 @@ public partial class EmueraContent : Control
 				if (now - lastScrollTraceDragTick >= ScrollTraceDragIntervalMs)
 				{
 					lastScrollTraceDragTick = now;
-					TraceScroll("drag_move", $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
+					TraceScroll("drag_move", () => $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
+					if (GenericUtils.IsTouchTraceEnabled("drag"))
+						GenericUtils.TouchTrace("TOUCH.DRAG.MOVE", () => "drag move",
+							() => $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
 				}
 				contentDragLastPosition = pointerPosition;
 				if (acceptEvent)
@@ -3429,7 +3665,12 @@ public partial class EmueraContent : Control
 			restoreQuickInputGate = advanceTap;
 		}
 
-		TraceScroll("pointer_release", $"moved={contentDragMoved} button={contentDragStartedOnButton} pressedInput={GenericUtils.ClipTrace(pressedButtonInput, 64)} advance={advanceTap} handled={handled}");
+		TraceScroll("pointer_release", () => $"moved={contentDragMoved} button={contentDragStartedOnButton} pressedInput={GenericUtils.ClipTrace(pressedButtonInput, 64)} advance={advanceTap} handled={handled}");
+		if (GenericUtils.IsTouchTraceEnabled("pointer"))
+			GenericUtils.TouchTrace("TOUCH.POINTER.RELEASE", () => "pointer release",
+				() => $"moved={contentDragMoved} button={contentDragStartedOnButton} advance={advanceTap} handled={handled}");
+		CaptureInputReplayEvent(contentDragStartedOnButton ? "button_release" : "touch_release",
+			pressedButtonInput, pointerPosition, handled);
 		ResetContentDragState();
 		if (pressedButtonInput != null)
 		{
@@ -3531,6 +3772,7 @@ public partial class EmueraContent : Control
 			if (!contentTouchGestureActive)
 				return false;
 			ConsumeContentPointerEvent(acceptEvent);
+			CaptureInputReplayEvent("screen_drag", "", drag.Position, true);
 			return true;
 		}
 
@@ -3546,6 +3788,7 @@ public partial class EmueraContent : Control
 			contentPinchDirty = true;
 
 		ConsumeContentPointerEvent(acceptEvent);
+		CaptureInputReplayEvent("screen_drag", "", drag.Position, true);
 		return true;
 	}
 
@@ -3558,7 +3801,10 @@ public partial class EmueraContent : Control
 			contentScrollInteractionSerial++;
 			StopContentInertia();
 			ResetContentDragState();
-			TraceScroll("touch_gesture_begin", $"touches={contentTouchPositions.Count}");
+			TraceScroll("touch_gesture_begin", () => $"touches={contentTouchPositions.Count}");
+			if (GenericUtils.IsTouchTraceEnabled("pinch"))
+				GenericUtils.TouchTrace("TOUCH.PINCH.START", () => "pinch start",
+					() => $"touches={contentTouchPositions.Count}");
 		}
 		BeginContentPinch();
 	}
@@ -3687,7 +3933,7 @@ public partial class EmueraContent : Control
 			? new Vector2(desiredContentScrollHorizontal, desiredContentScrollVertical)
 			: new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
 		var contentFocus = (previousScroll + localFocus) / previousScale;
-		TraceScroll("scale_focus_begin", $"from={contentScale:0.###} to={ClampContentScale(scale):0.###} focus=({Mathf.RoundToInt(localFocus.X)},{Mathf.RoundToInt(localFocus.Y)})");
+		TraceScroll("scale_focus_begin", () => $"from={contentScale:0.###} to={ClampContentScale(scale):0.###} focus=({Mathf.RoundToInt(localFocus.X)},{Mathf.RoundToInt(localFocus.Y)})");
 
 		ApplyContentScaleValue(scale);
 		UpdateScaleBounds(false);
@@ -3714,7 +3960,7 @@ public partial class EmueraContent : Control
 		scrollContainer.ScrollHorizontal = targetHorizontal;
 		scrollContainer.ScrollVertical = targetVertical;
 		RememberDesiredContentScroll(targetHorizontal, targetVertical);
-		TraceScroll("scale_focus_restore", $"target=({targetHorizontal},{targetVertical})");
+		TraceScroll("scale_focus_restore", () => $"target=({targetHorizontal},{targetVertical})");
 	}
 
 	// Finish a multi-touch gesture and lock in the final focused scroll position.
@@ -3725,7 +3971,10 @@ public partial class EmueraContent : Control
 			UpdateScaleBounds(true);
 			RestoreContentScaleFocus(scaleFocusContentPoint, scaleFocusLocalPoint);
 		}
-		TraceScroll("touch_gesture_end", $"focus={contentPinchFocusValid}");
+		TraceScroll("touch_gesture_end", () => $"focus={contentPinchFocusValid}");
+		if (GenericUtils.IsTouchTraceEnabled("pinch"))
+			GenericUtils.TouchTrace("TOUCH.PINCH.END", () => "pinch end",
+				() => $"focus={contentPinchFocusValid}");
 		ResetContentTouchGestureState();
 	}
 
@@ -3749,6 +3998,37 @@ public partial class EmueraContent : Control
 			AcceptEvent();
 		else
 			GetViewport().SetInputAsHandled();
+	}
+
+	void CaptureInputReplayEvent(string kind, string input, Vector2 globalPosition, bool consumed)
+	{
+		if (!GenericUtils.IsInputReplayCaptureEnabled)
+			return;
+		GenericUtils.CaptureInputReplay(kind, input, globalPosition,
+			GetContentReplayPosition(globalPosition), BuildInputReplayWaitState(), consumed);
+	}
+
+	Vector2 GetContentReplayPosition(Vector2 globalPosition)
+	{
+		if (scrollContainer == null)
+			return globalPosition;
+		var rect = scrollContainer.GetGlobalRect();
+		var contentPosition = globalPosition - rect.Position;
+		contentPosition += new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+		if (contentScale > 0.001f)
+			contentPosition /= contentScale;
+		return contentPosition;
+	}
+
+	string BuildInputReplayWaitState()
+	{
+		var console = GlobalStatic.Console;
+		if (console == null)
+			return "none";
+		return "input=" + console.IsWaitingInput
+			+ ",enter=" + console.IsWaitingEnterKey
+			+ ",any=" + console.IsWaitAnyKey
+			+ ",something=" + console.IsWaitingInputSomething;
 	}
 
 	// Update the emuera pointer position in unscaled console coordinates.
@@ -3814,7 +4094,7 @@ public partial class EmueraContent : Control
 		RememberDesiredContentScroll(nextHorizontal, nextVertical);
 		var applied = new Vector2(nextHorizontal - oldHorizontal, nextVertical - oldVertical);
 		if (applied.LengthSquared() > 0.01f && !contentDragActive && !contentInertiaActive)
-			TraceScroll("scroll_delta", $"delta=({Mathf.RoundToInt(delta.X)},{Mathf.RoundToInt(delta.Y)}) applied=({Mathf.RoundToInt(applied.X)},{Mathf.RoundToInt(applied.Y)})");
+			TraceScroll("scroll_delta", () => $"delta=({Mathf.RoundToInt(delta.X)},{Mathf.RoundToInt(delta.Y)}) applied=({Mathf.RoundToInt(applied.X)},{Mathf.RoundToInt(applied.Y)})");
 		return applied;
 	}
 
@@ -3838,7 +4118,7 @@ public partial class EmueraContent : Control
 		scrollContainer.ScrollHorizontal = targetHorizontal;
 		scrollContainer.ScrollVertical = targetVertical;
 		RememberDesiredContentScroll(targetHorizontal, targetVertical);
-		TraceScroll("scroll_correction", $"from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
+		TraceScroll("scroll_correction", () => $"from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
 	}
 
 	// Estimate drag velocity for inertial scrolling.
@@ -3886,7 +4166,10 @@ public partial class EmueraContent : Control
 		if (contentScrollVelocity.Length() >= ContentInertiaMinVelocity)
 		{
 			contentInertiaActive = true;
-			TraceScroll("inertia_start", $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())} decel={Mathf.RoundToInt(contentInertiaDeceleration)}");
+			TraceScroll("inertia_start", () => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())} decel={Mathf.RoundToInt(contentInertiaDeceleration)}");
+			if (GenericUtils.IsTouchTraceEnabled("inertia"))
+				GenericUtils.TouchTrace("TOUCH.INERTIA.START", () => "inertia start",
+					() => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())} decel={Mathf.RoundToInt(contentInertiaDeceleration)}");
 		}
 		else
 			StopContentInertia();
@@ -3897,7 +4180,12 @@ public partial class EmueraContent : Control
 	{
 		bool shouldLog = contentInertiaActive || contentScrollVelocity.LengthSquared() > 0.01f || contentInertiaRemainder.LengthSquared() > 0.01f;
 		if (shouldLog)
-			TraceScroll("inertia_stop", $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())}");
+		{
+			TraceScroll("inertia_stop", () => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())}");
+			if (GenericUtils.IsTouchTraceEnabled("inertia"))
+				GenericUtils.TouchTrace("TOUCH.INERTIA.STOP", () => "inertia stop",
+					() => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())}");
+		}
 		contentInertiaActive = false;
 		contentScrollVelocity = Vector2.Zero;
 		contentInertiaRemainder = Vector2.Zero;
@@ -3980,8 +4268,8 @@ public partial class EmueraContent : Control
 
 		uint nowTick = MinorShift._Library.WinmmTimer.TickCount;
 		bool skipFlag = (nowTick - lastClickTick < 200);
-		TraceScroll("advance_tap", $"skip={skipFlag}");
-		GenericUtils.StartScrollTraceCoreWindow($"advance_tap skip={skipFlag}");
+		TraceScroll("advance_tap", () => $"skip={skipFlag}");
+		GenericUtils.StartScrollTraceCoreWindow(() => $"advance_tap skip={skipFlag}");
 		EmueraThread.instance.Input("", false, skipFlag);
 		lastClickTick = nowTick;
 		return true;
@@ -4086,6 +4374,75 @@ public partial class EmueraContent : Control
 					GetViewport().SetInputAsHandled();
 				}
 			}
+		}
+	}
+
+	sealed partial class UiDiagnosticOverlay : Control
+	{
+		const ulong RectLifetimeMs = 2500;
+		readonly List<OverlayRect> rects = new List<OverlayRect>(128);
+
+		public int MaxRects { get; set; } = 128;
+
+		struct OverlayRect
+		{
+			public Rect2 Rect;
+			public Color Color;
+			public ulong ExpireTick;
+		}
+
+		public override void _Ready()
+		{
+			MouseFilter = MouseFilterEnum.Ignore;
+			SetProcess(true);
+		}
+
+		public void AddRect(Rect2 rect, Color color)
+		{
+			if (rect.Size.X <= 0 || rect.Size.Y <= 0)
+				return;
+			int maxRects = System.Math.Max(1, MaxRects);
+			while (rects.Count >= maxRects)
+				rects.RemoveAt(0);
+			rects.Add(new OverlayRect
+			{
+				Rect = rect,
+				Color = color,
+				ExpireTick = Time.GetTicksMsec() + RectLifetimeMs
+			});
+			QueueRedraw();
+		}
+
+		public void ClearRects()
+		{
+			if (rects.Count == 0)
+				return;
+			rects.Clear();
+			QueueRedraw();
+		}
+
+		public override void _Process(double delta)
+		{
+			if (rects.Count == 0)
+				return;
+			ulong now = Time.GetTicksMsec();
+			bool changed = false;
+			for (int i = rects.Count - 1; i >= 0; i--)
+			{
+				if (rects[i].ExpireTick <= now)
+				{
+					rects.RemoveAt(i);
+					changed = true;
+				}
+			}
+			if (changed)
+				QueueRedraw();
+		}
+
+		public override void _Draw()
+		{
+			for (int i = 0; i < rects.Count; i++)
+				DrawRect(rects[i].Rect, rects[i].Color, false, 2.0f);
 		}
 	}
 }

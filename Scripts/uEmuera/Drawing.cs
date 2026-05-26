@@ -118,16 +118,24 @@ namespace uEmuera.Drawing
 
 		static bool TryReadImageSize(string path, out Size imageSize)
 		{
-			// Header-only size probing avoids decoding large CG files merely to set
-			// layout metadata. The actual Godot.Image is created lazily by
-			// SpriteManager when rendering needs it.
 			imageSize = new Size();
-			if (string.IsNullOrEmpty(path) || !File.Exists(path))
+			if (string.IsNullOrEmpty(path))
 				return false;
+
+			string resolvedPath = uEmuera.Utils.ResolveExistingFilePath(path);
+			if (!uEmuera.Utils.FileExists(resolvedPath))
+				return false;
+
 			try
 			{
-				string ext = Path.GetExtension(path).ToLowerInvariant();
-				using var stream = File.OpenRead(path);
+				// 企业级说明：Android/APK 主运行环境会从 /storage/emulated/0 等外部目录读取游戏资源。
+				// 这里不能直接使用 System.IO.File.OpenRead，否则在 Godot FileAccess 可读但 .NET 路径探测失败时，
+				// CSV 图像会被误判为 0x0，后续 SPRITECREATED/HTML 立绘显示链路会出现空白。
+				// 仍然只读取图片头，不提前解码整张图，避免低配手机在资源扫描阶段产生纹理上传和大内存峰值。
+				string ext = Path.GetExtension(resolvedPath).ToLowerInvariant();
+				using var stream = OpenImageHeaderStream(resolvedPath);
+				if (stream == null)
+					return false;
 				return ext switch
 				{
 					".png" => TryReadPngSize(stream, out imageSize),
@@ -140,6 +148,93 @@ namespace uEmuera.Drawing
 			catch
 			{
 				return false;
+			}
+		}
+
+		static Stream OpenImageHeaderStream(string path)
+		{
+			if (Godot.OS.GetName() == "Android")
+			{
+				var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+				if (file == null)
+				{
+					string resolved = uEmuera.Utils.ResolveExistingFilePath(path);
+					if (!string.Equals(resolved, path, StringComparison.Ordinal))
+						file = Godot.FileAccess.Open(resolved, Godot.FileAccess.ModeFlags.Read);
+				}
+				return file != null ? new GodotFileAccessReadStream(file) : null;
+			}
+			return File.OpenRead(path);
+		}
+
+		sealed class GodotFileAccessReadStream : Stream
+		{
+			readonly Godot.FileAccess file;
+
+			public GodotFileAccessReadStream(Godot.FileAccess file)
+			{
+				this.file = file;
+			}
+
+			public override bool CanRead { get { return true; } }
+			public override bool CanSeek { get { return true; } }
+			public override bool CanWrite { get { return false; } }
+			public override long Length { get { return (long)file.GetLength(); } }
+			public override long Position
+			{
+				get { return (long)file.GetPosition(); }
+				set { file.Seek((ulong)Math.Max(0, value)); }
+			}
+
+			public override int Read(byte[] buffer, int offset, int count)
+			{
+				if (buffer == null)
+					throw new ArgumentNullException(nameof(buffer));
+				if (offset < 0 || count < 0 || offset + count > buffer.Length)
+					throw new ArgumentOutOfRangeException();
+				long remaining = Length - Position;
+				if (remaining <= 0 || count <= 0)
+					return 0;
+				int readCount = (int)Math.Min(count, remaining);
+				byte[] data = file.GetBuffer(readCount);
+				Array.Copy(data, 0, buffer, offset, data.Length);
+				return data.Length;
+			}
+
+			public override int Read(Span<byte> buffer)
+			{
+				long remaining = Length - Position;
+				if (remaining <= 0 || buffer.Length <= 0)
+					return 0;
+				int readCount = (int)Math.Min(buffer.Length, remaining);
+				byte[] data = file.GetBuffer(readCount);
+				data.AsSpan().CopyTo(buffer);
+				return data.Length;
+			}
+
+			public override long Seek(long offset, SeekOrigin origin)
+			{
+				long target = origin switch
+				{
+					SeekOrigin.Begin => offset,
+					SeekOrigin.Current => Position + offset,
+					SeekOrigin.End => Length + offset,
+					_ => Position,
+				};
+				target = Math.Max(0, Math.Min(target, Length));
+				file.Seek((ulong)target);
+				return target;
+			}
+
+			public override void Flush() { }
+			public override void SetLength(long value) { throw new NotSupportedException(); }
+			public override void Write(byte[] buffer, int offset, int count) { throw new NotSupportedException(); }
+
+			protected override void Dispose(bool disposing)
+			{
+				if (disposing)
+					file.Dispose();
+				base.Dispose(disposing);
 			}
 		}
 

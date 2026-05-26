@@ -6,9 +6,9 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using Godot;
+using gEmuera.Diagnostics;
 using MinorShift.Emuera.GameView;
 
 public enum EmueraLogLevel
@@ -35,12 +35,13 @@ public enum EmueraLogCategory
     Save = 1 << 8,
     Config = 1 << 9,
     Performance = 1 << 10,
+    Touch = 1 << 11,
+    StatementRecognition = 1 << 12,
     All = int.MaxValue
 }
 
 internal static class GenericUtils
 {
-    static readonly ConcurrentQueue<LogRecord> logQueue = new ConcurrentQueue<LogRecord>();
     static readonly ConcurrentQueue<Action> uiQueue = new ConcurrentQueue<Action>();
     static int mainThreadId = -1;
     static int pendingUiActions = 0;
@@ -64,16 +65,7 @@ internal static class GenericUtils
     static int scrollTraceCoreLinesRemaining = 0;
     const string ScrollTracePrefix = "[SCROLL_TRACE]";
     const int ScrollTraceCoreBurstLineCount = 120;
-    const int DiagnosticLogCapacity = 1000;
     const int MaxLogMessageChars = 8192;
-    const string RuntimeConfigFileName = "config.json";
-    const string RuntimeConfigPath = "res://config.json";
-    const string RuntimeDebugModelKey = "debug_model";
-    static readonly object diagnosticLogLock = new object();
-    static readonly LogRecord[] diagnosticLogRing = new LogRecord[DiagnosticLogCapacity];
-    static int diagnosticLogStart = 0;
-    static int diagnosticLogCount = 0;
-    static long diagnosticLogSequence = 0;
 #if DEBUG || GEMUERA_DIAGNOSTIC_LOGS
     const bool VerboseLogBuild = true;
 #else
@@ -82,6 +74,19 @@ internal static class GenericUtils
     static int runtimeLogLevel = (int)EmueraLogLevel.Error;
     static int runtimeLogCategories = (int)EmueraLogCategory.All;
     static int mirrorNonErrorLogsToGodot = 0;
+    static int loggingInitialized = 0;
+    static RuntimeDiagnosticsConfig _runtimeConfig;
+    static InputReplayBuffer _inputReplay;
+    const int SaveLogOperationTrailCapacity = 5;
+    static readonly SaveLogOperationTrail _saveLogOperationTrail = new SaveLogOperationTrail(SaveLogOperationTrailCapacity);
+    static string _runtimeGamePath = "";
+    static string _runtimeCoreProfile = "";
+    static long _inputIdSequence;
+    static long _currentInputId;
+    static long _lastPerformanceSampleMs;
+    static double _performanceFrameMsTotal;
+    static double _performanceFrameMsMax;
+    static int _performanceFrameCount;
 
     public static bool HasPendingUIWork => Volatile.Read(ref pendingUiActions) > 0;
     public static bool HasPendingDisplayWork => Volatile.Read(ref pendingDisplayActions) > 0;
@@ -90,53 +95,6 @@ internal static class GenericUtils
     {
         get => Volatile.Read(ref scrollTraceEnabled) != 0;
         set => Volatile.Write(ref scrollTraceEnabled, value ? 1 : 0);
-    }
-
-    readonly struct LogRecord
-    {
-        public readonly long Sequence;
-        public readonly DateTimeOffset UtcTime;
-        public readonly long MonoMs;
-        public readonly EmueraLogLevel Level;
-        public readonly EmueraLogCategory Category;
-        public readonly int ThreadId;
-        public readonly string Source;
-        public readonly string Member;
-        public readonly int Line;
-        public readonly string Message;
-
-        public LogRecord(long sequence, DateTimeOffset utcTime, long monoMs, EmueraLogLevel level,
-            EmueraLogCategory category, int threadId, string source, string member, int line, string message)
-        {
-            Sequence = sequence;
-            UtcTime = utcTime;
-            MonoMs = monoMs;
-            Level = level;
-            Category = category;
-            ThreadId = threadId;
-            Source = source ?? "";
-            Member = member ?? "";
-            Line = line;
-            Message = message ?? "";
-        }
-
-        public string FormatForGodot()
-        {
-            return $"[{Level.ToString().ToUpperInvariant()}][{Category}] {Source}:{Line} {Member} | {Message}";
-        }
-
-        public string FormatForExport()
-        {
-            return "seq=" + Sequence.ToString("D6")
-                + " utc=" + UtcTime.ToString("O")
-                + " mono_ms=" + MonoMs
-                + " level=" + Level.ToString().ToUpperInvariant()
-                + " category=" + Category
-                + " thread=" + ThreadId
-                + " source=" + Source + ":" + Line
-                + " member=" + Member
-                + " message=\"" + EscapeForSingleLine(Message) + "\"";
-        }
     }
 
     sealed class SnakeAudioState
@@ -228,13 +186,8 @@ internal static class GenericUtils
 
     public static void FlushLogs()
     {
-        int maxLogs = OS.IsDebugBuild() ? 64 : 16;
-        int count = 0;
-        while (count < maxLogs && logQueue.TryDequeue(out var item))
-        {
-            WriteLog(item);
-            count++;
-        }
+        // 新诊断系统已统一在 LogInternal 中按主线程/非主线程策略直接写入，
+        // 旧日志刷新入口保留为空实现，避免调用方编译错误。
     }
 
     public static void FlushUI()
@@ -317,101 +270,256 @@ internal static class GenericUtils
         set => Volatile.Write(ref mirrorNonErrorLogsToGodot, value ? 1 : 0);
     }
 
+    /// <summary>
+    /// 企业级说明：日志初始化只做一次 TOML 配置解析，将开关展开为已解析的布尔值。
+    /// 后续热路径只读取展开后的 int/布尔，不再查询字典或解析字符串，避免 Android 帧尖峰。
+    /// 默认 Release/APK 只输出 Error，Debug/诊断构建可按 config.toml 开启模块。
+    /// </summary>
     public static void InitializeLogging()
     {
-        // Mobile Debug APK policy: unsigned Debug APKs are used as playable builds,
-        // so diagnostics must stay production-like unless config.json explicitly opts in.
-        // Do not enable noisy Debug/ScrollTrace output by default; core trace can run in
-        // script and input hot paths and will hurt Android gameplay performance.
-        bool diagnosticLoggingEnabled = VerboseLogBuild && IsDiagnosticLoggingRequested();
-        RuntimeLogLevel = diagnosticLoggingEnabled ? EmueraLogLevel.Debug : EmueraLogLevel.Error;
-        RuntimeLogCategories = EmueraLogCategory.All;
-        MirrorNonErrorLogsToGodot = diagnosticLoggingEnabled;
-        ScrollTraceEnabled = diagnosticLoggingEnabled;
+        // 企业级说明：Android APK 冷启动可能先进入启动器界面，随后才进入实际模拟器主场景。
+        // 日志系统必须允许更早初始化，但不能在场景切换时重置 ring buffer、session 或 breadcrumb。
+        if (Interlocked.CompareExchange(ref loggingInitialized, 1, 0) != 0)
+            return;
+
+        var loadResult = RuntimeDiagnosticsConfigLoader.Load();
+        _runtimeConfig = loadResult.Config ?? RuntimeDiagnosticsConfig.CreateDefault();
+        string sessionId = BuildSessionId(_runtimeConfig.LoggingSessionIdFormat);
+        DiagnosticLogRouter.Initialize(_runtimeConfig, sessionId);
+        DiagnosticLogSinks.Initialize(_runtimeConfig);
+        DiagnosticLogExporter.WriteBreadcrumb(_runtimeConfig, "LOG.INIT", "source=GenericUtils.InitializeLogging");
+
+        ApplyRuntimeDiagnosticsConfig();
+        WriteConfigSelfCheck(loadResult);
+        WriteAndroidStorageDiagnostics();
+
+        if (_runtimeConfig.BreadcrumbEnabled && _runtimeConfig.BreadcrumbWriteOnStartup)
+            DiagnosticLogExporter.WriteBreadcrumb(_runtimeConfig, "BREADCRUMB.WRITE", "event=startup");
+        if (_runtimeConfig.RetentionEnabled && _runtimeConfig.RetentionCleanupOnStartup)
+            DiagnosticLogExporter.RunRetentionCleanup(_runtimeConfig);
     }
 
-    static bool IsDiagnosticLoggingRequested()
-    {
-        return HasVerboseCommandLine() || IsDebugModelEnabledFromConfig();
-    }
+    public static RuntimeDiagnosticsConfig GetRuntimeDiagnosticsConfig() => _runtimeConfig;
 
-    static bool IsDebugModelEnabledFromConfig()
+    /// <summary>
+    /// 企业级说明：运行时面板保存 user://config.toml 后调用本方法热重载诊断开关。
+    /// 只更新等级、类别、镜像、滚动追踪和输入复现等轻量运行时状态；ring buffer 容量等结构性参数保留下次启动生效。
+    /// </summary>
+    public static bool ReloadRuntimeDiagnosticsConfig(out string errorMessage)
     {
-        if (!TryReadRuntimeConfigText(out string configText) || string.IsNullOrWhiteSpace(configText))
+        errorMessage = "";
+        var loadResult = RuntimeDiagnosticsConfigLoader.Load();
+        _runtimeConfig = loadResult.Config ?? RuntimeDiagnosticsConfig.CreateDefault();
+        ApplyRuntimeDiagnosticsConfig();
+        DiagnosticLogRouter.Reload(_runtimeConfig);
+        if (!string.IsNullOrEmpty(loadResult.ErrorMessage))
+        {
+            errorMessage = loadResult.ErrorMessage;
             return false;
+        }
+        return true;
+    }
 
+    static void ApplyRuntimeDiagnosticsConfig()
+    {
+        var model = _runtimeConfig.GetActiveDebugModel();
+        if (model != null && model.Enabled)
+        {
+            RuntimeLogLevel = RuntimeDiagnosticsConfig.ParseLogLevel(model.LogLevel);
+            MirrorNonErrorLogsToGodot = model.MirrorToGodot;
+            ScrollTraceEnabled = model.ScrollTrace;
+        }
+        else
+        {
+            RuntimeLogLevel = _runtimeConfig.GetRuntimeLogLevel();
+            MirrorNonErrorLogsToGodot = _runtimeConfig.LoggingMirrorNonErrorToGodot;
+            ScrollTraceEnabled = false;
+        }
+
+        RuntimeLogCategories = _runtimeConfig.GetActiveDebugModelCategoryMask();
+        if (RuntimeLogCategories == EmueraLogCategory.None)
+            RuntimeLogCategories = EmueraLogCategory.All;
+
+        DiagnosticLogSinks.SetMirrorNonErrorToGodot(MirrorNonErrorLogsToGodot);
+        _inputReplay = _runtimeConfig.InputReplayEnabled
+            ? new InputReplayBuffer(_runtimeConfig.InputReplayMaxEvents)
+            : null;
+    }
+
+    static void WriteConfigSelfCheck(RuntimeDiagnosticsConfigLoader.LoadResult loadResult)
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null)
+            return;
+        string activeModules = BuildActiveDiagnosticModulesSummary(cfg);
+        DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Config,
+            "CONFIG.SELF_CHECK", "runtime diagnostics config loaded",
+            "schema_version=" + cfg.LoggingSchemaVersion
+            + " file_found=" + loadResult.FileFound
+            + " loaded_from=" + DiagnosticLogRouter.RedactPath(loadResult.LoadedFrom)
+            + " quick_enabled=" + cfg.QuickDebugEnabled
+            + " quick_preset=" + cfg.QuickDebugPreset
+            + " quick_effective=" + cfg.QuickDebugEffectivePreset
+            + " quick_language=" + cfg.QuickDebugEffectiveLanguage
+            + " active_model=" + cfg.ActiveDebugModel
+            + " runtime_level=" + cfg.GetRuntimeLogLevel().ToString().ToLowerInvariant()
+            + " modules=" + activeModules);
+        DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Config,
+            "LOG.MODULES.ACTIVE", "active diagnostic modules",
+            "modules=" + activeModules);
+        if (!VerboseLogBuild && cfg.GetActiveDebugModel()?.Enabled == true)
+        {
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Warn, EmueraLogCategory.Config,
+                "LOG.MODULE.FORCED_OFF", "non-error logs are disabled by build policy",
+                "reason=release_build_without_GEMUERA_DIAGNOSTIC_LOGS");
+        }
+        if (cfg.QuickDebugPresetInvalid)
+        {
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Warn, EmueraLogCategory.Config,
+                "CONFIG.QUICK_PRESET.INVALID", "invalid quick_debug preset, fallback to normal",
+                "preset=" + DiagnosticLogRouter.RedactText(cfg.QuickDebugPreset, 64)
+                + " effective=" + cfg.QuickDebugEffectivePreset);
+        }
+        if (cfg.QuickDebugLanguageInvalid)
+        {
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Warn, EmueraLogCategory.Config,
+                "CONFIG.QUICK_LANGUAGE.INVALID", "invalid quick_debug language, fallback to zh_cn",
+                "language=" + DiagnosticLogRouter.RedactText(cfg.QuickDebugLanguage, 32)
+                + " effective=" + cfg.QuickDebugEffectiveLanguage);
+        }
+    }
+
+    static string BuildActiveDiagnosticModulesSummary(RuntimeDiagnosticsConfig cfg)
+    {
+        var parts = new List<string>(16);
+        if (cfg.TouchEnabled) parts.Add("touch");
+        if (cfg.InputDebugEnabled) parts.Add("input");
+        if (cfg.StatementRecognitionEnabled) parts.Add("statement_recognition");
+        if (cfg.ImageDebugEnabled) parts.Add("image");
+        if (cfg.UiLayoutEnabled) parts.Add("ui_layout");
+        if (cfg.RuntimePanelEnabled) parts.Add("runtime_panel");
+        if (cfg.InputReplayEnabled) parts.Add("input_replay");
+        if (cfg.AndroidStorageEnabled) parts.Add("android_storage");
+        if (cfg.PerformanceSamplingEnabled) parts.Add("performance_sampling");
+        if (cfg.SnapshotEnabled) parts.Add("snapshot");
+        if (cfg.UiOverlayEnabled) parts.Add("ui_overlay");
+        return parts.Count == 0 ? "none" : string.Join(",", parts);
+    }
+
+    static void WriteAndroidStorageDiagnostics()
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.AndroidStorageEnabled || OS.GetName() != "Android")
+            return;
+
+        string root = "/storage/emulated/0/emuera";
+        bool rootExists = Directory.Exists(root);
+        if (cfg.AndroidStorageLogPermissions)
+        {
+            string permissions = BuildGrantedPermissionSummary();
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.FileSystem,
+                "ANDROID_STORAGE.PERMISSION", "android storage permission summary",
+                "platform=" + OS.GetName()
+                + " mobile=" + OS.HasFeature("mobile")
+                + " permissions=" + permissions);
+        }
+        if (cfg.AndroidStorageLogScopedStorage)
+        {
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.FileSystem,
+                "ANDROID_STORAGE.SCOPED_STORAGE", "android scoped storage summary",
+                "root=" + root + " root_exists=" + rootExists + " max_path_records=" + cfg.AndroidStorageMaxPathRecords);
+        }
+        if (cfg.AndroidStorageLogGameScan)
+        {
+            int eraCount = CountEraDirectories(root, cfg.AndroidStorageMaxPathRecords, out string sample);
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.FileSystem,
+                "ANDROID_STORAGE.GAME_SCAN", "android game directory scan summary",
+                "root=" + root + " root_exists=" + rootExists + " era_count=" + eraCount + " sample=" + sample);
+        }
+        if (cfg.AndroidStorageLogReadWriteFailures)
+            TryAndroidStorageWriteProbe(root);
+    }
+
+    static string BuildGrantedPermissionSummary()
+    {
         try
         {
-            using var document = JsonDocument.Parse(configText);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty(RuntimeDebugModelKey, out JsonElement debugModel)
-                && debugModel.ValueKind == JsonValueKind.True;
+            var permissions = OS.GetGrantedPermissions();
+            if (permissions == null || permissions.Length == 0)
+                return "none";
+            return string.Join(",", permissions);
         }
-        catch (JsonException)
+        catch (Exception ex)
         {
-            return false;
+            return "unavailable:" + ex.GetType().Name;
         }
     }
 
-    static bool TryReadRuntimeConfigText(out string configText)
+    static int CountEraDirectories(string root, int maxRecords, out string sample)
     {
-        configText = "";
-        if (Godot.FileAccess.FileExists(RuntimeConfigPath))
+        var samples = new List<string>(Math.Max(1, Math.Min(maxRecords, 16)));
+        int count = CountEraDirectoriesRecursive(root, 0, 2, Math.Max(1, maxRecords), samples);
+        sample = samples.Count == 0 ? "" : string.Join("|", samples);
+        return count;
+    }
+
+    static int CountEraDirectoriesRecursive(string path, int depth, int maxDepth, int maxRecords, List<string> samples)
+    {
+        if (string.IsNullOrEmpty(path) || depth > maxDepth || !Directory.Exists(path))
+            return 0;
+        int count = 0;
+        try
         {
-            using var configFile = Godot.FileAccess.Open(RuntimeConfigPath, Godot.FileAccess.ModeFlags.Read);
-            if (configFile != null)
+            foreach (string dir in Directory.EnumerateDirectories(path))
             {
-                configText = configFile.GetAsText();
-                return true;
+                if (IsEraDirectory(dir))
+                {
+                    count++;
+                    if (samples.Count < maxRecords)
+                        samples.Add(DiagnosticLogRouter.RedactPath(dir));
+                }
+                if (depth < maxDepth)
+                    count += CountEraDirectoriesRecursive(dir, depth + 1, maxDepth, maxRecords, samples);
+                if (samples.Count >= maxRecords && count >= maxRecords)
+                    break;
             }
         }
-
-        if (TryReadRuntimeConfigTextFromFile(Path.Combine(AppContext.BaseDirectory, RuntimeConfigFileName), out configText))
-            return true;
-
-        try
+        catch (Exception ex)
         {
-            string currentDirectory = Directory.GetCurrentDirectory();
-            if (!string.Equals(currentDirectory, AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase)
-                && TryReadRuntimeConfigTextFromFile(Path.Combine(currentDirectory, RuntimeConfigFileName), out configText))
-            {
-                return true;
-            }
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Warn, EmueraLogCategory.FileSystem,
+                "ANDROID_STORAGE.READ_FAIL", "android game directory scan failed",
+                "path=" + DiagnosticLogRouter.RedactPath(path) + " error=" + ex.GetType().Name);
         }
-        catch (Exception ex) when (ex is IOException
-            || ex is UnauthorizedAccessException
-            || ex is ArgumentException
-            || ex is NotSupportedException)
-        {
-            return false;
-        }
-
-        return false;
+        return count;
     }
 
-    static bool TryReadRuntimeConfigTextFromFile(string path, out string configText)
+    static bool IsEraDirectory(string path)
     {
-        configText = "";
+        return Directory.Exists(System.IO.Path.Combine(path, "ERB"))
+            || Directory.Exists(System.IO.Path.Combine(path, "erb"));
+    }
+
+    static void TryAndroidStorageWriteProbe(string root)
+    {
+        if (!Directory.Exists(root))
+            return;
+        string probe = System.IO.Path.Combine(root, ".gemuera_write_probe.tmp");
         try
         {
-            if (!File.Exists(path))
-                return false;
-            configText = File.ReadAllText(path, Encoding.UTF8);
-            return true;
+            File.WriteAllText(probe, "probe", Encoding.UTF8);
+            File.Delete(probe);
         }
-        catch (Exception ex) when (ex is IOException
-            || ex is UnauthorizedAccessException
-            || ex is ArgumentException
-            || ex is NotSupportedException)
+        catch (Exception ex)
         {
-            return false;
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Warn, EmueraLogCategory.FileSystem,
+                "ANDROID_STORAGE.WRITE_FAIL", "android storage write probe failed",
+                "path=" + DiagnosticLogRouter.RedactPath(probe) + " error=" + ex.GetType().Name);
         }
     }
 
     /// <summary>
-    /// Central runtime gate for all diagnostic logs. Normal Release APKs compile out
-    /// non-error call sites; this gate remains for Debug and diagnostic APKs where
-    /// players may enable only the categories needed for a bug report.
+    /// 企业级说明：所有诊断日志的运行时总闸门。
+    /// Release/APK 默认只允许 Error；诊断构建中也必须同时通过等级、类别和模块开关，防止误开高频日志拖慢手机。
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsLogEnabled(EmueraLogLevel level, EmueraLogCategory category = EmueraLogCategory.General)
@@ -517,34 +625,79 @@ internal static class GenericUtils
         LogInternal(level, category, content, messageFactory, member, file, line);
     }
 
+    /// <summary>
+    /// 企业级说明：所有日志统一经 DiagnosticLogRouter 做开关/限流判断，再经 DiagnosticLogSinks 写入 ring buffer 和 Godot 控制台。
+    /// 关闭日志时不构造 message，不对 category 做额外归一化，避免热路径分配。
+    /// 限流检查在 message 构造之前，若被限流则直接返回，不产生字符串。
+    /// </summary>
     static void LogInternal(EmueraLogLevel level, EmueraLogCategory category, object content,
         Func<string> messageFactory, string member, string file, int line)
     {
         if (!IsLogEnabled(level, category))
             return;
 
+        // 先用初始 category 推导 event_id 做限流预检，避免构造 message 后被限流浪费分配。
+        string preliminaryEventId = DeriveEventId(category, level);
+        if (!DiagnosticLogRouter.IsEnabled(level, category, preliminaryEventId))
+            return;
+
         string message = BuildLogMessage(content, messageFactory);
         category = NormalizeLogCategory(category, message);
-        var record = new LogRecord(
-            Interlocked.Increment(ref diagnosticLogSequence),
-            DateTimeOffset.UtcNow,
-            (long)Time.GetTicksMsec(),
-            level,
-            category,
-            System.Environment.CurrentManagedThreadId,
-            NormalizeSourcePath(file),
-            member,
-            line,
-            message);
+        string eventId = DeriveEventId(category, level);
 
-        AppendDiagnosticLog(record);
-        if (ShouldMirrorToGodot(level))
-        {
-            if (IsMainThread())
-                WriteLog(record);
-            else
-                logQueue.Enqueue(record);
-        }
+        string source = NormalizeSourcePath(file);
+        string data = AppendCorrelationData(category, eventId, "", source, line);
+        var record = DiagnosticLogRouter.BuildRecord(level, category, eventId, message, data, member, source, line);
+        DiagnosticLogSinks.Write(record);
+
+        if (level >= EmueraLogLevel.Error)
+            DiagnosticLogExporter.NotifyError(eventId);
+        else
+            DiagnosticLogExporter.NotifyEvent(eventId);
+    }
+
+    /// <summary>
+    /// 企业级说明：结构化诊断日志专用入口，接受调用方显式传入的 event_id 和 data。
+    /// 不走 DeriveEventId 派生，确保 TOUCH.* / INPUT.* / IMAGE.* / UI_LAYOUT.* 等稳定事件 ID 原样写入记录。
+    /// 限流使用显式 eventId，保证同一事件 ID 有独立限流桶。
+    /// messageFactory 为延迟构造，仅在开关和限流通过后执行。
+    /// </summary>
+    static void LogStructured(EmueraLogLevel level, EmueraLogCategory category,
+        string eventId, string data,
+        Func<string> messageFactory,
+        string member, string file, int line)
+    {
+        LogStructured(level, category, eventId, () => data, messageFactory, member, file, line);
+    }
+
+    /// <summary>
+    /// 企业级说明：结构化 data 也必须延迟构造。Android 触摸、图片和 UI 几何日志开启后仍可能被限流，
+    /// 因此 message/data 都只能在开关、类别和事件限流全部通过后再生成。
+    /// </summary>
+    static void LogStructured(EmueraLogLevel level, EmueraLogCategory category,
+        string eventId, Func<string> dataFactory,
+        Func<string> messageFactory,
+        string member, string file, int line)
+    {
+        if (!IsLogEnabled(level, category))
+            return;
+        if (string.IsNullOrEmpty(eventId))
+            eventId = DeriveEventId(category, level);
+
+        // 限流预检：使用显式 event_id，避免构造 message 后被限流浪费分配。
+        if (!DiagnosticLogRouter.IsEnabled(level, category, eventId))
+            return;
+
+        string source = NormalizeSourcePath(file);
+        string message = BuildLogMessage(null, messageFactory);
+        string data = AppendCorrelationData(category, eventId, BuildLogData(dataFactory), source, line);
+        var record = DiagnosticLogRouter.BuildRecord(level, category, eventId, message, data ?? "", member, source, line);
+        DiagnosticLogSinks.Write(record);
+
+        if (level >= EmueraLogLevel.Error)
+            DiagnosticLogExporter.NotifyError(eventId);
+        else
+            DiagnosticLogExporter.NotifyEvent(eventId);
     }
 
     static string BuildLogMessage(object content, Func<string> messageFactory)
@@ -561,52 +714,116 @@ internal static class GenericUtils
         return ClipLogMessage(message);
     }
 
-    static bool ShouldMirrorToGodot(EmueraLogLevel level)
+    static string BuildLogData(Func<string> dataFactory)
     {
-        return level >= EmueraLogLevel.Error || Volatile.Read(ref mirrorNonErrorLogsToGodot) != 0;
-    }
-
-    static void WriteLog(LogRecord record)
-    {
-        string message = record.FormatForGodot();
-        switch (record.Level)
+        if (dataFactory == null)
+            return "";
+        try
         {
-            case EmueraLogLevel.Warn:
-                GD.PushWarning(message);
-                break;
-            case EmueraLogLevel.Error:
-                GD.PushError(message);
-                break;
-            default:
-                GD.Print(message);
-                break;
+            return dataFactory() ?? "";
+        }
+        catch (Exception ex)
+        {
+            return "[LOGGER] data factory failed: " + ex.GetType().Name + ": " + ex.Message;
         }
     }
 
-    static void AppendDiagnosticLog(LogRecord record)
+    static string AppendCorrelationData(EmueraLogCategory category, string eventId, string data, string source, int line)
     {
-        lock (diagnosticLogLock)
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.CorrelationEnabled)
+            return data ?? "";
+
+        string result = data ?? "";
+        // 企业级说明：关联字段在日志通过开关和限流之后追加，避免关闭调试时产生字符串分配。
+        // 字段采用轻量整数或短哈希，不在 Android 热路径生成 GUID。
+        if (cfg.CorrelationSessionId && !ContainsDataKey(result, "session_id"))
+            result = AppendDataField(result, "session_id=" + DiagnosticLogRouter.SessionId);
+        if (cfg.CorrelationInputId && !ContainsDataKey(result, "input_id"))
+            result = AppendDataField(result, "input_id=" + CurrentInputId);
+        if (cfg.CorrelationRenderBatchId
+            && (category == EmueraLogCategory.UI || category == EmueraLogCategory.Sprite)
+            && !ContainsDataKey(result, "render_batch_id"))
         {
-            int index = (diagnosticLogStart + diagnosticLogCount) % DiagnosticLogCapacity;
-            if (diagnosticLogCount == DiagnosticLogCapacity)
-            {
-                diagnosticLogRing[diagnosticLogStart] = record;
-                diagnosticLogStart = (diagnosticLogStart + 1) % DiagnosticLogCapacity;
-                return;
-            }
-            diagnosticLogRing[index] = record;
-            diagnosticLogCount++;
+            result = AppendDataField(result, "render_batch_id=" + UiFrameGeneration);
         }
+        if (cfg.CorrelationLinePartId
+            && (category == EmueraLogCategory.UI || category == EmueraLogCategory.Sprite || category == EmueraLogCategory.Script)
+            && !ContainsDataKey(result, "line_part_id"))
+        {
+            result = AppendDataField(result, "line_part_id=" + BuildLinePartId(source, line));
+        }
+        if (cfg.CorrelationImageId && category == EmueraLogCategory.Sprite && !ContainsDataKey(result, "image_id"))
+            result = AppendDataField(result, "image_id=" + BuildImageCorrelationId(eventId, result));
+        return result;
     }
 
-    static LogRecord[] SnapshotDiagnosticLog()
+    static bool ContainsDataKey(string data, string key)
     {
-        lock (diagnosticLogLock)
+        return !string.IsNullOrEmpty(data) && data.Contains(key + "=", StringComparison.Ordinal);
+    }
+
+    static string AppendDataField(string data, string field)
+    {
+        if (string.IsNullOrEmpty(data))
+            return field;
+        return data + " " + field;
+    }
+
+    static string BuildLinePartId(string source, int line)
+    {
+        string src = string.IsNullOrEmpty(source) ? "unknown" : System.IO.Path.GetFileNameWithoutExtension(source);
+        return src + ":" + line;
+    }
+
+    static string BuildImageCorrelationId(string eventId, string data)
+    {
+        string key = ExtractDataValue(data, "resource");
+        if (string.IsNullOrEmpty(key))
+            key = ExtractDataValue(data, "name");
+        if (string.IsNullOrEmpty(key))
+            key = ExtractDataValue(data, "filename");
+        if (string.IsNullOrEmpty(key))
+            key = eventId ?? "image";
+        uint hash = 2166136261u;
+        foreach (char c in key)
         {
-            var snapshot = new LogRecord[diagnosticLogCount];
-            for (int i = 0; i < snapshot.Length; i++)
-                snapshot[i] = diagnosticLogRing[(diagnosticLogStart + i) % DiagnosticLogCapacity];
-            return snapshot;
+            hash ^= c;
+            hash *= 16777619u;
+        }
+        return "img_" + hash.ToString("x8");
+    }
+
+    static string ExtractDataValue(string data, string key)
+    {
+        if (string.IsNullOrEmpty(data) || string.IsNullOrEmpty(key))
+            return "";
+        string prefix = key + "=";
+        foreach (var part in data.Split(' '))
+        {
+            if (part.StartsWith(prefix, StringComparison.Ordinal))
+                return part.Substring(prefix.Length);
+        }
+        return "";
+    }
+
+    static string DeriveEventId(EmueraLogCategory category, EmueraLogLevel level)
+    {
+        switch (category)
+        {
+            case EmueraLogCategory.Sprite: return "SPRITE." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.Audio: return "AUDIO." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.Input: return "INPUT." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.Script: return "SCRIPT." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.UI: return "UI." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.FileSystem: return "FS." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.Load: return "LOAD." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.Save: return "SAVE." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.Config: return "CONFIG." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.Performance: return "PERF." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.Touch: return "TOUCH." + level.ToString().ToUpperInvariant();
+            case EmueraLogCategory.StatementRecognition: return "PARSER." + level.ToString().ToUpperInvariant();
+            default: return "LOG." + level.ToString().ToUpperInvariant();
         }
     }
 
@@ -614,13 +831,33 @@ internal static class GenericUtils
     {
         if (string.IsNullOrEmpty(stamp))
             stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        return $"user://diagnostics/gemuera-{stamp}-diagnostic.log";
+        return $"{DiagnosticLogExporter.GameDirectoryPathPrefix}gemuera_{stamp}.log";
+    }
+
+    public static string ResolveDiagnosticPathForDisplay(string path)
+    {
+        return DiagnosticLogExporter.ResolvePathForDisplay(path);
+    }
+
+    static string BuildSessionId(string format)
+    {
+        // 企业级说明：session_id_format 来自可编辑 TOML，不能让格式错误阻断 APK 启动。
+        // 格式异常时回退到稳定默认值，并继续让配置自检日志记录实际运行状态。
+        if (string.IsNullOrWhiteSpace(format))
+            format = "yyyyMMdd-HHmmss";
+        try
+        {
+            return DateTime.Now.ToString(format);
+        }
+        catch (FormatException)
+        {
+            return DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        }
     }
 
     /// <summary>
-    /// Writes the in-memory diagnostic ring buffer only when the user asks for it.
-    /// This avoids persistent storage I/O during Android gameplay while still
-    /// producing a source/line-oriented report that humans and AI tools can inspect.
+    /// 企业级说明：导出日志只在用户主动触发时写盘，Android 游玩期间不产生文件 I/O。
+    /// 委托 DiagnosticLogExporter 生成带报告头的结构化日志。
     /// </summary>
     public static bool ExportDiagnosticLog(string path, out string errorMessage)
     {
@@ -628,91 +865,25 @@ internal static class GenericUtils
         if (string.IsNullOrEmpty(path))
             path = GetDefaultDiagnosticLogPath();
 
-        try
-        {
-            string report = BuildDiagnosticReport();
-            if (path.Contains("://", StringComparison.Ordinal))
-            {
-                if (!EnsureGodotDirectoryForFile(path, out errorMessage))
-                    return false;
-                using var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Write);
-                if (file == null)
-                {
-                    errorMessage = Godot.FileAccess.GetOpenError().ToString();
-                    return false;
-                }
-                file.StoreString(report);
-                return true;
-            }
+        if (_runtimeConfig != null && _runtimeConfig.BreadcrumbWriteOnExport)
+            DiagnosticLogExporter.WriteBreadcrumb(_runtimeConfig, "BREADCRUMB.WRITE", "event=before_export path=" + path);
 
-            string dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-            File.WriteAllText(path, report, Encoding.UTF8);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = ex.GetType().Name + ": " + ex.Message;
-            return false;
-        }
+        string gamePath = _runtimeGamePath;
+        string coreProfile = _runtimeCoreProfile;
+        bool useLazyLoading = false;
+        bool ok = DiagnosticLogExporter.ExportDiagnosticLog(_runtimeConfig, path, gamePath, coreProfile, useLazyLoading, _saveLogOperationTrail, out errorMessage);
+
+        if (_runtimeConfig != null && _runtimeConfig.BreadcrumbWriteOnExport)
+            DiagnosticLogExporter.WriteBreadcrumb(_runtimeConfig, "BREADCRUMB.WRITE", "event=after_export ok=" + ok);
+        return ok;
     }
 
-    static string BuildDiagnosticReport()
+    public static bool ExportDiagnosticPackage(string outputDirectory, out string errorMessage)
     {
-        var snapshot = SnapshotDiagnosticLog();
-        var builder = new StringBuilder(snapshot.Length * 160 + 512);
-        builder.AppendLine("# gEmuera diagnostic log");
-        builder.AppendLine("# GeneratedUtc=" + DateTimeOffset.UtcNow.ToString("O"));
-        builder.AppendLine("# Platform=" + OS.GetName()
-            + " DebugBuild=" + OS.IsDebugBuild()
-            + " VerboseLogBuild=" + VerboseLogBuild
-            + " RuntimeLevel=" + RuntimeLogLevel
-            + " Categories=" + RuntimeLogCategories
-            + " Capacity=" + DiagnosticLogCapacity);
-        builder.AppendLine("# Columns: seq utc mono_ms level category thread source member message");
-        builder.AppendLine();
-        foreach (var record in snapshot)
-            builder.AppendLine(record.FormatForExport());
-        return builder.ToString();
-    }
-
-    static bool EnsureGodotDirectoryForFile(string path, out string errorMessage)
-    {
-        errorMessage = "";
-        string normalized = path.Replace('\\', '/');
-        int slash = normalized.LastIndexOf('/');
-        if (slash < 0)
-            return true;
-        string dirPath = normalized.Substring(0, slash);
-        if (dirPath.EndsWith("://", StringComparison.Ordinal))
-            return true;
-
-        if (dirPath.StartsWith("user://", StringComparison.OrdinalIgnoreCase))
-        {
-            using var root = DirAccess.Open("user://");
-            if (root == null)
-            {
-                errorMessage = DirAccess.GetOpenError().ToString();
-                return false;
-            }
-            string relative = dirPath.Substring("user://".Length);
-            var result = root.MakeDirRecursive(relative);
-            if (result != Godot.Error.Ok)
-            {
-                errorMessage = result.ToString();
-                return false;
-            }
-            return true;
-        }
-
-        var absoluteResult = DirAccess.MakeDirRecursiveAbsolute(dirPath);
-        if (absoluteResult != Godot.Error.Ok)
-        {
-            errorMessage = absoluteResult.ToString();
-            return false;
-        }
-        return true;
+        string gamePath = _runtimeGamePath;
+        string coreProfile = _runtimeCoreProfile;
+        bool useLazyLoading = false;
+        return DiagnosticLogExporter.ExportDiagnosticPackage(_runtimeConfig, outputDirectory, gamePath, coreProfile, useLazyLoading, _inputReplay, out errorMessage);
     }
 
     static string NormalizeSourcePath(string file)
@@ -761,30 +932,35 @@ internal static class GenericUtils
         return value.Substring(0, MaxLogMessageChars) + "...<truncated>";
     }
 
-    static string EscapeForSingleLine(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-            return "";
-        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
-    }
-
-    static bool HasVerboseCommandLine()
-    {
-        foreach (string arg in OS.GetCmdlineArgs())
-        {
-            if (string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public static void ScrollTrace(string category, string message)
     {
         if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
             return;
+        WriteScrollTrace(category, message);
+    }
+
+    /// <summary>
+    /// 企业级说明：滚动/输入追踪属于 Android 高频路径，必须在 ScrollTrace 开关和日志等级通过后再构造文本。
+    /// 该重载用于替换调用点的插值字符串，避免调试关闭时仍产生 GC 分配。
+    /// </summary>
+    public static void ScrollTrace(string category, Func<string> messageFactory)
+    {
+        if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
+            return;
+        string message;
+        try
+        {
+            message = messageFactory != null ? messageFactory() : "";
+        }
+        catch (Exception ex)
+        {
+            message = "[LOGGER] scroll trace factory failed: " + ex.GetType().Name + ": " + ex.Message;
+        }
+        WriteScrollTrace(category, message);
+    }
+
+    static void WriteScrollTrace(string category, string message)
+    {
         int seq = Interlocked.Increment(ref scrollTraceSequence);
         string formatted = $"{ScrollTracePrefix} #{seq} t={GetTickMs()} {category}: {message}";
         LogInternal(EmueraLogLevel.Debug, EmueraLogCategory.Script, formatted, null, nameof(ScrollTrace), "Scripts/GenericUtils.cs", 0);
@@ -796,6 +972,23 @@ internal static class GenericUtils
             return;
         Interlocked.Exchange(ref scrollTraceCoreLinesRemaining, ScrollTraceCoreBurstLineCount);
         ScrollTrace("core", $"window_start lines={ScrollTraceCoreBurstLineCount} reason={ClipTrace(reason)}");
+    }
+
+    public static void StartScrollTraceCoreWindow(Func<string> reasonFactory)
+    {
+        if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
+            return;
+        string reason;
+        try
+        {
+            reason = reasonFactory != null ? reasonFactory() : "";
+        }
+        catch (Exception ex)
+        {
+            reason = "[LOGGER] core window reason failed: " + ex.GetType().Name + ": " + ex.Message;
+        }
+        Interlocked.Exchange(ref scrollTraceCoreLinesRemaining, ScrollTraceCoreBurstLineCount);
+        ScrollTrace("core", () => $"window_start lines={ScrollTraceCoreBurstLineCount} reason={ClipTrace(reason)}");
     }
 
     public static bool TryConsumeScrollTraceCoreLine()
@@ -820,6 +1013,359 @@ internal static class GenericUtils
         if (value.Length <= maxLength)
             return value;
         return value.Substring(0, maxLength) + "...";
+    }
+
+    // ---------- 模块化调试开关兼容层 ----------
+
+    /// <summary>
+    /// 企业级说明：触摸调试开关默认关闭，调用前必须先判断，避免构造日志文本。
+    /// 返回 true 时，后续代码可安全构造 TOUCH.* 诊断日志。
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsTouchTraceEnabled(string subSwitch = "")
+    {
+        if (string.IsNullOrEmpty(subSwitch))
+            return (_runtimeConfig?.TouchEnabled ?? false) && DiagnosticLogRouter.IsCategoryEnabled(EmueraLogCategory.Touch);
+        return DiagnosticLogRouter.IsTouchEnabled(subSwitch);
+    }
+
+    /// <summary>
+    /// 企业级说明：语句识别调试开关默认关闭，未获用户确认前不开启。
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsStatementTraceEnabled(string subSwitch = "")
+    {
+        if (string.IsNullOrEmpty(subSwitch))
+            return (_runtimeConfig?.StatementRecognitionEnabled ?? false) && DiagnosticLogRouter.IsCategoryEnabled(EmueraLogCategory.StatementRecognition);
+        return DiagnosticLogRouter.IsStatementRecognitionEnabled(subSwitch);
+    }
+
+    /// <summary>
+    /// 企业级说明：输入调试开关默认关闭，只在输入链路记录 SUBMIT/CONSUME 等关键事件。
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsInputTraceEnabled(string subSwitch = "")
+    {
+        if (string.IsNullOrEmpty(subSwitch))
+            return (_runtimeConfig?.InputDebugEnabled ?? false) && DiagnosticLogRouter.IsCategoryEnabled(EmueraLogCategory.Input);
+        return DiagnosticLogRouter.IsInputDebugEnabled(subSwitch);
+    }
+
+    /// <summary>
+    /// 企业级说明：图片调试开关默认关闭，成功日志默认不记录，避免图片热路径分配。
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsImageDebugEnabled(string subSwitch = "")
+    {
+        if (string.IsNullOrEmpty(subSwitch))
+            return (_runtimeConfig?.ImageDebugEnabled ?? false) && DiagnosticLogRouter.IsCategoryEnabled(EmueraLogCategory.Sprite);
+        return DiagnosticLogRouter.IsImageDebugEnabled(subSwitch);
+    }
+
+    /// <summary>
+    /// 企业级说明：UI 几何调试开关默认关闭，且默认只记录 mismatch，不记录所有 part。
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsUiLayoutTraceEnabled(string subSwitch = "")
+    {
+        if (string.IsNullOrEmpty(subSwitch))
+            return (_runtimeConfig?.UiLayoutEnabled ?? false) && DiagnosticLogRouter.IsCategoryEnabled(EmueraLogCategory.UI);
+        return DiagnosticLogRouter.IsUiLayoutEnabled(subSwitch);
+    }
+
+    public static bool IsUiLayoutTargetRectTraceEnabled()
+    {
+        return IsUiLayoutTraceEnabled() && !(_runtimeConfig?.UiLayoutMismatchOnly ?? true) && (_runtimeConfig?.UiLayoutTargetRect ?? false);
+    }
+
+    public static bool IsUiLayoutActualRectTraceEnabled()
+    {
+        return IsUiLayoutTraceEnabled() && !(_runtimeConfig?.UiLayoutMismatchOnly ?? true) && (_runtimeConfig?.UiLayoutActualRect ?? false);
+    }
+
+    public static bool IsUiLayoutMismatchTraceEnabled()
+    {
+        return IsUiLayoutTraceEnabled();
+    }
+
+    public static int UiLayoutMismatchThresholdPx => _runtimeConfig?.UiLayoutMismatchThresholdPx ?? 2;
+
+    public static bool IsUiOverlayEnabled() => _runtimeConfig?.UiOverlayEnabled ?? false;
+
+    public static bool UiOverlayTargetRectEnabled => _runtimeConfig?.UiOverlayTargetRect ?? false;
+    public static bool UiOverlayActualRectEnabled => _runtimeConfig?.UiOverlayActualRect ?? false;
+    public static bool UiOverlayMismatchEnabled => _runtimeConfig?.UiOverlayMismatch ?? true;
+    public static bool UiOverlayImageRectEnabled => _runtimeConfig?.UiOverlayImageRect ?? true;
+    public static bool UiOverlayButtonRectEnabled => _runtimeConfig?.UiOverlayButtonRect ?? true;
+    public static int UiOverlayMaxDrawnRects => _runtimeConfig?.UiOverlayMaxDrawnRects ?? 128;
+
+    public static string RedactTracePath(string path) => DiagnosticLogRouter.RedactPath(path);
+
+    /// <summary>
+    /// 企业级说明：输出结构化触摸诊断日志，event_id 与 data 原样写入结构化记录。
+    /// message 延迟构造，仅在开关和限流通过后执行。
+    /// 调用前建议先通过 IsTouchTraceEnabled 判断，避免热路径字符串分配。
+    /// </summary>
+    public static void TouchTrace(string eventId, string message, string data = "",
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsTouchTraceEnabled())
+            return;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.Touch, eventId, data,
+            () => DiagnosticLogRouter.RedactText(message, _runtimeConfig?.LoggingMaxMessageChars ?? MaxLogMessageChars),
+            member, file, line);
+    }
+
+    public static void TouchTrace(string eventId, Func<string> messageFactory, Func<string> dataFactory = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsTouchTraceEnabled())
+            return;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.Touch, eventId, dataFactory,
+            () => DiagnosticLogRouter.RedactText(messageFactory?.Invoke(), _runtimeConfig?.LoggingMaxMessageChars ?? MaxLogMessageChars),
+            member, file, line);
+    }
+
+    /// <summary>
+    /// 企业级说明：输出结构化语句识别诊断日志，event_id 与 data 原样写入结构化记录。
+    /// 脚本文本默认截断到 120 字符，防止长行爆炸。
+    /// </summary>
+    public static void StatementTrace(string eventId, string message, string data = "",
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsStatementTraceEnabled())
+            return;
+        int maxChars = _runtimeConfig?.RedactionMaxScriptTextChars ?? 120;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.StatementRecognition, eventId, data,
+            () => DiagnosticLogRouter.RedactText(message, maxChars), member, file, line);
+    }
+
+    /// <summary>
+    /// 企业级说明：输出结构化输入诊断日志，event_id 与 data 原样写入结构化记录。
+    /// 输入文本截断到 64 字符，不记录完整用户输入。
+    /// </summary>
+    public static void InputTrace(string eventId, string message, string data = "",
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsInputTraceEnabled())
+            return;
+        int maxChars = _runtimeConfig?.RedactionMaxUserTextChars ?? 64;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.Input, eventId, data,
+            () => DiagnosticLogRouter.RedactText(message, maxChars), member, file, line);
+    }
+
+    public static void InputTrace(string eventId, Func<string> messageFactory, Func<string> dataFactory = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsInputTraceEnabled())
+            return;
+        int maxChars = _runtimeConfig?.RedactionMaxUserTextChars ?? 64;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.Input, eventId, dataFactory,
+            () => DiagnosticLogRouter.RedactText(messageFactory?.Invoke(), maxChars), member, file, line);
+    }
+
+    /// <summary>
+    /// 企业级说明：输出结构化图片诊断日志，event_id 与 data 原样写入结构化记录。
+    /// 路径脱敏，长路径截断，不输出像素或二进制。
+    /// </summary>
+    public static void ImageTrace(string eventId, string message, string data = "",
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsImageDebugEnabled())
+            return;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.Sprite, eventId, data,
+            () => message, member, file, line);
+    }
+
+    public static void ImageTrace(string eventId, Func<string> messageFactory, Func<string> dataFactory = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsImageDebugEnabled())
+            return;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.Sprite, eventId, dataFactory,
+            messageFactory, member, file, line);
+    }
+
+    /// <summary>
+    /// 企业级说明：输出结构化 UI 几何诊断日志，event_id 与 data 原样写入结构化记录。
+    /// 默认只记录 mismatch，不记录所有 part 矩形。
+    /// </summary>
+    public static void UiLayoutTrace(string eventId, string message, string data = "",
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsUiLayoutTraceEnabled())
+            return;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.UI, eventId, data,
+            () => message, member, file, line);
+    }
+
+    public static void UiLayoutTrace(string eventId, Func<string> messageFactory, Func<string> dataFactory = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsUiLayoutTraceEnabled())
+            return;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.UI, eventId, dataFactory,
+            messageFactory, member, file, line);
+    }
+
+    /// <summary>
+    /// 企业级说明：输入复现轨迹捕获，默认关闭，只在开启后保留最近 N 条。
+    /// 不记录完整用户输入文本，按 max_text_chars 截断。
+    /// </summary>
+    public static void CaptureInputReplay(string kind, string input, Godot.Vector2 globalPos, Godot.Vector2 localPos,
+        string waitState, bool consumed)
+    {
+        if (_inputReplay == null)
+            return;
+        long inputId = Interlocked.Increment(ref _inputIdSequence);
+        _currentInputId = inputId;
+        int maxChars = _runtimeConfig?.InputReplayMaxTextChars ?? 32;
+        string clipped = ClipTrace(input, maxChars);
+        _inputReplay.Capture(kind, clipped, globalPos, localPos, inputId, waitState, consumed);
+        DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Input,
+            "REPLAY.INPUT.CAPTURE", "input replay captured",
+            $"kind={kind} input_id={inputId} consumed={consumed}");
+    }
+
+    public static long CurrentInputId => Interlocked.Read(ref _currentInputId);
+
+    public static InputReplayBuffer GetInputReplayBuffer() => _inputReplay;
+
+    public static bool IsInputReplayCaptureEnabled => _inputReplay != null;
+
+    public static bool IsPerformanceSamplingEnabled => _runtimeConfig?.PerformanceSamplingEnabled ?? false;
+
+    /// <summary>
+    /// 企业级说明：save_log 操作轨迹始终保持最近 5 次核心输入摘要，独立于专家诊断开关。
+    /// 这条路径只在输入被核心消费时调用，不采集拖动采样和渲染事件，保证手机端默认使用时没有持续调试负担。
+    /// </summary>
+    public static void CaptureSaveLogOperation(string kind, string input, string codeBefore, string codeAfter,
+        string waitState, bool consumed)
+    {
+        int maxInputChars = _runtimeConfig?.RedactionMaxUserTextChars ?? 64;
+        int maxScriptChars = _runtimeConfig?.RedactionMaxScriptTextChars ?? 120;
+        string originalBefore = codeBefore ?? "";
+        string originalAfter = codeAfter ?? "";
+        string safeInput = ClipTrace(input, maxInputChars);
+        string safeBefore = DiagnosticLogRouter.RedactText(originalBefore, maxScriptChars);
+        string safeAfter = DiagnosticLogRouter.RedactText(originalAfter, maxScriptChars);
+        string safeWait = DiagnosticLogRouter.RedactText(waitState ?? "", 160);
+        string effect = string.Equals(originalBefore, originalAfter, StringComparison.Ordinal)
+            ? "line_unchanged"
+            : "line_changed";
+        long operationSeq = _saveLogOperationTrail.Capture(kind, safeInput, safeBefore, safeAfter, safeWait, consumed, effect);
+        DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Input,
+            "SAVE_LOG.OPERATION", "save_log operation captured",
+            "operation_seq=" + operationSeq + " kind=" + (kind ?? "") + " consumed=" + consumed + " effect=" + effect);
+    }
+
+    public static void NotifyGamePathSelected(string path, string coreProfile = "")
+    {
+        _runtimeGamePath = path ?? "";
+        _runtimeCoreProfile = coreProfile ?? "";
+        DiagnosticLogExporter.NotifyGamePathSelected(path);
+        var cfg = _runtimeConfig;
+        if (cfg == null)
+            return;
+        string redactedPath = DiagnosticLogRouter.RedactPath(path ?? "");
+        if (cfg.RetentionEnabled && cfg.RetentionCleanupOnStartup)
+            DiagnosticLogExporter.RunRetentionCleanup(cfg);
+        if (cfg.BreadcrumbEnabled && cfg.BreadcrumbWriteOnGamePathSelected)
+            DiagnosticLogExporter.WriteBreadcrumb(cfg, "BOOT.GAME_PATH.SELECTED", "game=" + redactedPath + " core=" + (coreProfile ?? ""));
+        if (cfg.AndroidStorageEnabled && cfg.AndroidStorageLogPathSelection)
+        {
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.FileSystem,
+                "ANDROID_STORAGE.PATH_SELECTED", "game path selected",
+                "game_path=" + redactedPath + " core=" + (coreProfile ?? ""));
+        }
+    }
+
+    public static void NotifyLifecycleState(string state)
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null)
+            return;
+        if (cfg.BreadcrumbEnabled && cfg.BreadcrumbWriteOnShutdown && string.Equals(state, "android_pause", StringComparison.Ordinal))
+            DiagnosticLogExporter.WriteBreadcrumb(cfg, "BREADCRUMB.WRITE", "event=" + state);
+        if (cfg.LifecycleEnabled && cfg.LifecycleAndroidPauseResume)
+        {
+            DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.General,
+                "LIFECYCLE." + (state ?? "UNKNOWN").ToUpperInvariant(), "application lifecycle state",
+                "state=" + (state ?? ""));
+        }
+    }
+
+    public static void NotifyApplicationShutdown()
+    {
+        var cfg = _runtimeConfig;
+        if (cfg != null && cfg.BreadcrumbEnabled && cfg.BreadcrumbWriteOnShutdown)
+            DiagnosticLogExporter.WriteBreadcrumb(cfg, "BREADCRUMB.WRITE", "event=shutdown");
+    }
+
+    public static void SamplePerformanceFrame(double deltaSeconds, int textureQueueCount)
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.PerformanceSamplingEnabled)
+            return;
+
+        double frameMs = Math.Max(0.0, deltaSeconds * 1000.0);
+        _performanceFrameMsTotal += frameMs;
+        _performanceFrameMsMax = Math.Max(_performanceFrameMsMax, frameMs);
+        _performanceFrameCount++;
+
+        long nowMs = GetTickMs();
+        long interval = Math.Max(250, cfg.PerformanceSamplingIntervalMs);
+        if (_lastPerformanceSampleMs != 0 && nowMs - _lastPerformanceSampleMs < interval)
+            return;
+        _lastPerformanceSampleMs = nowMs;
+
+        int count = Math.Max(1, _performanceFrameCount);
+        double avg = _performanceFrameMsTotal / count;
+        double max = _performanceFrameMsMax;
+        _performanceFrameMsTotal = 0.0;
+        _performanceFrameMsMax = 0.0;
+        _performanceFrameCount = 0;
+
+        var data = new StringBuilder(160);
+        if (cfg.PerformanceSamplingIncludeFps)
+            data.Append("fps=").Append(Engine.GetFramesPerSecond()).Append(' ');
+        if (cfg.PerformanceSamplingIncludeFrameMs)
+            data.Append("frame_ms_avg=").Append(avg.ToString("0.###")).Append(" frame_ms_max=").Append(max.ToString("0.###")).Append(' ');
+        if (cfg.PerformanceSamplingIncludeUiQueue)
+            data.Append("ui_pending=").Append(Volatile.Read(ref pendingUiActions))
+                .Append(" display_pending=").Append(Volatile.Read(ref pendingDisplayActions)).Append(' ');
+        if (cfg.PerformanceSamplingIncludeTextureQueue)
+            data.Append("texture_queue=").Append(textureQueueCount).Append(' ');
+        if (cfg.PerformanceSamplingIncludeRingBuffer)
+            data.Append("ring_count=").Append(DiagnosticLogSinks.RingCount)
+                .Append(" ring_capacity=").Append(DiagnosticLogSinks.RingCapacity).Append(' ');
+        if (cfg.PerformanceSamplingIncludeDroppedCount)
+            data.Append("dropped=").Append(DiagnosticLogRouter.GetDroppedTotal()).Append(' ');
+        if (cfg.PerformanceSamplingIncludeMemory)
+            data.Append("static_memory=").Append(OS.GetStaticMemoryUsage()).Append(' ');
+
+        // 企业级说明：性能采样是低频诊断事件，只在显式开启后每 interval 输出一次。
+        // 采样数据写入 ring buffer，不在每帧构造日志文本，避免诊断系统反向拖慢 APK。
+        DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Performance,
+            "PERF.SAMPLE", "performance sample", data.ToString().TrimEnd());
     }
 
     public static List<string> CalcMd5List(byte[] bytes)

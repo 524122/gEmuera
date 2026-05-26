@@ -30,10 +30,21 @@ static ConfigData() { }
 
 		private ConfigData() { setDefault(); }
 
-		//適当に大き目の配列を作っておく。
-		private AConfigItem[] configArray = new AConfigItem[75];
-		private AConfigItem[] replaceArray = new AConfigItem[50];
-		private AConfigItem[] debugArray = new AConfigItem[20];
+		private const int ConfigItemCapacity = 75;
+		private const int ReplaceItemCapacity = 50;
+		private const int DebugItemCapacity = 20;
+
+		// Keep the legacy arrays as the ordered source of truth for save/export
+		// compatibility, and build lookup indexes after defaults are populated.
+		private AConfigItem[] configArray = new AConfigItem[ConfigItemCapacity];
+		private AConfigItem[] replaceArray = new AConfigItem[ReplaceItemCapacity];
+		private AConfigItem[] debugArray = new AConfigItem[DebugItemCapacity];
+		private readonly Dictionary<ConfigCode, AConfigItem> configItemsByCode = new Dictionary<ConfigCode, AConfigItem>();
+		private readonly Dictionary<ConfigCode, AConfigItem> replaceItemsByCode = new Dictionary<ConfigCode, AConfigItem>();
+		private readonly Dictionary<ConfigCode, AConfigItem> debugItemsByCode = new Dictionary<ConfigCode, AConfigItem>();
+		private readonly Dictionary<string, AConfigItem> configItemsByName = new Dictionary<string, AConfigItem>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, AConfigItem> replaceItemsByName = new Dictionary<string, AConfigItem>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, AConfigItem> debugItemsByName = new Dictionary<string, AConfigItem>(StringComparer.OrdinalIgnoreCase);
 		private System.Text.StringBuilder configDebugLog = new System.Text.StringBuilder();
 
 		private static readonly Dictionary<string, ConfigCode> englishConfigAliases = new Dictionary<string, ConfigCode>(StringComparer.OrdinalIgnoreCase)
@@ -297,13 +308,15 @@ static ConfigData() { }
 			replaceArray[i++] = new ConfigItem<List<Int64>>(ConfigCode.PalamLvDef, "PALAMLVの初期値", new List<long>(new Int64[] { 0, 100, 500, 3000, 10000, 30000, 60000, 100000, 150000, 250000 }));
 			replaceArray[i++] = new ConfigItem<Int64>(ConfigCode.pbandDef, "PBANDの初期値", 4);
 			replaceArray[i++] = new ConfigItem<Int64>(ConfigCode.RelationDef, "RELATIONの初期値", 0);
+
+			RebuildLookupIndexes();
 		}
 
 		public void Clear()
 		{
-			configArray = new AConfigItem[74];
-			replaceArray = new AConfigItem[50];
-			debugArray = new AConfigItem[20];
+			configArray = new AConfigItem[ConfigItemCapacity];
+			replaceArray = new AConfigItem[ReplaceItemCapacity];
+			debugArray = new AConfigItem[DebugItemCapacity];
 			setDefault();
 		}
 
@@ -313,9 +326,9 @@ static ConfigData() { }
 			for (int i = 0; i < configArray.Length; i++)
 				if ((this.configArray[i] != null) && (config.configArray[i] != null))
 					this.configArray[i].CopyTo(config.configArray[i]);
-			for (int i = 0; i < configArray.Length; i++)
-				if ((this.configArray[i] != null) && (config.configArray[i] != null))
-					this.configArray[i].CopyTo(config.configArray[i]);
+			for (int i = 0; i < debugArray.Length; i++)
+				if ((this.debugArray[i] != null) && (config.debugArray[i] != null))
+					this.debugArray[i].CopyTo(config.debugArray[i]);
 			for (int i = 0; i < replaceArray.Length; i++)
 				if ((this.replaceArray[i] != null) && (config.replaceArray[i] != null))
 					this.replaceArray[i].CopyTo(config.replaceArray[i]);
@@ -371,29 +384,17 @@ static ConfigData() { }
 
 		public AConfigItem GetConfigItem(ConfigCode code)
 		{
-			foreach (AConfigItem item in configArray)
-			{
-				if (item == null)
-					continue;
-				if (item.Code == code)
-					return item;
-			}
-			return null;
+			AConfigItem item;
+			return configItemsByCode.TryGetValue(code, out item) ? item : null;
 		}
 		public AConfigItem GetConfigItem(string key)
 		{
 			if (key == null)
 				return null;
 			key = key.Trim();
-			foreach (AConfigItem item in configArray)
-			{
-				if (item == null)
-					continue;
-				if (string.Equals(item.Name, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-				if (string.Equals(item.Text, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-			}
+			AConfigItem item;
+			if (configItemsByName.TryGetValue(key, out item))
+				return item;
 			ConfigCode aliasCode;
 			if (TryGetEnglishConfigAlias(key, englishConfigAliases, out aliasCode))
 				return GetConfigItem(aliasCode);
@@ -402,29 +403,17 @@ static ConfigData() { }
 
 		public AConfigItem GetReplaceItem(ConfigCode code)
 		{
-			foreach (AConfigItem item in replaceArray)
-			{
-				if (item == null)
-					continue;
-				if (item.Code == code)
-					return item;
-			}
-			return null;
+			AConfigItem item;
+			return replaceItemsByCode.TryGetValue(code, out item) ? item : null;
 		}
 		public AConfigItem GetReplaceItem(string key)
 		{
 			if (key == null)
 				return null;
 			key = key.Trim();
-			foreach (AConfigItem item in replaceArray)
-			{
-				if (item == null)
-					continue;
-				if (string.Equals(item.Name, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-				if (string.Equals(item.Text, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-			}
+			AConfigItem item;
+			if (replaceItemsByName.TryGetValue(key, out item))
+				return item;
 			ConfigCode aliasCode;
 			if (TryGetEnglishConfigAlias(key, englishReplaceAliases, out aliasCode))
 				return GetReplaceItem(aliasCode);
@@ -433,33 +422,53 @@ static ConfigData() { }
 		
 		public AConfigItem GetDebugItem(ConfigCode code)
 		{
-			foreach (AConfigItem item in debugArray)
-			{
-				if (item == null)
-					continue;
-				if (item.Code == code)
-					return item;
-			}
-			return null;
+			AConfigItem item;
+			return debugItemsByCode.TryGetValue(code, out item) ? item : null;
 		}
 		public AConfigItem GetDebugItem(string key)
 		{
 			if (key == null)
 				return null;
 			key = key.Trim();
-			foreach (AConfigItem item in debugArray)
-			{
-				if (item == null)
-					continue;
-				if (string.Equals(item.Name, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-				if (string.Equals(item.Text, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-			}
+			AConfigItem item;
+			if (debugItemsByName.TryGetValue(key, out item))
+				return item;
 			ConfigCode aliasCode;
 			if (TryGetEnglishConfigAlias(key, englishDebugAliases, out aliasCode))
 				return GetDebugItem(aliasCode);
 			return null;
+		}
+
+		private void RebuildLookupIndexes()
+		{
+			// Config item identity is stable after setDefault(); values mutate in
+			// place during load. Rebuilding only at lifecycle boundaries keeps all
+			// hot-path lookups O(1) without changing save-order semantics.
+			RebuildLookupIndex(configArray, configItemsByCode, configItemsByName);
+			RebuildLookupIndex(replaceArray, replaceItemsByCode, replaceItemsByName);
+			RebuildLookupIndex(debugArray, debugItemsByCode, debugItemsByName);
+		}
+
+		private static void RebuildLookupIndex(AConfigItem[] items, Dictionary<ConfigCode, AConfigItem> byCode, Dictionary<string, AConfigItem> byName)
+		{
+			byCode.Clear();
+			byName.Clear();
+			foreach (AConfigItem item in items)
+			{
+				if (item == null)
+					continue;
+				if (!byCode.ContainsKey(item.Code))
+					byCode.Add(item.Code, item);
+				AddNameLookup(byName, item.Name, item);
+				AddNameLookup(byName, item.Text, item);
+			}
+		}
+
+		private static void AddNameLookup(Dictionary<string, AConfigItem> byName, string key, AConfigItem item)
+		{
+			if (string.IsNullOrWhiteSpace(key) || byName.ContainsKey(key))
+				return;
+			byName.Add(key, item);
 		}
 
 		private static bool TryGetEnglishConfigAlias(string key, Dictionary<string, ConfigCode> aliases, out ConfigCode code)

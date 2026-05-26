@@ -27,6 +27,7 @@ namespace MinorShift.Emuera.Content
 			public string Directory;
 			public ScriptPosition Position;
 			public bool IsAnime;
+			public bool IsOptional;
 			public List<LazySpriteDefinition> Frames;
 		}
 
@@ -77,6 +78,30 @@ namespace MinorShift.Emuera.Content
 	            return result;
 		}
 
+		static public bool SpriteExists(string name)
+		{
+			if (name == null)
+				return false;
+
+			name = name.ToUpper();
+			if (imageDictionary.TryGetValue(name, out var existing))
+				return existing != null && existing.IsCreated;
+			if (lazyImageDictionary.TryGetValue(name, out var definition))
+			{
+				// 企业级说明：懒加载索引只能证明 CSV 中声明过资源，不能证明 Android 外部目录中的实际文件可读。
+				// SPRITECREATED 会被脚本用于决定是否输出 <img>，因此这里必须完成一次轻量实体化校验，
+				// 避免把缺失/路径大小写不匹配的资源当成存在，最终在手机端只生成空白 div。
+				ASprite realized = RealizeLazySprite(name, definition);
+				if (realized != null && realized.IsCreated)
+					return true;
+				lazyImageDictionary.Remove(name);
+				return false;
+			}
+			if (name.StartsWith("CUTIN") && int.TryParse(name.Substring(5), out int graphicsId))
+				return gList.TryGetValue(graphicsId, out var g) && g != null && g.IsCreated;
+			return false;
+		}
+
 		static public void SetSpriteBasePosition(string name, Point position)
 		{
 			if (name == null)
@@ -123,13 +148,14 @@ namespace MinorShift.Emuera.Content
 		{
 			if (string.IsNullOrEmpty(imgName) || string.IsNullOrEmpty(filepath))
 				return false;
-			if (!uEmuera.Utils.FileExists(filepath))
+			string resolvedFilepath = ResolveDynamicSpriteFilePath(filepath);
+			if (!uEmuera.Utils.FileExists(resolvedFilepath))
 				return false;
 			imgName = imgName.ToUpper();
 			if (imageDictionary.ContainsKey(imgName))
 				return false;
 
-			BitmapTexture bmp = new BitmapTexture(filepath);
+			BitmapTexture bmp = new BitmapTexture(resolvedFilepath);
 			if (bmp.Width <= 0 || bmp.Height <= 0)
 				return false;
 			ConstImage img = new ConstImage(imgName + "_DYN");
@@ -138,6 +164,16 @@ namespace MinorShift.Emuera.Content
 				return false;
 			imageDictionary[imgName] = new SpriteF(imgName, img, new Rectangle(0, 0, bmp.Width, bmp.Height), Point.Empty);
 			return true;
+		}
+
+		static string ResolveDynamicSpriteFilePath(string filepath)
+		{
+			// 企业级说明：SPRITECREATEFROMFILE 的相对路径按 emuera 约定以游戏目录为基准。
+			// Android 导出包下游戏目录通常位于外部存储，先归一化并走统一解析逻辑，确保大小写回退和 Godot FileAccess 生效。
+			string resolved = uEmuera.Utils.NormalizePath(filepath.Trim());
+			if (!Path.IsPathRooted(resolved) && !resolved.Contains("://"))
+				resolved = Path.Combine(Program.ContentDir ?? "", resolved);
+			return uEmuera.Utils.ResolveExistingFilePath(resolved);
 		}
 
 		static public void CreateSpriteG(string imgName, GraphicsImage parent,Rectangle rect)
@@ -301,6 +337,13 @@ namespace MinorShift.Emuera.Content
 				// Android exports do not load every CSV-referenced texture at startup.
 				BitmapTexture bmp = new BitmapTexture(filepath);
                 bmp.name = name;
+				if (bmp.Width <= 0 || bmp.Height <= 0)
+				{
+					// 企业级说明：文件存在不等于图片资源可用，尤其在 Android 外部存储路径、大小写回退或格式兼容异常时，
+					// 若继续注册 0x0 基础图，SPRITECREATED 会误判成功并让 HTML 层生成空白图片占位。
+					ParserMediator.Warn("指定された画像ファイルのサイズを取得できません: " + arg2, sp, 1);
+					return null;
+				}
 				if (bmp.Width > AbstractImage.MAX_IMAGESIZE || bmp.Height > AbstractImage.MAX_IMAGESIZE)
 				{
 					// 1824-2: 8192px以上の画像を使うバリアントがあるため、警告しつつ許容する。
@@ -409,7 +452,8 @@ namespace MinorShift.Emuera.Content
 				LazySpriteDefinition currentAnime = null;
 				for (int l = 0; l < lines.Length; l++)
 				{
-					string str = NormalizeResourceCsvLineForIndex(lines[l]);
+					bool isOptional;
+					string str = NormalizeResourceCsvLineForIndex(lines[l], directory, out isOptional);
 					if (str.Length == 0 || str.StartsWith(";"))
 						continue;
 					string[] tokens = str.Split(',');
@@ -425,20 +469,23 @@ namespace MinorShift.Emuera.Content
 						Tokens = tokens,
 						Directory = directory,
 						Position = new ScriptPosition(filename, l + 1),
-						IsAnime = arg2.Equals("ANIME", StringComparison.OrdinalIgnoreCase)
+						IsAnime = arg2.Equals("ANIME", StringComparison.OrdinalIgnoreCase),
+						IsOptional = isOptional
 					};
 
 					if (definition.IsAnime)
 					{
-						if (!lazyImageDictionary.ContainsKey(spriteName))
+						LazySpriteDefinition existing;
+						if (!lazyImageDictionary.TryGetValue(spriteName, out existing) || (existing.IsOptional && !definition.IsOptional))
 						{
 							definition.Frames = new List<LazySpriteDefinition>();
-							lazyImageDictionary.Add(spriteName, definition);
-							indexedCount++;
+							lazyImageDictionary[spriteName] = definition;
+							if (existing == null)
+								indexedCount++;
 							currentAnime = definition;
 						}
 						else
-							currentAnime = lazyImageDictionary[spriteName];
+							currentAnime = existing;
 						continue;
 					}
 
@@ -449,10 +496,13 @@ namespace MinorShift.Emuera.Content
 					}
 
 					currentAnime = null;
-					if (!lazyImageDictionary.ContainsKey(spriteName))
+					LazySpriteDefinition existingSprite;
+					if (!lazyImageDictionary.TryGetValue(spriteName, out existingSprite) || (existingSprite.IsOptional && !definition.IsOptional))
 					{
-						lazyImageDictionary.Add(spriteName, definition);
-						indexedCount++;
+						// 注释候选资源只作为兼容兜底，正式CSV定义必须拥有更高优先级，避免不完整的候选行抢占有效资源名。
+						lazyImageDictionary[spriteName] = definition;
+						if (existingSprite == null)
+							indexedCount++;
 					}
 				}
 			}
@@ -485,8 +535,9 @@ namespace MinorShift.Emuera.Content
 			return sprite;
 		}
 
-		private static string NormalizeResourceCsvLineForIndex(string line)
+		private static string NormalizeResourceCsvLineForIndex(string line, string directory, out bool isOptional)
 		{
+			isOptional = false;
 			string str = line.Trim();
 			if (str.Length == 0)
 				return str;
@@ -501,9 +552,20 @@ namespace MinorShift.Emuera.Content
 			string filename = tokens[1].Trim();
 			if (name.Length == 0)
 				return str;
-			if (filename.Equals("ANIME", StringComparison.OrdinalIgnoreCase) || filename.IndexOf('.') >= 0)
+			if (filename.Equals("ANIME", StringComparison.OrdinalIgnoreCase))
+			{
+				if (tokens.Length < 4)
+					return str;
+				isOptional = true;
 				return candidate;
-			return str;
+			}
+			if (filename.IndexOf('.') < 0)
+				return str;
+			// 懒加载索引只接纳磁盘上真实存在的注释候选，避免SPRITECREATED返回真但实际取宽高失败。
+			if (!uEmuera.Utils.FileExists(uEmuera.Utils.ResolveExistingFilePath(directory + filename)))
+				return str;
+			isOptional = true;
+			return candidate;
 		}
 
 		static private string NormalizeResourceCsvLine(string line, string directory)

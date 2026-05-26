@@ -164,6 +164,9 @@ internal static class SpriteManager
 					catch (Exception ex)
 					{
 						GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager] Failed to create ImageTexture for {imagename}: {ex.Message}");
+						if (GenericUtils.IsImageDebugEnabled("texture"))
+							GenericUtils.ImageTrace("IMAGE.TEXTURE.CREATE_FAIL", () => "texture create failed",
+								() => $"name={imagename} failure_kind=texture_create_fail error={ex.GetType().Name}");
 					}
 				}
 				return _texture;
@@ -186,6 +189,9 @@ internal static class SpriteManager
 			{
 				_texture = null;
 				GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager] Failed to recreate ImageTexture for {imagename}: {ex.Message}");
+				if (GenericUtils.IsImageDebugEnabled("texture"))
+					GenericUtils.ImageTrace("IMAGE.TEXTURE.CREATE_FAIL", () => "texture recreate failed",
+						() => $"name={imagename} failure_kind=texture_create_fail error={ex.GetType().Name}");
 			}
 		}
 
@@ -286,6 +292,9 @@ internal static class SpriteManager
 		if(!uEmuera.Utils.FileExists(filename))
 		{
 			GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager.GetTextureInfo] file not found: {filename}");
+			if (GenericUtils.IsImageDebugEnabled("resolve"))
+				GenericUtils.ImageTrace("IMAGE.RESOLVE.FAIL", () => "image resolve failed",
+					() => $"name={name} filename={GenericUtils.RedactTracePath(filename)} failure_kind=not_found");
 			ti = CreatePlaceholderTextureInfo(name, filename, "file not found");
 			CacheTextureInfo(name, filename, ti);
 			return ti;
@@ -293,6 +302,9 @@ internal static class SpriteManager
 
 		Image img = LoadImageOrPlaceholder(filename, name);
 		ti = new TextureInfo(name, img);
+		if (GenericUtils.IsImageDebugEnabled("log_success"))
+			GenericUtils.ImageTrace("IMAGE.TEXTURE.LOAD_OK", () => "texture loaded",
+				() => $"name={name} filename={GenericUtils.RedactTracePath(filename)} size={img.GetWidth()}x{img.GetHeight()}");
 		return CacheTextureInfo(name, filename, ti);
 	}
 
@@ -398,6 +410,9 @@ internal static class SpriteManager
 
 			img.Dispose();
 			LogSpriteWarning(() => $"[SpriteManager] image decode failed, using transparent placeholder: {filename}, err={err}");
+				if (GenericUtils.IsImageDebugEnabled("texture"))
+					GenericUtils.ImageTrace("IMAGE.TEXTURE.LOAD_FAIL", () => "texture load failed",
+						() => $"filename={GenericUtils.RedactTracePath(filename)} failure_kind=decode_fail err={err}");
 		}
 		catch (Exception ex)
 		{

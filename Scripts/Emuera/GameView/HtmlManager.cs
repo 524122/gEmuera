@@ -175,9 +175,19 @@ namespace MinorShift.Emuera.GameView
 		{
 			int width = 0;
 			int i;
+			Dictionary<char, int> charWidthCache = str.Length >= 16 ? new Dictionary<char, int>(Math.Min(str.Length, 64)) : null;
 			for (i = 0; i < str.Length; i++)
 			{
-				int charWidth = HtmlLength(prefix + str.Substring(i, 1) + suffix);
+				char ch = str[i];
+				int charWidth;
+				if (charWidthCache == null || !charWidthCache.TryGetValue(ch, out charWidth))
+				{
+					// HtmlSubString は折り返し判定のたびに同じ装飾タグで1文字ずつ測る。
+					// 同一文字の幅を呼び出し内で共有し、HTML 再解析と短命文字列を抑える。
+					charWidth = HtmlLength(prefix + ch.ToString() + suffix);
+					if (charWidthCache != null)
+						charWidthCache[ch] = charWidth;
+				}
 				if (width + charWidth > remainingWidth)
 				{
 					i--;
@@ -193,6 +203,8 @@ namespace MinorShift.Emuera.GameView
 
 		private static string BuildStylePrefix(Stack<HtmlTagInfo> beginStack)
 		{
+			if (beginStack.Count == 0)
+				return string.Empty;
 			StringBuilder builder = new StringBuilder();
 			foreach (HtmlTagInfo tag in beginStack)
 			{
@@ -204,6 +216,8 @@ namespace MinorShift.Emuera.GameView
 
 		private static string BuildStyleSuffix(Stack<HtmlTagInfo> endStack)
 		{
+			if (endStack.Count == 0)
+				return string.Empty;
 			StringBuilder builder = new StringBuilder();
 			Stack<HtmlTagInfo> tags = new Stack<HtmlTagInfo>(endStack);
 			while (tags.Count > 0)

@@ -486,7 +486,67 @@ namespace MinorShift.Emuera.GameData.Expression
             bool hasBefore = false;
             bool hasAfter = false;
             bool waitAfter = false;
-            Stack<Object> stack = new Stack<Object>();
+            StackEntry[] stack = new StackEntry[8];
+            int stackCount = 0;
+
+            struct StackEntry
+            {
+                public bool IsOperator;
+                public OperatorCode Operator;
+                public IOperandTerm Term;
+
+                public StackEntry(OperatorCode op)
+                {
+                    IsOperator = true;
+                    Operator = op;
+                    Term = null;
+                }
+
+                public StackEntry(IOperandTerm term)
+                {
+                    IsOperator = false;
+                    Operator = OperatorCode.NULL;
+                    Term = term;
+                }
+            }
+
+            void PushOperator(OperatorCode op)
+            {
+                EnsureCapacity();
+                stack[stackCount++] = new StackEntry(op);
+            }
+
+            void PushTerm(IOperandTerm term)
+            {
+                EnsureCapacity();
+                stack[stackCount++] = new StackEntry(term);
+            }
+
+            OperatorCode PopOperator()
+            {
+                if (stackCount == 0 || !stack[stackCount - 1].IsOperator)
+                    throw new CodeEE("式が異常です");
+                var entry = stack[--stackCount];
+                stack[stackCount] = default(StackEntry);
+                return entry.Operator;
+            }
+
+            IOperandTerm PopTerm()
+            {
+                if (stackCount == 0 || stack[stackCount - 1].IsOperator)
+                    throw new CodeEE("式が異常です");
+                var entry = stack[--stackCount];
+                stack[stackCount] = default(StackEntry);
+                return entry.Term;
+            }
+
+            void EnsureCapacity()
+            {
+                if (stackCount < stack.Length)
+                    return;
+                Array.Resize(ref stack, stack.Length * 2);
+            }
+
             public void Add(OperatorCode op)
             {
                 if (state == 2 || state == 3)
@@ -495,7 +555,7 @@ namespace MinorShift.Emuera.GameData.Expression
                 {
                     if (!OperatorManager.IsUnary(op))
                         throw new CodeEE("式が異常です");
-                    stack.Push(op);
+                    PushOperator(op);
                     if (op == OperatorCode.Plus || op == OperatorCode.Minus || op == OperatorCode.BitNot)
                         state = 2;
                     else
@@ -517,7 +577,7 @@ namespace MinorShift.Emuera.GameData.Expression
                             hasBefore = false;
                             throw new CodeEE("インクリメント・デクリメントを前置・後置両方同時に使うことはできません");
                         }
-                        stack.Push(op);
+                        PushOperator(op);
                         reduceUnaryAfter();
                         //前置単項演算子が処理を待っている場合はここで解決
                         if (waitAfter)
@@ -538,7 +598,7 @@ namespace MinorShift.Emuera.GameData.Expression
                     {
                         this.reduceLastThree();
                     }
-                    stack.Push(op);
+                    PushOperator(op);
                     state = 0;
                     waitAfter = false;
                     hasBefore = false;
@@ -552,7 +612,7 @@ namespace MinorShift.Emuera.GameData.Expression
             public void Add(string s) { Add(new SingleTerm(s)); }
             public void Add(IOperandTerm term)
             {
-                stack.Push(term);
+                PushTerm(term);
                 if (state == 1)
                     throw new CodeEE("式が異常です");
                 if (state == 2)
@@ -569,18 +629,21 @@ namespace MinorShift.Emuera.GameData.Expression
 
             private int lastPriority()
             {
-                if (stack.Count < 3)
+                if (stackCount < 3)
                     return -1;
-                object temp = (object)stack.Pop();
-                OperatorCode opCode = (OperatorCode)stack.Peek();
+                // The stack shape before a binary/ternary operator is
+                // [..., leftTerm, operator, rightTerm]. Reading the middle entry
+                // directly avoids Stack<object> pop/peek boxing on Android.
+                if (!stack[stackCount - 2].IsOperator)
+                    throw new CodeEE("式が異常です");
+                OperatorCode opCode = stack[stackCount - 2].Operator;
                 int priority = OperatorManager.GetPriority(opCode);
-                stack.Push(temp);
                 return priority;
             }
 
             public IOperandTerm ReduceAll()
             {
-                if (stack.Count == 0)
+                if (stackCount == 0)
                     return null;
                 if (state != 1)
                     throw new CodeEE("式が異常です");
@@ -590,11 +653,11 @@ namespace MinorShift.Emuera.GameData.Expression
                 waitAfter = false;
                 hasBefore = false;
                 hasAfter = false;
-                while (stack.Count > 1)
+                while (stackCount > 1)
                 {
                     reduceLastThree();
                 }
-                IOperandTerm retTerm = (IOperandTerm)stack.Pop();
+                IOperandTerm retTerm = PopTerm();
                 return retTerm;
             }
 
@@ -602,33 +665,33 @@ namespace MinorShift.Emuera.GameData.Expression
             {
                 //if (stack.Count < 2)
                 //    throw new ExeEE("不正な時期の呼び出し");
-                IOperandTerm operand = (IOperandTerm)stack.Pop();
-                OperatorCode op = (OperatorCode)stack.Pop();
+                IOperandTerm operand = PopTerm();
+                OperatorCode op = PopOperator();
                 IOperandTerm newTerm = OperatorMethodManager.ReduceUnaryTerm(op, operand);
-                stack.Push(newTerm);
+                PushTerm(newTerm);
             }
 
             private void reduceUnaryAfter()
             {
                 //if (stack.Count < 2)
                 //    throw new ExeEE("不正な時期の呼び出し");
-                OperatorCode op = (OperatorCode)stack.Pop();
-                IOperandTerm operand = (IOperandTerm)stack.Pop();
+                OperatorCode op = PopOperator();
+                IOperandTerm operand = PopTerm();
                 
                 IOperandTerm newTerm = OperatorMethodManager.ReduceUnaryAfterTerm(op, operand);
-                stack.Push(newTerm);
+                PushTerm(newTerm);
 				
             }
             private void reduceLastThree()
             {
                 //if (stack.Count < 2)
                 //    throw new ExeEE("不正な時期の呼び出し");
-                IOperandTerm right = (IOperandTerm)stack.Pop();//後から入れたほうが右側
-                OperatorCode op = (OperatorCode)stack.Pop();
-                IOperandTerm left = (IOperandTerm)stack.Pop();
+                IOperandTerm right = PopTerm();//後から入れたほうが右側
+                OperatorCode op = PopOperator();
+                IOperandTerm left = PopTerm();
                 if (OperatorManager.IsTernary(op))
                 {
-                    if (stack.Count > 1)
+                    if (stackCount > 1)
                     {
                         reduceTernary(left, right);
                         return;
@@ -637,16 +700,16 @@ namespace MinorShift.Emuera.GameData.Expression
                 }
                 
                 IOperandTerm newTerm = OperatorMethodManager.ReduceBinaryTerm(op, left, right);
-                stack.Push(newTerm);
+                PushTerm(newTerm);
 			}
 
             private void reduceTernary(IOperandTerm left, IOperandTerm right)
             {
-                _ = (OperatorCode)stack.Pop();
-				IOperandTerm newLeft = (IOperandTerm)stack.Pop();
+                _ = PopOperator();
+				IOperandTerm newLeft = PopTerm();
 				
                 IOperandTerm newTerm = OperatorMethodManager.ReduceTernaryTerm(newLeft, left, right);
-                stack.Push(newTerm);
+                PushTerm(newTerm);
             }
 
 /*			SingleTerm GetSingle(IOperandTerm oprand)
