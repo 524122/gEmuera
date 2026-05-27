@@ -77,6 +77,8 @@ namespace gEmuera.Diagnostics
         public static void WriteInfrastructureRecord(EmueraLogLevel level, EmueraLogCategory category,
             string eventId, string message, string data)
         {
+            if (!DiagnosticLogRouter.IsLoggingEnabled())
+                return;
             if (!DiagnosticLogRouter.CheckRateLimit(eventId, category))
                 return;
 
@@ -100,7 +102,7 @@ namespace gEmuera.Diagnostics
 
         public static void WriteBreadcrumb(RuntimeDiagnosticsConfig config, string eventId, string data)
         {
-            if (config == null || !config.BreadcrumbEnabled)
+            if (config == null || !config.LoggingEnabled || !config.BreadcrumbEnabled)
                 return;
             lock (_breadcrumbLock)
             {
@@ -168,7 +170,7 @@ namespace gEmuera.Diagnostics
 
         public static void RunRetentionCleanup(RuntimeDiagnosticsConfig config)
         {
-            if (config == null || !config.RetentionEnabled)
+            if (config == null || !config.LoggingEnabled || !config.RetentionEnabled)
                 return;
             try
             {
@@ -264,7 +266,12 @@ namespace gEmuera.Diagnostics
             out string errorMessage)
         {
             errorMessage = "";
-            if (config != null && !config.DiagnosticPackageEnabled)
+            if (config == null || !config.LoggingEnabled)
+            {
+                errorMessage = "diagnostics_disabled";
+                return false;
+            }
+            if (!config.DiagnosticPackageEnabled)
             {
                 errorMessage = "diagnostic_package_disabled";
                 WriteInfrastructureRecord(EmueraLogLevel.Warn, EmueraLogCategory.Save,
@@ -386,6 +393,11 @@ namespace gEmuera.Diagnostics
             out string errorMessage)
         {
             errorMessage = "";
+            if (config == null || !config.LoggingEnabled)
+            {
+                errorMessage = "diagnostics_disabled";
+                return false;
+            }
             try
             {
                 if (!TryResolveDiagnosticsFilePath(path, "diagnostic.log", out string resolvedPath, out string reason))

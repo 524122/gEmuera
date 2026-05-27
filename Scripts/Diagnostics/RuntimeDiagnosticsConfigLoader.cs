@@ -126,6 +126,7 @@ namespace gEmuera.Diagnostics
             ReadDebugModel(sections, "debug_model_en", cfg.DebugModelEn);
 
             // logging
+            if (TryGetBool(sections, "logging", "enabled", out b)) cfg.LoggingEnabled = b;
             if (TryGetString(sections, "logging", "level", out v)) cfg.LoggingLevel = v;
             if (TryGetBool(sections, "logging", "mirror_non_error_to_godot", out b)) cfg.LoggingMirrorNonErrorToGodot = b;
             if (TryGetInt(sections, "logging", "diagnostic_ring_capacity", out int i)) cfg.LoggingDiagnosticRingCapacity = i;
@@ -358,7 +359,40 @@ namespace gEmuera.Diagnostics
 
             // 企业级说明：quick_debug 只在配置加载阶段展开，之后业务热路径不再感知 preset 字符串。
             cfg.ApplyQuickDebugPreset();
+            ApplyMinimalLoggingSwitches(sections, cfg);
             return cfg;
+        }
+
+        static void ApplyMinimalLoggingSwitches(System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, string>> sections, RuntimeDiagnosticsConfig cfg)
+        {
+            // 精简配置只认一个总开关和少量模块开关；缺省即关闭，避免旧 user://config.toml 误把 APK 热路径诊断打开。
+            bool enabled = GetMinimalBool(sections, "enabled", false);
+            bool mirrorToGodot = GetMinimalBool(sections, "mirror_to_godot",
+                GetMinimalBool(sections, "mirror_non_error_to_godot", false));
+            cfg.ApplyMinimalLoggingConfig(
+                enabled,
+                GetMinimalBool(sections, "touch", false),
+                GetMinimalBool(sections, "input", false),
+                GetMinimalBool(sections, "image", false),
+                GetMinimalBool(sections, "ui_layout", false),
+                GetMinimalBool(sections, "resource", false),
+                GetMinimalBool(sections, "load_save", false),
+                GetMinimalBool(sections, "android_storage", false),
+                GetMinimalBool(sections, "performance", GetMinimalBool(sections, "performance_sampling", false)),
+                GetMinimalBool(sections, "statement_recognition", false),
+                GetMinimalBool(sections, "runtime_panel", false),
+                GetMinimalBool(sections, "input_replay", false),
+                GetMinimalBool(sections, "diagnostic_package", false),
+                mirrorToGodot);
+        }
+
+        static bool GetMinimalBool(System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, string>> sections, string key, bool fallback)
+        {
+            if (TryGetBool(sections, "logging", key, out bool value))
+                return value;
+            if (TryGetBool(sections, "", key, out value))
+                return value;
+            return fallback;
         }
 
         static void ReadDebugModel(System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, string>> sections, string sectionName, RuntimeDiagnosticsConfig.DebugModelProfile model)

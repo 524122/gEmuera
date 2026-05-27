@@ -17,6 +17,7 @@ namespace gEmuera.Diagnostics
         static string _sessionId;
         static long _sequence;
         static int _initialized;
+        static int _cachedLoggingEnabled;
         static int _cachedRuntimeLogLevel = (int)EmueraLogLevel.Error;
         static int _cachedCategoryMask = (int)EmueraLogCategory.None;
 
@@ -63,13 +64,22 @@ namespace gEmuera.Diagnostics
             // 启动/热重载时缓存已展开的等级和类别掩码，避免每条日志重复解析字符串或扫描类别布尔字段。
             var nextConfig = config ?? RuntimeDiagnosticsConfig.CreateDefault();
             _config = nextConfig;
+            Volatile.Write(ref _cachedLoggingEnabled, nextConfig.LoggingEnabled ? 1 : 0);
             Volatile.Write(ref _cachedRuntimeLogLevel, (int)nextConfig.GetRuntimeLogLevel());
             Volatile.Write(ref _cachedCategoryMask, (int)nextConfig.GetActiveDebugModelCategoryMask());
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsLoggingEnabled()
+        {
+            return Volatile.Read(ref _cachedLoggingEnabled) != 0;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsEnabled(EmueraLogLevel level, EmueraLogCategory category, string eventId)
         {
+            if (Volatile.Read(ref _cachedLoggingEnabled) == 0)
+                return false;
             if (level == EmueraLogLevel.None)
                 return false;
             var globalLevel = (EmueraLogLevel)Volatile.Read(ref _cachedRuntimeLogLevel);
@@ -85,6 +95,8 @@ namespace gEmuera.Diagnostics
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool IsCategoryEnabled(EmueraLogCategory category)
         {
+            if (Volatile.Read(ref _cachedLoggingEnabled) == 0)
+                return false;
             var mask = (EmueraLogCategory)Volatile.Read(ref _cachedCategoryMask);
             return (mask & category) != 0;
         }
@@ -94,7 +106,7 @@ namespace gEmuera.Diagnostics
         public static bool IsTouchEnabled(string subSwitch)
         {
             var cfg = Config;
-            if (cfg == null || !cfg.TouchEnabled)
+            if (cfg == null || !cfg.LoggingEnabled || !cfg.TouchEnabled)
                 return false;
             return subSwitch switch
             {
@@ -111,7 +123,7 @@ namespace gEmuera.Diagnostics
         public static bool IsInputDebugEnabled(string subSwitch)
         {
             var cfg = Config;
-            if (cfg == null || !cfg.InputDebugEnabled)
+            if (cfg == null || !cfg.LoggingEnabled || !cfg.InputDebugEnabled)
                 return false;
             return subSwitch switch
             {
@@ -126,7 +138,7 @@ namespace gEmuera.Diagnostics
         public static bool IsStatementRecognitionEnabled(string subSwitch)
         {
             var cfg = Config;
-            if (cfg == null || !cfg.StatementRecognitionEnabled)
+            if (cfg == null || !cfg.LoggingEnabled || !cfg.StatementRecognitionEnabled)
                 return false;
             return subSwitch switch
             {
@@ -143,7 +155,7 @@ namespace gEmuera.Diagnostics
         public static bool IsImageDebugEnabled(string subSwitch)
         {
             var cfg = Config;
-            if (cfg == null || !cfg.ImageDebugEnabled)
+            if (cfg == null || !cfg.LoggingEnabled || !cfg.ImageDebugEnabled)
                 return false;
             return subSwitch switch
             {
@@ -161,7 +173,7 @@ namespace gEmuera.Diagnostics
         public static bool IsUiLayoutEnabled(string subSwitch)
         {
             var cfg = Config;
-            if (cfg == null || !cfg.UiLayoutEnabled)
+            if (cfg == null || !cfg.LoggingEnabled || !cfg.UiLayoutEnabled)
                 return false;
             return subSwitch switch
             {
@@ -182,7 +194,9 @@ namespace gEmuera.Diagnostics
         public static bool CheckRateLimit(string eventId, EmueraLogCategory category = EmueraLogCategory.None)
         {
             var cfg = _config;
-            if (cfg == null || !cfg.RateLimitEnabled)
+            if (cfg == null || !cfg.LoggingEnabled)
+                return false;
+            if (!cfg.RateLimitEnabled)
                 return true;
             if (string.IsNullOrEmpty(eventId))
                 eventId = "<unknown>";
@@ -301,7 +315,7 @@ namespace gEmuera.Diagnostics
         public static string RedactText(string text, int maxChars)
         {
             var cfg = Config;
-            if (cfg == null || !cfg.RedactionEnabled)
+            if (cfg == null || !cfg.LoggingEnabled || !cfg.RedactionEnabled)
                 return text;
             if (string.IsNullOrEmpty(text))
                 return "";
@@ -316,7 +330,7 @@ namespace gEmuera.Diagnostics
         public static string RedactPath(string path)
         {
             var cfg = Config;
-            if (cfg == null || !cfg.RedactionEnabled)
+            if (cfg == null || !cfg.LoggingEnabled || !cfg.RedactionEnabled)
                 return path;
             if (string.IsNullOrEmpty(path))
                 return "";

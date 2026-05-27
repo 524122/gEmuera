@@ -71,8 +71,8 @@ internal static class GenericUtils
 #else
     const bool VerboseLogBuild = false;
 #endif
-    static int runtimeLogLevel = (int)EmueraLogLevel.Error;
-    static int runtimeLogCategories = (int)EmueraLogCategory.All;
+    static int runtimeLogLevel = (int)EmueraLogLevel.None;
+    static int runtimeLogCategories = (int)EmueraLogCategory.None;
     static int mirrorNonErrorLogsToGodot = 0;
     static int loggingInitialized = 0;
     static RuntimeDiagnosticsConfig _runtimeConfig;
@@ -95,6 +95,21 @@ internal static class GenericUtils
     {
         get => Volatile.Read(ref scrollTraceEnabled) != 0;
         set => Volatile.Write(ref scrollTraceEnabled, value ? 1 : 0);
+    }
+
+    public static bool IsDiagnosticsLoggingEnabled => _runtimeConfig?.LoggingEnabled ?? false;
+
+    public static bool IsScrollTraceActive => ScrollTraceEnabled && IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script);
+
+    public static bool IsSaveLogOperationCaptureEnabled
+    {
+        get
+        {
+            var cfg = _runtimeConfig;
+            return cfg != null
+                && cfg.LoggingEnabled
+                && (cfg.InputDebugEnabled || cfg.InputReplayEnabled || cfg.SaveDebugEnabled || cfg.DiagnosticPackageEnabled);
+        }
     }
 
     sealed class SnakeAudioState
@@ -287,9 +302,12 @@ internal static class GenericUtils
         string sessionId = BuildSessionId(_runtimeConfig.LoggingSessionIdFormat);
         DiagnosticLogRouter.Initialize(_runtimeConfig, sessionId);
         DiagnosticLogSinks.Initialize(_runtimeConfig);
-        DiagnosticLogExporter.WriteBreadcrumb(_runtimeConfig, "LOG.INIT", "source=GenericUtils.InitializeLogging");
 
         ApplyRuntimeDiagnosticsConfig();
+        if (!_runtimeConfig.LoggingEnabled)
+            return;
+
+        DiagnosticLogExporter.WriteBreadcrumb(_runtimeConfig, "LOG.INIT", "source=GenericUtils.InitializeLogging");
         WriteConfigSelfCheck(loadResult);
         WriteAndroidStorageDiagnostics();
 
@@ -322,6 +340,17 @@ internal static class GenericUtils
 
     static void ApplyRuntimeDiagnosticsConfig()
     {
+        if (_runtimeConfig == null || !_runtimeConfig.LoggingEnabled)
+        {
+            RuntimeLogLevel = EmueraLogLevel.None;
+            RuntimeLogCategories = EmueraLogCategory.None;
+            MirrorNonErrorLogsToGodot = false;
+            ScrollTraceEnabled = false;
+            DiagnosticLogSinks.SetMirrorNonErrorToGodot(false);
+            _inputReplay = null;
+            return;
+        }
+
         var model = _runtimeConfig.GetActiveDebugModel();
         if (model != null && model.Enabled)
         {
@@ -337,8 +366,6 @@ internal static class GenericUtils
         }
 
         RuntimeLogCategories = _runtimeConfig.GetActiveDebugModelCategoryMask();
-        if (RuntimeLogCategories == EmueraLogCategory.None)
-            RuntimeLogCategories = EmueraLogCategory.All;
 
         DiagnosticLogSinks.SetMirrorNonErrorToGodot(MirrorNonErrorLogsToGodot);
         _inputReplay = _runtimeConfig.InputReplayEnabled
@@ -524,6 +551,8 @@ internal static class GenericUtils
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsLogEnabled(EmueraLogLevel level, EmueraLogCategory category = EmueraLogCategory.General)
     {
+        if (!(_runtimeConfig?.LoggingEnabled ?? false))
+            return false;
         if (level == EmueraLogLevel.None)
             return false;
         if (!VerboseLogBuild && level < EmueraLogLevel.Error)
@@ -862,6 +891,11 @@ internal static class GenericUtils
     public static bool ExportDiagnosticLog(string path, out string errorMessage)
     {
         errorMessage = "";
+        if (!(_runtimeConfig?.LoggingEnabled ?? false))
+        {
+            errorMessage = "diagnostics_disabled";
+            return false;
+        }
         if (string.IsNullOrEmpty(path))
             path = GetDefaultDiagnosticLogPath();
 
@@ -880,6 +914,11 @@ internal static class GenericUtils
 
     public static bool ExportDiagnosticPackage(string outputDirectory, out string errorMessage)
     {
+        if (!(_runtimeConfig?.LoggingEnabled ?? false))
+        {
+            errorMessage = "diagnostics_disabled";
+            return false;
+        }
         string gamePath = _runtimeGamePath;
         string coreProfile = _runtimeCoreProfile;
         bool useLazyLoading = false;
@@ -929,7 +968,7 @@ internal static class GenericUtils
 
     public static void ScrollTrace(string category, string message)
     {
-        if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
+        if (!IsScrollTraceActive)
             return;
         WriteScrollTrace(category, message);
     }
@@ -940,7 +979,7 @@ internal static class GenericUtils
     /// </summary>
     public static void ScrollTrace(string category, Func<string> messageFactory)
     {
-        if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
+        if (!IsScrollTraceActive)
             return;
         string message;
         try
@@ -963,7 +1002,7 @@ internal static class GenericUtils
 
     public static void StartScrollTraceCoreWindow(string reason)
     {
-        if (!ScrollTraceEnabled)
+        if (!IsScrollTraceActive)
             return;
         Interlocked.Exchange(ref scrollTraceCoreLinesRemaining, ScrollTraceCoreBurstLineCount);
         ScrollTrace("core", $"window_start lines={ScrollTraceCoreBurstLineCount} reason={ClipTrace(reason)}");
@@ -971,7 +1010,7 @@ internal static class GenericUtils
 
     public static void StartScrollTraceCoreWindow(Func<string> reasonFactory)
     {
-        if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
+        if (!IsScrollTraceActive)
             return;
         string reason;
         try
@@ -988,7 +1027,7 @@ internal static class GenericUtils
 
     public static bool TryConsumeScrollTraceCoreLine()
     {
-        if (!ScrollTraceEnabled || !IsLogEnabled(EmueraLogLevel.Debug, EmueraLogCategory.Script))
+        if (!IsScrollTraceActive)
             return false;
         while (true)
         {
@@ -1253,7 +1292,7 @@ internal static class GenericUtils
 
     public static bool IsInputReplayCaptureEnabled => _inputReplay != null;
 
-    public static bool IsPerformanceSamplingEnabled => _runtimeConfig?.PerformanceSamplingEnabled ?? false;
+    public static bool IsPerformanceSamplingEnabled => (_runtimeConfig?.LoggingEnabled ?? false) && (_runtimeConfig?.PerformanceSamplingEnabled ?? false);
 
     /// <summary>
     /// 企业级说明：save_log 操作轨迹始终保持最近 5 次核心输入摘要，独立于专家诊断开关。
@@ -1262,6 +1301,8 @@ internal static class GenericUtils
     public static void CaptureSaveLogOperation(string kind, string input, string codeBefore, string codeAfter,
         string waitState, bool consumed)
     {
+        if (!IsSaveLogOperationCaptureEnabled)
+            return;
         int maxInputChars = _runtimeConfig?.RedactionMaxUserTextChars ?? 64;
         int maxScriptChars = _runtimeConfig?.RedactionMaxScriptTextChars ?? 120;
         string originalBefore = codeBefore ?? "";
@@ -1285,7 +1326,7 @@ internal static class GenericUtils
         _runtimeCoreProfile = coreProfile ?? "";
         DiagnosticLogExporter.NotifyGamePathSelected(path);
         var cfg = _runtimeConfig;
-        if (cfg == null)
+        if (cfg == null || !cfg.LoggingEnabled)
             return;
         string redactedPath = DiagnosticLogRouter.RedactPath(path ?? "");
         if (cfg.RetentionEnabled && cfg.RetentionCleanupOnStartup)
@@ -1303,7 +1344,7 @@ internal static class GenericUtils
     public static void NotifyLifecycleState(string state)
     {
         var cfg = _runtimeConfig;
-        if (cfg == null)
+        if (cfg == null || !cfg.LoggingEnabled)
             return;
         if (cfg.BreadcrumbEnabled && cfg.BreadcrumbWriteOnShutdown && string.Equals(state, "android_pause", StringComparison.Ordinal))
             DiagnosticLogExporter.WriteBreadcrumb(cfg, "BREADCRUMB.WRITE", "event=" + state);
@@ -1318,14 +1359,14 @@ internal static class GenericUtils
     public static void NotifyApplicationShutdown()
     {
         var cfg = _runtimeConfig;
-        if (cfg != null && cfg.BreadcrumbEnabled && cfg.BreadcrumbWriteOnShutdown)
+        if (cfg != null && cfg.LoggingEnabled && cfg.BreadcrumbEnabled && cfg.BreadcrumbWriteOnShutdown)
             DiagnosticLogExporter.WriteBreadcrumb(cfg, "BREADCRUMB.WRITE", "event=shutdown");
     }
 
     public static void SamplePerformanceFrame(double deltaSeconds, int textureQueueCount)
     {
         var cfg = _runtimeConfig;
-        if (cfg == null || !cfg.PerformanceSamplingEnabled)
+        if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
             return;
 
         double frameMs = Math.Max(0.0, deltaSeconds * 1000.0);

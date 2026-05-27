@@ -57,17 +57,33 @@ public class EmueraThread
             return;
         if(!from_button && console.IsWaitingInputSomething)
         {
-            string ignoredLine = FormatCurrentCoreLineForTrace();
-            GenericUtils.ScrollTrace("input", () => $"submit_ignored fromButton={from_button} skip={skip} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)} {ignoredLine}");
-            GenericUtils.CaptureSaveLogOperation("keyboard_ignored", c, ignoredLine, ignoredLine, FormatWaitState(console), false);
+            if (GenericUtils.IsScrollTraceActive)
+            {
+                GenericUtils.ScrollTrace("input",
+                    () => $"submit_ignored fromButton={from_button} skip={skip} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)} {FormatCurrentCoreLineForTrace()}");
+            }
+            if (GenericUtils.IsSaveLogOperationCaptureEnabled)
+            {
+                string ignoredLine = FormatCurrentCoreLineForTrace();
+                GenericUtils.CaptureSaveLogOperation("keyboard_ignored", c, ignoredLine, ignoredLine, FormatWaitState(console), false);
+            }
             return;
         }
-        GenericUtils.ScrollTrace("input", () => $"submit fromButton={from_button} skip={skip} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)} waiting={console.IsWaitingInput} enter={console.IsWaitingEnterKey} any={console.IsWaitAnyKey} {FormatCurrentCoreLineForTrace()}");
-        GenericUtils.CaptureInputReplay(from_button ? "button" : "keyboard", c,
-            GetReplayPointerPosition(), GetReplayPointerPosition(), FormatWaitState(console), false);
+        if (GenericUtils.IsScrollTraceActive)
+        {
+            GenericUtils.ScrollTrace("input",
+                () => $"submit fromButton={from_button} skip={skip} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)} waiting={console.IsWaitingInput} enter={console.IsWaitingEnterKey} any={console.IsWaitAnyKey} {FormatCurrentCoreLineForTrace()}");
+        }
+        if (GenericUtils.IsInputReplayCaptureEnabled)
+        {
+            var replayPosition = GetReplayPointerPosition();
+            GenericUtils.CaptureInputReplay(from_button ? "button" : "keyboard", c,
+                replayPosition, replayPosition, FormatWaitState(console), false);
+        }
         if (GenericUtils.IsInputTraceEnabled("submit"))
             GenericUtils.InputTrace("INPUT.SUBMIT", () => "input submit", () => $"fromButton={from_button} skip={skip} mouse={mouseButton}");
-        GenericUtils.StartScrollTraceCoreWindow(() => $"input fromButton={from_button} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)}");
+        if (GenericUtils.IsScrollTraceActive)
+            GenericUtils.StartScrollTraceCoreWindow(() => $"input fromButton={from_button} mouse={mouseButton} value={GenericUtils.ClipTrace(c, 64)}");
         input = c;
         skipflag = skip;
         inputMouseButton = mouseButton;
@@ -105,10 +121,21 @@ public class EmueraThread
             {
                 string originalInput = input;
                 int originalMouseButton = inputMouseButton;
-                string codeBefore = FormatCurrentCoreLineForTrace();
-                GenericUtils.ScrollTrace("input", () => $"consume skip={skipflag} mouse={originalMouseButton} value={GenericUtils.ClipTrace(originalInput, 64)} enter={console.IsWaitingEnterKey} any={console.IsWaitAnyKey} {codeBefore}");
-                GenericUtils.CaptureInputReplay(originalMouseButton != 0 ? "button_consume" : "keyboard_consume", originalInput,
-                    GetReplayPointerPosition(), GetReplayPointerPosition(), FormatWaitState(console), true);
+                string codeBefore = null;
+                if (GenericUtils.IsScrollTraceActive)
+                {
+                    GenericUtils.ScrollTrace("input", () =>
+                    {
+                        codeBefore ??= FormatCurrentCoreLineForTrace();
+                        return $"consume skip={skipflag} mouse={originalMouseButton} value={GenericUtils.ClipTrace(originalInput, 64)} enter={console.IsWaitingEnterKey} any={console.IsWaitAnyKey} {codeBefore}";
+                    });
+                }
+                if (GenericUtils.IsInputReplayCaptureEnabled)
+                {
+                    var replayPosition = GetReplayPointerPosition();
+                    GenericUtils.CaptureInputReplay(originalMouseButton != 0 ? "button_consume" : "keyboard_consume", originalInput,
+                        replayPosition, replayPosition, FormatWaitState(console), true);
+                }
                 if (GenericUtils.IsInputTraceEnabled("consume"))
                     GenericUtils.InputTrace("INPUT.CONSUME", () => "input consume", () => $"skip={skipflag} mouse={originalMouseButton}");
                 bool consumed = false;
@@ -123,13 +150,17 @@ public class EmueraThread
                 }
                 finally
                 {
-                    GenericUtils.CaptureSaveLogOperation(
-                        originalMouseButton != 0 ? "button" : "keyboard",
-                        originalInput,
-                        codeBefore,
-                        FormatCurrentCoreLineForTrace(),
-                        FormatWaitState(console),
-                        consumed);
+                    if (GenericUtils.IsSaveLogOperationCaptureEnabled)
+                    {
+                        codeBefore ??= FormatCurrentCoreLineForTrace();
+                        GenericUtils.CaptureSaveLogOperation(
+                            originalMouseButton != 0 ? "button" : "keyboard",
+                            originalInput,
+                            codeBefore,
+                            FormatCurrentCoreLineForTrace(),
+                            FormatWaitState(console),
+                            consumed);
+                    }
                 }
             }
             input = null;

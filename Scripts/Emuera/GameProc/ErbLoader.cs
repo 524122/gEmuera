@@ -352,7 +352,8 @@ namespace MinorShift.Emuera.GameProc
 			int traceStartEnabledLineCount = enabledLineCount;
 			int traceInstructionCount = 0;
 			int traceLabelCount = 0;
-			GenericUtils.ScrollTrace("core", $"erb_load_start file={GenericUtils.ClipTrace(filename, 120)} lazy={isLazyLoading}");
+			if (GenericUtils.IsScrollTraceActive)
+				GenericUtils.ScrollTrace("core", $"erb_load_start file={GenericUtils.ClipTrace(filename, 120)} lazy={isLazyLoading}");
 			try
 			{
 				PPState ppstate = new PPState();
@@ -502,9 +503,12 @@ namespace MinorShift.Emuera.GameProc
 			finally
 			{
 				eReader.Close();
-				GenericUtils.ScrollTrace(
-					"core",
-					$"erb_load_end file={GenericUtils.ClipTrace(filename, 120)} lines={enabledLineCount - traceStartEnabledLineCount} instructions={traceInstructionCount} labels={traceLabelCount} ms={WinmmTimer.TickCount - traceStartTick} lazy={isLazyLoading}");
+				if (GenericUtils.IsScrollTraceActive)
+				{
+					GenericUtils.ScrollTrace(
+						"core",
+						$"erb_load_end file={GenericUtils.ClipTrace(filename, 120)} lines={enabledLineCount - traceStartEnabledLineCount} instructions={traceInstructionCount} labels={traceLabelCount} ms={WinmmTimer.TickCount - traceStartTick} lazy={isLazyLoading}");
+				}
 			}
 			return;
 		}

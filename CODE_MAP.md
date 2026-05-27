@@ -1,6 +1,6 @@
 # CODE_MAP
 
-更新时间：2026-05-27
+更新时间：2026-05-28
 
 用途：这是给 AI 和维护者快速定位代码用的地图。优先读本文件，再按路径进入源码。地图只记录结构、职责、主要接口和关键函数，不复制源码实现。
 
@@ -60,7 +60,7 @@ project.godot
 |-- project.godot                 Godot 项目配置，主场景 first_window.tscn
 |-- first_window.tscn             启动器场景
 |-- main.tscn                     主游戏场景
-|-- config.toml                   运行期诊断配置
+|-- config.toml                   精简运行期诊断配置；`[logging].enabled=false` 时日志/诊断系统完全关闭
 |-- IDEAS.md                      项目工作约定，所有 AI 任务优先阅读
 |-- CLAUDE.md                     Claude Code/AI CLI/AI IDE 执行指南
 |-- action_maps/                  本地 AI/程序操作日志，不提交 GitHub，最多 30 个日志文件
@@ -100,7 +100,7 @@ project.godot
 | `Scripts/EmueraThread.cs` | `EmueraThread` | 后台执行 Emuera 核心；把 Godot 输入转成阻塞式 console 输入。 | `Start`, `End`, `Running`, `Input` |
 | `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI 渲染核心；固定行高文本、按钮、图片层、输入栏、快速按钮、音频、缩放、诊断覆盖层。 | `_Ready`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
 | `Scripts/EmueraImage.cs` | `EmueraImage : Control` | 绘制 `Texture2D` / `AtlasTexture` 的控件，支持 ColorMatrix material。 | `SetColorMatrix`, `_Draw` |
-| `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志、诊断、UI 队列、文本输出、音频、输入回放。 | `InitializeLogging`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `ExportDiagnosticPackage`, `RestartGame` |
+| `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `ExportDiagnosticPackage`, `RestartGame` |
 | `Scripts/FirstWindow.cs` | `FirstWindow : Control` | 启动器；扫描 `era*` 游戏目录，切换语言/核心 profile，进入主场景。 | `_Ready`, `_ExitTree`, `_Notification`, `ResolveStartupGamePath` |
 | `Scripts/SpriteManager.cs` | `SpriteManager`, `TextureInfo`, `SpriteInfo` | 图片/精灵纹理缓存；AtlasTexture 管理；后台请求与主线程限流加载。 | `Init`, `GetSprite`, `GetTextureInfo`, `GetTextureInfoOtherThread`, `UpdateOtherThreads`, `UpdateCleanup`, `ForceClear` |
 | `Scripts/ColorMatrixGPU.cs` | `ColorMatrixGPU` | ColorMatrix shader material 创建、缓存、LRU、uniform 设置。 | `CreateMaterial`, `GetSharedMaterial`, `GetMatrixKey`, `SetMatrixUniforms`, `CreateCompositMaterial` |
@@ -119,14 +119,14 @@ project.godot
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
 | `DiagnosticLogRecord.cs` | `DiagnosticLogRecord` | 单条诊断日志记录和值格式化。 | `FormatForGodot`, `FormatForExport` |
-| `DiagnosticLogRouter.cs` | `DiagnosticLogRouter` | 日志开关、类别过滤、限流、脱敏、record 构造。 | `Initialize`, `Reload`, `IsEnabled`, `CheckRateLimit`, `BuildRecord`, `RedactPath` |
+| `DiagnosticLogRouter.cs` | `DiagnosticLogRouter` | 日志总闸门、类别过滤、限流、脱敏、record 构造；关闭时热路径直接返回。 | `Initialize`, `Reload`, `IsLoggingEnabled`, `IsEnabled`, `CheckRateLimit`, `BuildRecord`, `RedactPath` |
 | `DiagnosticLogSinks.cs` | `DiagnosticLogSinks` | 环形日志缓存和 Godot 输出镜像。 | `Initialize`, `Write`, `Snapshot`, `SetMirrorNonErrorToGodot` |
 | `DiagnosticLogExporter.cs` | `DiagnosticLogExporter` | 导出诊断包/日志，记录面包屑，清理保留文件。 | `ExportDiagnosticPackage`, `ExportDiagnosticLog`, `WriteBreadcrumb`, `RunRetentionCleanup` |
 | `InputReplayBuffer.cs` | `InputReplayBuffer` | 输入回放环形缓冲。 | `Capture`, `BuildExportText` |
 | `SaveLogOperationTrail.cs` | `SaveLogOperationTrail` | 存档/日志操作轨迹缓存。 | `Capture`, `BuildExportText` |
-| `RuntimeDiagnosticsConfig.cs` | `RuntimeDiagnosticsConfig` 等配置类 | 运行期诊断配置模型、默认值、快捷 debug preset。 | `CreateDefault`, `ApplyQuickDebugPreset`, `GetRuntimeLogLevel`, `GetActiveDebugModel` |
-| `RuntimeDiagnosticsConfigLoader.cs` | `RuntimeDiagnosticsConfigLoader`, `LoadResult` | 读取 `config.toml` 和用户覆盖配置。 | `Load` |
-| `RuntimeDiagnosticsConfigWriter.cs` | `RuntimeDiagnosticsConfigWriter` | 写出用户诊断配置 TOML。 | `SaveUserConfig`, `BuildToml` |
+| `RuntimeDiagnosticsConfig.cs` | `RuntimeDiagnosticsConfig` 等配置类 | 运行期诊断配置模型、默认值、精简 logging 开关展开和关闭态清理。 | `CreateDefault`, `ApplyMinimalLoggingConfig`, `DisableAllDiagnostics`, `GetRuntimeLogLevel`, `GetActiveDebugModel` |
+| `RuntimeDiagnosticsConfigLoader.cs` | `RuntimeDiagnosticsConfigLoader`, `LoadResult` | 读取 `config.toml` 和用户覆盖配置，支持精简 `[logging]` 总开关和模块开关。 | `Load` |
+| `RuntimeDiagnosticsConfigWriter.cs` | `RuntimeDiagnosticsConfigWriter` | 写出精简用户诊断配置 TOML。 | `SaveUserConfig`, `BuildToml` |
 | `RuntimeTomlParser.cs` | `RuntimeTomlParser` | 简易 TOML 解析器。 | `Parse` |
 | `RuntimeDiagnosticsPanel.cs` | `RuntimeDiagnosticsPanel`, `FloatingDiagnosticsHost` | Godot 内置诊断浮窗。 | `AttachFloatingTo`, `_Ready`, `_Notification` |
 
@@ -421,4 +421,4 @@ project.godot
 | 变量读写错误 | `VariableIdentifier`, `VariableParser`, `VariableEvaluator`, `VariableToken` |
 | 存档兼容 | `EraDataStream`, `EraBinaryDataReader`, `EraBinaryDataWriter`, `VariableData`, `CharacterData` |
 | SQL/Map/XML/DT 扩展 | `RuntimeDataStore`, `SnakeSqlManager`, `ModernSqlManager`, `Creator.Method.*.cs` |
-| 日志太多或没有日志 | `config.toml`, `RuntimeDiagnosticsConfig`, `DiagnosticLogRouter`, `GenericUtils.InitializeLogging` |
+| 日志太多或没有日志 | `config.toml` 的 `[logging].enabled` 与模块开关、`RuntimeDiagnosticsConfig`, `DiagnosticLogRouter`, `GenericUtils.InitializeLogging` |

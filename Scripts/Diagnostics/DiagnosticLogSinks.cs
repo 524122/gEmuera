@@ -24,6 +24,16 @@ namespace gEmuera.Diagnostics
         public static void Initialize(RuntimeDiagnosticsConfig config)
         {
             _config = config ?? RuntimeDiagnosticsConfig.CreateDefault();
+            if (!_config.LoggingEnabled)
+            {
+                _ringCapacity = 0;
+                _ring = null;
+                _ringStart = 0;
+                _ringCount = 0;
+                _overwrittenTotal = 0;
+                _mirrorNonErrorToGodot = 0;
+                return;
+            }
             _ringCapacity = Math.Max(64, _config.LoggingDiagnosticRingCapacity);
             _ring = new DiagnosticLogRecord[_ringCapacity];
             _ringStart = 0;
@@ -47,6 +57,8 @@ namespace gEmuera.Diagnostics
         /// </summary>
         public static void Write(in DiagnosticLogRecord record)
         {
+            if (_config == null || !_config.LoggingEnabled)
+                return;
             AppendToRing(record);
             if (ShouldMirrorToGodot(record.Level))
                 WriteToGodotConsole(record);

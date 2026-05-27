@@ -1240,7 +1240,8 @@ public partial class EmueraContent : Control
 			QueueDisplayFollowUp();
 		}
 
-		TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} changed={changed} update={update} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} changed={changed} update={update} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
 		SetLastButtonGeneration(lastButtonGeneration);
 	}
 
@@ -1417,7 +1418,7 @@ public partial class EmueraContent : Control
 	// toggled from GenericUtils without leaving prints in mobile hot paths.
 	void TraceScroll(string action, string detail = null)
 	{
-		if (!GenericUtils.ScrollTraceEnabled)
+		if (!GenericUtils.IsScrollTraceActive)
 			return;
 		string suffix = string.IsNullOrEmpty(detail) ? "" : " " + detail;
 		GenericUtils.ScrollTrace("ui", $"{action}{suffix} {GetScrollTraceState()}");
@@ -1427,7 +1428,7 @@ public partial class EmueraContent : Control
 	{
 		// 企业级说明：滚动追踪覆盖触摸、惯性和 UI 自动滚动路径。
 		// Android/APK 默认关闭时必须避免构造 detail 字符串，降低触摸帧中的 GC 压力。
-		if (!GenericUtils.ScrollTraceEnabled)
+		if (!GenericUtils.IsScrollTraceActive)
 			return;
 		TraceScroll(action, detailFactory != null ? detailFactory() : null);
 	}
@@ -1459,11 +1460,13 @@ public partial class EmueraContent : Control
 		pendingScrollDeadlineTick = now + ScrollToBottomRetryMs;
 		if (pendingScroll)
 		{
-			TraceScroll("scroll_bottom_request_merge", () => $"deadline={pendingScrollDeadlineTick}");
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("scroll_bottom_request_merge", () => $"deadline={pendingScrollDeadlineTick}");
 			return;
 		}
 		pendingScroll = true;
-		TraceScroll("scroll_bottom_request", () => $"deadline={pendingScrollDeadlineTick}");
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("scroll_bottom_request", () => $"deadline={pendingScrollDeadlineTick}");
 		CallDeferred(nameof(DeferredScrollToBottom));
 	}
 
@@ -1535,7 +1538,8 @@ public partial class EmueraContent : Control
 					ulong stableDeadline = now + ScrollToBottomStableMs;
 					if (pendingScrollDeadlineTick < stableDeadline)
 						pendingScrollDeadlineTick = stableDeadline;
-					TraceScroll("scroll_bottom_max", () => $"max={maxScroll} stableDeadline={stableDeadline}");
+					if (GenericUtils.IsScrollTraceActive)
+						TraceScroll("scroll_bottom_max", () => $"max={maxScroll} stableDeadline={stableDeadline}");
 				}
 
 				scrollContainer.ScrollVertical = maxScroll;
@@ -1556,7 +1560,8 @@ public partial class EmueraContent : Control
 		}
 		finally
 		{
-			TraceScroll("scroll_bottom_end", () => $"reason={endReason}");
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("scroll_bottom_end", () => $"reason={endReason}");
 			pendingScroll = false;
 			pendingScrollLastMax = int.MinValue;
 			pendingScrollStableSinceTick = 0;
@@ -1661,7 +1666,8 @@ public partial class EmueraContent : Control
 			scrollContainer.ScrollVertical = targetVertical;
 			RememberDesiredContentScroll(targetHorizontal, targetVertical);
 			if (oldHorizontal != targetHorizontal || oldVertical != targetVertical)
-				TraceScroll("scale_bounds_scroll_set", () => $"allowShrink={allowShrink} from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
+				if (GenericUtils.IsScrollTraceActive)
+					TraceScroll("scale_bounds_scroll_set", () => $"allowShrink={allowShrink} from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
 		}
 
 		return layoutChanged;
@@ -3082,12 +3088,16 @@ public partial class EmueraContent : Control
 	void OnButtonPressed(string input, long generation, bool skip = false)
 	{
 		RememberCurrentContentScroll();
-		TraceScroll("button_pressed", () => $"input={GenericUtils.ClipTrace(input, 64)} gen={generation} lastGen={lastButtonGeneration} skip={skip}");
-		GenericUtils.StartScrollTraceCoreWindow(() => $"button input={GenericUtils.ClipTrace(input, 64)} gen={generation} skip={skip}");
+		if (GenericUtils.IsScrollTraceActive)
+		{
+			TraceScroll("button_pressed", () => $"input={GenericUtils.ClipTrace(input, 64)} gen={generation} lastGen={lastButtonGeneration} skip={skip}");
+			GenericUtils.StartScrollTraceCoreWindow(() => $"button input={GenericUtils.ClipTrace(input, 64)} gen={generation} skip={skip}");
+		}
 		if (generation < lastButtonGeneration)
 		{
 			// Old button clicked - send empty input (acts as skip/advance)
-			TraceScroll("button_pressed_old_generation", () => $"gen={generation} lastGen={lastButtonGeneration}");
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("button_pressed_old_generation", () => $"gen={generation} lastGen={lastButtonGeneration}");
 			EmueraThread.instance.Input("", false, skip);
 			return;
 		}
@@ -3582,7 +3592,8 @@ public partial class EmueraContent : Control
 			contentDragLastPosition = pointerPosition;
 			contentLastDragTick = Time.GetTicksMsec();
 			lastScrollTraceDragTick = contentLastDragTick;
-		TraceScroll("pointer_press", () => $"button={contentDragStartedOnButton} input={GenericUtils.ClipTrace(input, 64)} gen={generation} pos=({Mathf.RoundToInt(pointerPosition.X)},{Mathf.RoundToInt(pointerPosition.Y)}) accept={acceptEvent}");
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("pointer_press", () => $"button={contentDragStartedOnButton} input={GenericUtils.ClipTrace(input, 64)} gen={generation} pos=({Mathf.RoundToInt(pointerPosition.X)},{Mathf.RoundToInt(pointerPosition.Y)}) accept={acceptEvent}");
 			if (GenericUtils.IsTouchTraceEnabled("pointer"))
 				GenericUtils.TouchTrace("TOUCH.POINTER.PRESS", () => "pointer press",
 					() => $"button={contentDragStartedOnButton} pos=({Mathf.RoundToInt(pointerPosition.X)},{Mathf.RoundToInt(pointerPosition.Y)}) accept={acceptEvent}");
@@ -3609,7 +3620,8 @@ public partial class EmueraContent : Control
 			{
 				contentDragMoved = true;
 				contentScrollInteractionSerial++;
-				TraceScroll("drag_start", () => $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
+				if (GenericUtils.IsScrollTraceActive)
+					TraceScroll("drag_start", () => $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
 				if (GenericUtils.IsTouchTraceEnabled("drag"))
 					GenericUtils.TouchTrace("TOUCH.DRAG.START", () => "drag start",
 						() => $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
@@ -3623,7 +3635,8 @@ public partial class EmueraContent : Control
 				if (now - lastScrollTraceDragTick >= ScrollTraceDragIntervalMs)
 				{
 					lastScrollTraceDragTick = now;
-					TraceScroll("drag_move", () => $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
+					if (GenericUtils.IsScrollTraceActive)
+						TraceScroll("drag_move", () => $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
 					if (GenericUtils.IsTouchTraceEnabled("drag"))
 						GenericUtils.TouchTrace("TOUCH.DRAG.MOVE", () => "drag move",
 							() => $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
@@ -3668,7 +3681,8 @@ public partial class EmueraContent : Control
 			restoreQuickInputGate = advanceTap;
 		}
 
-		TraceScroll("pointer_release", () => $"moved={contentDragMoved} button={contentDragStartedOnButton} pressedInput={GenericUtils.ClipTrace(pressedButtonInput, 64)} advance={advanceTap} handled={handled}");
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("pointer_release", () => $"moved={contentDragMoved} button={contentDragStartedOnButton} pressedInput={GenericUtils.ClipTrace(pressedButtonInput, 64)} advance={advanceTap} handled={handled}");
 		if (GenericUtils.IsTouchTraceEnabled("pointer"))
 			GenericUtils.TouchTrace("TOUCH.POINTER.RELEASE", () => "pointer release",
 				() => $"moved={contentDragMoved} button={contentDragStartedOnButton} advance={advanceTap} handled={handled}");
@@ -3804,7 +3818,8 @@ public partial class EmueraContent : Control
 			contentScrollInteractionSerial++;
 			StopContentInertia();
 			ResetContentDragState();
-			TraceScroll("touch_gesture_begin", () => $"touches={contentTouchPositions.Count}");
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("touch_gesture_begin", () => $"touches={contentTouchPositions.Count}");
 			if (GenericUtils.IsTouchTraceEnabled("pinch"))
 				GenericUtils.TouchTrace("TOUCH.PINCH.START", () => "pinch start",
 					() => $"touches={contentTouchPositions.Count}");
@@ -3936,7 +3951,8 @@ public partial class EmueraContent : Control
 			? new Vector2(desiredContentScrollHorizontal, desiredContentScrollVertical)
 			: new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
 		var contentFocus = (previousScroll + localFocus) / previousScale;
-		TraceScroll("scale_focus_begin", () => $"from={contentScale:0.###} to={ClampContentScale(scale):0.###} focus=({Mathf.RoundToInt(localFocus.X)},{Mathf.RoundToInt(localFocus.Y)})");
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("scale_focus_begin", () => $"from={contentScale:0.###} to={ClampContentScale(scale):0.###} focus=({Mathf.RoundToInt(localFocus.X)},{Mathf.RoundToInt(localFocus.Y)})");
 
 		ApplyContentScaleValue(scale);
 		UpdateScaleBounds(false);
@@ -3963,7 +3979,8 @@ public partial class EmueraContent : Control
 		scrollContainer.ScrollHorizontal = targetHorizontal;
 		scrollContainer.ScrollVertical = targetVertical;
 		RememberDesiredContentScroll(targetHorizontal, targetVertical);
-		TraceScroll("scale_focus_restore", () => $"target=({targetHorizontal},{targetVertical})");
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("scale_focus_restore", () => $"target=({targetHorizontal},{targetVertical})");
 	}
 
 	// Finish a multi-touch gesture and lock in the final focused scroll position.
@@ -3974,7 +3991,8 @@ public partial class EmueraContent : Control
 			UpdateScaleBounds(true);
 			RestoreContentScaleFocus(scaleFocusContentPoint, scaleFocusLocalPoint);
 		}
-		TraceScroll("touch_gesture_end", () => $"focus={contentPinchFocusValid}");
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("touch_gesture_end", () => $"focus={contentPinchFocusValid}");
 		if (GenericUtils.IsTouchTraceEnabled("pinch"))
 			GenericUtils.TouchTrace("TOUCH.PINCH.END", () => "pinch end",
 				() => $"focus={contentPinchFocusValid}");
@@ -4097,7 +4115,8 @@ public partial class EmueraContent : Control
 		RememberDesiredContentScroll(nextHorizontal, nextVertical);
 		var applied = new Vector2(nextHorizontal - oldHorizontal, nextVertical - oldVertical);
 		if (applied.LengthSquared() > 0.01f && !contentDragActive && !contentInertiaActive)
-			TraceScroll("scroll_delta", () => $"delta=({Mathf.RoundToInt(delta.X)},{Mathf.RoundToInt(delta.Y)}) applied=({Mathf.RoundToInt(applied.X)},{Mathf.RoundToInt(applied.Y)})");
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("scroll_delta", () => $"delta=({Mathf.RoundToInt(delta.X)},{Mathf.RoundToInt(delta.Y)}) applied=({Mathf.RoundToInt(applied.X)},{Mathf.RoundToInt(applied.Y)})");
 		return applied;
 	}
 
@@ -4121,7 +4140,8 @@ public partial class EmueraContent : Control
 		scrollContainer.ScrollHorizontal = targetHorizontal;
 		scrollContainer.ScrollVertical = targetVertical;
 		RememberDesiredContentScroll(targetHorizontal, targetVertical);
-		TraceScroll("scroll_correction", () => $"from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("scroll_correction", () => $"from=({oldHorizontal},{oldVertical}) to=({targetHorizontal},{targetVertical}) limit=({limit.X},{limit.Y})");
 	}
 
 	// Estimate drag velocity for inertial scrolling.
@@ -4169,7 +4189,8 @@ public partial class EmueraContent : Control
 		if (contentScrollVelocity.Length() >= ContentInertiaMinVelocity)
 		{
 			contentInertiaActive = true;
-			TraceScroll("inertia_start", () => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())} decel={Mathf.RoundToInt(contentInertiaDeceleration)}");
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("inertia_start", () => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())} decel={Mathf.RoundToInt(contentInertiaDeceleration)}");
 			if (GenericUtils.IsTouchTraceEnabled("inertia"))
 				GenericUtils.TouchTrace("TOUCH.INERTIA.START", () => "inertia start",
 					() => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())} decel={Mathf.RoundToInt(contentInertiaDeceleration)}");
@@ -4184,7 +4205,8 @@ public partial class EmueraContent : Control
 		bool shouldLog = contentInertiaActive || contentScrollVelocity.LengthSquared() > 0.01f || contentInertiaRemainder.LengthSquared() > 0.01f;
 		if (shouldLog)
 		{
-			TraceScroll("inertia_stop", () => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())}");
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("inertia_stop", () => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())}");
 			if (GenericUtils.IsTouchTraceEnabled("inertia"))
 				GenericUtils.TouchTrace("TOUCH.INERTIA.STOP", () => "inertia stop",
 					() => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())}");
@@ -4271,8 +4293,11 @@ public partial class EmueraContent : Control
 
 		uint nowTick = MinorShift._Library.WinmmTimer.TickCount;
 		bool skipFlag = (nowTick - lastClickTick < 200);
-		TraceScroll("advance_tap", () => $"skip={skipFlag}");
-		GenericUtils.StartScrollTraceCoreWindow(() => $"advance_tap skip={skipFlag}");
+		if (GenericUtils.IsScrollTraceActive)
+		{
+			TraceScroll("advance_tap", () => $"skip={skipFlag}");
+			GenericUtils.StartScrollTraceCoreWindow(() => $"advance_tap skip={skipFlag}");
+		}
 		EmueraThread.instance.Input("", false, skipFlag);
 		lastClickTick = nowTick;
 		return true;

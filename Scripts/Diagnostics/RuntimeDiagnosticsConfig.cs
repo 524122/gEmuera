@@ -10,8 +10,11 @@ namespace gEmuera.Diagnostics
     /// </summary>
     public sealed class RuntimeDiagnosticsConfig
     {
+        // ---------- minimal logging switch ----------
+        public bool LoggingEnabled { get; set; } = false;
+
         // ---------- quick_debug ----------
-        public bool QuickDebugEnabled { get; set; } = true;
+        public bool QuickDebugEnabled { get; set; } = false;
         public string QuickDebugPreset { get; set; } = "normal";
         public string QuickDebugEffectivePreset { get; private set; } = "normal";
         public bool QuickDebugPresetInvalid { get; private set; }
@@ -194,7 +197,7 @@ namespace gEmuera.Diagnostics
         public bool RuntimePanelShowRingBufferStats { get; set; } = true;
 
         // ---------- diagnostic_package ----------
-        public bool DiagnosticPackageEnabled { get; set; } = true;
+        public bool DiagnosticPackageEnabled { get; set; } = false;
         public bool DiagnosticPackageIncludeLog { get; set; } = true;
         public bool DiagnosticPackageIncludeConfigSnapshot { get; set; } = true;
         public bool DiagnosticPackageIncludeDeviceInfo { get; set; } = true;
@@ -226,7 +229,7 @@ namespace gEmuera.Diagnostics
         public bool ReferenceNote { get; set; } = false;
 
         // ---------- diagnostic_breadcrumb ----------
-        public bool BreadcrumbEnabled { get; set; } = true;
+        public bool BreadcrumbEnabled { get; set; } = false;
         public string BreadcrumbPath { get; set; } = "game://gemuera-last-session-breadcrumb.log";
         public int BreadcrumbMaxBytes { get; set; } = 32768;
         public bool BreadcrumbWriteOnStartup { get; set; } = true;
@@ -247,7 +250,7 @@ namespace gEmuera.Diagnostics
         public int InputReplayMaxTextChars { get; set; } = 32;
 
         // ---------- diagnostic_retention ----------
-        public bool RetentionEnabled { get; set; } = true;
+        public bool RetentionEnabled { get; set; } = false;
         public string RetentionDirectory { get; set; } = "game://";
         public int RetentionMaxPackages { get; set; } = 20;
         public int RetentionMaxTotalMb { get; set; } = 128;
@@ -256,7 +259,7 @@ namespace gEmuera.Diagnostics
         public bool RetentionProtectCurrentSession { get; set; } = true;
 
         // ---------- debug.android_storage ----------
-        public bool AndroidStorageEnabled { get; set; } = true;
+        public bool AndroidStorageEnabled { get; set; } = false;
         public bool AndroidStorageLogPermissions { get; set; } = true;
         public bool AndroidStorageLogGameScan { get; set; } = true;
         public bool AndroidStorageLogPathSelection { get; set; } = true;
@@ -285,6 +288,179 @@ namespace gEmuera.Diagnostics
         public int SnapshotMaxFileKb { get; set; } = 1024;
 
         // ---------- helpers ----------
+        /// <summary>
+        /// 日志总开关关闭时必须把所有诊断副作用一起关掉：
+        /// 不分配 ring buffer、不写 breadcrumb、不做 retention 扫描，也不保留输入回放。
+        /// </summary>
+        public void DisableAllDiagnostics()
+        {
+            LoggingEnabled = false;
+            QuickDebugEnabled = false;
+            LoggingLevel = "none";
+            LoggingMirrorNonErrorToGodot = false;
+            QuickDebugMirrorNonErrorToGodot = false;
+            QuickDebugRuntimePanel = false;
+            QuickDebugDiagnosticPackage = false;
+
+            DebugModelZhCn.Enabled = false;
+            DebugModelJp.Enabled = false;
+            DebugModelEn.Enabled = false;
+            DebugModelZhCn.MirrorToGodot = false;
+            DebugModelJp.MirrorToGodot = false;
+            DebugModelEn.MirrorToGodot = false;
+            DebugModelZhCn.ScrollTrace = false;
+            DebugModelJp.ScrollTrace = false;
+            DebugModelEn.ScrollTrace = false;
+
+            Categories.General = false;
+            Categories.Sprite = false;
+            Categories.Audio = false;
+            Categories.Input = false;
+            Categories.Script = false;
+            Categories.UI = false;
+            Categories.FileSystem = false;
+            Categories.Load = false;
+            Categories.Save = false;
+            Categories.Config = false;
+            Categories.Performance = false;
+            Categories.Touch = false;
+            Categories.StatementRecognition = false;
+
+            CorrelationEnabled = false;
+            RateLimitEnabled = false;
+
+            TouchEnabled = false;
+            TouchPointer = false;
+            TouchDrag = false;
+            TouchPinch = false;
+            TouchInertia = false;
+            TouchScroll = false;
+            StatementRecognitionEnabled = false;
+            StatementRecognitionErbLoad = false;
+            StatementRecognitionLogicalLine = false;
+            StatementRecognitionExpression = false;
+            StatementRecognitionVariable = false;
+            StatementRecognitionFunctionCall = false;
+            InputDebugEnabled = false;
+            InputDebugSubmit = false;
+            InputDebugConsume = false;
+            InputDebugButton = false;
+            PerformanceEnabled = false;
+            PerformanceUiQueue = false;
+            PerformanceResourceLoading = false;
+            LoadDebugEnabled = false;
+            LoadDebugErb = false;
+            LoadDebugCsv = false;
+            LoadDebugResources = false;
+            SaveDebugEnabled = false;
+            SaveDebugRead = false;
+            SaveDebugWrite = false;
+            SaveDebugCompatibilityFallback = false;
+            ResourceDebugEnabled = false;
+            ResourceDebugSprite = false;
+            ResourceDebugAudio = false;
+            ResourceDebugSqlite = false;
+            ImageDebugEnabled = false;
+            ImageDebugResolve = false;
+            ImageDebugTexture = false;
+            ImageDebugRenderRect = false;
+            ImageDebugCache = false;
+            ImageDebugColorMatrix = false;
+            ImageDebugLogSuccess = false;
+            UiLayoutEnabled = false;
+            UiLayoutTargetRect = false;
+            UiLayoutActualRect = false;
+            UiLayoutText = false;
+            LifecycleEnabled = false;
+            LifecycleAndroidPauseResume = false;
+            RuntimePanelEnabled = false;
+            DiagnosticPackageEnabled = false;
+            DiagnosticSummaryEnabled = false;
+            UiOverlayEnabled = false;
+            ReferenceEnabled = false;
+            BreadcrumbEnabled = false;
+            InputReplayEnabled = false;
+            RetentionEnabled = false;
+            AndroidStorageEnabled = false;
+            PerformanceSamplingEnabled = false;
+            SnapshotEnabled = false;
+        }
+
+        /// <summary>
+        /// 将精简 TOML 的模块开关一次性展开到既有强类型字段。
+        /// 该方法只在配置加载阶段调用，热路径仍只读布尔值。
+        /// </summary>
+        public void ApplyMinimalLoggingConfig(
+            bool enabled,
+            bool touch,
+            bool input,
+            bool image,
+            bool uiLayout,
+            bool resource,
+            bool loadSave,
+            bool androidStorage,
+            bool performance,
+            bool statementRecognition,
+            bool runtimePanel,
+            bool inputReplay,
+            bool diagnosticPackage,
+            bool mirrorToGodot)
+        {
+            DisableAllDiagnostics();
+            if (!enabled)
+                return;
+
+            LoggingEnabled = true;
+            LoggingLevel = "debug";
+            LoggingMirrorNonErrorToGodot = mirrorToGodot;
+            ActiveDebugModel = "debug_model_zh_cn";
+            DebugModelZhCn.Enabled = true;
+            DebugModelZhCn.Language = "zh_cn";
+            DebugModelZhCn.LogLevel = "debug";
+            DebugModelZhCn.MirrorToGodot = mirrorToGodot;
+            DebugModelZhCn.ScrollTrace = false;
+
+            Categories.General = true;
+            Categories.Config = true;
+            CorrelationEnabled = true;
+            RateLimitEnabled = true;
+            RedactionEnabled = true;
+            RuntimePanelEnabled = runtimePanel;
+            DiagnosticPackageEnabled = diagnosticPackage;
+            InputReplayEnabled = inputReplay;
+
+            if (touch) EnableQuickTouch();
+            if (input) EnableQuickInput();
+            if (image) EnableQuickImage();
+            if (uiLayout) EnableQuickUiLayout();
+            if (resource) EnableQuickResource();
+            if (loadSave) EnableQuickLoadSave();
+            if (androidStorage)
+            {
+                Categories.FileSystem = true;
+                EnableQuickAndroidStorage();
+            }
+            if (performance)
+            {
+                Categories.Performance = true;
+                PerformanceEnabled = true;
+                PerformanceStartupTiming = true;
+                PerformanceUiQueue = true;
+                PerformanceResourceLoading = true;
+                EnableQuickPerformanceSampling();
+            }
+            if (statementRecognition)
+            {
+                Categories.StatementRecognition = true;
+                StatementRecognitionEnabled = true;
+                StatementRecognitionErbLoad = true;
+                StatementRecognitionLogicalLine = true;
+                StatementRecognitionExpression = true;
+                StatementRecognitionVariable = true;
+                StatementRecognitionFunctionCall = true;
+            }
+        }
+
         public static RuntimeDiagnosticsConfig CreateDefault()
         {
             return new RuntimeDiagnosticsConfig();
@@ -613,6 +789,8 @@ namespace gEmuera.Diagnostics
         // 触摸、输入、图片和 UI 几何诊断会出现“开关已开但无日志”的误判。
         public EmueraLogLevel GetRuntimeLogLevel()
         {
+            if (!LoggingEnabled)
+                return EmueraLogLevel.None;
             var model = GetActiveDebugModel();
             if (model != null && model.Enabled)
                 return ParseLogLevel(model.LogLevel);
@@ -631,6 +809,8 @@ namespace gEmuera.Diagnostics
 
         public EmueraLogCategory GetActiveDebugModelCategoryMask()
         {
+            if (!LoggingEnabled)
+                return EmueraLogCategory.None;
             var model = GetActiveDebugModel();
             if (model == null || !model.Enabled)
                 return EmueraLogCategory.None;
