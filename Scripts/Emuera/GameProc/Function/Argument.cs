@@ -239,6 +239,27 @@ namespace MinorShift.Emuera.GameProc.Function
 		public readonly string InitialValue;
 	}
 
+	internal sealed class SpDtColumnOptionsArgument : Argument
+	{
+		public enum OptionType
+		{
+			Default,
+		}
+
+		public SpDtColumnOptionsArgument(IOperandTerm dataTable, IOperandTerm column, OptionType[] options, IOperandTerm[] values)
+		{
+			DataTable = dataTable;
+			Column = column;
+			Options = options;
+			Values = values;
+		}
+
+		public readonly IOperandTerm DataTable;
+		public readonly IOperandTerm Column;
+		public readonly OptionType[] Options;
+		public readonly IOperandTerm[] Values;
+	}
+
 	internal sealed class SpForNextArgment : Argument
 	{
 		public SpForNextArgment(VariableTerm var, IOperandTerm start, IOperandTerm end, IOperandTerm step)

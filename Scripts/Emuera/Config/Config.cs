@@ -125,6 +125,7 @@ namespace MinorShift.Emuera
 			UseERD = instance.GetConfigValue<bool>(ConfigCode.UseERD);
 			VarsizeDimConfig = instance.GetConfigValue<bool>(ConfigCode.VarsizeDimConfig);
 			CheckDuplicateIdentifier = instance.GetConfigValue<bool>(ConfigCode.CheckDuplicateIdentifier);
+			ForbidUpdateCheck = instance.GetConfigValue<bool>(ConfigCode.ForbidUpdateCheck);
 			
 			CompatiFuncArgAutoConvert = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgAutoConvert);
 			CompatiFuncArgOptional = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgOptional);
@@ -547,6 +548,7 @@ namespace MinorShift.Emuera
         public static bool TimesNotRigorousCalculation { get; private set; }
         //一文字変数の禁止オプションを考えた名残
         //public static bool ForbidOneCodeVariable { get; private set; }
+		public static bool ForbidUpdateCheck { get; private set; }
 		#endregion
 
 		#region debug

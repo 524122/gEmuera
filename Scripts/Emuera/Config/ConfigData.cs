@@ -30,7 +30,7 @@ static ConfigData() { }
 
 		private ConfigData() { setDefault(); }
 
-		private const int ConfigItemCapacity = 75;
+		private const int ConfigItemCapacity = 76;
 		private const int ReplaceItemCapacity = 50;
 		private const int DebugItemCapacity = 20;
 
@@ -128,6 +128,7 @@ static ConfigData() { }
 			{ "CHECK DUPLICATED IDENTIFIERS DEFINED BY ERD", ConfigCode.CheckDuplicateIdentifier },
 			{ "CHECK DUPLICATE ERD IDENTIFIER AND PRIVATE VARIABLE", ConfigCode.CheckDuplicateIdentifier },
 			{ "CHECK DUPLICATE ERD IDENTIFIER AND PRIVATE VARIABLEA", ConfigCode.CheckDuplicateIdentifier },
+			{ "DISALLOW UPDATECHECK", ConfigCode.ForbidUpdateCheck },
 		};
 
 		private static readonly Dictionary<string, ConfigCode> englishReplaceAliases = new Dictionary<string, ConfigCode>(StringComparer.OrdinalIgnoreCase)
@@ -169,7 +170,6 @@ static ConfigData() { }
 			"SKIASHARP FONT HINTING",
 			"SKIASHARP FONT EDGING",
 			"RENDERING BACKEND",
-			"DISALLOW UPDATECHECK",
 			"STRING OF REPLACING NEW LINE CODE INSIDE CONTINUATION",
 			"VALID EXTENSIONS FOR LOADTEXT AND SAVETEXT",
 			"OUTPUT ENGLISH ITEMS IN THE CONFIG FILE",
@@ -281,6 +281,7 @@ static ConfigData() { }
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseERD, "ERD機能を利用する", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.VarsizeDimConfig, "VARSIZEの次元指定をERD機能に合わせる", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.CheckDuplicateIdentifier, "ERDで定義した識別子とローカル変数の重複を確認する", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.ForbidUpdateCheck, "UPDATECHECKを許可しない", false);
 
 			i = 0;
 			debugArray[i++] = new ConfigItem<bool>(ConfigCode.DebugShowWindow, "起動時にデバッグウインドウを表示する", true);

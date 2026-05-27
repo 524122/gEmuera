@@ -619,11 +619,11 @@ public partial class EmueraContent : Control
 		label.MouseFilter = MouseFilterEnum.Ignore;
 		label.Text = uEmuera.Utils.StripZeroWidth(text) ?? "";
 		ApplyFont(label);
-		label.AddThemeColorOverride("font_color", new Godot.Color(color.r, color.g, color.b, color.a));
+		label.AddThemeColorOverride("font_color", color.ToGodotColor());
 		if (font?.Bold == true)
 		{
 			label.AddThemeConstantOverride("outline_size", 1);
-			label.AddThemeColorOverride("font_outline_color", new Godot.Color(color.r, color.g, color.b, color.a));
+			label.AddThemeColorOverride("font_outline_color", color.ToGodotColor());
 		}
 		label.VerticalAlignment = VerticalAlignment.Center;
 		label.ClipText = true;
@@ -700,7 +700,11 @@ public partial class EmueraContent : Control
 			return EffectiveLineHeight;
 		if (part is ConsoleImagePart image)
 		{
-			if (image.Display == DisplayMode.Relative)
+			// Relative 与 AbsoluteLeftTop 的图片都基于行内坐标定位；如果行高不足，
+			// 后续行会在 Godot 的渲染顺序中覆盖溢出的图片区域，导致角色立绘不可见。
+			// Absolute / AbsoluteLeftBottom 使用视口坐标（Y = WindowY + PositionY），
+			// 不应影响行高，否则会把后续内容向下推移到错误位置。
+			if (image.Display == DisplayMode.Relative || image.Display == DisplayMode.AbsoluteLeftTop)
 				return GetRelativeImagePartBottom(image);
 			return EffectiveLineHeight;
 		}
@@ -716,7 +720,33 @@ public partial class EmueraContent : Control
 		// 企业级说明：角色立绘等相对图片会生成真实 EmueraImage 节点；如果行高仍按字体高度计算，
 		// Android 的 ScrollContainer/VBoxContainer 只会为该行预留一行文字空间，表现为节点存在但图片不可见或被后续行覆盖。
 		int imageBottom = image.dest_rect.Y + System.Math.Abs(image.dest_rect.Height);
+		if (imageBottom <= image.dest_rect.Y)
+		{
+			// 防御性：当 dest_rect.Height 因异常变为0时，AddPartToContainer 会回退到纹理自然高度，
+			// 行高计算也应同步回退，避免渲染尺寸与布局尺寸不一致导致图片溢出或被覆盖。
+			int naturalHeight = TryGetImageNaturalHeight(image);
+			if (naturalHeight > 0)
+				imageBottom = image.dest_rect.Y + naturalHeight;
+		}
 		return System.Math.Max(EffectiveLineHeight, imageBottom);
+	}
+
+	// 从 ConsoleImagePart 关联的精灵或纹理缓存中获取自然高度，用于 dest_rect.Height 异常时的回退。
+	int TryGetImageNaturalHeight(ConsoleImagePart image)
+	{
+		if (image?.Image is ASpriteSingle single && single.BaseImage?.Bitmap != null)
+		{
+			int h = System.Math.Abs(single.SrcRectangle.Height);
+			if (h > 0)
+				return h;
+		}
+		if (!string.IsNullOrEmpty(image?.ResourceName))
+		{
+			var ti = SpriteManager.GetTextureInfo(image.ResourceName, image.ResourceName);
+			if (ti != null && ti.height > 0)
+				return ti.height;
+		}
+		return 0;
 	}
 
 	int GetButtonTop(ConsoleButtonString button)
@@ -783,7 +813,7 @@ public partial class EmueraContent : Control
 		btn.AddThemeStyleboxOverride("pressed", _btnHoverStyle);
 		btn.AddThemeStyleboxOverride("focus", _btnHoverStyle);
 		btn.AddThemeColorOverride("font_color", new Color(1, 1, 1, 1));
-		var focusColor = new Godot.Color(Config.FocusColor.r, Config.FocusColor.g, Config.FocusColor.b, Config.FocusColor.a);
+		var focusColor = Config.FocusColor.ToGodotColor();
 		btn.AddThemeColorOverride("font_hover_color", focusColor);
 		btn.AddThemeColorOverride("font_pressed_color", focusColor);
 		btn.AddThemeColorOverride("font_focus_color", focusColor);
@@ -879,42 +909,7 @@ public partial class EmueraContent : Control
 					int buttonHeight = GetButtonBottom(button) - buttonTop;
 					if (buttonHeight <= 0)
 						buttonHeight = EffectiveLineHeight;
-					var btn = new Panel();
-					btn.FocusMode = FocusModeEnum.None;
-					btn.MouseForcePassScrollEvents = false;
-					btn.MouseFilter = MouseFilterEnum.Stop;
-					btn.ClipContents = false;
-					EnsureButtonStyles();
-					btn.AddThemeStyleboxOverride("panel", _btnNormalStyle);
-					string inputs = button.Inputs;
-					long generation = button.Generation;
-					btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, inputs, generation);
-					btn.MouseEntered += () => GenericUtils.SetPointingButton(inputs, generation);
-					btn.MouseExited += () => GenericUtils.ClearPointingButton(generation);
-					btn.SetMeta("generation", generation);
-
-					var contentBox = new Control();
-					contentBox.MouseFilter = MouseFilterEnum.Ignore;
-					contentBox.ClipContents = false;
-					contentBox.Position = new Vector2(0, -buttonTop);
-					btn.AddChild(contentBox);
-
-					foreach(var part in button.StrArray)
-					{
-						AddPartToContainer(part, contentBox, button.PointX);
-					}
-
-					// Let clicks pass through to the Button
-					foreach (var child in contentBox.GetChildren())
-					{
-						if (child is Control c)
-							c.MouseFilter = MouseFilterEnum.Ignore;
-					}
-
-					SetFixedControlSize(contentBox, new Vector2(button.Width, buttonHeight));
-					btn.CustomMinimumSize = new Vector2(button.Width, buttonHeight);
-					btn.Position = new Vector2(button.PointX, buttonTop);
-					btn.Size = new Vector2(button.Width, buttonHeight);
+					var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
 					lineControl.AddChild(btn);
 					if (GenericUtils.IsUiLayoutTraceEnabled("button"))
 						QueueUiLayoutTrace(btn, "button", "", button.PointX, buttonTop, button.Width, buttonHeight);
@@ -973,6 +968,47 @@ public partial class EmueraContent : Control
 			else
 				QueueDisplayFollowUp();
 		}
+	}
+
+	// 企业级说明：普通行与 HTML/Div 子行共用同一按钮构建入口，避免触摸命中、焦点、样式和内容裁剪规则在移动端产生分叉。
+	Panel BuildConsoleButton(ConsoleButtonString button, int buttonTop, int buttonHeight)
+	{
+		if (buttonHeight <= 0)
+			buttonHeight = EffectiveLineHeight;
+		var btn = new Panel();
+		btn.FocusMode = FocusModeEnum.None;
+		btn.MouseForcePassScrollEvents = false;
+		btn.MouseFilter = MouseFilterEnum.Stop;
+		btn.ClipContents = false;
+		EnsureButtonStyles();
+		btn.AddThemeStyleboxOverride("panel", _btnNormalStyle);
+		string inputs = button.Inputs;
+		long generation = button.Generation;
+		btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, inputs, generation);
+		btn.MouseEntered += () => GenericUtils.SetPointingButton(inputs, generation);
+		btn.MouseExited += () => GenericUtils.ClearPointingButton(generation);
+		btn.SetMeta("generation", generation);
+
+		var contentBox = new Control();
+		contentBox.MouseFilter = MouseFilterEnum.Ignore;
+		contentBox.ClipContents = false;
+		contentBox.Position = new Vector2(0, -buttonTop);
+		btn.AddChild(contentBox);
+
+		foreach (var part in button.StrArray)
+			AddPartToContainer(part, contentBox, button.PointX);
+
+		foreach (var child in contentBox.GetChildren())
+		{
+			if (child is Control c)
+				c.MouseFilter = MouseFilterEnum.Ignore;
+		}
+
+		SetFixedControlSize(contentBox, new Vector2(button.Width, buttonHeight));
+		btn.CustomMinimumSize = new Vector2(button.Width, buttonHeight);
+		btn.Position = new Vector2(button.PointX, buttonTop);
+		btn.Size = new Vector2(button.Width, buttonHeight);
+		return btn;
 	}
 
 	void QueueUiLayoutTrace(Control control, string kind, string resourceName, int targetX, int targetY, int targetW, int targetH)
@@ -1223,7 +1259,7 @@ public partial class EmueraContent : Control
 		var c = line.TextBackgroundColor.Value;
 		var bg = new ColorRect();
 		bg.MouseFilter = MouseFilterEnum.Ignore;
-		bg.Color = new Godot.Color(c.r, c.g, c.b, c.a);
+		bg.Color = c.ToGodotColor();
 		bg.Position = Vector2.Zero;
 		bg.Size = new Vector2(Config.DrawableWidth, lineHeight);
 		bg.CustomMinimumSize = new Vector2(Config.DrawableWidth, lineHeight);
@@ -1881,7 +1917,7 @@ public partial class EmueraContent : Control
 				colorRect.MouseFilter = MouseFilterEnum.Ignore;
 				colorRect.CustomMinimumSize = new Vector2(rectShape.Width, rectShape.Bottom - rectShape.Top);
 				var sc = rectShape.pColor;
-				colorRect.Color = new Godot.Color(sc.r, sc.g, sc.b, sc.a);
+				colorRect.Color = sc.ToGodotColor();
 				colorRect.Position = new Vector2(rectShape.PointX - relX, rectShape.Top);
 				container.AddChild(colorRect);
 				return rectShape.Bottom;
@@ -1962,7 +1998,7 @@ public partial class EmueraContent : Control
 			var bg = new ColorRect();
 			bg.MouseFilter = MouseFilterEnum.Ignore;
 			var c = div.BackgroundColor.Value;
-			bg.Color = new Godot.Color(c.r, c.g, c.b, c.a);
+			bg.Color = c.ToGodotColor();
 			bg.Position = new Vector2(boxX, boxY);
 			bg.Size = new Vector2(boxW, boxH);
 			wrapper.AddChild(bg);
@@ -1983,8 +2019,10 @@ public partial class EmueraContent : Control
 		int y = 0;
 		foreach (var childLine in div.Children)
 		{
-			AddDisplayLineToContainer(childLine, content, y);
-			y += EffectiveLineHeight;
+			int childHeight = AddDisplayLineToContainer(childLine, content, y);
+			// div 子内容可以包含 180px 以上的立绘行；继续按字体行高推进会让后续子行覆盖图片，
+			// 在裁剪容器内表现为节点和目标矩形都正确但画面不可见。
+			y += childHeight > 0 ? childHeight : EffectiveLineHeight;
 		}
 
 		return wrapper;
@@ -2009,39 +2047,7 @@ public partial class EmueraContent : Control
 				int buttonHeight = GetButtonBottom(button) - buttonTop;
 				if (buttonHeight <= 0)
 					buttonHeight = EffectiveLineHeight;
-				var btn = new Panel();
-				btn.FocusMode = FocusModeEnum.None;
-				btn.MouseForcePassScrollEvents = false;
-				btn.MouseFilter = MouseFilterEnum.Stop;
-				btn.ClipContents = false;
-				EnsureButtonStyles();
-				btn.AddThemeStyleboxOverride("panel", _btnNormalStyle);
-				string inputs = button.Inputs;
-				long generation = button.Generation;
-				btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, inputs, generation);
-				btn.MouseEntered += () => GenericUtils.SetPointingButton(inputs, generation);
-				btn.MouseExited += () => GenericUtils.ClearPointingButton(generation);
-				btn.SetMeta("generation", generation);
-
-				var contentBox = new Control();
-				contentBox.MouseFilter = MouseFilterEnum.Ignore;
-				contentBox.ClipContents = false;
-				contentBox.Position = new Vector2(0, -buttonTop);
-				btn.AddChild(contentBox);
-
-				foreach (var part in button.StrArray)
-					AddPartToContainer(part, contentBox, button.PointX);
-
-				foreach (var child in contentBox.GetChildren())
-				{
-					if (child is Control c)
-						c.MouseFilter = MouseFilterEnum.Ignore;
-				}
-
-				SetFixedControlSize(contentBox, new Vector2(button.Width, buttonHeight));
-				btn.CustomMinimumSize = new Vector2(button.Width, buttonHeight);
-				btn.Position = new Vector2(button.PointX, buttonTop);
-				btn.Size = new Vector2(button.Width, buttonHeight);
+				var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
 				row.AddChild(btn);
 			}
 			else
@@ -2809,11 +2815,8 @@ public partial class EmueraContent : Control
 	// Convert emuera integer volume to Godot linear volume.
 	static float NormalizeEraVolume(int volume)
 	{
-		if (volume <= 0)
-			return 0.0f;
-		if (volume >= 100)
-			return 1.0f;
-		return volume / 100.0f;
+		// 企业级说明：音量边界由 GenericUtils 统一维护，避免核心状态与 Godot 播放器出现 0-100 规则漂移。
+		return GenericUtils.ClampEraVolume(volume) / 100.0f;
 	}
 
 	// Godot audio buses use dB, with a hard mute floor for zero volume.
@@ -3029,17 +3032,17 @@ public partial class EmueraContent : Control
 			if (button.StrArray[button.StrArray.Length - 1] is AConsoleColoredPart coloredPart)
 			{
 				var c = coloredPart.pColor;
-				return new Godot.Color(c.r, c.g, c.b, c.a);
+				return c.ToGodotColor();
 			}
 		}
-		return new Godot.Color(Config.ForeColor.r, Config.ForeColor.g, Config.ForeColor.b, Config.ForeColor.a);
+		return Config.ForeColor.ToGodotColor();
 	}
 
 	// Apply emuera background color to the full viewport.
 	public void SetBackgroundColor(uEmuera.Drawing.Color color)
 	{
 		if (bgRect != null)
-			bgRect.Color = new Godot.Color(color.r, color.g, color.b, color.a);
+			bgRect.Color = color.ToGodotColor();
 	}
 
 	// Toggle the processing label while the worker thread is busy.

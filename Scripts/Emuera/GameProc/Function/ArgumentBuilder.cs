@@ -227,9 +227,89 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_REF] = new SP_REF_ArgumentBuilder(false);
 			argb[FunctionArgType.SP_REFBYNAME] = new SP_REF_ArgumentBuilder(true);
 			argb[FunctionArgType.SP_HTMLSPLIT] = new SP_HTMLSPLIT_ArgumentBuilder();
+			argb[FunctionArgType.SP_DT_COLUMN_OPTIONS] = new SP_DT_COLUMN_OPTIONS_ArgumentBuilder();
 			
         }
 		
+		private sealed class SP_DT_COLUMN_OPTIONS_ArgumentBuilder : ArgumentBuilder
+		{
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				WordCollection wc = popWords(line);
+				IOperandTerm dataTable = ReduceRequiredStringTerm(wc, line, exm, 1);
+				if (dataTable == null)
+					return null;
+				IOperandTerm column = ReduceRequiredStringTerm(wc, line, exm, 2);
+				if (column == null)
+					return null;
+
+				List<SpDtColumnOptionsArgument.OptionType> options = new List<SpDtColumnOptionsArgument.OptionType>();
+				List<IOperandTerm> values = new List<IOperandTerm>();
+				int argIndex = 3;
+				while (!wc.EOL)
+				{
+					string keyword = wc.Current.ToString().ToLowerInvariant();
+					wc.ShiftNext();
+					wc.ShiftNext();
+					if (wc.EOL)
+					{
+						warn("引数が足りません", line, 2, false);
+						return null;
+					}
+
+					IOperandTerm value;
+					switch (keyword)
+					{
+						case "default":
+							options.Add(SpDtColumnOptionsArgument.OptionType.Default);
+							value = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.Comma);
+							wc.ShiftNext();
+							break;
+						default:
+							warn("解釈できないオプションです", line, 2, false);
+							return null;
+					}
+
+					if (value == null)
+					{
+						warn("第" + argIndex.ToString() + "引数を省略することはできません", line, 2, false);
+						return null;
+					}
+					values.Add(value.Restructure(exm));
+					argIndex += 2;
+				}
+
+				if (options.Count == 0)
+				{
+					warn("引数が足りません", line, 2, false);
+					return null;
+				}
+				return new SpDtColumnOptionsArgument(dataTable, column, options.ToArray(), values.ToArray());
+			}
+
+			private IOperandTerm ReduceRequiredStringTerm(WordCollection wc, InstructionLine line, ExpressionMediator exm, int index)
+			{
+				if (wc.EOL)
+				{
+					warn("第" + index.ToString() + "引数を省略することはできません", line, 2, false);
+					return null;
+				}
+				IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.Comma);
+				if (term == null)
+				{
+					warn("第" + index.ToString() + "引数を認識できません", line, 2, false);
+					return null;
+				}
+				if (!term.IsString)
+				{
+					warn("第" + index.ToString() + "引数の型が正しくありません", line, 2, false);
+					return null;
+				}
+				wc.ShiftNext();
+				return term.Restructure(exm);
+			}
+		}
+
 		private sealed class SP_PRINTV_ArgumentBuilder : ArgumentBuilder
 		{
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)

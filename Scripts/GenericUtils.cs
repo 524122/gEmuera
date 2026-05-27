@@ -924,12 +924,7 @@ internal static class GenericUtils
 
     static string ClipLogMessage(string value)
     {
-        if (string.IsNullOrEmpty(value))
-            return "";
-        value = value.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
-        if (value.Length <= MaxLogMessageChars)
-            return value;
-        return value.Substring(0, MaxLogMessageChars) + "...<truncated>";
+        return ClipFlatText(value, MaxLogMessageChars, "...<truncated>");
     }
 
     public static void ScrollTrace(string category, string message)
@@ -1007,12 +1002,19 @@ internal static class GenericUtils
 
     public static string ClipTrace(string value, int maxLength = 96)
     {
+        return ClipFlatText(value, maxLength, "...");
+    }
+
+    // 企业级说明：诊断日志会在滚动、输入和加载路径频繁调用，统一裁剪逻辑可避免不同日志入口产生不一致的换行/制表符处理。
+    static string ClipFlatText(string value, int maxLength, string suffix)
+    {
         if (string.IsNullOrEmpty(value))
             return "";
+        maxLength = Math.Max(0, maxLength);
         value = value.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
         if (value.Length <= maxLength)
             return value;
-        return value.Substring(0, maxLength) + "...";
+        return value.Substring(0, maxLength) + (suffix ?? "");
     }
 
     // ---------- 模块化调试开关兼容层 ----------
@@ -1911,7 +1913,7 @@ internal static class GenericUtils
         return (c >= 0x3400 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF);
     }
 
-    static int ClampEraVolume(int volume)
+    public static int ClampEraVolume(int volume)
     {
         if (volume < 0)
             return 0;

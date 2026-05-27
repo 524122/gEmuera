@@ -1,5 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Text;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.Sub;
@@ -2194,7 +2197,52 @@ namespace MinorShift.Emuera.GameProc.Function
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
-				exm.VEvaluator.RESULT = 3;
+				if (Config.ForbidUpdateCheck)
+				{
+					exm.VEvaluator.RESULT = 4;
+					return;
+				}
+
+				try
+				{
+					if (!NetworkInterface.GetIsNetworkAvailable())
+					{
+						exm.VEvaluator.RESULT = 5;
+						return;
+					}
+				}
+				catch
+				{
+					// 一部 Android 環境では NetworkInterface が例外を投げるため、
+					// ここでは通信本体の失敗判定に任せる。
+				}
+
+				string url = GlobalStatic.GameBaseData == null ? "" : GlobalStatic.GameBaseData.UpdateCheckURL;
+				if (string.IsNullOrWhiteSpace(url))
+				{
+					exm.VEvaluator.RESULT = 3;
+					return;
+				}
+
+				try
+				{
+					using HttpClient client = new HttpClient();
+					client.Timeout = TimeSpan.FromSeconds(5);
+					string text = client.GetStringAsync(url).GetAwaiter().GetResult();
+					using StringReader reader = new StringReader(text);
+					string version = reader.ReadLine();
+					string link = reader.ReadLine();
+					if (string.IsNullOrWhiteSpace(version) || string.IsNullOrWhiteSpace(link))
+					{
+						exm.VEvaluator.RESULT = 3;
+						return;
+					}
+					exm.VEvaluator.RESULT = string.Equals(version, GlobalStatic.GameBaseData.VersionName, StringComparison.Ordinal) ? 0 : 1;
+				}
+				catch
+				{
+					exm.VEvaluator.RESULT = 3;
+				}
 			}
 		}
 
@@ -2289,14 +2337,66 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SNAKE_DT_COLUMN_OPTIONS_Instruction()
 			{
-				ArgBuilder = SNAKE_COMPAT_NOOP_Instruction.RawArgBuilder.Instance;
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_DT_COLUMN_OPTIONS);
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
-				exm.VEvaluator.RESULT = -1;
+				SpDtColumnOptionsArgument arg = (SpDtColumnOptionsArgument)func.Argument;
+				string key = arg.DataTable.GetStrValue(exm) ?? "";
+				if (!RuntimeDataStore.DataTables.TryGetValue(key, out DataTable table))
+				{
+					exm.VEvaluator.RESULT = -1;
+					return;
+				}
+				string columnName = arg.Column.GetStrValue(exm) ?? "";
+				if (!table.Columns.Contains(columnName))
+				{
+					exm.VEvaluator.RESULT = 0;
+					return;
+				}
+
+				DataColumn column = table.Columns[columnName];
+				for (int i = 0; i < arg.Options.Length; i++)
+				{
+					switch (arg.Options[i])
+					{
+						case SpDtColumnOptionsArgument.OptionType.Default:
+							column.DefaultValue = ConvertDataTableDefaultValue(arg.Values[i], column, exm, key);
+							break;
+					}
+				}
+				exm.VEvaluator.RESULT = 1;
 			}
+		}
+
+		private static object ConvertDataTableDefaultValue(IOperandTerm value, DataColumn column, ExpressionMediator exm, string tableKey)
+		{
+			if (value == null)
+				return DBNull.Value;
+			if (column.DataType == typeof(string))
+			{
+				if (!value.IsString)
+					throw new CodeEE("DT_COLUMN_OPTIONSのDEFAULT値の型が列の型と一致しません: " + tableKey + "." + column.ColumnName);
+				return value.GetStrValue(exm) ?? "";
+			}
+			if (column.DataType == typeof(double))
+			{
+				if (value.IsString)
+					throw new CodeEE("DT_COLUMN_OPTIONSのDEFAULT値の型が列の型と一致しません: " + tableKey + "." + column.ColumnName);
+				return value.GetFloatValue(exm);
+			}
+			if (!value.IsInteger)
+				throw new CodeEE("DT_COLUMN_OPTIONSのDEFAULT値の型が列の型と一致しません: " + tableKey + "." + column.ColumnName);
+			long intValue = value.GetIntValue(exm);
+			if (column.DataType == typeof(sbyte))
+				return (sbyte)Math.Min(Math.Max(intValue, sbyte.MinValue), sbyte.MaxValue);
+			if (column.DataType == typeof(short))
+				return (short)Math.Min(Math.Max(intValue, short.MinValue), short.MaxValue);
+			if (column.DataType == typeof(int))
+				return (int)Math.Min(Math.Max(intValue, int.MinValue), int.MaxValue);
+			return intValue;
 		}
 
 		private sealed class SNAKE_VARI_Instruction : AbstractInstruction

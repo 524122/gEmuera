@@ -46,6 +46,11 @@ namespace MinorShift.Emuera.GameView
 				height = Config.FontSize;
 			else
 				height = raw_height.isPx ? raw_height.num : (Config.FontSize * raw_height.num / 100);
+			// 防御性：百分比高度在字体较小时可能因整数除法变为0（如 height='1%' 且 FontSize=18 时 18*1/100=0）。
+			// destRect.Height 为0 会导致 AddPartToContainer 与 GetRelativeImagePartBottom 产生不一致，
+			// 表现为图片自然尺寸渲染但行高只有 EffectiveLineHeight，最终图片被覆盖或溢出。
+			if (height <= 0)
+				height = Config.FontSize > 0 ? Config.FontSize : 1;
 
 			int width = 0;
 			if (raw_width.num == 0)

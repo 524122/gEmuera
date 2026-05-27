@@ -30,7 +30,7 @@ namespace MinorShift.Emuera.GameView
 			DivWidth = Math.Abs(ToPixel(width));
 			DivHeight = Math.Abs(ToPixel(height));
 			Depth = depth;
-			BackgroundColor = color >= 0 ? Color.FromArgb(color >> 16, (color >> 8) & 0xFF, color & 0xFF) : (Color?)null;
+			BackgroundColor = color >= 0 ? Color.FromRgbInt(color) : (Color?)null;
 			StyledBox = box;
 			IsRelative = isRelative;
 			Display = displayMode;

@@ -18,6 +18,9 @@ desktop.ini
 *.user
 *.suo
 
+# Local AI operation logs
+action_maps/
+
 # Reference/legacy code (not part of this project)
 uEmuera-0.2.9d/
 XEmuera-0.5.1/

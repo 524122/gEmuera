@@ -235,6 +235,7 @@ namespace MinorShift.Emuera.GameData.Function
                 ["BGMCONTROL"] = new BgmControlMethod(),
                 ["GET_TEXT_DRAWING_MODE"] = new GetTextDrawingModeMethod(),
                 ["GET_SKIA_QUALITY"] = new GetSkiaQualityMethod(),
+                ["GETPLATFORM"] = new GetPlatformMethod(),
                 ["SIN"] = new V24TrigMethod("SIN", Math.Sin),
                 ["COS"] = new V24TrigMethod("COS", Math.Cos),
                 ["TAN"] = new V24TrigMethod("TAN", Math.Tan),

@@ -16,34 +16,34 @@ active_debug_model = "debug_model_zh_cn"
 # preset 可选：normal / touch_input / image_ui / resource_storage / performance / apk_issue / custom。
 # custom 表示完全按下方 [debug.*] 专家细项执行。
 [quick_debug]
-enabled = true
-preset = "normal"
+enabled = false
+preset = "custom"
 language = "zh_cn"
-apk_safe = true
-mirror_non_error_to_godot = false
-runtime_panel = false
+apk_safe = false
+mirror_non_error_to_godot = true
+runtime_panel = true
 diagnostic_package = true
 
 # 这些是 preset 之外的额外开启项；false 表示不额外开启，不反向关闭 preset 已开启项。
 [quick_debug.modules]
-touch = false
-input = false
-image = false
-ui_layout = false
-resource = false
-load_save = false
+touch = true
+input = true
+image = true
+ui_layout = true
+resource = true
+load_save = true
 android_storage = true
-performance_sampling = false
-snapshot = false
-input_replay = false
+performance_sampling = true
+snapshot = true
+input_replay = true
 
 [debug_model_zh_cn]
 # 中文诊断档。APK 默认关闭，临时排查时改为 true，并按下方模块开关精确开启。
-enabled = false
+enabled = true
 language = "zh_cn"
-log_level = "error"
-mirror_to_godot = false
-scroll_trace = false
+log_level = "debug"
+mirror_to_godot = true
+scroll_trace = true
 
 [debug_model_jp]
 # 日文诊断档。用于对照日文资源或前辈模拟器行为时切换，不建议作为 APK 默认配置。
@@ -63,9 +63,9 @@ scroll_trace = false
 
 [logging]
 # 全局最低日志等级。APK 推荐 error；需要完整诊断时再改为 debug。
-level = "error"
+level = "debug"
 # false 表示非 Error 日志只进入诊断系统，不镜像到 Godot 控制台，避免控制台刷屏拖慢移动端。
-mirror_non_error_to_godot = false
+mirror_non_error_to_godot = true
 # 内存环形日志容量。容量越大越利于回溯，但会占用更多内存；手机默认 1000 条足够定位多数问题。
 diagnostic_ring_capacity = 1000
 # 单条 message 的最大长度，防止异常长文本撑爆日志。
@@ -89,9 +89,9 @@ save = true
 config = true
 performance = true
 # 高频移动端触摸日志默认关闭；排查点击、拖动、缩放时再开启。
-touch = false
+touch = true
 # ERB/表达式识别日志默认关闭；该类日志可能非常密集，需按问题范围单独开启。
-statement_recognition = false
+statement_recognition = true
 
 [logging.correlation]
 # 关联字段用于把输入、渲染批次、行片段、图片加载事件串起来，方便人与 AI 复盘。
@@ -104,7 +104,7 @@ image_id = true
 
 [logging.rate_limit]
 # 高频日志限流。除非正在做极短时本地复现，不建议关闭。
-enabled = true
+enabled = false
 default_per_second = 240
 default_per_frame = 64
 per_event_per_second = 30
@@ -124,100 +124,100 @@ hash_sensitive_text = false
 [debug.touch]
 # 触摸诊断。用于排查手机点击、拖动、双指缩放、惯性滚动问题。
 # 使用建议：先 enabled=true，再只打开 pointer/drag/pinch/inertia 中需要的一项。
-enabled = false
-pointer = false
-drag = false
-pinch = false
-inertia = false
-scroll = false
+enabled = true
+pointer = true
+drag = true
+pinch = true
+inertia = true
+scroll = true
 drag_interval_ms = 120
 core_burst_line_count = 120
 
 [debug.statement_recognition]
 # ERB/语句识别诊断。默认关闭，避免脚本执行热路径产生大量日志。
 # 未明确定位到解析/识别问题前，不建议开启 expression、variable、function_call。
-enabled = false
-erb_load = false
-logical_line = false
-expression = false
-variable = false
-function_call = false
+enabled = true
+erb_load = true
+logical_line = true
+expression = true
+variable = true
+function_call = true
 max_lines_per_burst = 80
 
 [debug.input]
 # 输入链路诊断。用于确认按钮、键盘、触摸转换后的输入是否提交/消费。
-enabled = false
-submit = false
-consume = false
-button = false
+enabled = true
+submit = true
+consume = true
+button = true
 
 [debug.performance]
 # 性能诊断。用于启动耗时、UI 队列、资源加载的低频定位。
-enabled = false
+enabled = true
 startup_timing = true
-ui_queue = false
-resource_loading = false
+ui_queue = true
+resource_loading = true
 
 [debug.load]
 # 加载流程诊断。用于 ERB/CSV/资源加载阶段定位，不修改加载策略。
-enabled = false
-erb = false
-csv = false
-resources = false
+enabled = true
+erb = true
+csv = true
+resources = true
 
 [debug.save]
 # 存档读写诊断。默认关闭，避免正常游玩时记录过多 I/O 信息。
-enabled = false
-read = false
-write = false
-compatibility_fallback = false
+enabled = true
+read = true
+write = true
+compatibility_fallback = true
 
 [debug.resource]
 # 资源层诊断。用于 sprite/audio/sqlite 等资源定位，不改变缓存策略。
-enabled = false
-sprite = false
-audio = false
-sqlite = false
+enabled = true
+sprite = true
+audio = true
+sqlite = true
 
 [debug.image]
 # 图片诊断。用于排查图片路径解析、纹理解码、渲染目标矩形、缓存命中和色彩矩阵问题。
 # 移动端建议优先打开 resolve 或 texture；log_success 会记录成功加载，日志量较大，默认关闭。
-enabled = false
-resolve = false
-texture = false
-render_rect = false
-cache = false
-color_matrix = false
-log_success = false
+enabled = true
+resolve = true
+texture = true
+render_rect = true
+cache = true
+color_matrix = true
+log_success = true
 max_records_per_frame = 16
 
 [debug.ui_layout]
 # UI 几何诊断。用于对比 ERB/UI 语法的目标位置与 EmueraContent 中 Godot Control 的实际位置。
 # 默认 mismatch_only=true，只在差异超过 mismatch_threshold_px 时记录，避免每个按钮/图片都刷日志。
-enabled = false
-target_rect = false
-actual_rect = false
-mismatch_only = true
+enabled = true
+target_rect = true
+actual_rect = true
+mismatch_only = false
 mismatch_threshold_px = 2
-text = false
+text = true
 button = true
 image = true
 shape = true
 html_div = true
 html_img = true
 cbg = true
-include_text = false
+include_text = true
 max_text_chars = 32
 max_records_per_frame = 32
 
 [debug.lifecycle]
 # 生命周期诊断。后续可用于 Android pause/resume、后台恢复、窗口尺寸变化等移动端问题。
-enabled = false
-android_pause_resume = false
+enabled = true
+android_pause_resume = true
 
 [debug.runtime_panel]
 # 运行时诊断面板预留配置。persist_changes=false 表示运行时改动不写回配置，避免误污染 APK 默认配置。
-enabled = false
+enabled = true
 allow_runtime_toggle = true
 persist_changes = false
 show_active_modules = true
@@ -244,9 +244,9 @@ top_image_failures = 20
 
 [debug.ui_overlay]
 # UI 调试覆盖层预留配置。默认关闭，避免影响手机实际画面和触摸判定。
-enabled = false
-target_rect = false
-actual_rect = false
+enabled = true
+target_rect = true
+actual_rect = true
 mismatch = true
 image_rect = true
 button_rect = true
@@ -254,10 +254,10 @@ max_drawn_rects = 128
 
 [debug.reference]
 # 前辈模拟器对照诊断。用于标记当前日志是否来自 uEmuera/XEmuera 参考行为。
-enabled = false
+enabled = true
 reference_name = ""
-expected_from_reference = false
-reference_note = false
+expected_from_reference = true
+reference_note = true
 
 [diagnostic_breadcrumb]
 # 面包屑日志记录关键生命周期点，便于崩溃或无法导出完整日志时保留最小现场。
@@ -273,7 +273,7 @@ write_on_shutdown = true
 
 [debug.input_replay]
 # 输入复现缓冲。只保存最近 N 条输入摘要，不保存完整用户文本。
-enabled = false
+enabled = true
 max_events = 240
 capture_touch = true
 capture_button = true
@@ -304,7 +304,7 @@ max_path_records = 64
 
 [debug.performance_sampling]
 # 性能采样。默认关闭；开启后按 sample_interval_ms 记录 FPS、帧时间、队列和内存摘要。
-enabled = false
+enabled = true
 sample_interval_ms = 1000
 include_fps = true
 include_frame_ms = true
@@ -316,9 +316,9 @@ include_memory = true
 
 [diagnostic_snapshot]
 # 现场快照预留配置。截图/布局快照可能增加文件体积和隐私风险，默认关闭。
-enabled = false
-include_screenshot = false
-include_layout_snapshot = false
+enabled = true
+include_screenshot = true
+include_layout_snapshot = true
 include_visible_ui_rects = true
 include_image_rects = true
 max_nodes = 512

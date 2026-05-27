@@ -13,7 +13,6 @@ config_version=5
 config/name="gemuera-c#"
 run/main_scene="res://first_window.tscn"
 config/features=PackedStringArray("4.6", "C#", "Mobile")
-config/icon="res://icon.svg"
 
 [display]
 

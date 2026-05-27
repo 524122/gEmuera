@@ -1,227 +1,193 @@
-# gemuera-c# (Godot Emuera Port)
+# CLAUDE.md
 
-A Godot 4.6 + .NET 8.0 port of the Emuera text game engine. The unified core targets `Emuera1824+v24+EMv18+EEv55` compatibility. Emuera is a Japanese derivative of eramaker that executes `.ERB` script files and reads `.CSV` data files. This project replaces the original Windows Forms / GDI rendering stack with Godot nodes and a `System.Drawing` compatibility shim (`uEmuera` namespace).
+本文面向 Claude Code、其他 AI CLI、AI IDE 和自动化 Agent。开始任何任务前，必须先读本文、`IDEAS.md` 和 `CODE_MAP.md`。
 
-## Tech Stack
+## 必读顺序
 
-- **Engine**: Godot 4.6 (C# backend)
-- **Framework**: .NET 8.0 (`Godot.NET.Sdk/4.6.2`)
-- **Target Frameworks**: `net8.0` (desktop), `net9.0` (Android)
-- **Rendering**: Mobile renderer, D3D12 on Windows, `canvas_items` stretch mode
-- **Editor Plugins**: gdUnit4, godot_mcp
-- **Excluded from compilation**: `uEmuera-0.2.9d/`, `XEmuera-0.5.1/` (reference/legacy code)
+1. `IDEAS.md`：项目工作约定、协作规则、日志规则、GitHub 规则。
+2. `CODE_MAP.md`：代码地图，用于减少无目的文件检索。
+3. 本文件：面向 Claude/AI 工具的执行流程。
+4. 需要改代码时，再按 `CODE_MAP.md` 定位具体源码。
 
-## Architecture
+如果本文与 `IDEAS.md` 冲突，以 `IDEAS.md` 为准。
 
-The project follows a 4-layer architecture:
+## 项目定位
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Godot UI Layer (Nodes)                                 │
-│  EmueraContent → HBoxContainer/VBoxContainer rows       │
-│  EmueraImage, Button, Label, ColorRect, Inputpad, etc.  │
-├─────────────────────────────────────────────────────────┤
-│  Console Layer (GameView)                               │
-│  EmueraConsole → ConsoleDisplayLine → parts             │
-│  PrintStringBuffer, StringStyle, HtmlManager            │
-├─────────────────────────────────────────────────────────┤
-│  Process Layer (GameProc)                               │
-│  Process → runScriptProc → Instruction execution        │
-│  ErbLoader, LogicalLineParser, LabelDictionary          │
-├─────────────────────────────────────────────────────────┤
-│  Data Layer (GameData)                                  │
-│  VariableEvaluator, ExpressionParser, GameBase          │
-│  ConstantData, CharacterData, IdentifierDictionary      │
-└─────────────────────────────────────────────────────────┘
-```
+本项目是 Godot 4.6 + C# 的 Emuera 模拟器核心复刻/移植。项目用 Godot 节点和 C# 兼容层替代原 Windows Forms/GDI 渲染，同时保留 Emuera 脚本执行、变量、表达式、资源、控制台和存档等核心行为。
 
-## Entry Points & Game Loop
+默认目标：
 
-1. **`first_window.tscn`** → `FirstWindow._Ready()` scans for `era*` game folders and lists them.
-2. User selects a game → scene changes to **`main.tscn`**.
-3. **`EmueraMain._Ready()`** resolves `Sys.ExeDir`, loads SHIFT-JIS/UTF-8 config maps, resets `GlobalStatic`, sets up GPU renderer, adds `EmueraContent` to the scene tree, and starts `EmueraThread.instance.Start()`.
-4. **`EmueraThread.Work()`** calls `Program.Main()` on a dedicated background `Thread`.
-5. **`Program.Main()`** sets directory paths (`csv/`, `erb/`, `resources/`), loads config, creates a `MainWindow` stub, and starts the engine.
-6. **`Process.Initialize()`** loads CSV/ERB files, builds `LabelDictionary`, and begins execution at the title screen.
-7. **`Process.ScriptProc.runScriptProc()`** is the inner script execution loop.
-8. **`EmueraConsole`** manages all output; **`GenericUtils`** forwards display operations to `EmueraContent`.
-9. **User input** is captured by Godot UI nodes → forwarded to `EmueraThread.instance.Input()` → wakes the background thread via `ManualResetEventSlim` → fed into `console.PressEnterKey()`.
+- 首要运行和测试目标是 Android/手机端，方案默认以导出 APK 后可用为准。
+- 桌面端可以用于调试，但不能替代 Android/APK 验证结论。
+- 默认测试游戏目录：`E:\Godot_v4.6.2-stable_mono_win64\snake\EraTW-Magic_DLC-update_base`。
+- 参考实现：
+  - `E:\MyCode\Era\emuera_lazyloading_selfmodified_version-main-skiasharp`
+  - `E:\MyCode\GodotCode\gemuera\uEmuera-0.2.9d`
+  - `E:\MyCode\GodotCode\gemuera\XEmuera-0.5.1`
+- 涉及 Godot 架构、UI、性能、平台适配时，应使用 `godot-master` skill 辅助判断。
 
-## Key Components
+## 架构速览
 
-### Godot UI Layer (`Scripts/`)
+核心运行链：
 
-| File | Role |
-|------|------|
-| `EmueraMain.cs` | Main entry Node; bootstraps engine, loads config maps, GPU work queue, starts `EmueraThread` |
-| `EmueraThread.cs` | Runs `Program.Main()` on a background `Thread`; bridges Godot input with Emuera's blocking model via `ManualResetEventSlim` |
-| `EmueraContent.cs` | Core Godot UI renderer; fixed-height line layout in VBoxContainer with overflow for images; manages menu bar, input pad, quick buttons, CBG layer, message boxes; enforces MaxVisibleLines=1000 node cap; `EffectiveLineHeight` adapts to font metrics |
-| `EmueraImage.cs` | Custom `Control` that draws `Texture2D` / `AtlasTexture` regions via `_Draw()`; MouseFilter=Ignore |
-| `SpriteManager.cs` | Static texture cache; loads images into `ImageTexture`; manages `AtlasTexture` sprites; `UpdateOtherThreads` processes max 1 texture per frame to avoid main-thread stalls |
-| `GenericUtils.cs` | Bridge shims connecting `EmueraConsole` → `EmueraContent` (`AddText`, `ClearText`, `SetBackgroundColor`, `RefreshCBG`, etc.) |
-| `FirstWindow.cs` | Launcher UI; scans for `era*` game folders (desktop: exe dir; Android: `/storage/emulated/0/emuera`) and transitions to `main.tscn` |
-| `ColorMatrixGPU.cs` | GPU ColorMatrix shader material creation and uniform management |
-| `SpriteDebugViewer.cs` | Debug overlay for sprite inspection (F3 toggle, desktop only) |
-| `Inputpad.cs` | On-screen input pad for text/number entry |
-| `QuickButtons.cs` | Quick-access button panel for recent choices |
-| `Scalepad.cs` | UI scaling controls |
-| `OptionWindow.cs` | Settings/options popup |
-
-### Core Emuera Engine (`Scripts/Emuera/`)
-
-| Layer | Key Files | Role |
-|-------|-----------|------|
-| **Config** | `Config/Config.cs`, `ConfigData.cs`, `ConfigCode.cs`, `ConfigItem.cs`, `KeyMacro.cs` | Engine configuration, key macros, replace dictionaries; Android overrides `WindowX` to screen width |
-| **GameData** | `GameData/ConstantData.cs`, `GameBase.cs`, `VariableData.cs`, `VariableEvaluator.cs`, `Expression/`, `Function/`, `Variable/` | Game state: variables, constants, expressions, character data |
-| **GameProc** | `GameProc/Process.cs`, `Process.ScriptProc.cs`, `Process.State.cs`, `Process.SystemProc.cs`, `ErbLoader.cs`, `LogicalLineParser.cs`, `LabelDictionary.cs` | Script execution engine; parses and runs `.ERB` files; manages CALL/JUMP/RETURN flow |
-| **GameView** | `GameView/EmueraConsole.cs`, `EmueraConsole.Print.cs`, `ConsoleDisplayLine.cs`, `ConsoleButtonString.cs`, `ConsoleImagePart.cs`, `ConsoleShapePart.cs`, `HtmlManager.cs` | Console emulation; display model (lines → styled strings / buttons / images / shapes); input/timers/button generations |
-| **Content** | `Content/AppContents.cs`, `ConstImage.cs`, `CroppedImage.cs`, `GraphicsImage.cs` | Resource loading (CSV → sprites); dynamic graphics surfaces for ERB `GCREATE`/`GDRAWG`/`GDRAWCIMG` commands; uses Godot native `Image.BlendRect` for sprite compositing |
-
-### Compatibility Shim (`Scripts/uEmuera/`)
-
-The `uEmuera` namespace provides drop-in replacements for `System.Drawing` and `System.Windows.Forms` so the original Emuera code compiles with minimal changes.
-
-| Original Concept | uEmuera Replacement |
-|------------------|---------------------|
-| `System.Drawing.Bitmap` | `uEmuera.Drawing.Bitmap` + `BitmapTexture` wrapping `Godot.ImageTexture` |
-| `System.Drawing.Graphics` | `uEmuera.Drawing.Graphics` (stub) |
-| `System.Drawing.Color/Font/Rectangle/Point/Size` | `uEmuera.Drawing.Color`, `Font`, `Rectangle`, `Point`, `Size` |
-| `System.Windows.Forms.Timer` | `uEmuera.Forms.Timer` (static HashSet updated manually in the input loop) |
-| `System.Windows.Forms.MessageBox/ScrollBar/ToolTip` | `uEmuera.Forms.MessageBox`, `ScrollBar`, `ToolTip` (stubs) |
-| `MainWindow` / `PictureBox` | `uEmuera.Window.MainWindow` / `uEmuera.Forms.PictureBox` (stubs bridging to Godot) |
-
-Key shim files:
-- `uEmuera/Drawing.cs` — `Bitmap`, `BitmapTexture`, `Graphics`, `Color`, `Font`, `Rectangle`, etc.
-- `uEmuera/Forms.cs` — `Timer`, `MessageBox`, `ScrollBar`, `ToolTip`, `TextBox`, `PictureBox`
-- `uEmuera/Window.cs` — `MainWindow` / `DebugDialog` stubs with `Update()` refresh logic
-- `uEmuera/Application.cs`, `Media.cs`, `Properties.cs`, `VisualBasic.cs` — Additional compatibility stubs
-
-## Project Structure
-
-```
-gemuera-c#/
-├── project.godot              # Godot project config
-├── gemuera-c#.csproj          # .NET 8.0 project file
-├── first_window.tscn          # Launcher scene
-├── main.tscn                  # Main game scene
-├── icon.svg
-│
-├── Scripts/
-│   ├── EmueraMain.cs          # Godot entry point, GPU work queue
-│   ├── EmueraThread.cs        # Background thread wrapper
-│   ├── EmueraContent.cs       # Godot UI renderer
-│   ├── EmueraImage.cs         # Texture drawing control
-│   ├── ColorMatrixGPU.cs      # GPU shader management
-│   ├── SpriteManager.cs       # Texture cache
-│   ├── SpriteDebugViewer.cs   # Debug sprite viewer (F3)
-│   ├── GenericUtils.cs        # Bridge shims
-│   ├── FirstWindow.cs         # Launcher UI
-│   ├── Inputpad.cs            # On-screen input
-│   ├── QuickButtons.cs        # Quick buttons
-│   ├── Scalepad.cs            # Scale controls
-│   ├── OptionWindow.cs        # Options popup
-│   ├── MultiLanguage.cs       # Localization
-│   ├── ResolutionHelper.cs    # Display resolution
-│   │
-│   ├── Emuera/                # Core Emuera engine (ported from Windows)
-│   │   ├── Program.cs         # Original entry point
-│   │   ├── GlobalStatic.cs    # Singleton registry
-│   │   ├── Config/            # Configuration
-│   │   ├── Content/           # Image/resource management
-│   │   ├── GameData/          # Data models, expressions, variables
-│   │   ├── GameProc/          # Script execution engine
-│   │   └── GameView/          # Console emulation and rendering
-│   │
-│   ├── Shaders/
-│   │   └── color_matrix.gdshader  # ColorMatrix canvas_item shader
-│   │
-│   └── uEmuera/               # System.Drawing/Forms compatibility shim
-│       ├── Drawing.cs         # Bitmap, Color, Font, Rectangle, etc.
-│       ├── Forms.cs           # Timer, MessageBox, ScrollBar, etc.
-│       ├── Window.cs          # MainWindow stub
-│       ├── Application.cs
-│       ├── Media.cs
-│       ├── Properties.cs
-│       ├── VisualBasic.cs
-│       └── partial/           # Partial class extensions
-│
-├── addons/                    # Godot editor plugins
-│   ├── gdUnit4/               # Testing framework
-│   └── godot_mcp/             # MCP server addon
-│
-├── Fonts/                     # Embedded fonts (MS Gothic)
-│
-└── eraAkumaMaid0.305-CH-正式版/  # Game content (excluded from build)
-
-# Reference directories (excluded from compilation):
-# uEmuera-0.2.9d/             # Previous Unity port reference
-# XEmuera-0.5.1/              # Xamarin/SkiaSharp port reference
+```text
+project.godot
+  -> first_window.tscn
+  -> FirstWindow._Ready()
+  -> main.tscn
+  -> EmueraMain._Ready()
+  -> EmueraThread.Start()
+  -> Program.Main()
+  -> Process.Initialize()
+  -> Process.DoScript() / Process.ScriptProc.runScriptProc()
+  -> EmueraConsole / GenericUtils / EmueraContent
 ```
 
-## Build & Development Notes
+核心层：
 
-- **Target framework**: .NET 8.0 (desktop), .NET 9.0 (Android when `GodotTargetPlatform == android`)
-- **Godot version**: 4.6 (C# backend)
-- **Editor plugins**: gdUnit4 (testing), godot_mcp (MCP server integration)
-- **Autoload**: `McpRuntimeAgent` (from godot_mcp addon)
-- **Viewport stretch**: `mode=canvas_items`
-- **Rendering**: Mobile method, D3D12 driver on Windows
+- `Scripts/`：Godot UI、主入口、线程桥、精灵缓存、输入面板、快速按钮、缩放、诊断入口。
+- `Scripts/Emuera/GameView/`：Emuera 控制台显示模型，负责文本、按钮、HTML、图片、形状、输入等待。
+- `Scripts/Emuera/GameProc/`：ERB 加载、逻辑行解析、label 索引、脚本执行状态机、lazy loading。
+- `Scripts/Emuera/GameData/`：变量、表达式、常量、函数方法、角色数据。
+- `Scripts/Emuera/Content/`：图片、精灵、Graphics surface、ColorMatrix 绘制。
+- `Scripts/uEmuera/`：`System.Drawing` / `System.Windows.Forms` 兼容层。
+- `Scripts/Diagnostics/`：运行期诊断、日志路由、导出、输入回放、诊断面板。
 
-### Game Directory Layout
+不要靠猜测定位文件。先查 `CODE_MAP.md`。
 
-Game files must be placed in a folder named `era*` (e.g., `eraAkumaMaid0.305-CH-正式版`) with the following structure:
+## 开始任务前
 
-```
-eraGameName/
-├── csv/              # Required — game data CSV files
-├── erb/              # Required — script ERB files
-├── resources/        # Optional — image resources (PNG, JPG, WEBP, BMP, TGA)
-└── fonts/            # Optional — external TTF fonts
-```
+执行任何会修改文件的任务前：
 
-**Search paths:**
-- Desktop: `res://` and executable directory
-- Android: `/storage/emulated/0/emuera/`
+1. 读 `IDEAS.md` 和 `CODE_MAP.md`。
+2. 查看当前工作区状态，识别已有用户改动。
+3. 不要回滚、覆盖或整理与当前任务无关的改动。
+4. 统计 `action_maps/` 中已有日志文件数量。
+5. 如果本次会修改文件，在本地 `action_maps/` 新增一份中文操作日志。
+6. 新增日志后总数不得超过 30 个；如果会超过，先询问仓库主人如何归档或删除旧日志。
 
-### Threading Model
+`action_maps/` 是本地日志目录：
 
-The engine uses a dual-thread architecture:
-- **Main thread** (Godot): UI rendering, input handling, GPU work queue processing, per-frame texture loading (max 1 per frame via `UpdateOtherThreads`)
-- **Background thread** (`EmueraThread`): ERB script execution, sprite compositing (`GraphicsImage.BlendRect` via Godot native `Image.BlendRect`), file I/O for texture loading
+- 不提交 GitHub。
+- 不放进 PR。
+- 不使用 `git add -f action_maps/` 强行加入版本控制。
+- `.gitignore` 必须保持忽略 `action_maps/`。
 
-Cross-thread communication:
-- Background → Main: `GenericUtils.uiQueue` (ConcurrentQueue of UI actions)
-- Main → Background: `EmueraThread.Input()` via `ManualResetEventSlim`
-- GPU work: `EmueraMain.gpuQueue` (ConcurrentQueue of ColorMatrix items, desktop only)
+## 修改代码原则
 
-### Rendering Model
+总体原则：保持现有效果和兼容行为，不为重构而重构。
 
-The display uses a fixed-height line model matching the original Emuera:
-- Every `ConsoleDisplayLine` occupies `EffectiveLineHeight` pixels vertically (computed from font metrics + line spacing)
-- Images with negative `ypos` draw above their line (overflow visible, no clipping)
-- Node cap: max 1000 line Controls in the VBoxContainer; oldest lines are batch-removed (100 at a time)
-- ColorMatrix applied via GDI+ convention: `cm[input][output]`, transposed for shader uniforms
-- Sprite compositing uses Godot native `Image.BlendRect` for performance (replaces manual pixel loop)
+要求：
 
-### Android-Specific Behavior
+- 优先保持原 Emuera 行为、Snake 兼容逻辑、移动端布局、输入流程、图片/精灵渲染。
+- 修改前先判断责任边界：UI、GameView、GameProc、GameData、Content、uEmuera、Diagnostics 分别处理不同问题。
+- 手机端性能优先，避免在热路径增加无界分配、全量扫描、同步 I/O、逐帧重建节点或纹理。
+- 优先沿用当前项目已有模式；只有明确降低复杂度或重复时才新增抽象。
+- 复杂逻辑需要中文注释，说明原因、边界和兼容性要求。
+- 跨线程、UI 队列、输入等待、日志导出、资源加载、ColorMatrix、存档兼容相关代码要额外谨慎。
+- 每次修改 `Scripts/**/*.cs` 后，必须判断是否需要更新 `CODE_MAP.md`。
 
-- `Config.WindowX` is overridden to match `EmueraContent.ContentWidth` (actual screen width) for full-width layout
-- `EmueraMain.GpuReady` is always `false` on Android — ColorMatrix falls back to CPU path
-- Texture loading in `SpriteManager.UpdateOtherThreads` is limited to 1 per frame to prevent main-thread stalls
-- Game folders are scanned from `/storage/emulated/0/emuera/`
+## 日志问题处理
 
-### Config Maps
+用户提供日志时，先诊断再改代码。
 
-The engine reads three config map files at startup for Japanese text encoding support:
-- `emuera_config_shiftjis.bytes`
-- `emuera_config_utf8.txt`
-- `emuera_config_utf8_zhcn.txt`
+常见日志：
 
-These are MD5-based dictionaries used to translate SHIFT-JIS text to UTF-8.
+- `emuera.log`
+- `emuera_xxx.log`
+- `gemuera_xxx.log`
+- `emuera_startup_debug`
+- `chara_debug` 或类似角色调试日志
 
-## Code Style & Conventions
+规则：
 
-- **Namespaces**: Core engine uses `MinorShift.Emuera.*`; Godot UI uses global or `uEmuera.*`
-- **Comments**: Mix of Japanese (original Emuera code) and Chinese (port additions)
-- **Access Modifiers**: Many `internal` classes and methods; some use `partial` classes
-- **Compatibility**: Original Windows Forms code is commented out rather than removed, preserving the port history
+- 如果同时存在 `emuera_xxx.log` 和 `gemuera_xxx.log`，先确认两个日志的日期/时间对应同一次测试。
+- 如果两份日志日期不一致，不要基于它们修复代码；先向用户确认并要求同一次运行的日志。
+- 不要只根据单行报错下结论，要结合调用链、平台、游戏目录、最近变更和复现路径。
+- 修复后说明根因、修改位置、验证方式，以及是否需要重新导出 APK 测试。
+
+诊断相关入口：
+
+- 配置：`config.toml`
+- 诊断模块：`Scripts/Diagnostics/`
+- 日志桥接：`Scripts/GenericUtils.cs`
+- 导出：`DiagnosticLogExporter`、`GenericUtils.ExportDiagnosticPackage`
+
+新增诊断前，先检查 `RuntimeDiagnosticsConfig` 和 `DiagnosticLogRouter` 是否已有分类或开关。
+
+## GitHub 协作规则
+
+仓库：
+
+- GitHub：`https://github.com/wwwXiaoHan17/gEmuera`
+- 默认协作分支：`dev`
+
+规则：
+
+- 除仓库主人明确要求外，不要直接向 `dev` 或主分支提交代码。
+- 每个任务从最新 `dev` 新建独立工作分支，建议 `ai/<任务简述>` 或 `fix/<问题简述>`。
+- 普通协作者或 AI 完成任务后，应提交到任务分支，并发起 Pull Request 指向 `dev`。
+- PR 合并前必须由仓库主人或指定维护者审核。
+- PR 标题和说明必须使用中文。
+- 每个 PR 尽量只解决一个明确问题，避免混入无关重构、格式化和资源变更。
+- 禁止擅自强制推送、硬重置、删除远端分支、回滚他人提交。
+
+如果发现同一文件已有用户或其他 AI 的未合并改动，要以最新文件为准；不能用旧上下文覆盖。
+
+## Action Maps 日志要求
+
+每次修改文件的任务，都要在本地 `action_maps/` 写中文日志。
+
+日志必须包含：
+
+- 任务目标：用户要求和本次执行范围。
+- 初始状态：当前分支、工作区状态、相关已有改动、日志文件计数。
+- 操作步骤：读取了哪些文件、执行了哪些命令、每一步得到什么结论。
+- 修改记录：每个被修改文件的具体改动、原因、影响范围。
+- 验证记录：执行过的命令、结果、失败原因、未验证内容。
+- `CODE_MAP.md` 判断：是否需要更新代码地图，以及原因。
+- 风险评估：可能影响的模块、平台、兼容行为。
+- 回退建议：如果本次改动出错，优先回退哪些文件或 hunk。
+
+日志不是 Git 的替代品，也不是仓库历史的一部分。真正回退仍应依赖 Git diff、commit、PR 或反向 patch。
+
+## 验证要求
+
+根据改动风险选择验证范围：
+
+- 纯文档修改：检查 Markdown 结构、关键规则可搜索、必要链接存在。
+- C# 代码修改：优先运行相关构建或最小可行检查。
+- Godot UI/渲染/输入修改：至少说明桌面验证结果；移动端问题必须说明 APK 是否验证。
+- Android 相关修复：如果不能导出/安装/运行 APK，最终回复必须明确未验证原因。
+- 日志/诊断修改：验证配置读取、日志开关、导出路径或至少说明未验证点。
+
+不要把“代码能编译”当作唯一完成标准。必须结合 Android/APK 和 Emuera 兼容目标判断。
+
+## 最终回复要求
+
+每次任务结束时，用中文说明：
+
+- 改了什么。
+- 为什么这样改。
+- 修改了哪些文件。
+- 执行了哪些验证。
+- 哪些内容没有验证以及原因。
+- 是否更新了 `CODE_MAP.md`。
+- 是否写入了本地 `action_maps/` 日志。
+- 是否存在风险或需要用户重新导出 APK 测试。
+
+## 常用定位入口
+
+- 项目约定：`IDEAS.md`
+- 代码地图：`CODE_MAP.md`
+- Claude/AI 工具规则：`CLAUDE.md`
+- 本地操作日志：`action_maps/`，不提交 GitHub
+- Godot 主场景：`first_window.tscn`、`main.tscn`
+- 主入口：`Scripts/FirstWindow.cs`、`Scripts/EmueraMain.cs`
+- 后台线程：`Scripts/EmueraThread.cs`
+- UI 渲染：`Scripts/EmueraContent.cs`
+- 脚本执行：`Scripts/Emuera/GameProc/Process*.cs`
+- 控制台输出：`Scripts/Emuera/GameView/EmueraConsole*.cs`
+- 表达式/变量：`Scripts/Emuera/GameData/Expression/`、`Scripts/Emuera/GameData/Variable/`
+- 图片/精灵：`Scripts/Emuera/Content/`、`Scripts/SpriteManager.cs`
+- 诊断日志：`Scripts/Diagnostics/`、`Scripts/GenericUtils.cs`

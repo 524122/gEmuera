@@ -206,14 +206,15 @@ namespace MinorShift.Emuera.GameView
 			return new ConsoleDisplayLine(dispLineButtonArray, firstLine, temporary);
 		}
 
-		public static ConsoleDisplayLine[] ButtonsToDisplayLines(List<ConsoleButtonString> buttonList, StringMeasure stringMeasure, bool nobr, bool temporary)
+		public static ConsoleDisplayLine[] ButtonsToDisplayLines(List<ConsoleButtonString> buttonList, StringMeasure stringMeasure, bool nobr, bool temporary, int customWidth = -1)
 		{
 			if (buttonList.Count == 0)
 				return new ConsoleDisplayLine[0];
 			setWidthToButtonList(buttonList, stringMeasure, nobr);
 			List<ConsoleDisplayLine> lineList = new List<ConsoleDisplayLine>();
 			List<ConsoleButtonString> lineButtonList = new List<ConsoleButtonString>();
-			int windowWidth = Config.DrawableWidth;
+			// div 内部需要按内容框宽度换行；继续使用整窗宽度会让子节点被父 div 裁剪。
+			int windowWidth = customWidth > 0 ? customWidth : Config.DrawableWidth;
 			bool firstLine = true;
 			for (int i = 0; i < buttonList.Count; i++)
 			{
@@ -238,7 +239,7 @@ namespace MinorShift.Emuera.GameView
 				//クリック可能なボタンでないなら分割する。ただし「ver1739以前の非ボタン折り返しを再現する」ならクリックの可否を区別しない
 				if ((!Config.ButtonWrap) || (lineButtonList.Count == 0) || (!buttonList[i].IsButton && !Config.CompatiLinefeedAs1739))
 				{//ボタン分割する
-					int divIndex = getDivideIndex(buttonList[i], stringMeasure);
+					int divIndex = getDivideIndex(buttonList[i], stringMeasure, windowWidth);
 					if (divIndex > 0)
 					{
 						ConsoleButtonString newButton = buttonList[i].DivideAt(divIndex, stringMeasure);
@@ -508,6 +509,11 @@ namespace MinorShift.Emuera.GameView
 
 		private static int getDivideIndex(ConsoleButtonString button, StringMeasure sm)
 		{
+			return getDivideIndex(button, sm, Config.DrawableWidth);
+		}
+
+		private static int getDivideIndex(ConsoleButtonString button, StringMeasure sm, int windowWidth)
+		{
 			AConsoleDisplayPart divCss = null;
 			int pointX = button.PointX;
 			int strLength = 0;
@@ -518,7 +524,7 @@ namespace MinorShift.Emuera.GameView
             for(var i=0; i<count; ++i)
 			{
                 css = button.StrArray[i];
-				if (pointX + css.Width > Config.DrawableWidth)
+				if (pointX + css.Width > windowWidth)
 				{
 					if (index == 0 && !css.CanDivide)
 						continue;
@@ -531,7 +537,7 @@ namespace MinorShift.Emuera.GameView
 			}
 			if (divCss != null)
 			{
-				int cssDivIndex = getDivideIndex(divCss, sm);
+				int cssDivIndex = getDivideIndex(divCss, sm, windowWidth);
 				if (cssDivIndex > 0)
 					strLength += cssDivIndex;
 			}
@@ -540,12 +546,17 @@ namespace MinorShift.Emuera.GameView
 
 		private static int getDivideIndex(AConsoleDisplayPart part, StringMeasure sm)
 		{
+			return getDivideIndex(part, sm, Config.DrawableWidth);
+		}
+
+		private static int getDivideIndex(AConsoleDisplayPart part, StringMeasure sm, int windowWidth)
+		{
 			if (!part.CanDivide)
 				return -1;
 			ConsoleStyledString css = part as ConsoleStyledString;
 			if (css == null)
 				return -1;
-			int widthLimit = Config.DrawableWidth - css.PointX;
+			int widthLimit = windowWidth - css.PointX;
 			string str = css.Str;
 			Font font = css.Font;
 			if (widthLimit <= 0)

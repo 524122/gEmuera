@@ -45,13 +45,13 @@ namespace uEmuera.Drawing
 		{
 			if (this is BitmapRenderTexture rt && rt.image != null)
 			{
-				rt.image.SetPixel(x, y, new Godot.Color(c.r, c.g, c.b, c.a));
+				rt.image.SetPixel(x, y, c.ToGodotColor());
 				return;
 			}
 			var ti = SpriteManager.GetTextureInfo(name, path);
 			if(ti == null || ti.image == null)
 				return;
-			ti.image.SetPixel(x, y, new Godot.Color(c.r, c.g, c.b, c.a));
+			ti.image.SetPixel(x, y, c.ToGodotColor());
 			ti.RecreateTexture();
 		}
 		public void Save(string path)
@@ -560,6 +560,10 @@ namespace uEmuera.Drawing
 		{
 			return FromArgb(255, red, green, blue);
 		}
+		public static Color FromRgbInt(int rgb)
+		{
+			return FromArgb((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+		}
 		public static Color FromArgb(int alpha, int red, int green, int blue)
 		{
 			return new Color
@@ -605,6 +609,12 @@ namespace uEmuera.Drawing
 		public int ToRGBA()
 		{
 			return (R << 24) + (G << 16) + (B << 8) + A;
+		}
+
+		// 企业级说明：Godot 侧渲染热路径统一通过该入口转换颜色，避免各模块重复手写通道顺序。
+		public global::Godot.Color ToGodotColor()
+		{
+			return new global::Godot.Color(r, g, b, a);
 		}
 
 		public float a;

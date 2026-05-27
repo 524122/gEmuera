@@ -3587,7 +3587,23 @@ namespace MinorShift.Emuera.GameData.Function
 				if (img == null || !img.IsCreated)
 					return 0;
 				if (img.DestBaseSize.Width <= 0 || img.DestBaseSize.Height <= 0)
+				{
+					// 防御性：某些动态创建路径（如 SPRITECREATE 后 GraphicsImage 被异常释放，
+					// 或 CSV 索引与文件系统状态不一致）可能导致 DestBaseSize 为0，但底层 Bitmap 仍有有效尺寸。
+					// 此时回退到 Bitmap 尺寸，避免 SPRITEWIDTH 返回0 引发后续脚本 GCREATE 报错。
+					var bmp = img.Bitmap;
+					if (bmp != null && bmp.Width > 0 && bmp.Height > 0)
+					{
+						switch (Name)
+						{
+							case "SPRITEWIDTH":
+								return bmp.Width;
+							case "SPRITEHEIGHT":
+								return bmp.Height;
+						}
+					}
 					return 0;
+				}
 				switch (Name)
 				{
 					case "SPRITEWIDTH":
@@ -4822,6 +4838,41 @@ namespace MinorShift.Emuera.GameData.Function
 						return exm.Console.SnakeFontEdging;
 					default:
 						return -1;
+				}
+			}
+		}
+
+		private sealed class GetPlatformMethod : FunctionMethod
+		{
+			public GetPlatformMethod()
+			{
+				ReturnType = typeof(Int64);
+				argumentTypeArray = new Type[] { };
+				CanRestructure = true;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string platform = global::Godot.OS.GetName();
+				switch (platform)
+				{
+					case "Windows":
+						return 0;
+					case "Android":
+						return 1;
+					case "iOS":
+						return 2;
+					case "macOS":
+					case "OSX":
+						return 3;
+					case "Linux":
+					case "FreeBSD":
+					case "NetBSD":
+					case "OpenBSD":
+					case "BSD":
+						return 4;
+					default:
+						return 5;
 				}
 			}
 		}

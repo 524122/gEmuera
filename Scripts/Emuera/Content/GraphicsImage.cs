@@ -87,7 +87,7 @@ namespace MinorShift.Emuera.Content
 		public void GClear(uEmuera.Drawing.Color c)
 		{
 			if (godotImage == null) return;
-			godotImage.Fill(new Godot.Color(c.r, c.g, c.b, c.a));
+			godotImage.Fill(c.ToGodotColor());
 		}
 
 		/// <summary>
@@ -105,7 +105,7 @@ namespace MinorShift.Emuera.Content
 			int y2 = Math.Min(height, rect.Y + rect.Height);
 			if (x2 <= x1 || y2 <= y1)
 				return;
-			var gc = new Godot.Color(c.r, c.g, c.b, c.a);
+			var gc = c.ToGodotColor();
 			// Use Godot's native rectangle fill instead of per-pixel writes. GFILL
 			// commands are common in era UI scripts, and this keeps the hot path in
 			// engine code for mobile CPU efficiency.
@@ -550,7 +550,7 @@ namespace MinorShift.Emuera.Content
 				return;
 			int minY = Math.Max(0, polygonPoints.Min(p => p.Y));
 			int maxY = Math.Min(height - 1, polygonPoints.Max(p => p.Y));
-			var fill = new Godot.Color(brushColor.r, brushColor.g, brushColor.b, brushColor.a);
+			var fill = brushColor.ToGodotColor();
 			for (int y = minY; y <= maxY; y++)
 			{
 				var nodes = new List<int>();
@@ -644,7 +644,7 @@ namespace MinorShift.Emuera.Content
 		void DrawPenPoint(int x, int y)
 		{
 			int radius = Math.Max(0, (int)penWidth / 2);
-			var c = new Godot.Color(penColor.r, penColor.g, penColor.b, penColor.a);
+			var c = penColor.ToGodotColor();
 			for (int yy = y - radius; yy <= y + radius; yy++)
 			{
 				if (yy < 0 || yy >= height) continue;
@@ -689,7 +689,7 @@ namespace MinorShift.Emuera.Content
 		{
 			if (godotImage == null) return;
 			if (x < 0 || x >= width || y < 0 || y >= height) return;
-			godotImage.SetPixel(x, y, new Godot.Color(c.r, c.g, c.b, c.a));
+			godotImage.SetPixel(x, y, c.ToGodotColor());
 		}
 
 		/// <summary>

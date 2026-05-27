@@ -316,11 +316,11 @@ namespace MinorShift.Emuera.GameView
 					if (font.Color >= 0)
 					{
 						colorChanged = true;
-						c = Color.FromArgb(font.Color >> 16, (font.Color >> 8) & 0xFF, font.Color & 0xFF);
+						c = Color.FromRgbInt(font.Color);
 					}
 					if (font.BColor >= 0)
 					{
-						b = Color.FromArgb(font.BColor >> 16, (font.BColor >> 8) & 0xFF, font.BColor & 0xFF);
+						b = Color.FromRgbInt(font.BColor);
 					}
 				}
 				return new StringStyle(c, colorChanged, b, FontStyle, fontname);
@@ -482,6 +482,11 @@ namespace MinorShift.Emuera.GameView
 		/// <returns></returns>
 		public static ConsoleDisplayLine[] Html2DisplayLine(string str, StringMeasure sm, EmueraConsole console)
 		{
+			return Html2DisplayLine(str, sm, console, -1);
+		}
+
+		private static ConsoleDisplayLine[] Html2DisplayLine(string str, StringMeasure sm, EmueraConsole console, int customWidth)
+		{
 			List<AConsoleDisplayPart> cssList = new List<AConsoleDisplayPart>();
 			List<ConsoleButtonString> buttonList = new List<ConsoleButtonString>();
 			StringStream st = new StringStream(str);
@@ -544,7 +549,10 @@ namespace MinorShift.Emuera.GameView
 						HtmlDivTag divTag = state.PendingDivTag;
 						state.PendingDivTag = null;
 						string divHtml = ReadDivInnerHtml(st);
-						ConsoleDisplayLine[] divLines = Html2DisplayLine(divHtml, sm, console);
+						int divContentWidth = GetDivContentWidth(divTag);
+						// div 子行的 align=center/right 必须使用内容框宽度；否则会按整窗居中，
+						// 在 Godot 的裁剪容器里表现为图片节点已创建但被挤到 div 外不可见。
+						ConsoleDisplayLine[] divLines = Html2DisplayLine(divHtml, sm, console, divContentWidth);
 						cssList.Add(new ConsoleDivPart(divTag.X, divTag.Y, divTag.Width, divTag.Height, divTag.Depth, divTag.Color, divTag.StyledBox, divTag.IsRelative, divTag.Display, divLines));
 						state.LineHead = false;
 					}
@@ -583,11 +591,11 @@ namespace MinorShift.Emuera.GameView
 				}
 			}
 			bool preservePreformatted = LooksLikePreformattedAsciiArt(str);
-			ConsoleDisplayLine[] ret = PrintStringBuffer.ButtonsToDisplayLines(buttonList, sm, state.FlagNobr || preservePreformatted, false);
+			ConsoleDisplayLine[] ret = PrintStringBuffer.ButtonsToDisplayLines(buttonList, sm, state.FlagNobr || preservePreformatted, false, customWidth);
 
 			foreach (ConsoleDisplayLine dl in ret)
 			{
-				dl.SetAlignment(state.Alignment);
+				dl.SetAlignment(state.Alignment, customWidth);
 			}
 			return ret;
 		}
@@ -1257,11 +1265,11 @@ namespace MinorShift.Emuera.GameView
 						Color b = Config.FocusColor;
 						if (color >= 0)
 						{
-							c = Color.FromArgb(color >> 16, (color >> 8) & 0xFF, color & 0xFF);
+							c = Color.FromRgbInt(color);
 						}
 						if (bcolor >= 0)
 						{
-							b = Color.FromArgb(bcolor >> 16, (bcolor >> 8) & 0xFF, bcolor & 0xFF);
+							b = Color.FromRgbInt(bcolor);
 						}
 						return ConsoleShapePart.CreateShape(type, param, c, b, color >= 0);
 					}
@@ -1493,6 +1501,31 @@ namespace MinorShift.Emuera.GameView
 			}
 
 			return int.TryParse(str, out value);
+		}
+
+		private static int GetDivContentWidth(HtmlDivTag divTag)
+		{
+			if (divTag?.Width == null)
+				return -1;
+			int width = Math.Abs(ConsoleDivPart.ToPixel(divTag.Width));
+			if (width <= 0)
+				return -1;
+
+			StyledBoxModel box = divTag.StyledBox;
+			if (box != null)
+			{
+				width -= GetBoxValue(box.Margin, BoxDirection.Left) + GetBoxValue(box.Margin, BoxDirection.Right);
+				width -= GetBoxValue(box.Border, BoxDirection.Left) + GetBoxValue(box.Border, BoxDirection.Right);
+				width -= GetBoxValue(box.Padding, BoxDirection.Left) + GetBoxValue(box.Padding, BoxDirection.Right);
+			}
+			return Math.Max(1, width);
+		}
+
+		private static int GetBoxValue(int[] values, int index)
+		{
+			if (values == null || index < 0 || index >= values.Length)
+				return 0;
+			return values[index];
 		}
 
 		private static string ReadDivInnerHtml(StringStream st)

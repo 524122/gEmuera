@@ -135,6 +135,7 @@ namespace MinorShift.Emuera
 		UseERD,
 		VarsizeDimConfig,
 		CheckDuplicateIdentifier,
+		ForbidUpdateCheck,
 
 		MoneyLabel = 100,
 		MoneyFirst = 101,
