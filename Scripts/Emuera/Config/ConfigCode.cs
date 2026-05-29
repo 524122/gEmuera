@@ -25,6 +25,7 @@ namespace MinorShift.Emuera
 		GRAPHICS = 0,
 		TEXTRENDERER = 1,
 		WINAPI = 2,
+		SKIASHARP = 3,
 	}
 
     [global::System.Reflection.Obfuscation(Exclude = true)]
@@ -136,6 +137,8 @@ namespace MinorShift.Emuera
 		VarsizeDimConfig,
 		CheckDuplicateIdentifier,
 		ForbidUpdateCheck,
+		PluginAvailableWarn,
+		DisableBeforeErrorThrow,
 
 		MoneyLabel = 100,
 		MoneyFirst = 101,

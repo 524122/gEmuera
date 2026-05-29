@@ -60,7 +60,7 @@ project.godot
 |-- project.godot                 Godot 项目配置，主场景 first_window.tscn
 |-- first_window.tscn             启动器场景
 |-- main.tscn                     主游戏场景
-|-- config.toml                   精简运行期诊断配置；`[logging].enabled=false` 时日志/诊断系统完全关闭
+|-- config.toml                   精简运行期诊断配置；默认开启轻量日志以支持保存 `gemuera_*.log`，`[logging].enabled=false` 时日志/诊断系统完全关闭
 |-- IDEAS.md                      项目工作约定，所有 AI 任务优先阅读
 |-- CLAUDE.md                     Claude Code/AI CLI/AI IDE 执行指南
 |-- action_maps/                  本地 AI/程序操作日志，不提交 GitHub，最多 30 个日志文件
@@ -142,7 +142,7 @@ project.godot
 | `uEmuera/Properties.cs` | `ResourceManager`, `Resources` | 原资源访问兼容。 | `GetString` |
 | `uEmuera/VisualBasic.cs` | `Strings`, `VbStrConv` | VB 字符串转换兼容。 | `StrConv` |
 | `uEmuera/Media.cs` | `Hand`, `Asterisk` | 系统声音兼容桩。 | `Play` |
-| `uEmuera/partial/EmueraConsole.cs` | partial `EmueraConsole` | 给 uEmuera 层访问显示行的扩展。 | `GetDisplayLinesForuEmuera`, `GetDisplayLinesCount`, `GetDisplayLinesSnapshotForuEmuera` |
+| `uEmuera/partial/EmueraConsole.cs` | partial `EmueraConsole` | 给 uEmuera 层访问显示行和输入等待状态的扩展，等待态包含 `WaitInputNoFocus`。 | `GetDisplayLinesForuEmuera`, `GetDisplayLinesCount`, `GetDisplayLinesSnapshotForuEmuera`, `IsWaitingInput` |
 | `uEmuera/partial/AConsoleColoredPart.cs` | partial `AConsoleColoredPart` | 显示部件兼容扩展。 | 主要是 partial 补充 |
 
 ### Scripts/Emuera 根
@@ -150,15 +150,15 @@ project.godot
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
 | `Emuera/Program.cs` | `Program`, `EmueraCoreProfile` | 原 Emuera 入口；设置目录、核心 profile、配置、窗口、Process。 | `Main`, `AppendSnakeStartupErrorLog`, `DetectCoreProfile`, `ConfigureModernMobileCoreAdapters` |
-| `Emuera/GlobalStatic.cs` | `GlobalStatic` | 核心全局对象注册和重置。 | `Reset` 及静态字段 |
+| `Emuera/GlobalStatic.cs` | `GlobalStatic` | 核心全局对象注册和重置；保存插件存在标志。 | `Reset`, `ExistPlugin` 及静态字段 |
 
 ### Scripts/Emuera/Config
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `Config.cs` | `Config` | 运行配置静态访问；字体、路径、窗口尺寸、更新检查、`UPDATECHECK` 禁用开关、debug config。 | `SetConfig`, `GetFont`, `ClearFont`, `CreateSavDir`, `CheckUpdate`, `UpdateWindowWidth`, `SetDebugConfig` |
-| `ConfigData.cs` | `ConfigData` | 配置数据实体，保存所有 Emuera 选项。 | 构造/读取/保存配置项 |
-| `ConfigCode.cs` | `ConfigCode` 等 enum | 配置项枚举和相关枚举。 | 枚举定义 |
+| `Config.cs` | `Config` | 运行配置静态访问；字体、路径、窗口尺寸、更新检查、`UPDATECHECK` 禁用、插件警告、`BEFORE_ERROR/THROW` 禁用开关、debug config。 | `SetConfig`, `GetFont`, `ClearFont`, `CreateSavDir`, `CheckUpdate`, `UpdateWindowWidth`, `SetDebugConfig` |
+| `ConfigData.cs` | `ConfigData` | 配置数据实体，保存所有 Emuera 选项，包含插件警告、异常前事件禁用项、v24 `TextDrawingMode.SKIASHARP` 默认兼容和默认开启 lazy loading。 | 构造/读取/保存配置项 |
+| `ConfigCode.cs` | `ConfigCode` 等 enum | 配置项枚举和相关枚举，包含 `PluginAvailableWarn`、`DisableBeforeErrorThrow` 和 `TextDrawingMode.SKIASHARP`。 | 枚举定义 |
 | `ConfigItem.cs` | `AConfigItem`, `ConfigItem<T>` | 单个配置项的解析/序列化容器。 | `ToString`, value parse 相关 |
 | `KeyMacro.cs` | `KeyMacro` | 快捷键宏配置。 | `Load`, `Save`, key macro 访问 |
 
@@ -244,7 +244,7 @@ project.godot
 | `LogicalLine.cs` | `LogicalLine`, `InstructionLine`, `FunctionLabelLine`, `GotoLabelLine` | ERB 逻辑行模型。 | `FunctionLabelLine`, `InstructionLine`, label/goto 访问 |
 | `LogicalLineParser.cs` | `LogicalLineParser` | 将文本行解析为 `LogicalLine`。 | `ParseSharpLine`, `ParseLine`, `ParseLabelLine` |
 | `LabelDictionary.cs` | `LabelDictionary` | 函数 label、事件 label、`$` label 索引。 | `AddLabel`, `SortLabels`, `GetEventLabels`, `GetNonEventLabel`, `GetLabelDollar` |
-| `InputRequest.cs` | `InputRequest`, `InputType` | 输入请求类型和值约束。 | 构造和字段 |
+| `InputRequest.cs` | `InputRequest`, `InputType` | 输入请求类型和值约束，`NoFocus` 标记用于 NF 定时输入。 | 构造和字段 |
 | `UserDefinedFunction.cs` | `UserDefinedFunctionData` | 用户定义函数元数据。 | 构造和参数类型 |
 | `UserDefinedVariable.cs` | `UserDefinedVariableData`, `DimLineWC` | 用户定义变量元数据。 | 构造、维度/类型信息 |
 
@@ -253,9 +253,9 @@ project.godot
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
 | `Instruction.cs` | `AbstractInstruction` | ERB 指令抽象基类。 | `SetJumpTo`, `DoInstruction`, `CreateArgument` |
-| `Instraction.Child.cs` | partial `FunctionIdentifier`, 多个 `*Instruction` | 具体 ERB 指令实现；文件名保留原拼写 `Instraction`；包含 Snake/v24 兼容指令如 `UPDATECHECK`、`DT_COLUMN_OPTIONS`。 | `PRINT_Instruction`, `CALL_Instruction`, `GOTO_Instruction`, `RETURNF_Instruction` 等 |
-| `FunctionIdentifier.cs` | `FunctionIdentifier` | 指令名/FunctionCode 映射和指令分类。 | `GetInstructionNameDic`, `IsPrint`, `IsInput`, `IsJump`, `IsMethod`, `IsFlowContorol` |
-| `BuiltInFunctionCode.cs` | `FunctionCode` | 内置指令/函数 code 枚举。 | 枚举定义 |
+| `Instraction.Child.cs` | partial `FunctionIdentifier`, 多个 `*Instruction` | 具体 ERB 指令实现；文件名保留原拼写 `Instraction`；包含 Snake/v24 兼容指令、`TINPUTNF/TINPUTSNF/TONEINPUTNF/TONEINPUTSNF` 和渲染控制 API。 | `PRINT_Instruction`, `TINPUT_Instruction`, `CALL_Instruction`, `GOTO_Instruction`, `RETURNF_Instruction`, `SNAKE_UI_SETTING_Instruction` 等 |
+| `FunctionIdentifier.cs` | `FunctionIdentifier` | 指令名/FunctionCode 映射和指令分类，注册 NF 定时输入变体。 | `GetInstructionNameDic`, `IsPrint`, `IsInput`, `IsJump`, `IsMethod`, `IsFlowContorol` |
+| `BuiltInFunctionCode.cs` | `FunctionCode` | 内置指令/函数 code 枚举，包含 NF 定时输入 code。 | 枚举定义 |
 | `FunctionArgType.cs` | `FunctionArgType` | 指令参数类型枚举。 | 枚举定义 |
 | `Argument.cs` | `Argument` 及大量 `Sp*Argument` | 已解析指令参数的数据对象。 | 构造和字段 |
 | `ArgumentBuilder.cs` | `ArgumentBuilder`, 多个 `*ArgumentBuilder` | 针对不同指令构造 `Argument`。 | `Build`, `CheckArgument`, 各指令 builder |
@@ -265,8 +265,8 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `EmueraConsole.cs` | partial `EmueraConsole`, `DisplayLineList`, `ClientBackGroundImage` | 控制台状态、输入等待、CBG/图片层、鼠标/键盘、调试、重载。 | `Initialize`, `WaitInput`, `PressEnterKey`, `RefreshStrings`, `CBG_SetImage`, `SetImageLayer`, `ReloadErb`, `Dispose` |
-| `EmueraConsole.Print.cs` | partial `EmueraConsole` | 打印文本、HTML、按钮、图片、形状、日志输出。 | `Print`, `PrintHtml`, `PrintImg`, `PrintShape`, `PrintButton`, `PrintFlush`, `OutputLog`, `PopDisplayingLines` |
+| `EmueraConsole.cs` | partial `EmueraConsole`, `DisplayLineList`, `ClientBackGroundImage` | 控制台状态、输入等待、NF 等待态、CBG/图片层、鼠标/键盘、调试、重载；保存 v24 渲染控制 API 的脚本可见状态。 | `Initialize`, `WaitInput`, `IsWaitInputState`, `PressEnterKey`, `RefreshStrings`, `CBG_SetImage`, `SetImageLayer`, `SetSnakeTextDrawingMode`, `ReloadErb`, `Dispose` |
+| `EmueraConsole.Print.cs` | partial `EmueraConsole` | 打印文本、HTML、按钮、图片、形状、日志输出；维护 `IsLineEnd`、`LINECOUNT`、`CLEARLINE` 的逻辑行语义和 `PrintC/PrintButtonC` 像素制表。 | `Print`, `PrintC`, `PrintButtonC`, `PrintHtml`, `PrintImg`, `PrintShape`, `PrintButton`, `PrintFlush`, `deleteLine`, `OutputLog`, `PopDisplayingLines` |
 | `ConsoleDisplayLine.cs` | `ConsoleDisplayLine` | 一行显示内容，包含多个按钮/片段。 | `DrawTo`, `GDIDrawTo`, `ShiftPositionX`, `ChangeStr` |
 | `ConsoleButtonString.cs` | `ConsoleButtonString` | 一个可点击/可输入的显示段，包含多个 display part。 | `DivideAt`, `CalcWidth`, `CalcPointX`, `DrawTo` |
 | `AConsoleDisplayPart.cs` | `AConsoleDisplayPart`, `AConsoleColoredPart` | 显示片段抽象基类。 | `DrawTo`, `GDIDrawTo`, `ToString` |
@@ -276,7 +276,7 @@ project.godot
 | `ConsoleDivPart.cs` | `ConsoleDivPart`, `StyledBoxModel` | HTML div/盒模型片段。 | box 计算与绘制 |
 | `ButtonStringCreator.cs` | `ButtonStringCreator`, `ButtonPrimitive` | 将文本拆成按钮/显示片段。 | `CreateButtonString` 相关 |
 | `HtmlManager.cs` | `HtmlManager` 及 HTML state 类型 | HTML 文本和 display line 互转，支持 style/button/img/shape/div。 | `Html2DisplayLine`, `Html2ButtonList`, `DisplayLine2Html`, `HtmlTagSplit`, `Escape`, `Unescape` |
-| `PrintStringBuffer.cs` | `PrintStringBuffer` | 打印缓冲；把连续输出合并成 display line。 | `Append`, `Flush`, `Clear`, line 构造 |
+| `PrintStringBuffer.cs` | `PrintStringBuffer` | 打印缓冲；把连续输出合并成 display line，并提供当前缓冲行像素宽度。 | `Append`, `Flush`, `CurrentLineWidth`, line 构造 |
 | `StringMeasure.cs` | `StringMeasure : IDisposable` | 文本宽度测量。 | `GetDisplayLength`, `Dispose` |
 | `StringStyle.cs` | `StringStyle` | 文本颜色、字体样式、font name。 | 构造、比较、转换 |
 | `MixedNum.cs` | `MixedNum` | HTML 尺寸/位置混合数值。 | 数值字段/解析辅助 |
@@ -288,9 +288,9 @@ project.godot
 | `Runtime/Utils/SqliteRuntime.cs` | `SqliteRuntime` | SQLite 初始化、连接路径、运行时可用性。 | `Initialize`, `OpenConnection`, `Shutdown` |
 | `Runtime/Utils/SnakeSqlManager.cs` | `SnakeSqlManager`, `ReaderContext` | Snake profile SQL 兼容层。 | `Connect`, `ExecuteNonQuery`, `ExecuteReader`, `ReaderGet*`, `Disconnect` |
 | `Runtime/Utils/PluginSystem/IPluginMethod.cs` | `IPluginMethod` | 插件方法接口。 | `Name`, `Description`, `Execute(PluginMethodParameter[] args)` |
-| `Runtime/Utils/PluginSystem/PluginManager.cs` | `PluginManager`, `ReflectionPluginMethod` | 插件 manifest 加载、方法注册和反射调用。 | `LoadPlugins`, `ExecuteMethod`, method registry |
+| `Runtime/Utils/PluginSystem/PluginManager.cs` | `PluginManager`, `ReflectionPluginMethod` | 插件 manifest 加载、DLL 存在检测、方法注册和反射调用。 | `LoadPlugins`, `ExecuteMethod`, method registry |
 | `Runtime/Utils/PluginSystem/PluginManifestAbstract.cs` | `PluginManifestAbstract` | 插件 manifest 抽象基类。 | manifest 字段/属性 |
-| `Runtime/Utils/PluginSystem/PluginMethodParameter.cs` | `PluginMethodParameter`, `PluginMethodParameterBuilder` | 插件方法参数对象和 builder。 | `Build`, 参数字段 |
+| `Runtime/Utils/PluginSystem/PluginMethodParameter.cs` | `PluginMethodParameter`, `PluginMethodParameterBuilder` | 插件方法参数对象和 builder，支持整数、字符串和小数参数。 | `ConvertTerm`, 参数字段 |
 | `Modern/Script/Functions/ModernSqlManager.cs` | `ModernSqlManager`, `ReaderContext` | 现代 SQL 扩展函数运行时。 | `Connect`, `ExecuteReader`, `ReaderGet*`, `Disconnect` |
 
 ### Scripts/Emuera/Sub
@@ -317,7 +317,7 @@ project.godot
 | `_Library/LangManager.cs` | `LangManager` | Emuera 内部语言文本管理。 | `Load`, `GetStr` |
 | `_Library/SFMT.cs` | `MTRandom` | SFMT/随机数实现。 | `Next`, seed 初始化 |
 | `_Library/Sys.cs` | `Sys` | 全局路径、exe dir 等系统信息。 | `ExeDir`, path 字段 |
-| `_Library/WinInput.cs` | `WinInput`, `MouseButtons` | 鼠标/键盘输入兼容枚举和 helper。 | `GetKeyState`, mouse helpers |
+| `_Library/WinInput.cs` | `WinInput`, `MouseButtons` | 鼠标/键盘输入兼容枚举和 helper；提供 `GETKEYTRIGGERED` latch 消费和清理。 | `GetKeyState`, `ConsumeKeyLatch`, `ClearLatches`, mouse helpers |
 | `_Library/WinmmTimer.cs` | `WinmmTimer` | WinMM timer 兼容桩。 | 构造/字段 |
 
 ## 核心接口和抽象契约

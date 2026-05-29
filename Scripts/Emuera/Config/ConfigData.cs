@@ -30,7 +30,7 @@ static ConfigData() { }
 
 		private ConfigData() { setDefault(); }
 
-		private const int ConfigItemCapacity = 76;
+		private const int ConfigItemCapacity = 78;
 		private const int ReplaceItemCapacity = 50;
 		private const int DebugItemCapacity = 20;
 
@@ -129,6 +129,8 @@ static ConfigData() { }
 			{ "CHECK DUPLICATE ERD IDENTIFIER AND PRIVATE VARIABLE", ConfigCode.CheckDuplicateIdentifier },
 			{ "CHECK DUPLICATE ERD IDENTIFIER AND PRIVATE VARIABLEA", ConfigCode.CheckDuplicateIdentifier },
 			{ "DISALLOW UPDATECHECK", ConfigCode.ForbidUpdateCheck },
+			{ "PLUGIN AVAILABLE WARNING", ConfigCode.PluginAvailableWarn },
+			{ "DISABLE BEFORE_ERROR/THROW EVENTS", ConfigCode.DisableBeforeErrorThrow },
 		};
 
 		private static readonly Dictionary<string, ConfigCode> englishReplaceAliases = new Dictionary<string, ConfigCode>(StringComparer.OrdinalIgnoreCase)
@@ -210,7 +212,7 @@ static ConfigData() { }
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.AutoSave, "オートセーブを行なう", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseKeyMacro, "キーボードマクロを使用する", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SizableWindow, "ウィンドウの高さを可変にする", true);
-			configArray[i++] = new ConfigItem<TextDrawingMode>(ConfigCode.TextDrawingMode, "描画インターフェース", TextDrawingMode.TEXTRENDERER);
+			configArray[i++] = new ConfigItem<TextDrawingMode>(ConfigCode.TextDrawingMode, "描画インターフェース", TextDrawingMode.SKIASHARP);
 			//configArray[i++] = new ConfigItem<bool>(ConfigCode.UseImageBuffer, "イメージバッファを使用する", true);
 			configArray[i++] = new ConfigItem<int>(ConfigCode.WindowX, "ウィンドウ幅", 760);
 			configArray[i++] = new ConfigItem<int>(ConfigCode.WindowY, "ウィンドウ高さ", 480);
@@ -277,11 +279,13 @@ static ConfigData() { }
 			//configArray[i++] = new ConfigItem<bool>(ConfigCode.ForbidOneCodeVariable, "一文字変数の使用を禁止する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SystemNoTarget, "キャラクタ変数の引数を補完しない", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SystemIgnoreStringSet, "文字列変数の代入に文字列式を強制する", false);
-			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseLazyLoading, "UseLazyLoading", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseLazyLoading, "UseLazyLoading", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseERD, "ERD機能を利用する", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.VarsizeDimConfig, "VARSIZEの次元指定をERD機能に合わせる", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.CheckDuplicateIdentifier, "ERDで定義した識別子とローカル変数の重複を確認する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.ForbidUpdateCheck, "UPDATECHECKを許可しない", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.PluginAvailableWarn, "外部プラグインが有効時に警告を表示する", true);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.DisableBeforeErrorThrow, "BEFORE_ERROR/THROWイベントを無効化する", false);
 
 			i = 0;
 			debugArray[i++] = new ConfigItem<bool>(ConfigCode.DebugShowWindow, "起動時にデバッグウインドウを表示する", true);

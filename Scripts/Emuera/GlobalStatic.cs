@@ -43,6 +43,7 @@ namespace MinorShift.Emuera
 #if UEMUERA_DEBUG
 		public static List<FunctionLabelLine> StackList = new List<FunctionLabelLine>();
 #endif
+		public static bool ExistPlugin;
 		public static void Reset()
 		{
 			MinorShift.Emuera.GameData.Function.SnakeSqlManager.CloseAll();
@@ -58,6 +59,7 @@ namespace MinorShift.Emuera
 			MainWindow = null;
 			LabelDictionary = null;
 			IdentifierDictionary = null;
+			ExistPlugin = false;
 			tempDic.Clear();
 		}
 	}

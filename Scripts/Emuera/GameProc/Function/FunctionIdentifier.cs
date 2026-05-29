@@ -247,6 +247,10 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.TINPUTS, new TINPUTS_Instruction(false));
 			addFunction(FunctionCode.TONEINPUT, new TINPUT_Instruction(true));
 			addFunction(FunctionCode.TONEINPUTS, new TINPUTS_Instruction(true));
+			addFunction(FunctionCode.TINPUTNF, new TINPUT_Instruction(false, true));
+			addFunction(FunctionCode.TINPUTSNF, new TINPUTS_Instruction(false, true));
+			addFunction(FunctionCode.TONEINPUTNF, new TINPUT_Instruction(true, true));
+			addFunction(FunctionCode.TONEINPUTSNF, new TINPUTS_Instruction(true, true));
 			addFunction(FunctionCode.TWAIT, new TWAIT_Instruction());
 			addFunction(FunctionCode.WAITANYKEY, new WAITANYKEY_Instruction());
 			addFunction(FunctionCode.FORCEWAIT, new WAIT_Instruction(true));

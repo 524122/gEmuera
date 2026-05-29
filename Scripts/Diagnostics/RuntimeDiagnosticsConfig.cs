@@ -11,7 +11,7 @@ namespace gEmuera.Diagnostics
     public sealed class RuntimeDiagnosticsConfig
     {
         // ---------- minimal logging switch ----------
-        public bool LoggingEnabled { get; set; } = false;
+        public bool LoggingEnabled { get; set; } = true;
 
         // ---------- quick_debug ----------
         public bool QuickDebugEnabled { get; set; } = false;

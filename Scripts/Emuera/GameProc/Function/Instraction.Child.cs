@@ -940,13 +940,15 @@ namespace MinorShift.Emuera.GameProc.Function
 
 		private sealed class TINPUT_Instruction : AbstractInstruction
 		{
-			public TINPUT_Instruction(bool oneInput)
+			public TINPUT_Instruction(bool oneInput, bool noFocus = false)
 			{
 				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_TINPUT);
 				flag = IS_PRINT | IS_INPUT | EXTENDED;
 				this.isOne = oneInput;
+				this.noFocus = noFocus;
 			}
 			bool isOne;
+			readonly bool noFocus;
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
 				SpTInputsArgument tinputarg = (SpTInputsArgument)func.Argument;
@@ -955,6 +957,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				req.InputType = InputType.IntValue;
 				req.HasDefValue = true;
 				req.OneInput = isOne;
+				req.NoFocus = noFocus;
 				Int64 x = tinputarg.Time.GetIntValue(exm);
 				Int64 y = tinputarg.Def.GetIntValue(exm);
 				//TODO:ONEINPUTと標準の値を統一
@@ -976,13 +979,15 @@ namespace MinorShift.Emuera.GameProc.Function
 
 		private sealed class TINPUTS_Instruction : AbstractInstruction
 		{
-			public TINPUTS_Instruction(bool oneInput)
+			public TINPUTS_Instruction(bool oneInput, bool noFocus = false)
 			{
 				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_TINPUTS);
 				flag = IS_PRINT | IS_INPUT | EXTENDED;
 				this.isOne = oneInput;
+				this.noFocus = noFocus;
 			}
 			bool isOne;
+			readonly bool noFocus;
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
 				SpTInputsArgument tinputarg = (SpTInputsArgument)func.Argument;
@@ -990,6 +995,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				req.InputType = InputType.StrValue;
 				req.HasDefValue = true;
 				req.OneInput = isOne;
+				req.NoFocus = noFocus;
 				Int64 x = tinputarg.Time.GetIntValue(exm);
 				string strs = tinputarg.Def.GetStrValue(exm);
 				if (isOne && strs.Length > 1)
@@ -1930,6 +1936,8 @@ namespace MinorShift.Emuera.GameProc.Function
 					{
 						if (varTerm.GetOperandType() == typeof(string))
 							varTerm.SetValue(pluginArgs[i].strValue, exm);
+						else if (varTerm.GetOperandType() == typeof(double))
+							varTerm.SetValue(pluginArgs[i].floatValue, exm);
 						else
 							varTerm.SetValue(pluginArgs[i].intValue, exm);
 					}
@@ -2294,7 +2302,7 @@ namespace MinorShift.Emuera.GameProc.Function
 						exm.Console.StrictFontFallback = value != 0;
 						break;
 					case FunctionCode.SET_TEXT_DRAWING_MODE:
-						exm.Console.SnakeTextDrawingMode = (int)value;
+						exm.Console.SetSnakeTextDrawingMode((int)value);
 						break;
 					case FunctionCode.BITMAP_CACHE_ENABLE:
 						exm.Console.BitmapCacheEnabledForNextLine = value != 0;

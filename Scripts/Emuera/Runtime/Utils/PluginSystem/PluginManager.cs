@@ -39,15 +39,15 @@ namespace MinorShift.Emuera.Runtime.Utils.PluginSystem
 		{
 			ClearMethods();
 			string pluginDir = GetPluginDirectory();
+			GlobalStatic.ExistPlugin = false;
 			if (!Directory.Exists(pluginDir))
 				return;
 
-			bool pluginsAware = File.Exists(Path.Combine(Program.ExeDir ?? "", "pluginsAware.txt"));
+			string[] pluginFiles = Directory.GetFiles(pluginDir, "*.dll");
+			GlobalStatic.ExistPlugin = pluginFiles.Length > 0;
 			currentPluginDir = pluginDir;
-			foreach (string pluginPath in Directory.GetFiles(pluginDir, "*.dll"))
+			foreach (string pluginPath in pluginFiles)
 			{
-				if (!pluginsAware)
-					throw new ExeEE("This game comes prepackaged with plugins. Create pluginsAware.txt in the game root if you trust these plugins.");
 				try
 				{
 					Assembly dll = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(pluginPath));

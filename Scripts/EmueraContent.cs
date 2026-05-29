@@ -676,9 +676,11 @@ public partial class EmueraContent : Control
 			|| normalized.Equals("\uFF2D\uFF33 \u30B4\u30B7\u30C3\u30AF", System.StringComparison.OrdinalIgnoreCase);
 	}
 
+	const int EscapedConsolePartZIndex = 2;
+
 	// The following helpers compute absolute row bounds from every part in a
-	// ConsoleDisplayLine. Images and div-like parts can extend outside the normal
-	// baseline, so row height cannot rely on font height alone.
+	// ConsoleDisplayLine. Images follow the SkiaSharp core behavior: the display
+	// line still occupies one text row, while overflow is drawn above later rows.
 	int GetPartTop(AConsoleDisplayPart part)
 	{
 		if (part == null)
@@ -694,18 +696,16 @@ public partial class EmueraContent : Control
 		return System.Math.Min(0, part.Top);
 	}
 
-	int GetPartBottom(AConsoleDisplayPart part)
+	int GetPartBottom(AConsoleDisplayPart part, bool reserveImageOverflow)
 	{
 		if (part == null)
 			return EffectiveLineHeight;
 		if (part is ConsoleImagePart image)
 		{
-			// Relative 与 AbsoluteLeftTop 的图片都基于行内坐标定位；如果行高不足，
-			// 后续行会在 Godot 的渲染顺序中覆盖溢出的图片区域，导致角色立绘不可见。
-			// Absolute / AbsoluteLeftBottom 使用视口坐标（Y = WindowY + PositionY），
-			// 不应影响行高，否则会把后续内容向下推移到错误位置。
-			if (image.Display == DisplayMode.Relative || image.Display == DisplayMode.AbsoluteLeftTop)
-				return GetRelativeImagePartBottom(image);
+			// SkiaSharp 核心按固定 LineHeight 推进行号，再把越界图片作为 escaped part 覆盖绘制。
+			// Godot 行布局也不能被图片撑高，否则会在图片后产生大量空白行；按钮命中范围才需要单独保留图片高度。
+			if (reserveImageOverflow && (image.Display == DisplayMode.Relative || image.Display == DisplayMode.AbsoluteLeftTop))
+				return GetImagePartBottom(image);
 			return EffectiveLineHeight;
 		}
 		if (part is ConsoleDivPart div && div.IsRelative)
@@ -713,17 +713,15 @@ public partial class EmueraContent : Control
 		return System.Math.Max(EffectiveLineHeight, part.Bottom);
 	}
 
-	int GetRelativeImagePartBottom(ConsoleImagePart image)
+	int GetImagePartBottom(ConsoleImagePart image)
 	{
 		if (image == null)
 			return EffectiveLineHeight;
-		// 企业级说明：角色立绘等相对图片会生成真实 EmueraImage 节点；如果行高仍按字体高度计算，
-		// Android 的 ScrollContainer/VBoxContainer 只会为该行预留一行文字空间，表现为节点存在但图片不可见或被后续行覆盖。
 		int imageBottom = image.dest_rect.Y + System.Math.Abs(image.dest_rect.Height);
 		if (imageBottom <= image.dest_rect.Y)
 		{
-			// 防御性：当 dest_rect.Height 因异常变为0时，AddPartToContainer 会回退到纹理自然高度，
-			// 行高计算也应同步回退，避免渲染尺寸与布局尺寸不一致导致图片溢出或被覆盖。
+			// 防御性：当 dest_rect.Height 因异常变为 0 时，渲染路径会回退到纹理自然高度，
+			// 按钮命中范围也应使用同一高度，避免图片可见但触摸区域过小。
 			int naturalHeight = TryGetImageNaturalHeight(image);
 			if (naturalHeight > 0)
 				imageBottom = image.dest_rect.Y + naturalHeight;
@@ -749,6 +747,19 @@ public partial class EmueraContent : Control
 		return 0;
 	}
 
+	bool ImageEscapesLine(ConsoleImagePart image)
+	{
+		if (image == null)
+			return false;
+		if (image.Display == DisplayMode.Absolute || image.Display == DisplayMode.AbsoluteLeftBottom)
+			return true;
+		if (image.Display == DisplayMode.AbsoluteLeftTop)
+			return true;
+		int top = image.dest_rect.Y;
+		int bottom = GetImagePartBottom(image);
+		return top < 0 || bottom > EffectiveLineHeight;
+	}
+
 	int GetButtonTop(ConsoleButtonString button)
 	{
 		int top = 0;
@@ -759,13 +770,13 @@ public partial class EmueraContent : Control
 		return top;
 	}
 
-	int GetButtonBottom(ConsoleButtonString button)
+	int GetButtonBottom(ConsoleButtonString button, bool reserveImageOverflow = false)
 	{
 		int bottom = EffectiveLineHeight;
 		if (button?.StrArray == null)
 			return bottom;
 		foreach (var part in button.StrArray)
-			bottom = System.Math.Max(bottom, GetPartBottom(part));
+			bottom = System.Math.Max(bottom, GetPartBottom(part, reserveImageOverflow));
 		return bottom;
 	}
 
@@ -906,10 +917,12 @@ public partial class EmueraContent : Control
 				if(button.IsButton)
 				{
 					int buttonTop = GetButtonTop(button);
-					int buttonHeight = GetButtonBottom(button) - buttonTop;
+					int buttonHeight = GetButtonBottom(button, true) - buttonTop;
 					if (buttonHeight <= 0)
 						buttonHeight = EffectiveLineHeight;
 					var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
+					if (buttonTop < 0 || buttonHeight > EffectiveLineHeight)
+						btn.ZIndex = EscapedConsolePartZIndex;
 					lineControl.AddChild(btn);
 					if (GenericUtils.IsUiLayoutTraceEnabled("button"))
 						QueueUiLayoutTrace(btn, "button", "", button.PointX, buttonTop, button.Width, buttonHeight);
@@ -933,7 +946,9 @@ public partial class EmueraContent : Control
 			activeTexturePinCollector = previousTexturePinCollector;
 		}
 
-		int fixedLineHeight = lineControl.GetChildCount() == 0 ? 0 : lineHeight;
+		// PRINT_IMAGE 会用后续的 <br> 行为大图预留显示高度。即使这些行没有可见子节点，
+		// 也必须按 emuera 的逻辑行高参与布局，否则日结动画后的图片和怀孕口上会被后续输出挤压或遮住。
+		int fixedLineHeight = lineHeight;
 		var lineSize = new Vector2(maxLineRight, fixedLineHeight);
 		SetFixedControlSize(lineControl, lineSize);
 
@@ -1893,6 +1908,8 @@ public partial class EmueraContent : Control
 				emuImg.FlipX = cip.FlipX;
 				emuImg.FlipY = cip.FlipY;
 				emuImg.SetColorMatrix(cip.ColorMatrix);
+				if (ImageEscapesLine(cip))
+					emuImg.ZIndex = EscapedConsolePartZIndex;
 				// Inline images are absolutely positioned inside a fixed-height Emuera line.
 				// Giving them a minimum size lets Godot containers add blank vertical space.
 				emuImg.CustomMinimumSize = Vector2.Zero;
@@ -2050,10 +2067,12 @@ public partial class EmueraContent : Control
 			if (button.IsButton)
 			{
 				int buttonTop = GetButtonTop(button);
-				int buttonHeight = GetButtonBottom(button) - buttonTop;
+				int buttonHeight = GetButtonBottom(button, true) - buttonTop;
 				if (buttonHeight <= 0)
 					buttonHeight = EffectiveLineHeight;
 				var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
+				if (buttonTop < 0 || buttonHeight > EffectiveLineHeight)
+					btn.ZIndex = EscapedConsolePartZIndex;
 				row.AddChild(btn);
 			}
 			else

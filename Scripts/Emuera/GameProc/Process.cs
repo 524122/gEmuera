@@ -182,6 +182,8 @@ namespace MinorShift.Emuera.GameProc
 				{
 					PluginManager.GetInstance().SetParent(this, state, exm);
 					PluginManager.GetInstance().LoadPlugins();
+					if (GlobalStatic.ExistPlugin && Config.PluginAvailableWarn)
+						console.PrintSingleLine("注意：外部プラグイン機能が有効になっています。この機能で生じた不具合等はEmueraのサポート対象外となります");
 				}
 
 				//ERH読込
@@ -348,7 +350,9 @@ namespace MinorShift.Emuera.GameProc
 						return;
 					}
 					state.InBeforeError = true;
-					var beforeError = CalledFunction.CallEventFunction(this, "BEFORE_ERROR", null);
+					var beforeError = Config.DisableBeforeErrorThrow
+						? null
+						: CalledFunction.CallEventFunction(this, "BEFORE_ERROR", null);
 					if (beforeError != null)
 					{
 						state.IntoFunction(beforeError, null, null);

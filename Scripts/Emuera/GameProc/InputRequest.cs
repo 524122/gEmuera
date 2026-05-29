@@ -43,6 +43,7 @@ namespace MinorShift.Emuera.GameProc
 			} 
 		}
 		public bool OneInput = false;
+		public bool NoFocus = false;
 		public bool StopMesskip = false;
 		public bool IsSystemInput = false;
 

@@ -10,6 +10,7 @@ namespace MinorShift._Library
 		static readonly Dictionary<int, long> virtualPressedUntilMs = new Dictionary<int, long>();
 		static readonly Dictionary<int, bool> pressedStates = new Dictionary<int, bool>();
 		static readonly Dictionary<int, short> toggleStates = new Dictionary<int, short>();
+		static readonly Dictionary<int, int> keyLatch = new Dictionary<int, int>();
 		static readonly object syncRoot = new object();
 
 		public static void UpdateKeyState()
@@ -53,6 +54,8 @@ namespace MinorShift._Library
 
 		static void PollButton(int vk, bool pressed)
 		{
+			if (pressed && (!pressedStates.TryGetValue(vk, out bool wasPressed) || !wasPressed))
+				keyLatch[vk] = 1;
 			keyStateCache[vk] = ComposeState(vk, pressed);
 		}
 
@@ -97,7 +100,27 @@ namespace MinorShift._Library
 			lock (syncRoot)
 			{
 				virtualPressedUntilMs[nVirtKey] = until;
+				keyLatch[nVirtKey] = 1;
 				keyStateCache[nVirtKey] = ComposeState(nVirtKey, true);
+			}
+		}
+
+		public static int ConsumeKeyLatch(int nVirtKey)
+		{
+			lock (syncRoot)
+			{
+				if (!keyLatch.TryGetValue(nVirtKey, out int value))
+					return 0;
+				keyLatch[nVirtKey] = 0;
+				return value;
+			}
+		}
+
+		public static void ClearLatches()
+		{
+			lock (syncRoot)
+			{
+				keyLatch.Clear();
 			}
 		}
 

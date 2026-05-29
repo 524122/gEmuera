@@ -30,6 +30,7 @@ namespace MinorShift.Emuera.GameView
 		Running = 7,
 		WaitInput = 20,
         Sleep = 21,//DoEvents
+		WaitInputNoFocus = 22,
 
         //WaitKey = 1,//WAIT
         //WaitSystemInteger = 2,//Systemが要求するInput
@@ -576,8 +577,18 @@ namespace MinorShift.Emuera.GameView
 			{
 				if (state == ConsoleState.Initializing)
 					return true;
+				if (IsWaitInputState)
+					return false;
 				return (state == ConsoleState.Running || runningERBfromMemory);
 			}
+		}
+
+		/// <summary>
+		/// NF 输入和普通输入都属于同一类等待态，避免只更新一半分支导致输入流程失配。
+		/// </summary>
+		internal bool IsWaitInputState
+		{
+			get { return state == ConsoleState.WaitInput || state == ConsoleState.WaitInputNoFocus; }
 		}
 
 		internal bool IsInProcess
@@ -588,6 +599,8 @@ namespace MinorShift.Emuera.GameView
 					return true;
 				if (state == ConsoleState.Sleep)
 					return true;
+				if (IsWaitInputState)
+					return false;
 				if (inProcess)
 					return true;
 				return (state == ConsoleState.Running || runningERBfromMemory);
@@ -608,7 +621,7 @@ namespace MinorShift.Emuera.GameView
 			{
 				if ((state == ConsoleState.Quit) || (state == ConsoleState.Error))
 					return true;
-				if(state == ConsoleState.WaitInput)
+				if (IsWaitInputState)
 					return (inputReq.InputType == InputType.AnyKey || inputReq.InputType == InputType.EnterKey);
 				return false;
 			}
@@ -618,7 +631,7 @@ namespace MinorShift.Emuera.GameView
         {
             get
 			{
-				return (state == ConsoleState.WaitInput && inputReq.InputType == InputType.AnyKey);
+				return (IsWaitInputState && inputReq.InputType == InputType.AnyKey);
             }
         }
 
@@ -626,7 +639,7 @@ namespace MinorShift.Emuera.GameView
         {
             get
             {
-				return (state == ConsoleState.WaitInput && inputReq.OneInput);
+				return (IsWaitInputState && inputReq.OneInput);
             }
         }
 
@@ -634,7 +647,7 @@ namespace MinorShift.Emuera.GameView
 		{
 			get
 			{
-				return (state == ConsoleState.WaitInput && inputReq.Timelimit > 0 && !isTimeout);
+				return (IsWaitInputState && inputReq.Timelimit > 0 && !isTimeout);
 			}
 		}
 
@@ -642,7 +655,7 @@ namespace MinorShift.Emuera.GameView
 		{
 			get
 			{
-				if (state == ConsoleState.WaitInput)
+				if (IsWaitInputState)
 					return (inputReq.InputType == InputType.PrimitiveMouseKey);
 				return false;
 			}
@@ -656,7 +669,7 @@ namespace MinorShift.Emuera.GameView
 					return null;
 				if (state == ConsoleState.Error)
 					return selectingButton.Inputs;
-				if (state != ConsoleState.WaitInput)
+				if (!IsWaitInputState)
 					return null;
 				if (inputReq.InputType == InputType.IntValue && (selectingButton.IsInteger))
 					return selectingButton.Input.ToString();
@@ -741,7 +754,7 @@ namespace MinorShift.Emuera.GameView
 		private void newGeneration()
 		{
             //値の入力を求められない時は更新は必要ないはず
-			if (state != ConsoleState.WaitInput || !inputReq.NeedValue)
+			if (!IsWaitInputState || !inputReq.NeedValue)
 				return;
             if (!updatedGeneration && emuera.getCurrentLine != lastInputLine)
             {
@@ -953,6 +966,7 @@ namespace MinorShift.Emuera.GameView
 			if (frameWaitMs > 0)
 				global::GenericUtils.WaitForUiFrameAfter(uiFrame, frameWaitMs);
 			state = ConsoleState.Sleep;
+			WinInput.ClearLatches();
 			emuera.UpdateCheckInfiniteLoopState();
 
 			if (time > 0)
@@ -986,8 +1000,10 @@ namespace MinorShift.Emuera.GameView
 
 		public void WaitInput(InputRequest req)
 		{
-			state = ConsoleState.WaitInput;
+			state = req.NoFocus ? ConsoleState.WaitInputNoFocus : ConsoleState.WaitInput;
 			inputReq = req;
+			if (req.NoFocus)
+				RefreshStrings(true);
 			if (req.Timelimit > 0)
 			{
 				if (req.OneInput)
@@ -1028,7 +1044,7 @@ namespace MinorShift.Emuera.GameView
 			if (!redrawTimer.Enabled)
 				return;
 			//INPUT待ちでないとき、又はタイマー付きINPUT状態の場合はこれ以外の処理に任せる
-			if (state != ConsoleState.WaitInput || timer.Enabled)
+			if (!IsWaitInputState || timer.Enabled)
 			{
 				return;
 			}
@@ -1111,7 +1127,7 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (!timer.Enabled)
 				return;
-			if (state != ConsoleState.WaitInput || inputReq.Timelimit <= 0 || timerID != inputReq.ID)
+			if (!IsWaitInputState || inputReq.Timelimit <= 0 || timerID != inputReq.ID)
 			{
 #if UEMUERA_DEBUG
 				throw new ExeEE("");
@@ -1172,7 +1188,7 @@ namespace MinorShift.Emuera.GameView
 			else if (inputReq.TimeUpMes != null)
 				PrintSingleLine(inputReq.TimeUpMes);
 			callEmueraProgram("");//ディフォルト入力の処理はcallEmueraProgram側で
-			if (state == ConsoleState.WaitInput && inputReq.NeedValue)
+			if (IsWaitInputState && inputReq.NeedValue)
 			{
 				Point point = window.MainPicBox.PointToClient(uEmuera.Forms.Control.MousePosition);
 				if (window.MainPicBox.ClientRectangle.Contains(point))
@@ -1223,7 +1239,7 @@ namespace MinorShift.Emuera.GameView
 
 		private bool doInputToEmueraProgram(string str)
 		{
-			if (state == ConsoleState.WaitInput)
+			if (IsWaitInputState)
 			{
 				Int64 inputValue;
 
@@ -1360,7 +1376,7 @@ namespace MinorShift.Emuera.GameView
 			{
 				//1823 Escキーもマクロも右クリックも不可。単純に押されたキーを送るのみ。
 				callEmueraProgram(null);
-				if (state == ConsoleState.WaitInput && inputReq.NeedValue)
+				if (IsWaitInputState && inputReq.NeedValue)
 				{
 					Point point = window.MainPicBox.PointToClient(uEmuera.Forms.Control.MousePosition);
 					if (window.MainPicBox.ClientRectangle.Contains(point))
@@ -1395,7 +1411,7 @@ namespace MinorShift.Emuera.GameView
 				return;
 			}
 #if UEMUERA_DEBUG
-			if (state != ConsoleState.WaitInput || inputReq == null)
+			if (!IsWaitInputState || inputReq == null)
 				throw new ExeEE("");
 #endif
 			KillMacro = false;
@@ -1443,7 +1459,7 @@ namespace MinorShift.Emuera.GameView
 					}
 					callEmueraProgram(inputs);
 					RefreshStrings(false);
-					while (MesSkip && state == ConsoleState.WaitInput)
+					while (MesSkip && IsWaitInputState)
 					{
 						//TODO:入力無効を通していいか？スキップ停止をマクロでは飛ばせていいのか？
 						if (inputReq.NeedValue)
@@ -1459,12 +1475,12 @@ namespace MinorShift.Emuera.GameView
 						//	goto endMacro;
 					}
 					MesSkip = false;
-					if (state != ConsoleState.WaitInput)
+					if (!IsWaitInputState)
 						break;
 					//マクロループ時は待ち処理が起こらないのでここでシステムキューを捌く
 					//Application.DoEvents();
 #if UEMUERA_DEBUG
-					if (state != ConsoleState.WaitInput || inputReq == null)
+					if (!IsWaitInputState || inputReq == null)
 						throw new ExeEE("");
 #endif
 					if (KillMacro)
@@ -1476,7 +1492,7 @@ namespace MinorShift.Emuera.GameView
 				inProcess = false;
 			}
 			endMacro:
-			if(state == ConsoleState.WaitInput && inputReq.NeedValue)
+			if (IsWaitInputState && inputReq.NeedValue)
 			{
 				Point point = window.MainPicBox.PointToClient(uEmuera.Forms.Control.MousePosition);
 				if (window.MainPicBox.ClientRectangle.Contains(point))
@@ -1762,9 +1778,9 @@ namespace MinorShift.Emuera.GameView
 				//if (isBackLog)
 				//	selectingButton = null;
 				//数値か文字列の入力待ち状態でなければ無効
-				if(state != ConsoleState.Error && state != ConsoleState.WaitInput)
+				if (state != ConsoleState.Error && !IsWaitInputState)
 					selectingButton = null;
-				else if((state == ConsoleState.WaitInput) && !inputReq.NeedValue)
+				else if (IsWaitInputState && !inputReq.NeedValue)
 					selectingButton = null;
 				//選択肢が最新でないなら無効
 				else if (selectingButton.Generation != lastButtonGeneration)
@@ -1904,10 +1920,18 @@ namespace MinorShift.Emuera.GameView
 		public uEmuera.Drawing.Color? TextBackgroundColor { get; set; }
 		public bool BitmapCacheEnabledForNextLine { get; set; }
 		public bool StrictFontFallback { get; set; }
-		public int SnakeTextDrawingMode { get; set; }
-		public int SnakeImageQuality { get; private set; }
+		// Godot 版不使用 SkiaSharp，但 v24 脚本会通过这些 API 探测渲染后端。
+		// 保留与改版 emuera 默认值一致的可见状态，避免迁移脚本误判为旧 GDI 模式。
+		public int SnakeTextDrawingMode { get; private set; } = 3;
+		public int SnakeImageQuality { get; private set; } = 3;
 		public int SnakeFontHinting { get; private set; }
-		public int SnakeFontEdging { get; private set; }
+		public int SnakeFontEdging { get; private set; } = 2;
+
+		public void SetSnakeTextDrawingMode(int mode)
+		{
+			if (mode == 1 || mode == 3)
+				SnakeTextDrawingMode = mode;
+		}
 
 		public void SetSnakeSkiaQuality(int imageQuality, int fontHinting, int fontEdging)
 		{

@@ -106,9 +106,7 @@ internal static class GenericUtils
         get
         {
             var cfg = _runtimeConfig;
-            return cfg != null
-                && cfg.LoggingEnabled
-                && (cfg.InputDebugEnabled || cfg.InputReplayEnabled || cfg.SaveDebugEnabled || cfg.DiagnosticPackageEnabled);
+            return cfg != null && cfg.LoggingEnabled;
         }
     }
 

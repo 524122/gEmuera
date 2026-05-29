@@ -55,6 +55,10 @@ namespace MinorShift.Emuera.GameProc.Function
 		TONEINPUT,
 		TONEINPUTS,
 		AWAIT,//入力不可 DoEvents
+		TINPUTNF,
+		TINPUTSNF,
+		TONEINPUTNF,
+		TONEINPUTSNF,
 
 		DRAWLINE,//画面の左端から右端まで----と線を引く。
 		BAR,//[*****....]のようなグラフを書く。BAR (変数) , (最大値), (長さ)

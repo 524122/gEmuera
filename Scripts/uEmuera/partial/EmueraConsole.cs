@@ -37,12 +37,12 @@ namespace MinorShift.Emuera.GameView
 		}
 		internal bool IsWaitingInput
 		{
-			get { return state == ConsoleState.WaitInput; }
+			get { return IsWaitInputState; }
 		}
 		internal bool IsWaitingInputSomething
 		{
 			get {
-				return state == ConsoleState.WaitInput &&
+				return IsWaitInputState &&
 						  (inputReq.InputType == GameProc.InputType.IntValue || 
 						  inputReq.InputType == GameProc.InputType.StrValue);
 			}
@@ -58,7 +58,7 @@ namespace MinorShift.Emuera.GameView
 		}
 		internal bool IsWaitingOnePhrase
 		{
-			get { return state == ConsoleState.WaitInput && inputReq != null && inputReq.OneInput; }
+			get { return IsWaitInputState && inputReq != null && inputReq.OneInput; }
 		}
 	}
 }

@@ -150,9 +150,26 @@ namespace MinorShift.Emuera.GameView
 				else
 					line.SetAlignment(alignment);
 				line.LineNo = lineNo;
+				// PRINT/PRINTFORM 等不换行输出要和下一次 Flush 的内容保持同一逻辑行。
+				// LINECOUNT/CLEARLINE 依赖这个边界；Godot 侧还要沿用旧 LineNo，才能替换已渲染的未结束行。
+				if (displayLineList.Count != 0 && !displayLineList[displayLineList.Count - 1].IsLineEnd)
+				{
+					ConsoleDisplayLine lastLine = displayLineList[displayLineList.Count - 1];
+					int mergedLineNo = lastLine.LineNo;
+					ConsoleButtonString[] lastButtons = lastLine.Buttons ?? new ConsoleButtonString[0];
+					ConsoleButtonString[] currentButtons = line.Buttons ?? new ConsoleButtonString[0];
+					if (lastButtons.Length > 0 && currentButtons.Length > 0)
+					{
+						ConsoleButtonString lastButton = lastButtons[lastButtons.Length - 1];
+						line.ShiftPositionX(lastButton.PointX + lastButton.Width);
+					}
+					deleteLine(1);
+					line.LineNo = mergedLineNo;
+					line.ChangeStr(mergeDisplayLineButtons(lastButtons, currentButtons));
+				}
 				displayLineList.Add(line);
 				lineNo++;
-				if (line.IsLogicalLine)
+				if (line.IsLogicalLine && line.IsLineEnd)
 					logicalLineCount++;
 				if (lineNo == int.MaxValue)
 				{
@@ -166,6 +183,18 @@ namespace MinorShift.Emuera.GameView
 				if (displayLineList.Count > Config.MaxLog)
 					displayLineList.RemoveAt(0);
 			}
+		}
+
+		private static ConsoleButtonString[] mergeDisplayLineButtons(ConsoleButtonString[] first, ConsoleButtonString[] second)
+		{
+			int firstLength = first == null ? 0 : first.Length;
+			int secondLength = second == null ? 0 : second.Length;
+			ConsoleButtonString[] merged = new ConsoleButtonString[firstLength + secondLength];
+			if (firstLength > 0)
+				Array.Copy(first, 0, merged, 0, firstLength);
+			if (secondLength > 0)
+				Array.Copy(second, 0, merged, firstLength, secondLength);
+			return merged;
 		}
 
 
@@ -185,7 +214,8 @@ namespace MinorShift.Emuera.GameView
 					if (line.IsLogicalLine)
 					{
 						delNum++;
-						logicalLineCount--;
+						if (line.IsLineEnd)
+							logicalLineCount--;
 					}
 				}
 				if (lineNo < 0)
@@ -410,6 +440,14 @@ namespace MinorShift.Emuera.GameView
 			if (cellWidthPx <= 0)
 				cellWidthPx = Config.PrintCLength * Config.FontSize / 2;
 
+			int maxLineWidth = Config.DrawableWidth;
+			int currentPx = printBuffer.CurrentLineWidth;
+			if (currentPx > 0 && currentPx + cellWidthPx > maxLineWidth)
+			{
+				ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
+				addRangeDisplayLine(dispList);
+			}
+
 			ConsoleButtonString[] buttons = HtmlManager.Html2ButtonList(str, stringMeasure, this);
 			if (buttons.Length == 0)
 				return;
@@ -441,14 +479,47 @@ namespace MinorShift.Emuera.GameView
 		}
 
 		private int printCWidth = -1;
-		private int printCWidthL = -1;
-		private int printCWidthL2 = -1;
+		// PRINTC/PRINTBUTTONC 在 Godot 侧按像素宽度分栏，避免全半角混排时列宽漂移。
+		// 这里单独跟踪缓冲中由 PRINTC 累积的宽度，因为 force_button 路径的按钮宽度要到 Flush 前才会补齐。
+		private int printCCurrentLinePx = 0;
 		public void PrintC(string str, bool alignmentRight)
 		{
 			if (string.IsNullOrEmpty(str))
 				return;
 
-			printBuffer.Append(CreateTypeCString(str, alignmentRight), Style, true);
+			if (printCWidth == -1)
+				calcPrintCWidth(stringMeasure);
+
+			Font font = Config.Font;
+			int contentWidth = stringMeasure.GetDisplayLength(str, font);
+			int cellWidth = printCWidth;
+			int padPx = cellWidth - contentWidth;
+
+			if (printBuffer.IsEmpty)
+				printCCurrentLinePx = 0;
+
+			int maxLineWidth = Config.DrawableWidth;
+			bool fullColumnFits = (printCCurrentLinePx + cellWidth <= maxLineWidth);
+			bool contentFits = (printCCurrentLinePx + contentWidth <= maxLineWidth);
+
+			if (printCCurrentLinePx > 0 && !contentFits)
+			{
+				ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
+				addRangeDisplayLine(dispList);
+				printCCurrentLinePx = 0;
+				fullColumnFits = true;
+				contentFits = true;
+			}
+
+			if (alignmentRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			printBuffer.Append(str, Style, true);
+
+			if (!alignmentRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			printCCurrentLinePx = fullColumnFits ? printCCurrentLinePx + cellWidth : maxLineWidth;
 		}
 
 		private void calcPrintCWidth(StringMeasure stringMeasure)
@@ -456,56 +527,6 @@ namespace MinorShift.Emuera.GameView
 			string str = new string(' ', Config.PrintCLength);
 			Font font = Config.Font;
 			printCWidth = stringMeasure.GetDisplayLength(str, font);
-
-			printCWidthL = printCWidth;
-			printCWidthL2 = printCWidth;
-		}
-
-		private string CreateTypeCString(string str, bool alignmentRight)
-		{
-			if (printCWidth == -1)
-				calcPrintCWidth(stringMeasure);
-			int length = 0;
-			int width = 0;
-            if(str != null)
-                //length = Config.Encode.GetByteCount(str);
-                length = uEmuera.Utils.GetByteCount(str);
-            int printcLength = Config.PrintCLength;
-			Font font = null;
-			try
-			{
-				font = new Font(Style.Fontname, Config.Font.Size, Style.FontStyle, GraphicsUnit.Pixel);
-			}
-			catch
-			{
-				return str;
-			}
-
-			if ((alignmentRight) && (length < printcLength))
-			{
-				str = new string(' ', printcLength - length) + str;
-				width = stringMeasure.GetDisplayLength(str, font);
-				while (width > printCWidth)
-				{
-					if (str[0] != ' ')
-						break;
-					str = str.Remove(0, 1);
-					width = stringMeasure.GetDisplayLength(str, font);
-				}
-			}
-			else if ((!alignmentRight) && (length < printcLength + 1))
-			{
-				str += new string(' ', printcLength + 1 - length);
-				width = stringMeasure.GetDisplayLength(str, font);
-				while (width > printCWidthL)
-				{
-					if (str[str.Length - 1] != ' ')
-						break;
-					str = str.Remove(str.Length - 1, 1);
-					width = stringMeasure.GetDisplayLength(str, font);
-				}
-			}
-			return str;
 		}
 
 		internal void PrintButton(string str, string p)
@@ -524,13 +545,79 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (string.IsNullOrEmpty(str))
 				return;
-			printBuffer.AppendButton(CreateTypeCString(str, isRight), Style, p);
+
+			if (printCWidth == -1)
+				calcPrintCWidth(stringMeasure);
+
+			Font font = Config.Font;
+			int contentWidth = stringMeasure.GetDisplayLength(str, font);
+			int cellWidth = printCWidth;
+			int padPx = cellWidth - contentWidth;
+
+			if (printBuffer.IsEmpty)
+				printCCurrentLinePx = 0;
+
+			int maxLineWidth = Config.DrawableWidth;
+			bool fullColumnFits = (printCCurrentLinePx + cellWidth <= maxLineWidth);
+			bool contentFits = (printCCurrentLinePx + contentWidth <= maxLineWidth);
+
+			if (printCCurrentLinePx > 0 && !contentFits)
+			{
+				ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
+				addRangeDisplayLine(dispList);
+				printCCurrentLinePx = 0;
+				fullColumnFits = true;
+				contentFits = true;
+			}
+
+			if (isRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			printBuffer.AppendButton(str, Style, p);
+
+			if (!isRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			printCCurrentLinePx = fullColumnFits ? printCCurrentLinePx + cellWidth : maxLineWidth;
 		}
 		internal void PrintButtonC(string str, long p, bool isRight)
 		{
 			if (string.IsNullOrEmpty(str))
 				return;
-			printBuffer.AppendButton(CreateTypeCString(str, isRight), Style, p);
+
+			if (printCWidth == -1)
+				calcPrintCWidth(stringMeasure);
+
+			Font font = Config.Font;
+			int contentWidth = stringMeasure.GetDisplayLength(str, font);
+			int cellWidth = printCWidth;
+			int padPx = cellWidth - contentWidth;
+
+			if (printBuffer.IsEmpty)
+				printCCurrentLinePx = 0;
+
+			int maxLineWidth = Config.DrawableWidth;
+			bool fullColumnFits = (printCCurrentLinePx + cellWidth <= maxLineWidth);
+			bool contentFits = (printCCurrentLinePx + contentWidth <= maxLineWidth);
+
+			if (printCCurrentLinePx > 0 && !contentFits)
+			{
+				ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
+				addRangeDisplayLine(dispList);
+				printCCurrentLinePx = 0;
+				fullColumnFits = true;
+				contentFits = true;
+			}
+
+			if (isRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			printBuffer.AppendButton(str, Style, p);
+
+			if (!isRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			printCCurrentLinePx = fullColumnFits ? printCCurrentLinePx + cellWidth : maxLineWidth;
 		}
 
 		internal void PrintPlain(string str)

@@ -144,6 +144,20 @@ namespace MinorShift.Emuera.GameView
 			}
 		}
 
+		public int CurrentLineWidth
+		{
+			get
+			{
+				int width = 0;
+				foreach (ConsoleButtonString button in m_buttonList)
+				{
+					if (button != null && button.Width > 0)
+						width += button.Width;
+				}
+				return width;
+			}
+		}
+
 		public override string ToString()
 		{
 			StringBuilder buf = new StringBuilder();

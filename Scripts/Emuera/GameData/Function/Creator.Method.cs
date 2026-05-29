@@ -4494,7 +4494,10 @@ namespace MinorShift.Emuera.GameData.Function
 				switch(Name)
 				{
 					case "GETKEY": return (s < 0) ? 1 : 0;
-					case "GETKEYTRIGGERED": return (s < 0) && (toggle != keytoggle[keycode]) ? 1 : 0;//初回はtrue、2回目以降はトグル状態が前回と違う場合のみ1
+					case "GETKEYTRIGGERED":
+						if (WinInput.ConsumeKeyLatch((int)keycode) != 0)
+							return 1;
+						return (s < 0) && (toggle != keytoggle[keycode]) ? 1 : 0;//初回はtrue、2回目以降はトグル状態が前回と違う場合のみ1
 				}
 				throw new ExeEE("異常な分岐");
 			}

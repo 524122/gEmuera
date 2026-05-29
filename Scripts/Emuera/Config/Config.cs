@@ -126,6 +126,8 @@ namespace MinorShift.Emuera
 			VarsizeDimConfig = instance.GetConfigValue<bool>(ConfigCode.VarsizeDimConfig);
 			CheckDuplicateIdentifier = instance.GetConfigValue<bool>(ConfigCode.CheckDuplicateIdentifier);
 			ForbidUpdateCheck = instance.GetConfigValue<bool>(ConfigCode.ForbidUpdateCheck);
+			PluginAvailableWarn = instance.GetConfigValue<bool>(ConfigCode.PluginAvailableWarn);
+			DisableBeforeErrorThrow = instance.GetConfigValue<bool>(ConfigCode.DisableBeforeErrorThrow);
 			
 			CompatiFuncArgAutoConvert = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgAutoConvert);
 			CompatiFuncArgOptional = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgOptional);
@@ -535,6 +537,8 @@ namespace MinorShift.Emuera
 		public static bool UseERD { get; private set; }
 		public static bool VarsizeDimConfig { get; private set; }
 		public static bool CheckDuplicateIdentifier { get; private set; }
+		public static bool PluginAvailableWarn { get; private set; }
+		public static bool DisableBeforeErrorThrow { get; private set; }
 
 		public static int Language { get; private set; }
 

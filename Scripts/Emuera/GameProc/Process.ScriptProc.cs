@@ -774,7 +774,9 @@ namespace MinorShift.Emuera.GameProc
 						}
 						state.PendingThrowMessage = throwMessage;
 						state.PendingThrowLine = func;
-						var beforeThrow = CalledFunction.CallEventFunction(this, "BEFORE_THROW", func);
+						var beforeThrow = Config.DisableBeforeErrorThrow
+							? null
+							: CalledFunction.CallEventFunction(this, "BEFORE_THROW", func);
 						if (beforeThrow == null)
 						{
 							state.ClearPendingThrow();
