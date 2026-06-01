@@ -12,8 +12,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlConnectionOpenMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -37,13 +37,13 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlConnectMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				return CheckSqlArgs(name, arguments, 1, 2, typeof(string), typeof(string));
+				return CheckSqlArgs(name, arguments, 1, 2, EraType.String, EraType.String);
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -67,8 +67,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlDisconnectMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -92,8 +92,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlExecuteNonQueryMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -117,8 +117,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlExecuteReaderMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -142,8 +142,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlReaderReadMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -167,8 +167,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlReaderGetIntMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -192,8 +192,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlReaderGetFloatMethod()
 			{
-				ReturnType = typeof(double);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Float;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -217,8 +217,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlReaderIsNullMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -242,8 +242,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlReaderCloseMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -267,13 +267,13 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlPExecuteNonQueryMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				return CheckSqlArgs(name, arguments, 2, int.MaxValue, typeof(string), typeof(string));
+				return CheckSqlArgs(name, arguments, 2, int.MaxValue, EraType.String, EraType.String);
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -296,13 +296,13 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlPExecuteReaderMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				return CheckSqlArgs(name, arguments, 2, int.MaxValue, typeof(string), typeof(string));
+				return CheckSqlArgs(name, arguments, 2, int.MaxValue, EraType.String, EraType.String);
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -325,8 +325,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlExecuteScalarLongMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -350,8 +350,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlExecuteScalarFloatMethod()
 			{
-				ReturnType = typeof(double);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+				ReturnType = EraType.Float;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -375,13 +375,13 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlPExecuteScalarLongMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				return CheckSqlArgs(name, arguments, 2, int.MaxValue, typeof(string), typeof(string));
+				return CheckSqlArgs(name, arguments, 2, int.MaxValue, EraType.String, EraType.String);
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -404,13 +404,13 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlPExecuteScalarFloatMethod()
 			{
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				return CheckSqlArgs(name, arguments, 2, int.MaxValue, typeof(string), typeof(string));
+				return CheckSqlArgs(name, arguments, 2, int.MaxValue, EraType.String, EraType.String);
 			}
 			public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -433,8 +433,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlEscapeMethod()
 			{
-				ReturnType = typeof(string);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = true;
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -458,8 +458,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlExecuteScalarStringMethod()
 			{
-				ReturnType = typeof(string);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -483,13 +483,13 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlPExecuteScalarStringMethod()
 			{
-				ReturnType = typeof(string);
+				ReturnType = EraType.String;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				return CheckSqlArgs(name, arguments, 2, int.MaxValue, typeof(string), typeof(string));
+				return CheckSqlArgs(name, arguments, 2, int.MaxValue, EraType.String, EraType.String);
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -512,8 +512,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlReaderGetStringMethod()
 			{
-				ReturnType = typeof(string);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -537,8 +537,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlImportMapXmlMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -562,8 +562,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlImportDtXmlMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -587,8 +587,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlImportXmlCustomMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string), typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String, EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -612,8 +612,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlExportMapXmlMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -637,8 +637,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SqlExportDtXmlMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)

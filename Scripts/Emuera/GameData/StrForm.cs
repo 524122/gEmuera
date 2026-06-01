@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Text;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.GameData.Variable;
@@ -136,12 +136,12 @@ namespace MinorShift.Emuera.GameData
                 }
 				if (SWT is CurlyBraceSubWord)
 				{
-					if (operand.GetOperandType() != typeof(Int64))
+					if (operand.GetEraType() != EraType.Integer)
 						throw new CodeEE("{}の中の式が数式ではありません");
 					termArray[i] = new FunctionMethodTerm(formatCurlyBrace, new IOperandTerm[] { operand, second, third });
 					continue;
 				}
-				if (operand.GetOperandType() != typeof(string))
+				if (operand.GetEraType() != EraType.String)
 					throw new CodeEE("%%の中の式が文字列式ではありません");
 				termArray[i] = new FunctionMethodTerm(formatPercent, new IOperandTerm[] { operand, second, third });
 			}
@@ -222,7 +222,7 @@ namespace MinorShift.Emuera.GameData
 			public FormattedStringMethod()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(string);
+				ReturnType = EraType.String;
 				argumentTypeArray = null;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments) { throw new ExeEE("型チェックは呼び出し元が行うこと"); }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using MinorShift.Emuera.GameData;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.GameData.Function;
@@ -99,6 +100,7 @@ namespace MinorShift.Emuera.GameProc
 		}
 		readonly EmueraConsole console = null;
 		readonly List<CalledFunction> functionList = new List<CalledFunction>();
+		readonly Stack<ExecutionContext> contextStack = new Stack<ExecutionContext>();
 		private LogicalLine currentLine;
 		//private LogicalLine nextLine;
 		public int lineCount = 0;
@@ -108,6 +110,7 @@ namespace MinorShift.Emuera.GameProc
 		private string pendingThrowMessage;
 		private bool inBeforeError;
 		private bool skipBeforeError;
+		private bool inBeforeThrow;
 		private InstructionLine pendingThrowLine;
 		private Exception pendingErrorException;
 		private LogicalLine pendingErrorCurrentLine;
@@ -128,6 +131,21 @@ namespace MinorShift.Emuera.GameProc
                 return functionList.Count;
             }
         }
+
+		public ExecutionContext CurrentContext
+		{
+			get { return contextStack.Count > 0 ? contextStack.Peek() : null; }
+		}
+
+		public void PushContext(ExecutionContext context)
+		{
+			contextStack.Push(context);
+		}
+
+		public ExecutionContext PopContext()
+		{
+			return contextStack.Count > 0 ? contextStack.Pop() : null;
+		}
 
 		SystemStateCode sysStateCode = SystemStateCode.Title_Begin;
 		BeginType begintype = BeginType.NULL;
@@ -175,6 +193,7 @@ namespace MinorShift.Emuera.GameProc
 
 		public bool InBeforeError { get { return inBeforeError; } set { inBeforeError = value; } }
 		public bool SkipBeforeError { get { return skipBeforeError; } set { skipBeforeError = value; } }
+		public bool InBeforeThrow { get { return inBeforeThrow; } set { inBeforeThrow = value; } }
 		public bool IsInBeforeThrow
 		{
 			get
@@ -302,6 +321,11 @@ namespace MinorShift.Emuera.GameProc
 			foreach (CalledFunction called in functionList)
                 if (called.CurrentLabel.hasPrivDynamicVar)
                     called.CurrentLabel.Out();
+			while (contextStack.Count > 0)
+			{
+				ExecutionContext context = contextStack.Pop();
+				context.Dispose();
+			}
 			functionList.Clear();
 			begintype = BeginType.NULL;
 		}
@@ -357,6 +381,11 @@ namespace MinorShift.Emuera.GameProc
 			foreach (CalledFunction called in functionList)
                 if (called.CurrentLabel.hasPrivDynamicVar)
                     called.CurrentLabel.Out();
+			while (contextStack.Count > 0)
+			{
+				ExecutionContext context = contextStack.Pop();
+				context.Dispose();
+			}
 			functionList.Clear();
 			begintype = BeginType.NULL;
 			return;
@@ -407,7 +436,10 @@ namespace MinorShift.Emuera.GameProc
 
 		public void Return(Int64 ret)
 		{
-			if (IsFunctionMethod)
+			CalledFunction called = functionList[functionList.Count - 1];
+			// BEFORE_ERROR / BEFORE_THROW 是错误处理事件，即使当前外层是 #FUNCTION，
+			// 也必须走事件返回路径，让 pending error/throw 在事件结束后重新抛出。
+			if (IsFunctionMethod && !(called.IsEvent && (called.FunctionName == "BEFORE_THROW" || called.FunctionName == "BEFORE_ERROR")))
 			{
 				ReturnF(null);
 				return;
@@ -418,11 +450,12 @@ namespace MinorShift.Emuera.GameProc
 			//{
 			//    throw new ExeEE("実行中の関数が存在しません");
 			//}
-			CalledFunction called = functionList[functionList.Count - 1];
 			if (called.IsJump)
 			{//JUMPした場合。即座にRETURN RESULTする。
                 if (called.TopLabel.hasPrivDynamicVar)
                     called.TopLabel.Out();
+				ExecutionContext context = PopContext();
+				context?.Dispose();
 				functionList.Remove(called);
 				if (Program.DebugMode)
 					console.DebugRemoveTraceLog();
@@ -433,12 +466,16 @@ namespace MinorShift.Emuera.GameProc
 			{
                 if (called.TopLabel.hasPrivDynamicVar)
                     called.TopLabel.Out();
+				ExecutionContext context = PopContext();
+				context?.Dispose();
                 currentLine = null;
             }
 			else
 			{
                 if (called.CurrentLabel.hasPrivDynamicVar)
                     called.CurrentLabel.Out();
+				ExecutionContext context = PopContext();
+				context?.Dispose();
 				//#Singleフラグ付き関数で1が返された。
 				//1752 非0ではなく1と等価であることを見るように修正
 				//1756 全てを終了ではなく#PRIや#LATERのグループごとに修正
@@ -454,6 +491,7 @@ namespace MinorShift.Emuera.GameProc
                     lineCount++;
                     if (called.CurrentLabel.hasPrivDynamicVar)
                         called.CurrentLabel.In();
+					PushContext(new ExecutionContext(called.CurrentLabel, CurrentContext));
                 }
             }
 			if (Program.DebugMode)
@@ -463,9 +501,12 @@ namespace MinorShift.Emuera.GameProc
 				string msg = pendingThrowMessage;
 				functionList.RemoveAt(functionList.Count - 1);
 				pendingThrowMessage = null;
+				inBeforeThrow = false;
 				skipBeforeError = true;
 				throw new CodeEE(msg, pendingThrowLine != null ? pendingThrowLine.Position : null);
 			}
+			if (currentLine == null && called.IsEvent && called.FunctionName == "BEFORE_THROW")
+				inBeforeThrow = false;
 			if (currentLine == null && called.IsEvent && called.FunctionName == "BEFORE_ERROR" && pendingErrorException != null)
 			{
 				Exception ec = pendingErrorException;
@@ -535,6 +576,38 @@ namespace MinorShift.Emuera.GameProc
             {
                 //引数の値を確定させる
                 srcArgs.SetTransporter(exm);
+            }
+			ExecutionContext context = new ExecutionContext(call.TopLabel, CurrentContext);
+			PushContext(context);
+            if (srcArgs != null)
+            {
+				if (call.TopLabel.VariadicArgIndex >= 0)
+				{
+					VariadicArgTerm variadicArg = srcArgs.Arguments[call.TopLabel.VariadicArgIndex] as VariadicArgTerm;
+					if (variadicArg != null)
+					{
+						VariableTerm destArg = call.TopLabel.Arg[call.TopLabel.VariadicArgIndex];
+						int requiredSize = destArg.getEl1forArg + variadicArg.Count;
+						if (destArg.Identifier.Code == VariableCode.ARG && requiredSize > context.ArgIntegers.Length)
+						{
+							long[] newArray = new long[requiredSize];
+							Array.Copy(context.ArgIntegers, newArray, context.ArgIntegers.Length);
+							context.ArgIntegers = newArray;
+						}
+						else if (destArg.Identifier.Code == VariableCode.ARGS && requiredSize > context.ArgStrings.Length)
+						{
+							string[] newArray = new string[requiredSize];
+							Array.Copy(context.ArgStrings, newArray, context.ArgStrings.Length);
+							context.ArgStrings = newArray;
+						}
+						else if (destArg.Identifier.Code == VariableCode.ARGF && requiredSize > context.ArgFloats.Length)
+						{
+							double[] newArray = new double[requiredSize];
+							Array.Copy(context.ArgFloats, newArray, context.ArgFloats.Length);
+							context.ArgFloats = newArray;
+						}
+					}
+				}
                 //プライベート変数更新
                 if (call.TopLabel.hasPrivDynamicVar)
                     call.TopLabel.In();
@@ -544,7 +617,15 @@ namespace MinorShift.Emuera.GameProc
                     if (srcArgs.Arguments[i] != null)
                     {
 						if (call.TopLabel.Arg[i].Identifier.IsReference)
-							((ReferenceToken)(call.TopLabel.Arg[i].Identifier)).SetRef(srcArgs.TransporterRef[i]);
+						{
+							ReferenceToken refToken = (ReferenceToken)call.TopLabel.Arg[i].Identifier;
+							if (!srcArgs.TransporterElementRef[i].IsNull)
+								refToken.SetRef(srcArgs.TransporterElementRef[i]);
+							else if (srcArgs.TransporterRef[i] != null)
+								refToken.SetRef(srcArgs.TransporterRef[i]);
+							else if (refToken.IsOut)
+								refToken.SetNullRef();
+						}
 						else if (srcArgs.Arguments[i] is VariadicArgTerm variadic)
 						{
 							int baseIndex = call.TopLabel.Arg[i].getEl1forArg;
@@ -565,18 +646,27 @@ namespace MinorShift.Emuera.GameProc
 								if (value == null)
 									continue;
 								long[] index = new long[] { baseIndex + j };
-								if (call.TopLabel.Arg[i].Identifier.VariableType == typeof(double))
-									call.TopLabel.Arg[i].Identifier.SetValue(value.GetFloatValue(exm), index);
-								else if (call.TopLabel.Arg[i].Identifier.VariableType == typeof(Int64))
+								bool targetIsFloat = call.TopLabel.Arg[i].GetEraType() == EraType.Float;
+								EraType valueType = value.GetEraType();
+								if (targetIsFloat && valueType == EraType.Integer)
+									call.TopLabel.Arg[i].Identifier.SetValue((double)value.GetIntValue(exm), index);
+								else if (valueType == EraType.Integer)
 									call.TopLabel.Arg[i].Identifier.SetValue(value.GetIntValue(exm), index);
+								else if (valueType == EraType.Float)
+									call.TopLabel.Arg[i].Identifier.SetValue(value.GetFloatValue(exm), index);
 								else
 									call.TopLabel.Arg[i].Identifier.SetValue(value.GetStrValue(exm), index);
 							}
 						}
-                        else if (srcArgs.Arguments[i].GetOperandType() == typeof(Int64))
+                        else if (call.TopLabel.Arg[i].GetEraType() == EraType.Float)
+                        {
+                            if (srcArgs.Arguments[i].GetEraType() == EraType.Integer)
+                                call.TopLabel.Arg[i].SetValue((double)srcArgs.TransporterInt[i], exm);
+                            else
+                                call.TopLabel.Arg[i].SetValue(srcArgs.TransporterFloat[i], exm);
+                        }
+                        else if (call.TopLabel.Arg[i].GetEraType() == EraType.Integer)
                             call.TopLabel.Arg[i].SetValue(srcArgs.TransporterInt[i], exm);
-                        else if (srcArgs.Arguments[i].GetOperandType() == typeof(double))
-                            call.TopLabel.Arg[i].SetValue(srcArgs.TransporterFloat[i], exm);
                         else
                             call.TopLabel.Arg[i].SetValue(srcArgs.TransporterStr[i], exm);
                     }
@@ -625,6 +715,8 @@ namespace MinorShift.Emuera.GameProc
 			//OutはGetValue側で行う
 			//functionList[0].TopLabel.Out();
             currentLine = functionList[functionList.Count - 1].ReturnAddress;
+			ExecutionContext context = PopContext();
+			context?.Dispose();
             functionList.RemoveAt(functionList.Count - 1);
             //nextLine = null;
             MethodReturnValue = ret;

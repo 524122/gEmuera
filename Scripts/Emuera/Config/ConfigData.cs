@@ -30,7 +30,7 @@ static ConfigData() { }
 
 		private ConfigData() { setDefault(); }
 
-		private const int ConfigItemCapacity = 78;
+		private const int ConfigItemCapacity = 79;
 		private const int ReplaceItemCapacity = 50;
 		private const int DebugItemCapacity = 20;
 
@@ -131,6 +131,8 @@ static ConfigData() { }
 			{ "DISALLOW UPDATECHECK", ConfigCode.ForbidUpdateCheck },
 			{ "PLUGIN AVAILABLE WARNING", ConfigCode.PluginAvailableWarn },
 			{ "DISABLE BEFORE_ERROR/THROW EVENTS", ConfigCode.DisableBeforeErrorThrow },
+			{ "USE SCOPED VARIABLE INSTRUCTION", ConfigCode.UseScopedVariableInstruction },
+			{ "USESCOPEDVARIABLEINSTRUCTION", ConfigCode.UseScopedVariableInstruction },
 		};
 
 		private static readonly Dictionary<string, ConfigCode> englishReplaceAliases = new Dictionary<string, ConfigCode>(StringComparer.OrdinalIgnoreCase)
@@ -286,6 +288,7 @@ static ConfigData() { }
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.ForbidUpdateCheck, "UPDATECHECKを許可しない", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.PluginAvailableWarn, "外部プラグインが有効時に警告を表示する", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.DisableBeforeErrorThrow, "BEFORE_ERROR/THROWイベントを無効化する", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseScopedVariableInstruction, "VARI/VARS命令を利用する", true);
 
 			i = 0;
 			debugArray[i++] = new ConfigItem<bool>(ConfigCode.DebugShowWindow, "起動時にデバッグウインドウを表示する", true);

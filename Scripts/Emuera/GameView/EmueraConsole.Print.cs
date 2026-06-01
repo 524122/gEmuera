@@ -455,6 +455,8 @@ namespace MinorShift.Emuera.GameView
 			int contentWidth = 0;
 			foreach (ConsoleButtonString button in buttons)
 			{
+				if (button == null)
+					continue;
 				button.CalcWidth(stringMeasure, 0);
 				contentWidth += Math.Max(0, button.Width);
 			}
@@ -463,7 +465,11 @@ namespace MinorShift.Emuera.GameView
 			if (padPx > 0 && alignmentRight)
 				appendHtmlCellSpace(padPx);
 			foreach (ConsoleButtonString button in buttons)
+			{
+				if (button == null)
+					continue;
 				printBuffer.AppendButton(button);
+			}
 			if (padPx > 0 && !alignmentRight)
 				appendHtmlCellSpace(padPx);
 		}

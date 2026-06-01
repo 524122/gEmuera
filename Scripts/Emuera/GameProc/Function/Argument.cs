@@ -20,7 +20,7 @@ namespace MinorShift.Emuera.GameProc.Function
 	/// </summary>
 	internal sealed class ExpressionsArgument : Argument
 	{
-		public ExpressionsArgument(Type[] types, IOperandTerm[] terms)
+		public ExpressionsArgument(EraType[] types, IOperandTerm[] terms)
 		{
 			ArgumentTypeArray = types;
 			ArgumentArray = terms;
@@ -28,7 +28,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		/// <summary>
 		/// 引数の型(ArgumentArrayよりもLengthが大きい可能性があるので見るのはArgumentArrayにすること)
 		/// </summary>
-		readonly public Type[] ArgumentTypeArray;
+		readonly public EraType[] ArgumentTypeArray;
 		readonly public IOperandTerm[] ArgumentArray;
 	}
 

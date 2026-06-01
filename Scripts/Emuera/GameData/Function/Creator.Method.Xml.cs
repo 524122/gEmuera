@@ -18,8 +18,8 @@ namespace MinorShift.Emuera.GameData.Function
             public XmlDocumentMethod(bool create)
             {
                 this.create = create;
-                ReturnType = typeof(Int64);
-                argumentTypeArray = create ? new Type[] { typeof(string), typeof(string) } : new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = create ? new EraType[] { EraType.String, EraType.String } : new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -43,8 +43,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public XmlReleaseMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -61,8 +61,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public XmlToStrMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -79,7 +79,7 @@ namespace MinorShift.Emuera.GameData.Function
             public XmlGetMethod(bool byName)
             {
                 this.byName = byName;
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -126,7 +126,7 @@ namespace MinorShift.Emuera.GameData.Function
             public XmlSetMethod(bool byName)
             {
                 this.byName = byName;
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -172,7 +172,7 @@ namespace MinorShift.Emuera.GameData.Function
             {
                 this.isAttribute = isAttribute;
                 this.byName = byName;
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -246,7 +246,7 @@ namespace MinorShift.Emuera.GameData.Function
             {
                 this.isAttribute = isAttribute;
                 this.byName = byName;
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -289,7 +289,7 @@ namespace MinorShift.Emuera.GameData.Function
             public XmlReplaceMethod(bool byName)
             {
                 this.byName = byName;
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }

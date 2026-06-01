@@ -19,7 +19,7 @@ namespace MinorShift.Emuera.GameData.Function
 
         public override long GetIntValue(ExpressionMediator exm)
         {
-			if (GetOperandType() == typeof(double))
+			if (GetEraType() == EraType.Float)
 				return (Int64)GetFloatValue(exm);
 			return method.GetIntValue(exm, arguments);
         }

@@ -25,6 +25,7 @@ namespace MinorShift.Emuera.GameProc
 			"FUNCTIONF",
 			"LOCALSIZE",
 			"LOCALSSIZE",
+			"LOCALFSIZE",
 			"DIM",
 			"DIMS",
 			"DIMF",
@@ -36,13 +37,13 @@ namespace MinorShift.Emuera.GameProc
 		private static readonly Regex SnakeFloatLiteralRegex =
 			new Regex(@"(?<![A-Za-z0-9_])([+-]?\d+)\.\d+(?![A-Za-z0-9_])", RegexOptions.Compiled);
 
-		static Type GetFunctionReturnType(string token)
+		static EraType GetFunctionReturnType(string token)
 		{
 			if (token == "FUNCTIONS")
-				return typeof(string);
+				return EraType.String;
 			if (token == "FUNCTIONF")
-				return typeof(double);
-			return typeof(Int64);
+				return EraType.Float;
+			return EraType.Integer;
 		}
 
 		public static bool ParseSharpLine(FunctionLabelLine label, StringStream st, ScriptPosition position, List<string> OnlyLabel)
@@ -183,23 +184,23 @@ namespace MinorShift.Emuera.GameProc
 						}
 						if (label.IsMethod)
 						{
-							Type requestedType = GetFunctionReturnType(token);
+							EraType requestedType = GetFunctionReturnType(token);
 							if (label.MethodType == requestedType)
 							{
 								ParserMediator.Warn("関数" + label.LabelName + "にはすでに#" + token + "が宣言されています(この行は無視されます)", position, 1);
 								return false;
 							}
-							if (label.MethodType == typeof(Int64) && token == "FUNCTIONS")
+							if (label.MethodType == EraType.Integer && token == "FUNCTIONS")
 								ParserMediator.Warn("関数" + label.LabelName + "にはすでに#FUNCTIONが宣言されています", position, 2);
-							else if (label.MethodType == typeof(Int64) && token == "FUNCTIONF")
+							else if (label.MethodType == EraType.Integer && token == "FUNCTIONF")
 								ParserMediator.Warn("関数" + label.LabelName + "にはすでに#FUNCTIONが宣言されています", position, 2);
-							else if (label.MethodType == typeof(string) && token == "FUNCTION")
+							else if (label.MethodType == EraType.String && token == "FUNCTION")
 								ParserMediator.Warn("関数" + label.LabelName + "にはすでに#FUNCTIONSが宣言されています", position, 2);
-							else if (label.MethodType == typeof(string) && token == "FUNCTIONF")
+							else if (label.MethodType == EraType.String && token == "FUNCTIONF")
 								ParserMediator.Warn("関数" + label.LabelName + "にはすでに#FUNCTIONSが宣言されています", position, 2);
-							else if (label.MethodType == typeof(double) && token == "FUNCTION")
+							else if (label.MethodType == EraType.Float && token == "FUNCTION")
 								ParserMediator.Warn("関数" + label.LabelName + "にはすでに#FUNCTIONFが宣言されています", position, 2);
-							else if (label.MethodType == typeof(double) && token == "FUNCTIONS")
+							else if (label.MethodType == EraType.Float && token == "FUNCTIONS")
 								ParserMediator.Warn("関数" + label.LabelName + "にはすでに#FUNCTIONFが宣言されています", position, 2);
 							return false;
 						}
@@ -234,6 +235,7 @@ namespace MinorShift.Emuera.GameProc
 						break;
 					case "LOCALSIZE":
 					case "LOCALSSIZE":
+					case "LOCALFSIZE":
 						{
 							if (wc.EOL)
 							{
@@ -247,7 +249,7 @@ namespace MinorShift.Emuera.GameProc
                                 break;
                             }
 							IOperandTerm arg = ExpressionParser.ReduceIntegerTerm(wc, TermEndWith.EoL);
-                            if ((!(arg.Restructure(null) is SingleTerm sizeTerm)) || (sizeTerm.GetOperandType() != typeof(Int64)))
+                            if ((!(arg.Restructure(null) is SingleTerm sizeTerm)) || (sizeTerm.GetEraType() != EraType.Integer))
                             {
                                 ParserMediator.Warn("#" + token + "の後に有効な定数式が指定されていません", position, 2);
                                 break;
@@ -274,7 +276,7 @@ namespace MinorShift.Emuera.GameProc
 									ParserMediator.Warn("この関数にはすでに#LOCALSIZEが定義されています。（以前の定義は無視されます）", position, 1);
 								label.LocalLength = size;
 							}
-							else
+							else if (token == "LOCALSSIZE")
 							{
 								if (GlobalStatic.IdentifierDictionary.getLocalIsForbid("LOCALS"))
 								{
@@ -284,6 +286,17 @@ namespace MinorShift.Emuera.GameProc
 								if (label.LocalsLength > 0)
 									ParserMediator.Warn("この関数にはすでに#LOCALSSIZEが定義されています。（以前の定義は無視されます）", position, 1);
 								label.LocalsLength = size;
+							}
+							else
+							{
+								if (GlobalStatic.IdentifierDictionary.getLocalIsForbid("LOCALF"))
+								{
+									ParserMediator.Warn("#" + token + "が指定されていますが変数LOCALFは使用禁止されています", position, 2);
+									break;
+								}
+								if (label.LocalFloatLength > 0)
+									ParserMediator.Warn("この関数にはすでに#LOCALFSIZEが定義されています。（以前の定義は無視されます）", position, 1);
+								label.LocalFloatLength = size;
 							}
 						}
 						break;
@@ -504,7 +517,21 @@ namespace MinorShift.Emuera.GameProc
 							goto err;
 						}
 						stream.ShiftNext();
-						return new InstructionLine(position, func, stream);
+						// 命令名と同名の変数への代入を優先する
+						// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応
+						// ※PRINTFORM = ... のような正当な命令呼び出しを誤判定しないよう、
+						//   VARS/VARI のみに限定する
+						LexicalAnalyzer.SkipWhiteSpace(stream);
+						if (!stream.EOS && stream.Current == '='
+						    && (func.Code == FunctionCode.VARS || func.Code == FunctionCode.VARI))
+						{
+							stream.Seek(0, System.IO.SeekOrigin.Begin);
+							// Fall through to assignment parsing below
+						}
+						else
+						{
+							return new InstructionLine(position, func, stream);
+						}
 					}
 				}
 				LexicalAnalyzer.SkipWhiteSpace(stream);

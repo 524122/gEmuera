@@ -610,11 +610,11 @@ namespace uEmuera
 
         public static readonly HashSet<char> fullsize = new HashSet<char>
         {
-            '´',
+            '¢', '£', '¬', '§', '¨', '°', '±', '´', '¶', '·', '×', '÷',
         };
         public static bool CheckFullSize(char c)
         {
-            return fullsize.Contains(c);
+            return fullsize.Contains(c) || IsFullWidthForm(c);
         }
         public static readonly HashSet<char> halfsize = new HashSet<char>
         {
@@ -630,7 +630,30 @@ namespace uEmuera
         };
         public static bool CheckHalfSize(char c)
         {
-            return c < 0x127 || halfsize.Contains(c);
+            // 原核心的 STRLEN 以 Shift-JIS/代码页字节数为基准，绘制宽度则依赖日文字体测量。
+            // Godot/Android 侧改用固定网格后，必须先排除这些在脚本中常作全角符号使用的字符，
+            // 否则 ×、±、°、全角数字等会被当成半角，地图和 GDRAWTEXT 的列推进会错位。
+            if(CheckFullSize(c))
+                return false;
+            return c < 0x127 || IsHalfWidthKatakana(c) || halfsize.Contains(c) || IsBoxDrawing(c);
+        }
+
+        static bool IsFullWidthForm(char c)
+        {
+            return (c >= '\uFF01' && c <= '\uFF60')
+                || (c >= '\uFFE0' && c <= '\uFFE6');
+        }
+
+        static bool IsHalfWidthKatakana(char c)
+        {
+            return c >= '\uFF61' && c <= '\uFF9F';
+        }
+
+        static bool IsBoxDrawing(char c)
+        {
+            // 地图和 DRAWLINE 常用 U+2500..U+257F 箱线字符。原核心在等宽字体下
+            // 这些字符通常占半角列；这里只收箱线区间，保留 ■ 等几何方块的全宽表现。
+            return c >= '\u2500' && c <= '\u257F';
         }
 
         public static bool CheckZeroWidth(char c)

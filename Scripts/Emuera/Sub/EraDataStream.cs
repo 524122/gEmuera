@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
+using MinorShift.Emuera.GameData.Variable;
 
 namespace MinorShift.Emuera.Sub
 {
@@ -124,6 +125,31 @@ namespace MinorShift.Emuera.Sub
 				array[i] = 0;
 		}
 
+		public void ReadInt64Array(SparseArray<Int64> array)
+		{
+			if (reader == null)
+				throw new FileEE("無効なストリームです");
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			array.Clear();
+			int i = -1;
+			string str;
+			while (true)
+			{
+				i++;
+				str = reader.ReadLine();
+				if (str == null)
+					throw new FileEE("予期しないセーブデータの終端です");
+				if (str.Equals(FINISHER, StringComparison.Ordinal))
+					break;
+				if (i >= array.Length)
+					continue;
+				if (!Int64.TryParse(str, out long integer))
+					throw new FileEE("数値として認識できません");
+				array[i] = integer;
+			}
+		}
+
 		public void ReadStringArray(string[] array)
 		{
 			if (reader == null)
@@ -146,6 +172,29 @@ namespace MinorShift.Emuera.Sub
 			}
 			for (; i < array.Length; i++)//保存されている値が無いなら""に初期化
 				array[i] = "";
+		}
+
+		public void ReadStringArray(SparseArray<string> array)
+		{
+			if (reader == null)
+				throw new FileEE("無効なストリームです");
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			array.Clear();
+			int i = -1;
+			string str;
+			while (true)
+			{
+				i++;
+				str = reader.ReadLine();
+				if (str == null)
+					throw new FileEE("予期しないセーブデータの終端です");
+				if (str.Equals(FINISHER, StringComparison.Ordinal))
+					break;
+				if (i >= array.Length)
+					continue;
+				array[i] = str;
+			}
 		}
 		#endregion
 		#region Emuera
@@ -540,6 +589,12 @@ namespace MinorShift.Emuera.Sub
 				writer.WriteLine(array[i].ToString());
 			writer.WriteLine(FINISHER);
 		}
+		public void Write(SparseArray<Int64> array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			Write(array.ToArray());
+		}
 		public void Write(string[] array)
 		{
 			if (writer == null)
@@ -559,6 +614,12 @@ namespace MinorShift.Emuera.Sub
 					writer.WriteLine(array[i]);
 			}
 			writer.WriteLine(FINISHER);
+		}
+		public void Write(SparseArray<string> array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			Write(array.ToArray());
 		}
 		#endregion
 		#region Emuera
@@ -613,6 +674,12 @@ namespace MinorShift.Emuera.Sub
 				writer.WriteLine(array[i].ToString());
 			writer.WriteLine(FINISHER);
 		}
+		public void WriteExtended(string key, SparseArray<Int64> array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			WriteExtended(key, array.ToArray());
+		}
 		public void WriteExtended(string key, string[] array)
 		{
 			if (writer == null)
@@ -635,6 +702,12 @@ namespace MinorShift.Emuera.Sub
 					writer.WriteLine(array[i]);
 			}
 			writer.WriteLine(FINISHER);
+		}
+		public void WriteExtended(string key, SparseArray<string> array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			WriteExtended(key, array.ToArray());
 		}
 
 		public void WriteExtended(string key, Int64[,] array2D)

@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 using System.IO.Compression;
 using System.Xml;
+using MinorShift.Emuera.GameData.Variable;
 
 namespace MinorShift.Emuera.Sub
 {
@@ -102,6 +103,12 @@ namespace MinorShift.Emuera.Sub
 				writer.Write(key);
 				writeData((Int64[])v);
 			}
+			else if (v is SparseArray<Int64>)
+			{
+				writer.Write((byte)EraSaveDataType.IntArray);
+				writer.Write(key);
+				writeData(((SparseArray<Int64>)v).ToArray());
+			}
 			else if (v is Int64[,])
 			{
 				writer.Write((byte)EraSaveDataType.IntArray2D);
@@ -126,6 +133,12 @@ namespace MinorShift.Emuera.Sub
 				writer.Write(key);
 				writeData((string[])v);
 			}
+			else if (v is SparseArray<string>)
+			{
+				writer.Write((byte)EraSaveDataType.StrArray);
+				writer.Write(key);
+				writeData(((SparseArray<string>)v).ToArray());
+			}
 			else if (v is string[,])
 			{
 				writer.Write((byte)EraSaveDataType.StrArray2D);
@@ -149,6 +162,12 @@ namespace MinorShift.Emuera.Sub
 				writer.Write((byte)EraSaveDataType.PcFloatArray);
 				writer.Write(key);
 				writeData((double[])v);
+			}
+			else if (v is SparseArray<double>)
+			{
+				writer.Write((byte)EraSaveDataType.PcFloatArray);
+				writer.Write(key);
+				writeData(((SparseArray<double>)v).ToArray());
 			}
 			else if (v is double[,])
 			{

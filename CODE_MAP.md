@@ -1,6 +1,6 @@
 # CODE_MAP
 
-更新时间：2026-05-28
+更新时间：2026-06-01
 
 用途：这是给 AI 和维护者快速定位代码用的地图。优先读本文件，再按路径进入源码。地图只记录结构、职责、主要接口和关键函数，不复制源码实现。
 
@@ -22,8 +22,8 @@ rg -n "interface|abstract class|class .*:|enum " Scripts -g '*.cs' -g '!addons/*
 
 本次扫描范围：
 - 项目 C#：`Scripts/**/*.cs`
-- C# 文件数：148
-- C# 代码行数约：82537
+- C# 文件数：156
+- C# 代码行数约：85256
 - 忽略：`addons/**`、`*.uid`、资源导入文件
 
 核心运行链：
@@ -119,11 +119,11 @@ project.godot
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
 | `DiagnosticLogRecord.cs` | `DiagnosticLogRecord` | 单条诊断日志记录和值格式化。 | `FormatForGodot`, `FormatForExport` |
-| `DiagnosticLogRouter.cs` | `DiagnosticLogRouter` | 日志总闸门、类别过滤、限流、脱敏、record 构造；关闭时热路径直接返回。 | `Initialize`, `Reload`, `IsLoggingEnabled`, `IsEnabled`, `CheckRateLimit`, `BuildRecord`, `RedactPath` |
+| `DiagnosticLogRouter.cs` | `DiagnosticLogRouter` | 日志总闸门、类别过滤、限流、脱敏、record 构造；关闭时热路径直接返回；限流与单调时间戳使用 CLR `Stopwatch`，允许后台线程在 Godot 退出阶段继续安全写诊断。 | `Initialize`, `Reload`, `IsLoggingEnabled`, `IsEnabled`, `CheckRateLimit`, `BuildRecord`, `GetMonotonicMilliseconds`, `RedactPath` |
 | `DiagnosticLogSinks.cs` | `DiagnosticLogSinks` | 环形日志缓存和 Godot 输出镜像。 | `Initialize`, `Write`, `Snapshot`, `SetMirrorNonErrorToGodot` |
 | `DiagnosticLogExporter.cs` | `DiagnosticLogExporter` | 导出诊断包/日志，记录面包屑，清理保留文件。 | `ExportDiagnosticPackage`, `ExportDiagnosticLog`, `WriteBreadcrumb`, `RunRetentionCleanup` |
-| `InputReplayBuffer.cs` | `InputReplayBuffer` | 输入回放环形缓冲。 | `Capture`, `BuildExportText` |
-| `SaveLogOperationTrail.cs` | `SaveLogOperationTrail` | 存档/日志操作轨迹缓存。 | `Capture`, `BuildExportText` |
+| `InputReplayBuffer.cs` | `InputReplayBuffer` | 输入回放环形缓冲；相对时间戳复用诊断路由的 CLR 单调时钟，避免后台线程依赖 Godot `Time`。 | `Capture`, `BuildExportText` |
+| `SaveLogOperationTrail.cs` | `SaveLogOperationTrail` | 存档/日志操作轨迹缓存；时间戳复用诊断路由的 CLR 单调时钟。 | `Capture`, `BuildExportText` |
 | `RuntimeDiagnosticsConfig.cs` | `RuntimeDiagnosticsConfig` 等配置类 | 运行期诊断配置模型、默认值、精简 logging 开关展开和关闭态清理。 | `CreateDefault`, `ApplyMinimalLoggingConfig`, `DisableAllDiagnostics`, `GetRuntimeLogLevel`, `GetActiveDebugModel` |
 | `RuntimeDiagnosticsConfigLoader.cs` | `RuntimeDiagnosticsConfigLoader`, `LoadResult` | 读取 `config.toml` 和用户覆盖配置，支持精简 `[logging]` 总开关和模块开关。 | `Load` |
 | `RuntimeDiagnosticsConfigWriter.cs` | `RuntimeDiagnosticsConfigWriter` | 写出精简用户诊断配置 TOML。 | `SaveUserConfig`, `BuildToml` |
@@ -156,10 +156,12 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `Config.cs` | `Config` | 运行配置静态访问；字体、路径、窗口尺寸、更新检查、`UPDATECHECK` 禁用、插件警告、`BEFORE_ERROR/THROW` 禁用开关、debug config。 | `SetConfig`, `GetFont`, `ClearFont`, `CreateSavDir`, `CheckUpdate`, `UpdateWindowWidth`, `SetDebugConfig` |
-| `ConfigData.cs` | `ConfigData` | 配置数据实体，保存所有 Emuera 选项，包含插件警告、异常前事件禁用项、v24 `TextDrawingMode.SKIASHARP` 默认兼容和默认开启 lazy loading。 | 构造/读取/保存配置项 |
-| `ConfigCode.cs` | `ConfigCode` 等 enum | 配置项枚举和相关枚举，包含 `PluginAvailableWarn`、`DisableBeforeErrorThrow` 和 `TextDrawingMode.SKIASHARP`。 | 枚举定义 |
+| `Config.cs` | `Config` | 运行配置静态访问；字体、路径、窗口尺寸、更新检查、`UPDATECHECK` 禁用、插件警告、`BEFORE_ERROR/THROW` 禁用、`UseScopedVariableInstruction`、debug config。 | `SetConfig`, `GetFont`, `ClearFont`, `CreateSavDir`, `CheckUpdate`, `UpdateWindowWidth`, `SetDebugConfig` |
+| `ConfigData.cs` | `ConfigData` | 配置数据实体，保存所有 Emuera 选项，包含插件警告、异常前事件禁用项、`VARI/VARS` 开关、v24 `TextDrawingMode.SKIASHARP` 默认兼容和默认开启 lazy loading。 | 构造/读取/保存配置项 |
+| `ConfigCode.cs` | `ConfigCode` 等 enum | 配置项枚举和相关枚举，包含 `PluginAvailableWarn`、`DisableBeforeErrorThrow`、`UseScopedVariableInstruction`、`TextDrawingMode.SKIASHARP` 和 `RenderingBackend` 兼容枚举。 | 枚举定义 |
 | `ConfigItem.cs` | `AConfigItem`, `ConfigItem<T>` | 单个配置项的解析/序列化容器。 | `ToString`, value parse 相关 |
+| `JSONConfig.cs` | `JSONConfig` | v24/snake `setting.json` 兼容配置层；启动时创建/读取 JSON，映射 `UseScopedVariableInstruction` 到旧配置并公开 JSON-only 开关。 | `Load`, `Save` |
+| `JSONConfigData.cs` | `JSONConfigData` | `setting.json` 数据模型，包含 `UseButtonFocusBackgroundColor`、`UseNewRandom`、`UseScopedVariableInstruction`、`RenderingBackend`。 | JSON 属性 |
 | `KeyMacro.cs` | `KeyMacro` | 快捷键宏配置。 | `Load`, `Save`, key macro 访问 |
 
 ### Scripts/Emuera/Content
@@ -177,11 +179,11 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `ConstantData.cs` | `ConstantData`, `CharacterTemplate`, `LazyErdNameData` | CSV 常量、角色模板、ERD 名称数据。 | 常量读取、角色模板访问 |
+| `ConstantData.cs` | `ConstantData`, `CharacterTemplate`, `LazyErdNameData` | CSV 常量、角色模板、ERD 名称数据；维护整数/字符串/小数 1D 变量默认长度，`LOCALF/ARGF` 使用小数长度表；读取 `VarExt*.csv` 中 MAP/XML/DT 的 `SAVE/GLOBAL/STATIC` 保存域声明。 | 常量读取、角色模板访问 |
 | `DefineMacro.cs` | `DefineMacro` | `#DEFINE` 宏数据。 | 构造和字段 |
-| `EraType.cs` | `EraType` | Era 值类型枚举。 | 枚举定义 |
+| `EraType.cs` | `EraType`, `EraTypeHelper` | Era 值类型枚举和 CLR `Type` 过渡转换 helper；迁移期用于把旧 `long/string/double` 签名统一映射到整数/字符串/小数语义。 | `FromClrType`, `ToClrType`, 枚举定义 |
 | `GameBase.cs` | `GameBase` | 游戏基础信息、版本、标题、更新检查 URL/版本名等。 | `Load`, `Save`, 基础字段访问 |
-| `IdentifierDictionary.cs` | `IdentifierDictionary` | 变量/函数/宏名解析字典。 | `GetIdentifier`, `Add`, defined-name 管理 |
+| `IdentifierDictionary.cs` | `IdentifierDictionary` | 变量/函数/宏名解析字典，保留 `REF/REFF` 等关键字并管理局部变量默认尺寸/禁用状态。 | `GetIdentifier`, `Add`, defined-name 管理 |
 | `ParserMediator.cs` | `ParserMediator` | 表达式、变量、函数解析的中介和 warning 管理。 | `Initialize`, `GetWarningList`, parse helper |
 | `StrForm.cs` | `StrForm`, `FormattedStringMethod` 系列 | 格式化字符串表达式。 | `GetString`, format 方法 |
 
@@ -189,10 +191,10 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `IOperandTerm.cs` | `IOperandTerm` | 表达式操作数抽象基类。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetValue`, `Restructure` |
-| `Term.cs` | `NullTerm`, `SingleTerm`, `StrFormTerm`, `VariadicArgTerm` | 常量/字符串格式/可变参数表达式项。 | `GetValue`, `GetIntValue`, `GetStrValue`, `Restructure` |
+| `IOperandTerm.cs` | `IOperandTerm` | 表达式操作数抽象基类；内部以 `EraType` 保存整数/字符串/小数类型，`GetOperandType()` 仅作为旧 CLR `Type` 桥接入口。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetValue`, `GetEraType`, `GetOperandType`, `Restructure` |
+| `Term.cs` | `NullTerm`, `SingleTerm`, `StrFormTerm`, `VariadicArgTerm` | 常量/字符串格式/可变参数表达式项；常量和可变参数类型判断走 `EraType`。 | `GetValue`, `GetIntValue`, `GetStrValue`, `Restructure` |
 | `ExpressionParser.cs` | `ExpressionParser` | ERB 表达式解析器。 | `ReduceExpression`, `ReduceArguments`, `ReadExpression` 类方法 |
-| `ExpressionMediator.cs` | `ExpressionMediator` | 表达式求值上下文，连接变量和函数。 | 变量/函数访问、运行时上下文 |
+| `ExpressionMediator.cs` | `ExpressionMediator` | 表达式求值上下文，连接变量和函数；暴露 `CurrentContext` 供局部变量 token 读取当前调用栈的运行期数组。 | 变量/函数访问、运行时上下文 |
 | `OperatorCode.cs` | `OperatorCode`, `OperatorManager` | 运算符枚举和查找。 | `GetOperator`, operator metadata |
 | `OperatorMethod.cs` | `OperatorMethod`, 多个具体运算符 | 运算符求值实现。 | `OperatorMethodManager.Initialize`, `GetIntValue`, `GetStrValue`, `GetReturnValue` |
 | `SafeArithmetic.cs` | `SafeArithmetic` | 整数/浮点安全数学工具。 | `Add`, `Sub`, `Mul`, `Div`, `Pow` 等 |
@@ -202,48 +204,54 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `FunctionMethod.cs` | `FunctionMethod` | 内置函数抽象基类。 | `CheckArgumentType`, `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetReturnValue`, `UniqueRestructure` |
+| `FunctionMethod.cs` | `FunctionMethod` | 内置函数抽象基类；返回类型和默认参数签名都使用 `EraType`，默认参数校验按脚本语义类型比较表达式。 | `CheckArgumentType`, `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetReturnValue`, `UniqueRestructure` |
 | `FunctionMethodTerm.cs` | `FunctionMethodTerm` | 把 `FunctionMethod` 包装成表达式项。 | `GetIntValue`, `GetStrValue`, `Restructure` |
 | `Creator.cs` | partial `FunctionMethodCreator` | 创建内置函数表。 | `GetMethodList` |
-| `Creator.Method.cs` | partial `FunctionMethodCreator` | 大量基础内置函数：角色、CSV、字符串、数学、图像、音频、平台识别、变量访问等。 | 嵌套 `*Method : FunctionMethod`；统一 override `GetIntValue/GetStrValue/GetReturnValue` |
+| `Creator.Method.cs` | partial `FunctionMethodCreator` | 大量基础内置函数：角色、CSV、字符串、数学、图像、音频、平台识别、变量访问等；`GETNUM/GETNUMB/GETPALAMLV/GETEXPLV` 对齐 CSV 编号与等级查找语义；`EVAL/EVALF/EVALS` 分别执行整数/小数/字符串动态表达式求值；`BITSET/BITGET/BITTOGGLE/BITINDEXOFFIRST` 使用整数 1D 数组作为位图并兼容 `SparseArray<long>`；`ARRAYMSORT/ARRAYMSORTEX` 支持 int/string/float 排序、1D 稀疏数组和 1D/2D/3D 目标数组首维重排；`SUMARRAY/SUMCARRAY`、`MAXARRAY/MINARRAY`、`MATCH/CMATCH`、`GROUPMATCH/NOSAMES/ALLSAMES`、`INRANGEARRAY/INRANGECARRAY` 兼容整数/小数数组统计与检索。 | 嵌套 `*Method : FunctionMethod`；统一 override `GetIntValue/GetStrValue/GetReturnValue` |
 | `Creator.Method.DT.cs` | partial `FunctionMethodCreator` | DataTable 扩展函数。 | `DtCreate`, `DtRowAdd`, `DtCellGet`, `DtSelect`, XML 互转 |
 | `Creator.Method.Map.cs` | partial `FunctionMethodCreator` | Map 扩展函数。 | `MapCreate`, `MapSet`, `MapGet`, `MapKeys`, `MapToXml` |
 | `Creator.Method.Sql.cs` | partial `FunctionMethodCreator` | SQL 扩展函数。 | `SqlConnect`, `SqlExecuteReader`, `SqlReaderGet*`, import/export |
 | `Creator.Method.Xml.cs` | partial `FunctionMethodCreator` | XML 扩展函数。 | `XmlDocument`, `XmlGet`, `XmlSet`, `XmlAddNode`, `XmlRemoveNode` |
-| `RuntimeDataStore.cs` | `RuntimeDataStore` | 运行期 DataTable/Map/XML 静态存储。 | `Clear`, `DataTables`, `Maps`, `XmlDocuments` |
-| `UserDefinedMethodTerm.cs` | `UserDefinedMethodTerm`, `UserDefinedRefMethodTerm` | 用户定义函数调用表达式项。 | `Create`, `Restructure`, `GetRefName`, `GetValue` |
-| `UserDefinedRefMethod.cs` | `UserDefinedRefMethod` | `#REF/#REFS/#REFF` 引用函数匹配和绑定。 | `Create`, `MatchType`, `SetReference` |
+| `RuntimeDataStore.cs` | `RuntimeDataStore` | 运行期 DataTable/Map/XML 静态存储；按 `VarExt*.csv` 的 `SAVE/GLOBAL/STATIC` 声明域清理、筛选和保存 Map/XML/DataTable，避免读档误删非保存域运行期缓存。 | `Clear`, `ClearSaveData`, `ClearGlobalData`, `ClearStaticData`, `DataTables`, `Maps`, `XmlDocuments` |
+| `UserDefinedMethodTerm.cs` | `UserDefinedMethodTerm`, `UserDefinedRefMethodTerm` | 用户定义函数调用表达式项；以 `EraType` 接收函数返回类型，并在 `IOperandTerm` 边界桥接回 CLR operand type。 | `Create`, `Restructure`, `GetRefName`, `GetValue` |
+| `UserDefinedRefMethod.cs` | `UserDefinedRefMethod` | `#REF/#REFS/#REFF` 引用函数匹配和绑定；`RetType` 使用 `EraType` 与 `FunctionLabelLine.MethodType` 对齐。 | `Create`, `MatchType`, `SetReference` |
 
 ### Scripts/Emuera/GameData/Variable
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `VariableCode.cs` | `VariableCode` | Emuera 变量枚举。 | 枚举定义 |
-| `VariableIdentifier.cs` | `VariableIdentifier` | 变量名到 `VariableCode`/scope 的解析。 | `GetVarNameDic`, `GetVariableId`, `GetExtSaveList` |
-| `VariableData.cs` | `VariableData : IDisposable` | 全局变量数据容器和变量 token 构造。 | 初始化变量、读取/保存、`Dispose` |
-| `VariableEvaluator.cs` | `VariableEvaluator : IDisposable` | 变量求值、读写、角色变量访问、局部变量栈。 | `GetValue`, `SetValue`, local/reference 管理 |
-| `VariableToken.cs` | `VariableToken` 及大量派生 token | 变量实际存取实现；静态/私有/局部/引用/角色/常量/伪变量。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `SetValue`, `SetValueAll`, `PlusValue`, `In`, `Out` |
-| `VariableTerm.cs` | `VariableTerm`, `FixedVariableTerm`, `VariableNoArgTerm` | 表达式中的变量访问项。 | `GetIntValue`, `SetValue`, `Restructure` |
+| `VariableCode.cs` | `VariableCode` | Emuera 变量枚举；包含 `COUNT` 禁用标志、`LOCALF/ARGF` 小数局部编号、`GAMEBASE_URL/GAMEBASE_VERSIONNAME` 和 `REFF*` 小数引用变量。 | 枚举定义 |
+| `VariableIdentifier.cs` | `VariableIdentifier` | 变量名到 `VariableCode`/scope 的解析；类型、维度和属性判断优先来自 `VariableDescriptor` 元数据。 | `GetVarNameDic`, `GetVariableId`, `GetExtSaveList`, `Descriptor` |
+| `VariableDescriptor.cs` | `VariableDescriptor`, `VariableDescriptorTable`, `VariableKind`, `VariableDimension`, `VariableAttribute` | Snake 兼容的变量描述符元数据层；集中解释 `VariableCode` 位标志为类型、维度和属性，目前不改变存储布局或存档格式。 | `FromCode`, `GetDescriptorByCode`, `TryGetDescriptor` |
+| `SparseArray.cs` | `SparseArray<T>` | 1D 变量稀疏存储容器；未写入元素按默认值读取，用于降低 Android 上巨型数组的初始内存占用，2D/3D 仍保持 CLR 多维数组契约。 | `Length`, indexer, `Entries`, `FromArray`, `ToArray`, `Shift`, `RemoveRange`, `Sort` |
+| `VariableData.cs` | `VariableData : IDisposable` | 全局变量数据容器和变量 token 构造；暴露 GAMEBASE URL/版本名常量，按小数长度表初始化 `LOCALF/ARGF`，全局 1D 整数/字符串数组使用 `SparseArray<T>` 存储。 | 初始化变量、读取/保存、`Dispose` |
+| `VariableEvaluator.cs` | `VariableEvaluator : IDisposable` | 变量求值、读写、角色变量访问、局部变量栈；`RESULT_ARRAY`、`RESULTS_ARRAY`、`RESULTF`、`SELECTCOM_ARRAY`、`ITEMSALES`、`RANDDATA` 等结果/工作变量兼容小数和 1D 稀疏存储，`VARSET/CVARSET` 批量赋值按 `EraType` 分派整数/字符串/小数路径，数组求和、匹配计数、最大/最小、区间统计 helper 覆盖小数数组；读档/全局读档按 VarExt 声明域处理 RuntimeDataStore，保留非保存域运行期缓存。 | `GetValue`, `SetValue`, `GetNextRand`, `SetValueAll`, `LoadFrom`, `LoadGlobal`, local/reference 管理 |
+| `ElementRefInfo.cs` | `ElementRefInfo` | Snake 兼容的元素级 REF 信息；捕获变量 token、索引和非角色数组实体，供标量 REF 参数读写数组单个元素。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `SetValue`, `PlusValue` |
+| `NullRefTerm.cs` | `NullRefTerm` | `OUT REF` 参数省略时的空引用占位；读零/空串、写入无操作。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `SetValue`, `GetArray` |
+| `VariableToken.cs` | `VariableToken` 及大量派生 token | 变量实际存取实现；静态/私有/局部/引用/角色/常量/伪变量，基础类型/维度/保存属性由 `VariableDescriptor` 驱动并公开 `EraType`；`REFF/REFF2D/REFF3D` 使用小数引用类型；`ReferenceToken` 保存数组引用、标量引用、元素引用和空引用状态，1D REF 路径同时支持 CLR 数组和 `SparseArray<T>`。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetEraType`, `SetValue`, `SetValueAll`, `PlusValue`, `In`, `Out`, `SetRef`, `SetNullRef`, `MatchType` |
+| `VariableTerm.cs` | `VariableTerm`, `FixedVariableTerm`, `VariableNoArgTerm` | 表达式中的变量访问项；暴露变量 `EraType` 和参数个数供函数参数转换、可变参数和元素级 REF 捕获索引。 | `GetIntValue`, `SetValue`, `GetEraType`, `Restructure`, `ArgumentCount` |
 | `VariableStrArgTerm.cs` | `VariableStrArgTerm` | 字符串索引变量表达式项。 | `GetStrValue`, `Restructure` |
-| `VariableLocal.cs` | `VariableLocal` | 局部变量集合。 | local 变量创建、进入/退出函数 |
+| `VariableLocal.cs` | `VariableLocal` | 局部变量 token 注册表；仍负责按函数标签尺寸创建 `LOCAL/LOCALS/LOCALF/ARG/ARGS/ARGF` token，但实际运行期数组已改由 `ExecutionContext` 持有。 | local token 创建、尺寸调整、默认值重置 |
 | `VariableParser.cs` | `VariableParser` | 变量表达式解析。 | `Parse`, variable term 构造 |
-| `CharacterData.cs` | `CharacterData : IDisposable` | 角色数据数组和角色变量管理。 | 角色增删、保存/读取、`Dispose` |
+| `CharacterData.cs` | `CharacterData : IDisposable` | 角色数据数组和角色变量管理；角色 1D 整数/字符串变量及可适配的用户定义角色 1D 变量使用 `SparseArray<T>`，排序键读取兼容稀疏数组。 | 角色增删、保存/读取、`Dispose` |
 
 ### Scripts/Emuera/GameProc
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `Process.cs` | partial `Process` | 脚本处理器主类；初始化、输入结果、开始执行、异常处理。 | `Initialize`, `DoScript`, `BeginTitle`, `InputInteger`, `InputString`, `ReloadErb`, `GetRunningPosition` |
-| `Process.ScriptProc.cs` | partial `Process` | 内层脚本执行循环和 debug 执行。 | `runScriptProc`, `DoDebugNormalFunction`, `saveCurrentState`, `loadPrevState` |
-| `Process.State.cs` | `ProcessState`, `SystemStateCode`, `BeginType` | CALL/JUMP/RETURN、BEGIN、函数栈、返回值、状态克隆。 | `JumpTo`, `SetBegin`, `Begin`, `Return`, `IntoFunction`, `ReturnF`, `Clone` |
+| `Process.cs` | partial `Process` | 脚本处理器主类；初始化、输入结果、开始执行、异常处理；脚本错误终止时清理函数栈与 `ExecutionContext`，表达式函数异常路径防止局部上下文残留，并在 `BEFORE_THROW` 内部异常时跳过二次 `BEFORE_ERROR`。 | `Initialize`, `InitializeAsync`, `DoScript`, `BeginTitle`, `InputInteger`, `InputString`, `ReloadErb`, `ReloadErbAsync`, `ReloadPartialErb`, `ReloadPartialErbAsync`, `GetRunningPosition` |
+| `Process.ScriptProc.cs` | partial `Process` | 内层脚本执行循环和 debug 执行；`THROW` 会记录 pending throw、进入 `BEFORE_THROW`，并在 `BEFORE_THROW/BEFORE_ERROR` 内部只打印消息避免递归错误事件。 | `runScriptProc`, `DoDebugNormalFunction`, `saveCurrentState`, `loadPrevState` |
+| `ExecutionContext.cs` | `ExecutionContext` | 函数执行上下文；持有当前调用帧的 `LOCAL/LOCALS/LOCALF/ARG/ARGS/ARGF` 运行期数组和父子关系，用于替代旧的共享局部数组存储。 | 构造函数、`Dispose`, `Parent`, `Local*`, `Arg*` |
+| `Process.State.cs` | `ProcessState`, `SystemStateCode`, `BeginType` | CALL/JUMP/RETURN、BEGIN、函数栈、返回值、状态克隆；维护 `ExecutionContext` 栈，进入函数时绑定数组 REF、元素级 REF、OUT 空引用并创建局部执行上下文；`BEFORE_ERROR/BEFORE_THROW` 事件返回时绕过 `#FUNCTION` 快速 `ReturnF` 路径以保留错误重抛语义。 | `JumpTo`, `SetBegin`, `Begin`, `Return`, `IntoFunction`, `ReturnF`, `CurrentContext`, `Clone` |
 | `Process.SystemProc.cs` | partial `Process` | 系统流程处理。 | 系统状态执行 helper |
-| `Process.CalledFunction.cs` | `CalledFunction`, `UserDefinedFunctionArgument` | 调用栈条目和用户函数实参。 | 构造、参数访问 |
-| `Process.LazyLoading.cs` | partial `Process`, `LazyStatus` | ERB lazy loading 表、索引、按需加载、缓存。 | `TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`, `PreloadEventLoadLazyErbs` |
-| `ErbLoader.cs` | `ErbLoader`, `PPState` | 读取/预处理 ERB/ERH 文件，生成 logical lines/labels。 | `LoadErbFiles`, `loadErbs`, `warningDic` |
+| `Process.CalledFunction.cs` | `CalledFunction`, `UserDefinedFunctionArgument` | 调用栈条目和用户函数实参；转换并暂存普通参数、数组 REF、元素级 REF 和 OUT 空引用；用户函数参数按 `EraType` 处理整数到小数的兼容扩展和可变参数类型，`VariadicArgTerm` 不进入普通 transporter，统一由 `ProcessState.IntoFunction` 展开。 | `ConvertArg`, `SetTransporter`, 参数暂存数组 |
+| `Process.LazyLoading.cs` | partial `Process`, `LazyStatus` | ERB lazy loading 表、索引、按需加载、缓存；索引构建和局部更新会排除事件函数与 `#FUNCTION/#FUNCTIONS/#FUNCTIONF` 方法文件，避免预解析依赖的方法被延迟加载。 | `TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`, `SavePartialLazyLoadingList`, `PreloadEventLoadLazyErbs` |
+| `ErbLoader.cs` | `ErbLoader`, `PPState` | 读取/预处理 ERB/ERH 文件，生成 logical lines/labels；提供 `LoadErbFilesAsync` / `LoadErbsAsync` 作为主入口，旧同步方法仅做兼容包装。 | `LoadErbFiles`, `LoadErbFilesAsync`, `loadErbs`, `LoadErbsAsync`, `warningDic` |
 | `HeaderFileLoader.cs` | `HeaderFileLoader` | 读取头文件/定义。 | header 加载入口 |
-| `LogicalLine.cs` | `LogicalLine`, `InstructionLine`, `FunctionLabelLine`, `GotoLabelLine` | ERB 逻辑行模型。 | `FunctionLabelLine`, `InstructionLine`, label/goto 访问 |
-| `LogicalLineParser.cs` | `LogicalLineParser` | 将文本行解析为 `LogicalLine`。 | `ParseSharpLine`, `ParseLine`, `ParseLabelLine` |
-| `LabelDictionary.cs` | `LabelDictionary` | 函数 label、事件 label、`$` label 索引。 | `AddLabel`, `SortLabels`, `GetEventLabels`, `GetNonEventLabel`, `GetLabelDollar` |
+| `SelectCaseJumpTable.cs` | `SelectCaseJumpTable` | Snake 兼容的 `SELECTCASE` 常量分支跳转表；对整数/字符串/小数常量 `CASE` 建表，范围、比较和运行期表达式回退顺序扫描。 | `TryBuild`, `Lookup` |
+| `LogicalLine.cs` | `LogicalLine`, `InstructionLine`, `FunctionLabelLine`, `GotoLabelLine` | ERB 逻辑行模型；函数标签记录 `LOCAL/LOCALS/LOCALF/ARG/ARGS/ARGF` 尺寸，`FunctionLabelLine.MethodType` 以 `EraType` 保存 `#FUNCTION/#FUNCTIONS/#FUNCTIONF` 返回类型。 | `FunctionLabelLine`, `InstructionLine`, label/goto 访问 |
+| `LogicalLineParser.cs` | `LogicalLineParser` | 将文本行解析为 `LogicalLine`；支持 `#FUNCTIONF`、`#LOCALFSIZE`、`#REFF` 和 Snake 小数私有变量兼容解析。 | `ParseSharpLine`, `ParseLine`, `ParseLabelLine` |
+| `LabelDictionary.cs` | `LabelDictionary` | 函数 label、事件 label、`$` label 索引；事件 label 合并 `LOCAL/LOCALS/LOCALF` 最大尺寸并同步 ARGF 尺寸。 | `AddLabel`, `SortLabels`, `GetEventLabels`, `GetNonEventLabel`, `GetLabelDollar` |
 | `InputRequest.cs` | `InputRequest`, `InputType` | 输入请求类型和值约束，`NoFocus` 标记用于 NF 定时输入。 | 构造和字段 |
 | `UserDefinedFunction.cs` | `UserDefinedFunctionData` | 用户定义函数元数据。 | 构造和参数类型 |
 | `UserDefinedVariable.cs` | `UserDefinedVariableData`, `DimLineWC` | 用户定义变量元数据。 | 构造、维度/类型信息 |
@@ -253,29 +261,30 @@ project.godot
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
 | `Instruction.cs` | `AbstractInstruction` | ERB 指令抽象基类。 | `SetJumpTo`, `DoInstruction`, `CreateArgument` |
-| `Instraction.Child.cs` | partial `FunctionIdentifier`, 多个 `*Instruction` | 具体 ERB 指令实现；文件名保留原拼写 `Instraction`；包含 Snake/v24 兼容指令、`TINPUTNF/TINPUTSNF/TONEINPUTNF/TONEINPUTSNF` 和渲染控制 API。 | `PRINT_Instruction`, `TINPUT_Instruction`, `CALL_Instruction`, `GOTO_Instruction`, `RETURNF_Instruction`, `SNAKE_UI_SETTING_Instruction` 等 |
-| `FunctionIdentifier.cs` | `FunctionIdentifier` | 指令名/FunctionCode 映射和指令分类，注册 NF 定时输入变体。 | `GetInstructionNameDic`, `IsPrint`, `IsInput`, `IsJump`, `IsMethod`, `IsFlowContorol` |
+| `Instraction.Child.cs` | partial `FunctionIdentifier`, 多个 `*Instruction` | 具体 ERB 指令实现；文件名保留原拼写 `Instraction`；包含 Snake/v24 兼容指令、`TINPUTNF/TINPUTSNF/TONEINPUTNF/TONEINPUTSNF` 和渲染控制 API；`TRYCALLF/TRYCALLFORMF` 预解析失败静默返回，普通 `CALLF/CALLFORMF` 继续报告解析警告。 | `PRINT_Instruction`, `TINPUT_Instruction`, `CALL_Instruction`, `CALLF_Instruction`, `GOTO_Instruction`, `RETURNF_Instruction`, `SNAKE_UI_SETTING_Instruction` 等 |
+| `FunctionIdentifier.cs` | `FunctionIdentifier` | 指令名/FunctionCode 映射和指令分类，注册 NF 定时输入变体；`VARI/VARS` 由 `Config.UseScopedVariableInstruction` 控制。 | `GetInstructionNameDic`, `IsPrint`, `IsInput`, `IsJump`, `IsMethod`, `IsFlowContorol` |
 | `BuiltInFunctionCode.cs` | `FunctionCode` | 内置指令/函数 code 枚举，包含 NF 定时输入 code。 | 枚举定义 |
 | `FunctionArgType.cs` | `FunctionArgType` | 指令参数类型枚举。 | 枚举定义 |
-| `Argument.cs` | `Argument` 及大量 `Sp*Argument` | 已解析指令参数的数据对象。 | 构造和字段 |
-| `ArgumentBuilder.cs` | `ArgumentBuilder`, 多个 `*ArgumentBuilder` | 针对不同指令构造 `Argument`。 | `Build`, `CheckArgument`, 各指令 builder |
+| `Argument.cs` | `Argument` 及大量 `Sp*Argument` | 已解析指令参数的数据对象；通用 `ExpressionsArgument.ArgumentTypeArray` 使用 `EraType[]` 保存指令参数类型契约。 | 构造和字段 |
+| `ArgumentBuilder.cs` | `ArgumentBuilder`, 多个 `*ArgumentBuilder` | 针对不同指令构造 `Argument`；通用参数表与 `checkArgumentType` 使用 `EraType` 校验，`EraType.Void` 表示任意/省略兼容位。 | `Build`, `CheckArgument`, 各指令 builder |
 | `ArgumentParser.cs` | partial `ArgumentParser` | 根据 `FunctionIdentifier` 解析参数。 | `ParseArgument` |
 
 ### Scripts/Emuera/GameView
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `EmueraConsole.cs` | partial `EmueraConsole`, `DisplayLineList`, `ClientBackGroundImage` | 控制台状态、输入等待、NF 等待态、CBG/图片层、鼠标/键盘、调试、重载；保存 v24 渲染控制 API 的脚本可见状态。 | `Initialize`, `WaitInput`, `IsWaitInputState`, `PressEnterKey`, `RefreshStrings`, `CBG_SetImage`, `SetImageLayer`, `SetSnakeTextDrawingMode`, `ReloadErb`, `Dispose` |
+| `EmueraConsole.cs` | partial `EmueraConsole`, `DisplayLineList`, `ClientBackGroundImage` | 控制台状态、输入等待、NF 等待态、CBG/图片层、鼠标/键盘、调试、重载；保存 v24 渲染控制 API 和 `HOTKEY_STATE` 的脚本可见状态。 | `Initialize`, `WaitInput`, `IsWaitInputState`, `PressEnterKey`, `RefreshStrings`, `CBG_SetImage`, `SetImageLayer`, `SetSnakeTextDrawingMode`, `HotkeyStateInitialize`, `TryEvaluateHotkey`, `ReloadErb`, `Dispose` |
 | `EmueraConsole.Print.cs` | partial `EmueraConsole` | 打印文本、HTML、按钮、图片、形状、日志输出；维护 `IsLineEnd`、`LINECOUNT`、`CLEARLINE` 的逻辑行语义和 `PrintC/PrintButtonC` 像素制表。 | `Print`, `PrintC`, `PrintButtonC`, `PrintHtml`, `PrintImg`, `PrintShape`, `PrintButton`, `PrintFlush`, `deleteLine`, `OutputLog`, `PopDisplayingLines` |
 | `ConsoleDisplayLine.cs` | `ConsoleDisplayLine` | 一行显示内容，包含多个按钮/片段。 | `DrawTo`, `GDIDrawTo`, `ShiftPositionX`, `ChangeStr` |
 | `ConsoleButtonString.cs` | `ConsoleButtonString` | 一个可点击/可输入的显示段，包含多个 display part。 | `DivideAt`, `CalcWidth`, `CalcPointX`, `DrawTo` |
 | `AConsoleDisplayPart.cs` | `AConsoleDisplayPart`, `AConsoleColoredPart` | 显示片段抽象基类。 | `DrawTo`, `GDIDrawTo`, `ToString` |
-| `ConsoleStyledString.cs` | `ConsoleStyledString`, `DisplayMode` | 有样式文本片段。 | `DrawTo`, 样式字段 |
+| `ConsoleStyledString.cs` | `ConsoleStyledString`, `DisplayMode` | 有样式文本片段；按钮选中态可按 `setting.json` 的 `UseButtonFocusBackgroundColor` 绘制背景。 | `DrawTo`, 样式字段 |
 | `ConsoleImagePart.cs` | `ConsoleImagePart` | 行内图片片段。 | `DrawTo`, 图片尺寸/偏移 |
 | `ConsoleShapePart.cs` | `ConsoleShapePart`, `ConsoleRectangleShapePart`, `ConsoleSpacePart`, `ConsoleErrorShapePart` | 行内形状/空白/错误占位片段。 | `DrawTo`, shape 参数 |
 | `ConsoleDivPart.cs` | `ConsoleDivPart`, `StyledBoxModel` | HTML div/盒模型片段。 | box 计算与绘制 |
 | `ButtonStringCreator.cs` | `ButtonStringCreator`, `ButtonPrimitive` | 将文本拆成按钮/显示片段。 | `CreateButtonString` 相关 |
 | `HtmlManager.cs` | `HtmlManager` 及 HTML state 类型 | HTML 文本和 display line 互转，支持 style/button/img/shape/div。 | `Html2DisplayLine`, `Html2ButtonList`, `DisplayLine2Html`, `HtmlTagSplit`, `Escape`, `Unescape` |
+| `HotkeyState.cs` | `HotkeyState` | v24/snake `HOTKEY.ERB` 简易解释器和状态数组；支持 `HOTKEY_STATE_INIT`、`HOTKEY_STATE`、Ctrl+D 开关和硬件键盘热键转数值输入。 | `Initialize`, `Set`, `Toggle`, `TryEvaluate` |
 | `PrintStringBuffer.cs` | `PrintStringBuffer` | 打印缓冲；把连续输出合并成 display line，并提供当前缓冲行像素宽度。 | `Append`, `Flush`, `CurrentLineWidth`, line 构造 |
 | `StringMeasure.cs` | `StringMeasure : IDisposable` | 文本宽度测量。 | `GetDisplayLength`, `Dispose` |
 | `StringStyle.cs` | `StringStyle` | 文本颜色、字体样式、font name。 | 构造、比较、转换 |
@@ -299,9 +308,9 @@ project.godot
 |---|---|---|---|
 | `EmueraException.cs` | `EmueraException`, `ExeEE`, `CodeEE`, `FileEE`, `ScriptPosition` | 核心异常层次和脚本位置。 | `ScriptPosition`, exception 构造 |
 | `EraStreamReader.cs` | `EraStreamReader` | Era 文本读取封装。 | `ReadLine`, `Dispose` |
-| `EraDataStream.cs` | `EraDataReader`, `EraDataWriter`, `EraDataState` | 文本存档/数据流读写。 | `Read`, `Write`, `Dispose` |
-| `EraBinaryDataReader.cs` | `EraBinaryDataReader`, `EraSaveFileType`, `EraSaveDataType` | 二进制存档读取，含 1808 兼容 reader。 | `Read`, `ReadInt64`, `ReadString`, `Dispose` |
-| `EraBinaryDataWriter.cs` | `EraBinaryDataWriter` | 二进制存档写入。 | `Write`, `WriteInt64`, `WriteString`, `Dispose` |
+| `EraDataStream.cs` | `EraDataReader`, `EraDataWriter`, `EraDataState` | 文本存档/数据流读写；提供 `SparseArray<long>` / `SparseArray<string>` 读写重载以保持 1D 稀疏变量存档兼容。 | `Read`, `Write`, `Dispose` |
+| `EraBinaryDataReader.cs` | `EraBinaryDataReader`, `EraSaveFileType`, `EraSaveDataType` | 二进制存档读取，含 1808 兼容 reader；支持把 1D 整数/字符串数据读入 `SparseArray<T>`。 | `Read`, `ReadInt64`, `ReadString`, `Dispose` |
+| `EraBinaryDataWriter.cs` | `EraBinaryDataWriter` | 二进制存档写入；支持从 `SparseArray<T>` 输出 1D 整数/字符串数据。 | `Write`, `WriteInt64`, `WriteString`, `Dispose` |
 | `LexicalAnalyzer.cs` | `LexicalAnalyzer` | ERB 词法分析，生成 `WordCollection`。 | `Analyse`, string/form string 解析 |
 | `Word.cs` | `Word` 及各 token word | 词法 token 模型。 | `ToString`, token 字段 |
 | `WordCollection.cs` | `WordCollection` | token 列表和当前位置操作。 | `Current`, `ShiftNext`, `GetWord`, `Clone` |
@@ -325,11 +334,13 @@ project.godot
 | 契约 | 位置 | 说明 | 主要成员 |
 |---|---|---|---|
 | `IPluginMethod` | `Scripts/Emuera/Runtime/Utils/PluginSystem/IPluginMethod.cs` | 真正的 C# interface；插件方法统一入口。 | `Name`, `Description`, `Execute(PluginMethodParameter[] args)` |
-| `IOperandTerm` | `GameData/Expression/IOperandTerm.cs` | 名字像接口，实际是 abstract class；所有表达式项的求值契约。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetValue`, `Restructure` |
-| `FunctionMethod` | `GameData/Function/FunctionMethod.cs` | 内置函数契约；所有 `*Method` 嵌套类继承它。 | `CheckArgumentType`, `GetIntValue`, `GetStrValue`, `GetReturnValue`, `UniqueRestructure` |
+| `IOperandTerm` | `GameData/Expression/IOperandTerm.cs` | 名字像接口，实际是 abstract class；所有表达式项的求值契约，类型主存储为 `EraType`，通过 `GetOperandType()` 兼容旧 CLR `Type` 调用。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetValue`, `GetEraType`, `GetOperandType`, `Restructure` |
+| `FunctionMethod` | `GameData/Function/FunctionMethod.cs` | 内置函数契约；所有 `*Method` 嵌套类继承它，默认参数检查按 `EraType` 比较表达式类型。 | `CheckArgumentType`, `GetIntValue`, `GetStrValue`, `GetReturnValue`, `UniqueRestructure` |
 | `AbstractInstruction` | `GameProc/Function/Instruction.cs` | ERB 指令执行契约。 | `SetJumpTo`, `DoInstruction`, `CreateArgument`, `ArgBuilder` |
-| `ArgumentBuilder` + `Argument` | `GameProc/Function/ArgumentBuilder.cs`, `Argument.cs` | 指令参数解析和参数对象契约。 | builder 构造 `Argument`；`Argument` 派生类保存解析结果 |
-| `VariableToken` | `GameData/Variable/VariableToken.cs` | 变量读写契约，覆盖标量/数组/角色/局部/引用/常量。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `SetValue`, `SetValueAll`, `PlusValue` |
+| `ArgumentBuilder` + `Argument` | `GameProc/Function/ArgumentBuilder.cs`, `Argument.cs` | 指令参数解析和参数对象契约；通用指令参数签名使用 `EraType[]`，不再依赖 CLR `Type` 做脚本语义比较。 | builder 构造 `Argument`；`Argument` 派生类保存解析结果 |
+| `SparseArray<T>` | `GameData/Variable/SparseArray.cs` | 1D 稀疏变量存储契约；对外提供逻辑长度、默认值读取、已写入项枚举和少量数组操作，调用方不能再假设所有 1D 数组都是 CLR 数组。 | `Length`, indexer, `Entries`, `Shift`, `RemoveRange`, `Sort` |
+| `VariableDescriptor` | `GameData/Variable/VariableDescriptor.cs` | 变量元数据契约；把 `VariableCode` 的类型、维度、保存和作用域位标志集中解释，供 identifier/token 复用。 | `VariableDescriptorTable.GetDescriptorByCode`, `VariableDescriptor.FromCode` |
+| `VariableToken` | `GameData/Variable/VariableToken.cs` | 变量读写契约，覆盖标量/数组/角色/局部/引用/常量；基础元数据来自 `VariableDescriptor` 并公开 `EraType`，1D 数组访问需兼容 CLR 数组与 `SparseArray<T>`。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetEraType`, `SetValue`, `SetValueAll`, `PlusValue` |
 | `VariableTerm` | `GameData/Variable/VariableTerm.cs` | 表达式中的变量访问契约。 | `Get*Value`, `SetValue`, `Restructure` |
 | `AContentFile` / `AbstractImage` / `ASprite` | `Content/*.cs` | 图片资源和精灵绘制契约。 | `Dispose`, `SpriteGetColor`, `GraphicsDraw` |
 | `AConsoleDisplayPart` | `GameView/AConsoleDisplayPart.cs` | 一行显示中的最小渲染片段。 | `DrawTo`, `GDIDrawTo`, `ToString` |
@@ -419,6 +430,6 @@ project.godot
 | HTML 显示错误 | `HtmlManager`, `ConsoleDivPart`, `ConsoleStyledString`, `PrintStringBuffer` |
 | ERB 函数找不到 | `FunctionMethodCreator.GetMethodList`, `FunctionIdentifier`, `LabelDictionary`, lazy loading 表 |
 | 变量读写错误 | `VariableIdentifier`, `VariableParser`, `VariableEvaluator`, `VariableToken` |
-| 存档兼容 | `EraDataStream`, `EraBinaryDataReader`, `EraBinaryDataWriter`, `VariableData`, `CharacterData` |
-| SQL/Map/XML/DT 扩展 | `RuntimeDataStore`, `SnakeSqlManager`, `ModernSqlManager`, `Creator.Method.*.cs` |
+| 存档兼容 | `EraDataStream`, `EraBinaryDataReader`, `EraBinaryDataWriter`, `VariableData`, `VariableEvaluator`, `CharacterData`；1D 稀疏数组读写、RuntimeDataStore 的 VarExt 保存域读写也在这些入口 |
+| SQL/Map/XML/DT 扩展 | `RuntimeDataStore`, `ConstantData` 的 VarExt 保存域声明读取、`SnakeSqlManager`, `ModernSqlManager`, `Creator.Method.*.cs` |
 | 日志太多或没有日志 | `config.toml` 的 `[logging].enabled` 与模块开关、`RuntimeDiagnosticsConfig`, `DiagnosticLogRouter`, `GenericUtils.InitializeLogging` |

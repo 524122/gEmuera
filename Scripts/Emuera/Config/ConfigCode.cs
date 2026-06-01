@@ -28,6 +28,14 @@ namespace MinorShift.Emuera
 		SKIASHARP = 3,
 	}
 
+	[global::System.Reflection.Obfuscation(Exclude=true)]
+	internal enum RenderingBackend
+	{
+		Auto = 0,
+		OpenGL = 1,
+		CPU = 2,
+	}
+
     [global::System.Reflection.Obfuscation(Exclude = true)]
     internal enum UseLanguage
     {
@@ -139,6 +147,7 @@ namespace MinorShift.Emuera
 		ForbidUpdateCheck,
 		PluginAvailableWarn,
 		DisableBeforeErrorThrow,
+		UseScopedVariableInstruction,
 
 		MoneyLabel = 100,
 		MoneyFirst = 101,

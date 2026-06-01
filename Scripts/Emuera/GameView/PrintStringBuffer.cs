@@ -444,8 +444,9 @@ namespace MinorShift.Emuera.GameView
 		{
 			int pointX = 0;
 			//int count = buttonList.Count;
-			//1.824 修正。サブピクセルの初期値を0から0.5fにすることで端数処理吸収
-			float subPixel = 0.5f;
+			// v24/snake は 0 から subPixel を累计する。0.5f 起点会让 space/shape 补白
+			// 在横向按钮之间多吃 1px，导致视觉间隔和核心布局数据不一致。
+			float subPixel = 0.0f;
 			for (int i = 0; i < buttonList.Count; i++)
 			{
 				ConsoleButtonString button = buttonList[i];

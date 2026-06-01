@@ -11,6 +11,7 @@ using MinorShift.Emuera.GameData.Variable;
 using MinorShift.Emuera.GameProc.Function;
 using MinorShift.Emuera.GameData.Function;
 using System.Linq;
+using System.Threading.Tasks;
 using uEmuera.Forms;
 using MinorShift.Emuera.Runtime.Utils.PluginSystem;
 using System.Diagnostics;
@@ -44,13 +45,19 @@ namespace MinorShift.Emuera.GameProc
 		readonly EmueraConsole console;
 		private IdentifierDictionary idDic;
 		ProcessState state;
+		public ProcessState State { get { return state; } }
 		ProcessState originalState;//リセットする時のために
         bool noError = false;
         //色々あって復活させてみる
         bool initialiing;
         public bool inInitializeing { get { return initialiing;  } }
 
-        public bool Initialize()
+		public bool Initialize()
+		{
+			return InitializeAsync().GetAwaiter().GetResult();
+		}
+
+		public async Task<bool> InitializeAsync()
 		{
 			LexicalAnalyzer.UseMacro = false;
             state = new ProcessState(console);
@@ -178,13 +185,10 @@ namespace MinorShift.Emuera.GameProc
 
 				LexicalAnalyzer.UseMacro = false;
 
-				if (Program.IsSnakeProfile)
-				{
-					PluginManager.GetInstance().SetParent(this, state, exm);
-					PluginManager.GetInstance().LoadPlugins();
-					if (GlobalStatic.ExistPlugin && Config.PluginAvailableWarn)
-						console.PrintSingleLine("注意：外部プラグイン機能が有効になっています。この機能で生じた不具合等はEmueraのサポート対象外となります");
-				}
+				PluginManager.GetInstance().SetParent(this, state, exm);
+				PluginManager.GetInstance().LoadPlugins();
+				if (GlobalStatic.ExistPlugin && Config.PluginAvailableWarn)
+					console.PrintSingleLine("注意：外部プラグイン機能が有効になっています。この機能で生じた不具合等はEmueraのサポート対象外となります");
 
 				//ERH読込
 				GenericUtils.Info($"[LOAD] Loading ERH from: {Program.ErbDir}");
@@ -205,9 +209,9 @@ namespace MinorShift.Emuera.GameProc
 				GenericUtils.Info("[LOAD] Loading ERB files...");
 				ErbLoader loader = new ErbLoader(console, exm, this);
                 if (Program.AnalysisMode)
-                    noError = loader.loadErbs(Program.AnalysisFiles, labelDic);
+                    noError = await loader.LoadErbsAsync(Program.AnalysisFiles, labelDic);
                 else
-                    noError = loader.LoadErbFiles(Program.ErbDir, Config.DisplayReport, labelDic, Config.UseLazyLoading && Program.SupportsLazyLoading);
+                    noError = await loader.LoadErbFilesAsync(Program.ErbDir, Config.DisplayReport, labelDic, Config.UseLazyLoading && Program.SupportsLazyLoading);
 				GenericUtils.Info($"[LOAD] ERB loaded, noError={noError}");
 				MarkLoad("erb");
                 initSystemProcess();
@@ -233,19 +237,29 @@ namespace MinorShift.Emuera.GameProc
 
 		public void ReloadErb()
 		{
+			ReloadErbAsync().GetAwaiter().GetResult();
+		}
+
+		public async Task ReloadErbAsync()
+		{
 			saveCurrentState(false);
 			state.SystemState = SystemStateCode.System_Reloaderb;
 			ErbLoader loader = new ErbLoader(console, exm, this);
-            loader.LoadErbFiles(Program.ErbDir, false, labelDic, Config.UseLazyLoading && Program.SupportsLazyLoading);
+            await loader.LoadErbFilesAsync(Program.ErbDir, false, labelDic, Config.UseLazyLoading && Program.SupportsLazyLoading);
 			console.ReadAnyKey();
 		}
 
 		public void ReloadPartialErb(List<string> path)
 		{
+			ReloadPartialErbAsync(path).GetAwaiter().GetResult();
+		}
+
+		public async Task ReloadPartialErbAsync(List<string> path)
+		{
 			saveCurrentState(false);
 			state.SystemState = SystemStateCode.System_Reloaderb;
 			ErbLoader loader = new ErbLoader(console, exm, this);
-			loader.loadErbs(path, labelDic);
+			await loader.LoadErbsAsync(path, labelDic);
 			console.ReadAnyKey();
 		}
 
@@ -253,7 +267,7 @@ namespace MinorShift.Emuera.GameProc
 		{
 			coms = new List<long>((int)count);
 			isCTrain = true;
-			Int64[] selectcom = vEvaluator.SELECTCOM_ARRAY;
+			var selectcom = vEvaluator.SELECTCOM_ARRAY;
 			if (count >= selectcom.Length)
 			{
 				throw new CodeEE("CALLTRAIN命令の引数の値がSELECTCOMの要素数を超えています");
@@ -273,31 +287,44 @@ namespace MinorShift.Emuera.GameProc
             return (callFunction("CALLTRAINEND", false, false));
         }
 
-		public void InputResult5(int r0, int r1, int r2, int r3, int r4)
+		public void InputResult5(int r0, int r1, int r2, int r3, int r4, long r5)
 		{
-			long[] result = vEvaluator.RESULT_ARRAY;
+			var result = vEvaluator.RESULT_ARRAY;
 			result[0] = r0;
 			result[1] = r1;
 			result[2] = r2;
 			result[3] = r3;
 			result[4] = r4;
+			result[5] = r5;
 		}
 		public void InputInteger(Int64 i)
 		{
+			GlobalStatic.ctrlZ.Add(i.ToString());
 			vEvaluator.RESULT = i;
 		}
 		public void InputInteger(Int64 index, Int64 i)
 		{
+			if (GlobalStatic.ctrlZ != null)
+				GlobalStatic.ctrlZ.Add(i.ToString());
 			if (index >= 0 && index < vEvaluator.RESULT_ARRAY.Length)
 				vEvaluator.RESULT_ARRAY[index] = i;
 		}
 		public void InputSystemInteger(Int64 i)
 		{
+			GlobalStatic.ctrlZ.Add(i.ToString());
 			systemResult = i;
 		}
 		public void InputString(string s)
 		{
+			GlobalStatic.ctrlZ.Add(s);
 			vEvaluator.RESULTS = s;
+		}
+		public void InputString(long idx, string i)
+		{
+			if (GlobalStatic.ctrlZ != null)
+				GlobalStatic.ctrlZ.Add(i);
+			if (idx < vEvaluator.RESULTS_ARRAY.Length)
+				vEvaluator.RESULTS_ARRAY[idx] = i;
 		}
 
 		private uint startTime = 0;
@@ -336,6 +363,7 @@ namespace MinorShift.Emuera.GameProc
 							handleExceptionInSystemProc(ec, errorLine, true);
 						else
 							handleException(ec, errorLine, true);
+						state.ClearFunctionList();
 						return;
 					}
 					if (state.SkipBeforeError)
@@ -347,6 +375,22 @@ namespace MinorShift.Emuera.GameProc
 							handleExceptionInSystemProc(ec, throwLine, true);
 						else
 							handleException(ec, throwLine, true);
+						state.ClearFunctionList();
+						return;
+					}
+					if (state.InBeforeThrow)
+					{
+						state.InBeforeThrow = false;
+						string throwMessage = state.PendingThrowMessage ?? ec.Message;
+						LogicalLine throwLine = state.PendingThrowLine ?? currentLine;
+						state.PendingThrowMessage = null;
+						state.PendingThrowLine = null;
+						var throwException = new CodeEE(throwMessage);
+						if (systemProcRunning)
+							handleExceptionInSystemProc(throwException, throwLine, true);
+						else
+							handleException(throwException, throwLine, true);
+						state.ClearFunctionList();
 						return;
 					}
 					state.InBeforeError = true;
@@ -366,6 +410,8 @@ namespace MinorShift.Emuera.GameProc
 						handleExceptionInSystemProc(ec, currentLine, true);
 					else
 						handleException(ec, currentLine, true);
+					state.ClearFunctionList();
+					return;
 				}
 			}
 		}
@@ -432,6 +478,7 @@ namespace MinorShift.Emuera.GameProc
             }
             SingleTerm ret = null;
             int temp_current = state.currentMin;
+			ExecutionContext parentContext = state.CurrentContext;
             state.currentMin = state.functionCount;
             udmt.Call.updateRetAddress(state.CurrentLine);
             try
@@ -446,6 +493,14 @@ namespace MinorShift.Emuera.GameProc
 			{
 				if (udmt.Call.TopLabel.hasPrivDynamicVar)
 					udmt.Call.TopLabel.Out();
+				// 异常路径不会经过 RETURNF。必须同时校验父上下文，递归调用同一 label 时不能误弹父调用帧。
+				if (state.CurrentContext != null &&
+					ReferenceEquals(state.CurrentContext.Function, udmt.Call.TopLabel) &&
+					ReferenceEquals(state.CurrentContext.Parent, parentContext))
+				{
+					ExecutionContext context = state.PopContext();
+					context?.Dispose();
+				}
                 //1756beta2+v3:こいつらはここにないとデバッグコンソールで式中関数が事故った時に大事故になる
                 state.currentMin = temp_current;
                 methodStack--;

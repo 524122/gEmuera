@@ -8,8 +8,8 @@ namespace MinorShift.Emuera.GameData.Function
 {
 	internal abstract class FunctionMethod
 	{
-		public Type ReturnType { get; protected set; }
-		protected Type[] argumentTypeArray;
+		public EraType ReturnType { get; protected set; }
+		protected EraType[] argumentTypeArray;
 		protected string Name { get; private set; }
 
 		//引数の数・型が一致するかどうかのテスト
@@ -23,7 +23,7 @@ namespace MinorShift.Emuera.GameData.Function
 			{
 				if (arguments[i] == null)
 					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, i+1);
-				if (argumentTypeArray[i] != arguments[i].GetOperandType())
+				if (argumentTypeArray[i] != arguments[i].GetEraType())
 					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
 			}
 			return null;
@@ -41,12 +41,17 @@ namespace MinorShift.Emuera.GameData.Function
 		public virtual double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments) { throw new ExeEE("戻り値の型が違う or 未実装"); }
 		public virtual SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
 		{
-			if (ReturnType == typeof(Int64))
+			if (ReturnType == EraType.Integer)
 				return new SingleTerm(GetIntValue(exm, arguments));
-			else if (ReturnType == typeof(double))
+			else if (ReturnType == EraType.Float)
 				return new SingleTerm(GetFloatValue(exm, arguments));
 			else
 				return new SingleTerm(GetStrValue(exm, arguments));
+		}
+
+		protected bool MatchesArgumentType(int index, IOperandTerm argument)
+		{
+			return argumentTypeArray[index] == argument.GetEraType();
 		}
 
 		/// <summary>

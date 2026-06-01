@@ -98,7 +98,11 @@ namespace MinorShift.Emuera.GameView
 				return;
 			Color color = this.Color;
 			if(isSelecting)
+			{
+				if (Config.UseButtonFocusBackgroundColor && Width > 0 && !string.IsNullOrWhiteSpace(Str))
+					graph.FillRectangel(new SolidBrush(Color.FromArgb(50, 50, 50)), new Rectangle(PointX, pointY, Width, Config.LineHeight));
 				color = this.ButtonColor;
+			}
 			else if (isBackLog && !colorChanged)
                 color = Config.LogColor;
 				

@@ -419,9 +419,11 @@ namespace MinorShift.Emuera
 						else
 						{
 							//代入文が使えなくなるために命令名との衝突は致命的。
+							// ただしプライベート変数の場合はスコープが限定的なので警告レベル1にして変数を作成する。
+							// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応。
 							errMes = "変数名" + varName + "はEmueraの命令名として使われています";
-							warnLevel = 2;
-							return;
+							warnLevel = 1;
+							break;
 						}
 					case DefinedNameType.SystemMethod:
 						errMes = "変数名" + varName + "はEmueraの式中関数名として使われています";

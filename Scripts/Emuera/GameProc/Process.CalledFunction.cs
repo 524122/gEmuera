@@ -18,20 +18,25 @@ namespace MinorShift.Emuera.GameProc
 			TransporterInt = new Int64[Arguments.Length];
 			TransporterFloat = new double[Arguments.Length];
 			TransporterStr = new string[Arguments.Length];
-			TransporterRef = new Array[Arguments.Length];
+			TransporterRef = new object[Arguments.Length];
+			TransporterElementRef = new ElementRefInfo[Arguments.Length];
 			isRef = new bool[Arguments.Length];
+			refDestDimension = new int[Arguments.Length];
 			for (int i = 0; i < Arguments.Length; i++)
 			{
 				isRef[i] = destArgs[i].Identifier.IsReference;
+				refDestDimension[i] = destArgs[i].Identifier.Dimension;
 			}
 		}
 		public readonly IOperandTerm[] Arguments;
 		public readonly Int64[] TransporterInt;
 		public readonly double[] TransporterFloat;
 		public readonly string[] TransporterStr;
-		public readonly Array[] TransporterRef;
+		public readonly object[] TransporterRef;
+		public readonly ElementRefInfo[] TransporterElementRef;
 		public readonly bool[] isRef;
-		public void SetTransporter(ExpressionMediator exm)
+		public readonly int[] refDestDimension;
+			public void SetTransporter(ExpressionMediator exm)
 		{
 			for (int i = 0; i < Arguments.Length; i++)
 			{
@@ -40,21 +45,56 @@ namespace MinorShift.Emuera.GameProc
 				if (isRef[i])
 				{
 					VariableTerm vTerm = (VariableTerm)Arguments[i];
-					if (vTerm.Identifier.IsCharacterData)
+					if (vTerm.Identifier is NullRefTerm)
+						continue;
+					if (refDestDimension[i] > 0)
 					{
-						Int64 charaNo = vTerm.GetElementInt(0, exm);
-						if ((charaNo < 0) || (charaNo >= GlobalStatic.VariableData.CharacterList.Count))
-							throw new CodeEE("キャラクタ配列変数" + vTerm.Identifier.Name + "の第１引数(" + charaNo.ToString() + ")はキャラ登録番号の範囲外です");
-						TransporterRef[i] = (Array)vTerm.Identifier.GetArrayChara((int)charaNo);
+						if (vTerm.Identifier.IsCharacterData)
+						{
+							Int64 charaNo = vTerm.GetElementInt(0, exm);
+							if ((charaNo < 0) || (charaNo >= GlobalStatic.VariableData.CharacterList.Count))
+								throw new CodeEE("キャラクタ配列変数" + vTerm.Identifier.Name + "の第１引数(" + charaNo.ToString() + ")はキャラ登録番号の範囲外です");
+							TransporterRef[i] = vTerm.Identifier.GetArrayChara((int)charaNo);
+						}
+						else if (vTerm.Identifier is ReferenceToken refToken)
+						{
+							if (refToken.IsOut && refToken.IsNullRef)
+								continue;
+							TransporterRef[i] = refToken.GetArray();
+						}
+						else
+							TransporterRef[i] = vTerm.Identifier.GetArray();
 					}
 					else
-						TransporterRef[i] = (Array)vTerm.Identifier.GetArray();
-
+					{
+						if (vTerm.Identifier is ReferenceToken refToken && refToken.HasElementRef)
+						{
+							TransporterElementRef[i] = refToken.GetElementRef();
+						}
+						else if (vTerm.Identifier is ReferenceToken refTokenOut && refTokenOut.IsOut && refTokenOut.IsNullRef)
+						{
+							continue;
+						}
+						else
+						{
+							Int64[] indices = new Int64[vTerm.Identifier.Dimension];
+							for (int d = 0; d < vTerm.Identifier.Dimension; d++)
+							{
+								if (vTerm is FixedVariableTerm || d < vTerm.ArgumentCount)
+									indices[d] = vTerm.GetElementInt(d, exm);
+								else
+									indices[d] = 0;
+							}
+							TransporterElementRef[i] = new ElementRefInfo(vTerm.Identifier, indices);
+						}
+					}
 				}
-				else if (Arguments[i].GetOperandType() == typeof(double))
-					TransporterFloat[i] = Arguments[i].GetFloatValue(exm);
-				else if (Arguments[i].GetOperandType() == typeof(Int64))
+				else if (Arguments[i] is VariadicArgTerm)
+					continue;
+				else if (Arguments[i].GetEraType() == EraType.Integer)
 					TransporterInt[i] = Arguments[i].GetIntValue(exm);
+				else if (Arguments[i].GetEraType() == EraType.Float)
+					TransporterFloat[i] = Arguments[i].GetFloatValue(exm);
 				else
 					TransporterStr[i] = Arguments[i].GetStrValue(exm);
 			}
@@ -160,7 +200,9 @@ namespace MinorShift.Emuera.GameProc
 			int variadicIndex = func.VariadicArgIndex;
 			int fixedArgCount = variadicIndex >= 0 ? variadicIndex : func.Arg.Length;
             IOperandTerm[] convertedArg = new IOperandTerm[func.Arg.Length];
-			if(!ignoreExtraArgs && variadicIndex < 0 && convertedArg.Length < srcArgs.Length)
+			// snake fork 的 ConvertArg 原实现不会检查普通 CALL 的多余实参，会只绑定形参范围内的值。
+			// v24 仍保持严格报错；TRYCALL 继续沿用 ignoreExtraArgs 的宽松路径。
+			if(!ignoreExtraArgs && !Program.IsSnakeProfile && variadicIndex < 0 && convertedArg.Length < srcArgs.Length)
 			{
 				errMes = "引数の数が関数\"@" + func.LabelName + "\"に設定された数を超えています";
 				return null;
@@ -177,21 +219,41 @@ namespace MinorShift.Emuera.GameProc
 				{
 					if (term == null)
 					{
+						if (destArg.Identifier.IsOut)
+						{
+							term = new VariableTerm(new NullRefTerm(!destArg.Identifier.IsString, destArg.Identifier.IsFloat), new IOperandTerm[0]);
+							convertedArg[i] = term;
+							continue;
+						}
 						errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数は参照渡しのため省略できません";
 						return null;
 					}
 					VariableTerm vTerm = term as VariableTerm;
-					if (vTerm == null || vTerm.Identifier.Dimension == 0)
+					if (vTerm == null)
 					{
 						errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数は参照渡しのための配列変数でなければなりません";
 						return null;
 					}
-					//TODO 1810alpha007 キャラ型を認めるかどうかはっきりしたい 今のところ認めない方向
-					//型チェック
-					if (!((ReferenceToken)destArg.Identifier).MatchType(vTerm.Identifier, false, out errMes))
+					if (destArg.Identifier.Dimension == 0)
 					{
-						errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数:" + errMes;
-						return null;
+						if (!((ReferenceToken)destArg.Identifier).MatchType(vTerm.Identifier, true, true, out errMes))
+						{
+							errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数:" + errMes;
+							return null;
+						}
+					}
+					else
+					{
+						if (vTerm.Identifier.Dimension == 0)
+						{
+							errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数は参照渡しのための配列変数でなければなりません";
+							return null;
+						}
+						if (!((ReferenceToken)destArg.Identifier).MatchType(vTerm.Identifier, false, false, out errMes))
+						{
+							errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数:" + errMes;
+							return null;
+						}
 					}
 				}
 				else if (term == null)//引数が省略されたとき
@@ -205,11 +267,22 @@ namespace MinorShift.Emuera.GameProc
 						return null;
 					}
 				}
-				else if (term.GetOperandType() != destArg.GetOperandType())
+				else if (term.GetEraType() != destArg.GetEraType())
 				{
-					if (term.GetOperandType() == typeof(string))
+					EraType termType = term.GetEraType();
+					EraType destType = destArg.GetEraType();
+					if (termType == EraType.String)
 					{
 						errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数を文字列型から整数型に変換できません";
+						return null;
+					}
+					else if (destType == EraType.Float && termType == EraType.Integer)
+					{
+						// 整数から小数への拡張は snake と同じく ARG 代入時に許可する。
+					}
+					else if (destType == EraType.Integer && termType == EraType.Float)
+					{
+						errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数を小数型から整数型に変換できません";
 						return null;
 					}
 					else
@@ -233,11 +306,22 @@ namespace MinorShift.Emuera.GameProc
 				for (int i = variadicIndex; i < srcArgs.Length; i++)
 				{
 					term = srcArgs[i];
-					if (term.GetOperandType() != destArg.GetOperandType())
+					if (term.GetEraType() != destArg.GetEraType())
 					{
-						if (term.GetOperandType() == typeof(string))
+						EraType termType = term.GetEraType();
+						EraType destType = destArg.GetEraType();
+						if (termType == EraType.String)
 						{
 							errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数を文字列型から整数型に変換できません";
+							return null;
+						}
+						else if (destType == EraType.Float && termType == EraType.Integer)
+						{
+							// 整数から小数への拡張は snake と同じく ARG 代入時に許可する。
+						}
+						else if (destType == EraType.Integer && termType == EraType.Float)
+						{
+							errMes = "\"@" + func.LabelName + "\"の" + (i + 1).ToString() + "番目の引数を小数型から整数型に変換できません";
 							return null;
 						}
 						else
@@ -254,7 +338,7 @@ namespace MinorShift.Emuera.GameProc
 					}
 					variadicArgs.Add(term);
 				}
-				convertedArg[variadicIndex] = new VariadicArgTerm(variadicArgs, destArg.GetOperandType());
+				convertedArg[variadicIndex] = new VariadicArgTerm(variadicArgs, destArg.GetEraType());
 			}
 			return new UserDefinedFunctionArgument(convertedArg, func.Arg);
 		}

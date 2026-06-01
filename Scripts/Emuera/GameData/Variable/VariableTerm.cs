@@ -43,6 +43,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public bool isAllConst { get { return allArgIsConst; } }
 		public int getEl1forArg { get { return (int)transporter[0]; } }
+		public int ArgumentCount { get { return arguments == null ? 0 : arguments.Length; } }
 
 		public override Int64 GetIntValue(ExpressionMediator exm)
 		{
@@ -244,6 +245,10 @@ namespace MinorShift.Emuera.GameData.Variable
 				SetValue(value.GetFloatValue(exm), exm);
 			else
 				SetValue(value.GetStrValue(exm), exm);
+		}
+		public override EraType GetEraType()
+		{
+			return Identifier.GetEraType();
 		}
 		public Int32 GetLength()
 		{

@@ -101,6 +101,7 @@ namespace MinorShift.Emuera.GameProc
 
 			int localMax = 0;
 			int localsMax = 0;
+			int localFloatMax = 0;
 			for (int i = 0; i < eventLabels.Length; i++)
 			{
 				for (int j = 0; j < eventLabels[i].Count; j++)
@@ -109,18 +110,23 @@ namespace MinorShift.Emuera.GameProc
 						localMax = eventLabels[i][j].LocalLength;
 					if (eventLabels[i][j].LocalsLength > localsMax)
 						localsMax = eventLabels[i][j].LocalsLength;
+					if (eventLabels[i][j].LocalFloatLength > localFloatMax)
+						localFloatMax = eventLabels[i][j].LocalFloatLength;
 				}
 			}
 			if (localMax < GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCAL"))
 				localMax = GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCAL");
 			if (localsMax < GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCALS"))
 				localsMax = GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCALS");
+			if (localFloatMax < GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCALF"))
+				localFloatMax = GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCALF");
 			for (int i = 0; i < eventLabels.Length; i++)
 			{
 				for (int j = 0; j < eventLabels[i].Count; j++)
 				{
 					eventLabels[i][j].LocalLength = localMax;
 					eventLabels[i][j].LocalsLength = localsMax;
+					eventLabels[i][j].LocalFloatLength = localFloatMax;
 				}
 			}
 			eventLabelDic.Add(key, eventLabels);
@@ -155,15 +161,18 @@ namespace MinorShift.Emuera.GameProc
                 List<FunctionLabelLine> onlylist = new List<FunctionLabelLine>();
 				List<FunctionLabelLine> prilist = new List<FunctionLabelLine>();
 				List<FunctionLabelLine> normallist = new List<FunctionLabelLine>();
-				List<FunctionLabelLine> laterlist = new List<FunctionLabelLine>();
+                List<FunctionLabelLine> laterlist = new List<FunctionLabelLine>();
                 int localMax = 0;
                 int localsMax = 0;
+                int localFloatMax = 0;
 				for (int i = 0; i < list.Count; i++)
 				{
                     if (list[i].LocalLength > localMax)
                         localMax = list[i].LocalLength;
                     if (list[i].LocalsLength > localsMax)
                         localsMax = list[i].LocalsLength;
+                    if (list[i].LocalFloatLength > localFloatMax)
+                        localFloatMax = list[i].LocalFloatLength;
                     if (list[i].IsOnly)
                         onlylist.Add(list[i]);
 					if (list[i].IsPri)
@@ -177,6 +186,8 @@ namespace MinorShift.Emuera.GameProc
                     localMax = GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCAL");
                 if (localsMax < GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCALS"))
                     localsMax = GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCALS");
+                if (localFloatMax < GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCALF"))
+                    localFloatMax = GlobalStatic.IdentifierDictionary.getLocalDefaultSize("LOCALF");
                 eventLabels[0] = onlylist;
 				eventLabels[1] = prilist;
 				eventLabels[2] = normallist;
@@ -187,6 +198,7 @@ namespace MinorShift.Emuera.GameProc
                     {
                         eventLabels[i][j].LocalLength = localMax;
                         eventLabels[i][j].LocalsLength = localsMax;
+                        eventLabels[i][j].LocalFloatLength = localFloatMax;
                     }
                 }
                 eventLabelDic.Add(key, eventLabels);

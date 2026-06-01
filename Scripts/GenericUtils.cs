@@ -118,6 +118,7 @@ internal static class GenericUtils
         public bool Paused;
         public int Volume = 100;
         public int Speed = 100;
+        public int Repeat = 1;
         public long StartedAtMs;
         public long TotalMs;
         public long LastKnownCurrentMs;
@@ -1542,6 +1543,7 @@ internal static class GenericUtils
         int channel = 0;
         lock (snakeAudioLock)
         {
+            FlushCompletedAudioStatesLocked();
             for (int i = 0; i < snakeSounds.Length; i++)
             {
                 if (!snakeSounds[i].Playing)
@@ -1555,6 +1557,8 @@ internal static class GenericUtils
             state.Playing = true;
             state.PendingStart = true;
             state.Paused = false;
+            state.Speed = 100;
+            state.Repeat = repeat < 0 ? -1 : Math.Max(repeat, 1);
             state.StartedAtMs = 0;
             state.TotalMs = 0;
             state.LastKnownCurrentMs = 0;
@@ -1571,6 +1575,7 @@ internal static class GenericUtils
                 state.Playing = false;
                 state.PendingStart = false;
                 state.Paused = false;
+                state.Repeat = 1;
                 state.LastKnownCurrentMs = 0;
             }
         }
@@ -1585,6 +1590,8 @@ internal static class GenericUtils
             snakeBgm.Playing = true;
             snakeBgm.PendingStart = true;
             snakeBgm.Paused = false;
+            snakeBgm.Speed = 100;
+            snakeBgm.Repeat = -1;
             snakeBgm.StartedAtMs = 0;
             snakeBgm.TotalMs = 0;
             snakeBgm.LastKnownCurrentMs = 0;
@@ -1599,6 +1606,7 @@ internal static class GenericUtils
             snakeBgm.Playing = false;
             snakeBgm.PendingStart = false;
             snakeBgm.Paused = false;
+            snakeBgm.Repeat = 1;
             snakeBgm.LastKnownCurrentMs = 0;
         }
         EnqueueUI(() => EmueraContent.instance?.StopBgm());
@@ -1631,24 +1639,26 @@ internal static class GenericUtils
     {
         lock (snakeAudioLock)
         {
-            if (channel >= 0)
-                return channel < snakeSounds.Length && snakeSounds[channel].Playing && !snakeSounds[channel].Paused ? channel : -1;
-            for (int i = 0; i < snakeSounds.Length; i++)
-            {
-                if (snakeSounds[i].Playing && !snakeSounds[i].Paused)
-                    return i;
-            }
+            FlushCompletedAudioStatesLocked();
+            return channel >= 0 && channel < snakeSounds.Length && snakeSounds[channel].Playing && !snakeSounds[channel].Paused ? channel : -1;
         }
-        return -1;
     }
 
     public static bool IsPlayingBgm()
     {
         lock (snakeAudioLock)
+        {
+            FlushCompletedAudioStatesLocked();
             return snakeBgm.Playing && !snakeBgm.Paused;
+        }
     }
 
     public static int ControlSound(int channel, int action, int speed = 100)
+    {
+        return ControlSound(channel, action, speed, true);
+    }
+
+    public static int ControlSound(int channel, int action, int speed, bool preservePitch)
     {
         if (channel < 0 || channel >= SnakeSoundChannelCount)
             return -1;
@@ -1673,13 +1683,15 @@ internal static class GenericUtils
                     state.Playing = false;
                     state.PendingStart = false;
                     state.Paused = false;
+                    state.Repeat = 1;
                     state.LastKnownCurrentMs = 0;
                     EnqueueUI(() => EmueraContent.instance?.StopSoundChannel(channel));
                     return 1;
                 case 3:
                     state.LastKnownCurrentMs = GetCurrentAudioMs(state);
-                    state.Speed = Math.Max(1, speed);
+                    state.Speed = ClampSnakeAudioSpeed(speed);
                     state.StartedAtMs = GetTickMs() - ScaleFromPlaybackMs(state.LastKnownCurrentMs, state.Speed);
+                    // Godot AudioStreamPlayer 只能通过 PitchScale 做跨平台变速，preservePitch 参数按 snake API 接收但无法完全保真。
                     EnqueueUI(() => EmueraContent.instance?.SetSoundChannelSpeed(channel, state.Speed / 100.0f));
                     return 1;
                 default:
@@ -1689,6 +1701,11 @@ internal static class GenericUtils
     }
 
     public static int ControlBgm(int action, int speed = 100)
+    {
+        return ControlBgm(action, speed, true);
+    }
+
+    public static int ControlBgm(int action, int speed, bool preservePitch)
     {
         lock (snakeAudioLock)
         {
@@ -1710,13 +1727,15 @@ internal static class GenericUtils
                     snakeBgm.Playing = false;
                     snakeBgm.PendingStart = false;
                     snakeBgm.Paused = false;
+                    snakeBgm.Repeat = 1;
                     snakeBgm.LastKnownCurrentMs = 0;
                     EnqueueUI(() => EmueraContent.instance?.StopBgm());
                     return 1;
                 case 3:
                     snakeBgm.LastKnownCurrentMs = GetCurrentAudioMs(snakeBgm);
-                    snakeBgm.Speed = Math.Max(1, speed);
+                    snakeBgm.Speed = ClampSnakeAudioSpeed(speed);
                     snakeBgm.StartedAtMs = GetTickMs() - ScaleFromPlaybackMs(snakeBgm.LastKnownCurrentMs, snakeBgm.Speed);
+                    // Godot 后端无 SoundTouch 等价能力，保留参数仅保证脚本接口兼容。
                     EnqueueUI(() => EmueraContent.instance?.SetBgmSpeed(snakeBgm.Speed / 100.0f));
                     return 1;
                 default:
@@ -1729,6 +1748,7 @@ internal static class GenericUtils
     {
         lock (snakeAudioLock)
         {
+            FlushCompletedAudioStatesLocked();
             SnakeAudioState state = channel == -1 ? snakeBgm : channel >= 0 && channel < snakeSounds.Length ? snakeSounds[channel] : null;
             if (state == null)
                 return default;
@@ -1773,6 +1793,24 @@ internal static class GenericUtils
             state.Playing = false;
             state.PendingStart = false;
             state.Paused = false;
+            state.Repeat = 1;
+            state.LastKnownCurrentMs = 0;
+        }
+    }
+
+    public static void NotifySoundPlaybackRepeated(int channel)
+    {
+        if (channel < 0 || channel >= SnakeSoundChannelCount)
+            return;
+        lock (snakeAudioLock)
+        {
+            var state = snakeSounds[channel];
+            if (!state.Playing || state.PendingStart)
+                return;
+            if (state.Repeat > 1)
+                state.Repeat--;
+            state.Paused = false;
+            state.StartedAtMs = GetTickMs();
             state.LastKnownCurrentMs = 0;
         }
     }
@@ -1789,8 +1827,25 @@ internal static class GenericUtils
                 state.TotalMs = (long)(totalSec * 1000.0);
             if (!state.PendingStart)
                 state.Playing = playing;
+            if (!playing && !state.PendingStart && !state.Paused)
+                state.LastKnownCurrentMs = ClampAudioPositionMs(state.LastKnownCurrentMs, state.TotalMs);
             if (playing)
                 state.StartedAtMs = GetTickMs() - ScaleFromPlaybackMs(state.LastKnownCurrentMs, state.Speed);
+        }
+    }
+
+    public static void NotifySoundPlaybackFinished(int channel)
+    {
+        if (channel < 0 || channel >= SnakeSoundChannelCount)
+            return;
+        lock (snakeAudioLock)
+        {
+            var state = snakeSounds[channel];
+            state.Playing = false;
+            state.PendingStart = false;
+            state.Paused = false;
+            state.Repeat = 1;
+            state.LastKnownCurrentMs = 0;
         }
     }
 
@@ -1818,6 +1873,7 @@ internal static class GenericUtils
             snakeBgm.Playing = false;
             snakeBgm.PendingStart = false;
             snakeBgm.Paused = false;
+            snakeBgm.Repeat = 1;
             snakeBgm.LastKnownCurrentMs = 0;
         }
     }
@@ -1831,6 +1887,8 @@ internal static class GenericUtils
                 snakeBgm.TotalMs = (long)(totalSec * 1000.0);
             if (!snakeBgm.PendingStart)
                 snakeBgm.Playing = playing;
+            if (!playing && !snakeBgm.PendingStart && !snakeBgm.Paused)
+                snakeBgm.LastKnownCurrentMs = ClampAudioPositionMs(snakeBgm.LastKnownCurrentMs, snakeBgm.TotalMs);
             if (playing)
                 snakeBgm.StartedAtMs = GetTickMs() - ScaleFromPlaybackMs(snakeBgm.LastKnownCurrentMs, snakeBgm.Speed);
         }
@@ -1843,12 +1901,53 @@ internal static class GenericUtils
         if (state.PendingStart || state.StartedAtMs <= 0 || state.Paused)
             return Math.Max(0, state.LastKnownCurrentMs);
         long elapsedMs = Math.Max(0, GetTickMs() - state.StartedAtMs);
-        return elapsedMs * Math.Max(1, state.Speed) / 100;
+        long currentMs = elapsedMs * Math.Max(1, state.Speed) / 100;
+        if (state.Repeat < 0 && state.TotalMs > 0)
+            return currentMs % state.TotalMs;
+        return ClampAudioPositionMs(currentMs, state.TotalMs);
     }
 
     static long ScaleFromPlaybackMs(long playbackMs, int speed)
     {
         return playbackMs * 100 / Math.Max(1, speed);
+    }
+
+    static int ClampSnakeAudioSpeed(int speed)
+    {
+        if (speed < 10)
+            return 10;
+        if (speed > 1000)
+            return 1000;
+        return speed;
+    }
+
+    static long ClampAudioPositionMs(long currentMs, long totalMs)
+    {
+        currentMs = Math.Max(0, currentMs);
+        if (totalMs <= 0)
+            return currentMs;
+        return Math.Min(currentMs, totalMs);
+    }
+
+    static void FlushCompletedAudioStatesLocked()
+    {
+        foreach (var state in snakeSounds)
+            FlushCompletedAudioStateLocked(state);
+        FlushCompletedAudioStateLocked(snakeBgm);
+    }
+
+    static void FlushCompletedAudioStateLocked(SnakeAudioState state)
+    {
+        // Godot 的 Finished 信号偶尔会和脚本查询错帧；这里用总时长兜底，避免一次性音效结束后通道长期占用。
+        if (state == null || !state.Playing || state.PendingStart || state.Paused || state.Repeat < 0 || state.Repeat > 1 || state.TotalMs <= 0)
+            return;
+        if (GetCurrentAudioMs(state) < state.TotalMs)
+            return;
+        state.Playing = false;
+        state.PendingStart = false;
+        state.Paused = false;
+        state.Repeat = 1;
+        state.LastKnownCurrentMs = 0;
     }
 
     public static string ResolveSoundPath(string name)

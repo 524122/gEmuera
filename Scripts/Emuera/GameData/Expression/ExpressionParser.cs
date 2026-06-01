@@ -100,13 +100,13 @@ namespace MinorShift.Emuera.GameData.Expression
 						IOperandTerm term = reduceTerm(wc, false, termEndWith, VariableCode.__NULL__);
 						if (term == null)
 							throw new CodeEE("'='の後に式がありません");
-						if (term.GetOperandType() != terms[terms.Count - 1].GetOperandType())
+						if (term.GetEraType() != terms[terms.Count - 1].GetEraType())
 							throw new CodeEE("'='の前後で型が一致しません");
 						terms.Add(term);
 					}
 					else
 					{
-						if (terms[terms.Count - 1].GetOperandType() == typeof(Int64))
+						if (terms[terms.Count - 1].GetEraType() == EraType.Integer)
 							terms.Add(new NullTerm(0));
 						else
 							terms.Add(new NullTerm(""));
@@ -154,7 +154,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			IOperandTerm term = reduceTerm(wc, false, endwith, VariableCode.__NULL__);
             if (term == null)
                 throw new CodeEE("構文を式として解釈できません");
-			if (term.GetOperandType() != typeof(Int64))
+			if (term.GetEraType() != EraType.Integer)
 				throw new CodeEE("式の結果が数値ではありません");
 			return term;
 		}
@@ -338,7 +338,7 @@ namespace MinorShift.Emuera.GameData.Expression
 				id = wc.Current as IdentifierWord;
 				if ((id != null) && (id.Code.Equals("TO", Config.SCVariable)))
 					throw new CodeEE("TOキーワードが2度使われています");
-				if (ret.LeftTerm.GetOperandType() != ret.RightTerm.GetOperandType())
+				if (ret.LeftTerm.GetEraType() != ret.RightTerm.GetEraType())
 					throw new CodeEE("TOキーワードの前後の型が一致していません");
 				return ret;
 			}

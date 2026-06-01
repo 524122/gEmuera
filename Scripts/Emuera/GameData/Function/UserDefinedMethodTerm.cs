@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using MinorShift.Emuera.GameProc;
+using MinorShift.Emuera.GameData;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.Sub;
 
@@ -11,6 +12,10 @@ namespace MinorShift.Emuera.GameData.Function
 	{
 		protected SuperUserDefinedMethodTerm(Type returnType)
 			: base(returnType)
+		{
+		}
+		protected SuperUserDefinedMethodTerm(EraType returnType)
+			: base(EraTypeHelper.ToClrType(returnType))
 		{
 		}
 		public abstract UserDefinedFunctionArgument Argument { get;}
@@ -41,9 +46,9 @@ namespace MinorShift.Emuera.GameData.Function
 			SingleTerm term = exm.Process.GetValue(this);
 			if (term == null)
 			{
-				if (GetOperandType() == typeof(Int64))
+				if (GetEraType() == EraType.Integer)
 					return new SingleTerm(0);
-				else if (GetOperandType() == typeof(double))
+				else if (GetEraType() == EraType.Float)
 					return new SingleTerm(0.0);
 				else
 					return new SingleTerm("");
@@ -67,7 +72,7 @@ namespace MinorShift.Emuera.GameData.Function
 			return new UserDefinedMethodTerm(arg, call.TopLabel.MethodType, call);
 		}
 
-		private UserDefinedMethodTerm(UserDefinedFunctionArgument arg, Type returnType, CalledFunction call)
+		private UserDefinedMethodTerm(UserDefinedFunctionArgument arg, EraType returnType, CalledFunction call)
 			: base(returnType)
 		{
 			argment = arg;

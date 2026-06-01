@@ -17,8 +17,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapCreateMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -36,8 +36,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapExistMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -51,8 +51,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapReleaseMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -69,8 +69,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapSetMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -88,8 +88,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapHasMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -105,8 +105,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapRemoveMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -123,8 +123,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapClearMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -140,8 +140,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapSizeMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -156,8 +156,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapGetMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -173,7 +173,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapGetKeysMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -220,7 +220,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapValuesMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -267,7 +267,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapToStringMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -295,7 +295,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapFromStringMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -343,8 +343,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapToXmlMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -364,8 +364,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapFromXmlMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -402,8 +402,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapMergeMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -422,8 +422,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapRemoveIfMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -445,8 +445,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MapFindKeyMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -497,7 +497,7 @@ namespace MinorShift.Emuera.GameData.Function
 
         static void WriteStringResults(ExpressionMediator exm, VariableTerm destination, string[] values)
         {
-            string[] target;
+            var target = exm.VEvaluator.RESULTS_ARRAY;
             if (destination != null && destination.Identifier.IsString && destination.Identifier.IsArray1D)
             {
                 try
@@ -510,7 +510,6 @@ namespace MinorShift.Emuera.GameData.Function
                 }
                 catch { }
             }
-            target = exm.VEvaluator.RESULTS_ARRAY;
             int max = Math.Min(values.Length, target.Length);
             for (int i = 0; i < max; i++)
                 target[i] = values[i];

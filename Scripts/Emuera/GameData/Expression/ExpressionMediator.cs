@@ -27,6 +27,10 @@ namespace MinorShift.Emuera.GameData.Expression
 		public readonly VariableEvaluator VEvaluator;
 		public readonly Process Process;
 		public readonly EmueraConsole Console;
+		public GameProc.ExecutionContext CurrentContext
+		{
+			get { return Process?.State?.CurrentContext; }
+		}
 		
 		
 		

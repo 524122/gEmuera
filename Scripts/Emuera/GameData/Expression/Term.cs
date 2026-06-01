@@ -55,7 +55,7 @@ namespace MinorShift.Emuera.GameData.Expression
 
         public override long GetIntValue(ExpressionMediator exm)
         {
-			if (GetOperandType() == typeof(double))
+			if (GetEraType() == EraType.Float)
 				return (Int64)fValue;
             return iValue;
         }
@@ -103,11 +103,11 @@ namespace MinorShift.Emuera.GameData.Expression
 
 		public override string ToString()
 		{
-			if (GetOperandType() == typeof(Int64))
+			if (GetEraType() == EraType.Integer)
 				return iValue.ToString();
-            if (GetOperandType() == typeof(string))
+            if (GetEraType() == EraType.String)
 				return sValue.ToString();
-            if (GetOperandType() == typeof(double))
+            if (GetEraType() == EraType.Float)
 				return fValue.ToString();
 			return base.ToString();
 		}
@@ -160,6 +160,12 @@ namespace MinorShift.Emuera.GameData.Expression
 
 	internal sealed class VariadicArgTerm : IOperandTerm
 	{
+		public VariadicArgTerm(List<IOperandTerm> args, EraType type)
+			: base(type)
+		{
+			this.args = args;
+		}
+
 		public VariadicArgTerm(List<IOperandTerm> args, Type type)
 			: base(type)
 		{

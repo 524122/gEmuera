@@ -74,6 +74,7 @@ namespace MinorShift.Emuera.GameData
 		
 		public int[] VariableIntArrayLength;
 		public int[] VariableStrArrayLength;
+		public int[] VariableFloatArrayLength;
 		public Int64[] VariableIntArray2DLength;
 		public Int64[] VariableStrArray2DLength;
 		public Int64[] VariableIntArray3DLength;
@@ -95,6 +96,16 @@ namespace MinorShift.Emuera.GameData
 		private readonly Dictionary<string, Int64> nicknameToTemplateMap = new Dictionary<string, Int64>();
 		private readonly Dictionary<string, Int64> callnameToTemplateMap = new Dictionary<string, Int64>();
 		private readonly Dictionary<string, Int64> masternameToTemplateMap = new Dictionary<string, Int64>();
+
+		public HashSet<string> GlobalSaveMaps { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> SaveMaps { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> GlobalSaveXmls { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> SaveXmls { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> GlobalSaveDTs { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> SaveDTs { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> StaticMaps { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> StaticXmls { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		public HashSet<string> StaticDTs { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 		public IReadOnlyDictionary<string, Int64> NameToTemplateMap { get { return nameToTemplateMap; } }
 		public IReadOnlyDictionary<string, Int64> NicknameToTemplateMap { get { return nicknameToTemplateMap; } }
@@ -164,6 +175,7 @@ namespace MinorShift.Emuera.GameData
 
 			VariableIntArrayLength = new int[(int)VariableCode.__COUNT_INTEGER_ARRAY__];
 			VariableStrArrayLength = new int[(int)VariableCode.__COUNT_STRING_ARRAY__];
+			VariableFloatArrayLength = new int[(int)VariableCode.__COUNT_FLOAT_ARRAY__];
 			VariableIntArray2DLength = new Int64[(int)VariableCode.__COUNT_INTEGER_ARRAY_2D__];
 			VariableStrArray2DLength = new Int64[(int)VariableCode.__COUNT_STRING_ARRAY_2D__];
 			VariableIntArray3DLength = new Int64[(int)VariableCode.__COUNT_INTEGER_ARRAY_3D__];
@@ -182,6 +194,8 @@ namespace MinorShift.Emuera.GameData
 			for (int i = 0; i < VariableStrArrayLength.Length; i++)
 				VariableStrArrayLength[i] = 100;
 			VariableStrArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.STR)] = MaxDataList[strIndex];
+			for (int i = 0; i < VariableFloatArrayLength.Length; i++)
+				VariableFloatArrayLength[i] = 10;
 
 			for (int i = 0; i < VariableIntArray2DLength.Length; i++)
 				VariableIntArray2DLength[i] = (100L << 32) + 100L;
@@ -476,6 +490,8 @@ check1break:
 								VariableIntArrayLength[id.CodeInt] = length;
 							else if (id.IsString)
 								VariableStrArrayLength[id.CodeInt] = length;
+							else if (id.IsFloat)
+								VariableFloatArrayLength[id.CodeInt] = length;
 						}
 					}
 					break;
@@ -669,6 +685,7 @@ check1break:
 			}
 			//if (!Program.AnalysisMode)
 			loadCharacterData(csvDir, disp);
+			loadGlobalVarExSetting(csvDir, disp);
 
 			//逆引き辞書を作成2 (RELATION)
 			for (int i = 0; i < CharacterTmplList.Count; i++)
@@ -681,6 +698,113 @@ check1break:
 				if (!string.IsNullOrEmpty(tmpl.Nickname) && !relationDic.ContainsKey(tmpl.Nickname))
                     relationDic.Add(tmpl.Nickname, (int)tmpl.No);
 			}
+		}
+
+		private void loadGlobalVarExSetting(string csvDir, bool disp)
+		{
+			GlobalSaveMaps.Clear();
+			SaveMaps.Clear();
+			GlobalSaveXmls.Clear();
+			SaveXmls.Clear();
+			GlobalSaveDTs.Clear();
+			SaveDTs.Clear();
+			StaticMaps.Clear();
+			StaticXmls.Clear();
+			StaticDTs.Clear();
+
+			if (!uEmuera.Utils.DirectoryExists(csvDir))
+				return;
+
+			// 原核心对 VarExt*.csv 固定递归搜索，不受“搜索子目录”配置影响。
+			// 这里仍走 uEmuera 文件 API，保证 Android/Godot 路径和大小写回退逻辑可用。
+			List<string> csvPaths = uEmuera.Utils.GetFilePaths(csvDir, "VarExt*.csv", SearchOption.AllDirectories);
+			if (Config.SortWithFilename)
+				csvPaths.Sort(StringComparer.OrdinalIgnoreCase);
+			for (int i = 0; i < csvPaths.Count; i++)
+				loadGlobalVarExSettingFile(csvPaths[i], getRelativeVarExtPath(csvDir, csvPaths[i]), disp);
+		}
+
+		private static string getRelativeVarExtPath(string rootDir, string fullPath)
+		{
+			if (string.IsNullOrEmpty(rootDir) || string.IsNullOrEmpty(fullPath))
+				return fullPath;
+			string normalizedRoot = rootDir.Replace('\\', '/');
+			string normalizedPath = fullPath.Replace('\\', '/');
+			if (!normalizedRoot.EndsWith("/"))
+				normalizedRoot += "/";
+			if (normalizedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+				return normalizedPath.Substring(normalizedRoot.Length);
+			return Path.GetFileName(fullPath);
+		}
+
+		private void loadGlobalVarExSettingFile(string csvPath, string csvName, bool disp)
+		{
+			EraStreamReader eReader = new EraStreamReader(false);
+			if (!eReader.OpenOnCache(csvPath, csvName))
+			{
+				output.PrintError(eReader.Filename + "のオープンに失敗しました");
+				return;
+			}
+			ScriptPosition position = null;
+			if (disp)
+				output.PrintSystemLine(eReader.Filename + "読み込み中・・・");
+			try
+			{
+				StringStream st = null;
+				while ((st = eReader.ReadEnabledLine()) != null)
+				{
+					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
+					string[] tokens = st.Substring().Split(',');
+					if (tokens.Length < 2)
+					{
+						ParserMediator.Warn("\",\"が必要です", position, 1);
+						continue;
+					}
+					if (tokens[0].Length == 0)
+					{
+						ParserMediator.Warn("\",\"で始まっています", position, 1);
+						continue;
+					}
+
+					string key = tokens[0].Trim();
+					if (key.Equals("GLOBAL_MAPS", Config.SCVariable))
+						addVarExtNames(GlobalSaveMaps, tokens);
+					else if (key.Equals("SAVE_MAPS", Config.SCVariable))
+						addVarExtNames(SaveMaps, tokens);
+					else if (key.Equals("GLOBAL_XMLS", Config.SCVariable))
+						addVarExtNames(GlobalSaveXmls, tokens);
+					else if (key.Equals("SAVE_XMLS", Config.SCVariable))
+						addVarExtNames(SaveXmls, tokens);
+					else if (key.Equals("GLOBAL_DTS", Config.SCVariable))
+						addVarExtNames(GlobalSaveDTs, tokens);
+					else if (key.Equals("SAVE_DTS", Config.SCVariable))
+						addVarExtNames(SaveDTs, tokens);
+					else if (key.Equals("STATIC_MAPS", Config.SCVariable))
+						addVarExtNames(StaticMaps, tokens);
+					else if (key.Equals("STATIC_XMLS", Config.SCVariable))
+						addVarExtNames(StaticXmls, tokens);
+					else if (key.Equals("STATIC_DTS", Config.SCVariable))
+						addVarExtNames(StaticDTs, tokens);
+				}
+			}
+			catch
+			{
+				uEmuera.Media.SystemSounds.Hand.Play();
+				if (position != null)
+					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+				else
+					output.PrintError("予期しないエラーが発生しました");
+			}
+			finally
+			{
+				eReader.Close();
+			}
+		}
+
+		private static void addVarExtNames(HashSet<string> target, string[] tokens)
+		{
+			for (int i = 1; i < tokens.Length; i++)
+				target.Add(tokens[i].Trim());
 		}
 
 		public bool isDefined(VariableCode varCode, string str)

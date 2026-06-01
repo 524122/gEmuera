@@ -130,8 +130,10 @@ namespace MinorShift.Emuera.GameProc.Function
 					IOperandTerm[] terms = ((SpPrintVArgument)func.Argument).Terms;
 					foreach (IOperandTerm termV in terms)
 					{
-						if (termV.GetOperandType() == typeof(Int64))
+						if (termV.GetEraType() == EraType.Integer)
 							builder.Append(termV.GetIntValue(exm).ToString());
+						else if (termV.GetEraType() == EraType.Float)
+							builder.Append(termV.GetFloatValue(exm).ToString());
 						else
 							builder.Append(termV.GetStrValue(exm));
 					}
@@ -371,6 +373,40 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private sealed class CUSTOMDRAWLINE_Instruction : AbstractInstruction
+		{
+			public CUSTOMDRAWLINE_Instruction()
+			{
+				ArgBuilder = null;
+				flag = METHOD_SAFE | EXTENDED;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				StringStream st = line.PopArgumentPrimitive();
+				if (st == null || st.EOS)
+					throw new CodeEE("引数が足りません");
+
+				// v24/snake 原核心把 CUSTOMDRAWLINE 后面的整段原始文本当作线条种子，
+				// 不能走普通 STR 表达式解析，否则未加引号的箱线字符会被误判为语法。
+				string rowStr = GlobalStatic.Console.getStBar(st.Substring());
+				return new ExpressionArgument(new SingleTerm(rowStr))
+				{
+					ConstStr = rowStr,
+					IsConst = true
+				};
+			}
+
+			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
+			{
+				if (GlobalStatic.Process.SkipPrint)
+					return;
+
+				GlobalStatic.Console.printCustomBar(func.Argument.ConstStr, true);
+				exm.Console.NewLine();
+			}
+		}
+
 		private sealed class DEBUGPRINT_Instruction : AbstractInstruction
 		{
 			public DEBUGPRINT_Instruction(bool form, bool newline)
@@ -419,14 +455,12 @@ namespace MinorShift.Emuera.GameProc.Function
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
 				IOperandTerm term = ((MethodArgument)func.Argument).MethodTerm;
-				//Type type = term.GetOperandType();
-				if (term.GetOperandType() == typeof(Int64))
+				if (term.GetEraType() == EraType.Integer)
 					exm.VEvaluator.RESULT = term.GetIntValue(exm);
-				else// if (func.Argument.MethodTerm.GetOperandType() == typeof(string))
+				else if (term.GetEraType() == EraType.Float)
+					exm.VEvaluator.RESULTF = term.GetFloatValue(exm);
+				else
 					exm.VEvaluator.RESULTS = term.GetStrValue(exm);
-				//これら以外の型は現状ない
-				//else
-				//	throw new ExeEE(func.Function.Name + "命令の型が不明");
 			}
 		}
 
@@ -1043,10 +1077,15 @@ namespace MinorShift.Emuera.GameProc.Function
 				{
 					callfArg.FuncTerm = GlobalStatic.IdentifierDictionary.GetFunctionMethod(GlobalStatic.LabelDictionary, callfArg.ConstStr, callfArg.RowArgs, true);
 				}
+				catch (Exception) when (isTry)
+				{
+					// TRYCALLF/TRYCALLFORMF 在预解析阶段必须和 snake/v24 一样静默失败，
+					// 否则带有无效签名或懒加载解析异常的可选函数会提前产生警告或中断加载。
+					return;
+				}
 				catch (CodeEE e)
 				{
-					if (!isTry)
-						ParserMediator.Warn(e.Message, func, 2, true, false);
+					ParserMediator.Warn(e.Message, func, 2, true, false);
 					return;
 				}
 				if (callfArg.FuncTerm == null)
@@ -1391,9 +1430,14 @@ namespace MinorShift.Emuera.GameProc.Function
 						end = temp;
 					}
 				}
-				if (var.IsString)
+				if (var.GetEraType() == EraType.String)
 				{
 					string src = spvarsetarg.Term.GetStrValue(exm);
+					exm.VEvaluator.SetValueAll(p, src, start, end);
+				}
+				else if (var.GetEraType() == EraType.Float)
+				{
+					double src = spvarsetarg.Term.GetFloatValue(exm);
 					exm.VEvaluator.SetValueAll(p, src, start, end);
 				}
 				else
@@ -1442,14 +1486,19 @@ namespace MinorShift.Emuera.GameProc.Function
 				}
 				if (!p.Identifier.IsCharacterData)
 					throw new CodeEE("命令CVARSETにキャラクタ変数でない変数" + p.Identifier.Name + "が渡されました");
-				if (index.GetOperandType() == typeof(string) && p.Identifier.IsArray1D)
+				if (index.GetEraType() == EraType.String && p.Identifier.IsArray1D)
 				{
 					if (!GlobalStatic.ConstantData.isDefined(p.Identifier.Code, index.Str))
 						throw new CodeEE("文字列" + index.Str + "は配列変数" + p.Identifier.Name + "の要素ではありません");
 				}
-				if (p.Identifier.IsString)
+				if (p.Identifier.GetEraType() == EraType.String)
 				{
 					string src = spvarsetarg.Term.GetStrValue(exm);
+					exm.VEvaluator.SetValueAllEachChara(p, index, src, start, end);
+				}
+				else if (p.Identifier.GetEraType() == EraType.Float)
+				{
+					double src = spvarsetarg.Term.GetFloatValue(exm);
 					exm.VEvaluator.SetValueAllEachChara(p, index, src, start, end);
 				}
 				else
@@ -1801,12 +1850,12 @@ namespace MinorShift.Emuera.GameProc.Function
 					warn(terms.Length < 1 ? "引数が足りません" : "引数が多すぎます", line, 2, false);
 					return null;
 				}
-				if (terms[0] == null || terms[0].GetOperandType() != typeof(string))
+				if (terms[0] == null || terms[0].GetEraType() != EraType.String)
 				{
 					warn("第１引数が文字列ではありません", line, 2, false);
 					return null;
 				}
-				if (terms.Length > 1 && terms[1] != null && terms[1].GetOperandType() != typeof(Int64))
+				if (terms.Length > 1 && terms[1] != null && terms[1].GetEraType() != EraType.Integer)
 				{
 					warn("第２引数が数値ではありません", line, 2, false);
 					return null;
@@ -1934,12 +1983,18 @@ namespace MinorShift.Emuera.GameProc.Function
 				{
 					if (arg.RowArgs[i] is VariableTerm varTerm)
 					{
-						if (varTerm.GetOperandType() == typeof(string))
-							varTerm.SetValue(pluginArgs[i].strValue, exm);
-						else if (varTerm.GetOperandType() == typeof(double))
-							varTerm.SetValue(pluginArgs[i].floatValue, exm);
-						else
-							varTerm.SetValue(pluginArgs[i].intValue, exm);
+						switch (varTerm.GetEraType())
+						{
+							case EraType.String:
+								varTerm.SetValue(pluginArgs[i].strValue, exm);
+								break;
+							case EraType.Float:
+								varTerm.SetValue(pluginArgs[i].floatValue, exm);
+								break;
+							default:
+								varTerm.SetValue(pluginArgs[i].intValue, exm);
+								break;
+						}
 					}
 				}
 			}
@@ -2424,14 +2479,22 @@ namespace MinorShift.Emuera.GameProc.Function
 				{
 					SnakeVarsArgument arg = (SnakeVarsArgument)func.Argument;
 					UserDefinedVariableToken token = func.ParentLabelLine.GetPrivateVariable(arg.Name);
-					if (token != null && token.GetLength(0) == 1)
-						token.SetValue(arg.InitialValue ?? "", new long[] { 0 });
+					if (token != null)
+					{
+						token.In();
+						if (token.GetLength(0) == 1)
+							token.SetValue(arg.InitialValue ?? "", new long[] { 0 });
+					}
 					return;
 				}
 				SnakeVariArgument iarg = (SnakeVariArgument)func.Argument;
 				UserDefinedVariableToken itoken = func.ParentLabelLine.GetPrivateVariable(iarg.Name);
-				if (itoken != null && itoken.GetLength(0) == 1)
-					itoken.SetValue(iarg.InitialValue == null ? 0 : iarg.InitialValue.GetIntValue(exm), new long[] { 0 });
+				if (itoken != null)
+				{
+					itoken.In();
+					if (itoken.GetLength(0) == 1)
+						itoken.SetValue(iarg.InitialValue == null ? 0 : iarg.InitialValue.GetIntValue(exm), new long[] { 0 });
+				}
 			}
 		}
 
@@ -2737,7 +2800,7 @@ namespace MinorShift.Emuera.GameProc.Function
 					if (refVar.Dimension == 0 && srcVar.Dimension == 0)
 						refVar.SetScalarRef(srcVar, new Int64[0]);
 					else
-						refVar.SetRef((Array)srcVar.GetArray());
+						refVar.SetRef(srcVar.GetArray());
 					exm.VEvaluator.RESULT = 1;
 				}
 				return;
@@ -3108,10 +3171,24 @@ namespace MinorShift.Emuera.GameProc.Function
 				IOperandTerm selectValue = ((ExpressionArgument)func.Argument).Term;
 				string sValue = null;
 				Int64 iValue = 0;
+				double fValue = 0.0;
 				if (selectValue.IsInteger)
 					iValue = selectValue.GetIntValue(exm);
+				else if (selectValue.IsFloat)
+					fValue = selectValue.GetFloatValue(exm);
 				else
 					sValue = selectValue.GetStrValue(exm);
+				if (func.SelectCaseJumpTable != null)
+				{
+					if (selectValue.IsInteger)
+						caseJumpto = func.SelectCaseJumpTable.Lookup(iValue);
+					else if (selectValue.IsFloat)
+						caseJumpto = func.SelectCaseJumpTable.Lookup(fValue);
+					else
+						caseJumpto = func.SelectCaseJumpTable.Lookup(sValue);
+					state.JumpTo(caseJumpto);
+					return;
+				}
 				//チェック済み
 				//if (func.IfCaseList == null)
 				//	throw new ExeEE("SELECTCASEのCASEリストが適正に作成されていない");
@@ -3137,6 +3214,18 @@ namespace MinorShift.Emuera.GameProc.Function
 					if (selectValue.IsInteger)
 					{
 						Int64 Is = iValue;
+						foreach (CaseExpression caseExp in caseArg.CaseExps)
+						{
+							if (caseExp.GetBool(Is, exm))
+							{
+								caseJumpto = line;
+								goto casefound;
+							}
+						}
+					}
+					else if (selectValue.IsFloat)
+					{
+						double Is = fValue;
 						foreach (CaseExpression caseExp in caseArg.CaseExps)
 						{
 							if (caseExp.GetBool(Is, exm))
@@ -3426,13 +3515,13 @@ namespace MinorShift.Emuera.GameProc.Function
 					IOperandTerm term = ((ExpressionArgument)func.Argument).Term;
 					if (term != null)
 					{
-						if (label.MethodType != term.GetOperandType())
+						if (label.MethodType != term.GetEraType())
 						{
-							if (label.MethodType == typeof(Int64))
+							if (label.MethodType == EraType.Integer)
 								ParserMediator.Warn("#FUNCTIONで始まる関数の戻り値に整数型以外が指定されました", func, 2, true, false);
-							else if (label.MethodType == typeof(string))
+							else if (label.MethodType == EraType.String)
 								ParserMediator.Warn("#FUNCTIONSで始まる関数の戻り値に文字列型以外が指定されました", func, 2, true, false);
-							else if (label.MethodType == typeof(double))
+							else if (label.MethodType == EraType.Float)
 								ParserMediator.Warn("#FUNCTIONFで始まる関数の戻り値に小数型以外が指定されました", func, 2, true, false);
 						}
 					}

@@ -29,7 +29,10 @@ namespace MinorShift.Emuera.GameProc.Function
 			string errmes;
 			try
 			{
-				arg = line.Function.ArgBuilder.CreateArgument(line, GlobalStatic.EMediator);
+				if (line.Function.ArgBuilder != null)
+					arg = line.Function.ArgBuilder.CreateArgument(line, GlobalStatic.EMediator);
+				else
+					arg = line.Function.Instruction.CreateArgument(line, GlobalStatic.EMediator);
 			}
 			catch (EmueraException e)
 			{

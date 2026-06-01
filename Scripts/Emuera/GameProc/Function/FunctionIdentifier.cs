@@ -88,7 +88,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.TEXT_BGC_OFF, new SNAKE_TEXT_BGC_OFF_Instruction());
 			addFunction(FunctionCode.TEXT_BGC_ON, new SNAKE_TEXT_BGC_ON_Instruction());
 			addFunction(FunctionCode.DT_COLUMN_OPTIONS, new SNAKE_DT_COLUMN_OPTIONS_Instruction());
-			if (Program.IsSnakeProfile)
+			if (Config.UseScopedVariableInstruction)
 			{
 				addFunction(FunctionCode.VARI, new SNAKE_VARI_Instruction(false));
 				addFunction(FunctionCode.VARS, new SNAKE_VARI_Instruction(true));
@@ -331,7 +331,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.SORTCHARA, new SORTCHARA_Instruction());
 			addFunction(FunctionCode.FONTSTYLE, argb[FunctionArgType.INT_EXPRESSION_NULLABLE], METHOD_SAFE | EXTENDED);
 			addFunction(FunctionCode.ALIGNMENT, argb[FunctionArgType.STR], METHOD_SAFE | EXTENDED);
-			addFunction(FunctionCode.CUSTOMDRAWLINE, argb[FunctionArgType.STR], METHOD_SAFE | EXTENDED);
+			addFunction(FunctionCode.CUSTOMDRAWLINE, new CUSTOMDRAWLINE_Instruction());
 			addFunction(FunctionCode.DRAWLINEFORM, argb[FunctionArgType.FORM_STR], METHOD_SAFE | EXTENDED);
 			addFunction(FunctionCode.CLEARTEXTBOX, argb[FunctionArgType.VOID], METHOD_SAFE | EXTENDED);
 

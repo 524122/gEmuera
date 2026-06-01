@@ -485,10 +485,10 @@ namespace MinorShift.Emuera.GameView
 			return Html2DisplayLine(str, sm, console, -1);
 		}
 
-		private static ConsoleDisplayLine[] Html2DisplayLine(string str, StringMeasure sm, EmueraConsole console, int customWidth)
+		private static ConsoleDisplayLine[] Html2DisplayLine(string str, StringMeasure sm, EmueraConsole console, int customWidth, List<ConsoleButtonString> buttonsOutput = null)
 		{
 			List<AConsoleDisplayPart> cssList = new List<AConsoleDisplayPart>();
-			List<ConsoleButtonString> buttonList = new List<ConsoleButtonString>();
+			List<ConsoleButtonString> buttonList = buttonsOutput ?? new List<ConsoleButtonString>();
 			StringStream st = new StringStream(str);
 			int found;
 			bool hasComment = str.IndexOf("<!--") >= 0;
@@ -579,6 +579,12 @@ namespace MinorShift.Emuera.GameView
 			if (cssList.Count > 0)
 				buttonList.Add(cssToButton(cssList, state, console));
 
+			// buttonsOutput != null の場合は Html2ButtonList からの呼び出し。
+			// ボタンリスト（強制改行マーカー null を含む）をそのまま返し、
+			// ButtonsToDisplayLines による折り返しは後続の Flush で行う。
+			if (buttonsOutput != null)
+				return null;
+
 			foreach(ConsoleButtonString button in buttonList)
 			{
 				if (button != null && button.PointXisLocked)
@@ -651,13 +657,10 @@ namespace MinorShift.Emuera.GameView
 
 		public static ConsoleButtonString[] Html2ButtonList(string str, StringMeasure sm, EmueraConsole console)
 		{
-			ConsoleDisplayLine[] lines = Html2DisplayLine(str, sm, console);
+			// 参考実装と同じく、buttonList（強制改行マーカー null を含む）を直接取得し、
+			// ConsoleDisplayLine[] 経由で改行情報が失われるのを防ぐ。
 			List<ConsoleButtonString> buttons = new List<ConsoleButtonString>();
-			foreach (ConsoleDisplayLine line in lines)
-			{
-				foreach (ConsoleButtonString button in line.Buttons)
-					buttons.Add(button);
-			}
+			Html2DisplayLine(str, sm, console, -1, buttons);
 			return buttons.ToArray();
 		}
 

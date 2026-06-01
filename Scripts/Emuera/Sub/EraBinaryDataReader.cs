@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 using System.IO.Compression;
 using System.Xml;
+using MinorShift.Emuera.GameData.Variable;
 
 namespace MinorShift.Emuera.Sub
 {
@@ -166,16 +167,20 @@ namespace MinorShift.Emuera.Sub
 		public abstract string ReadString();
 		public abstract Int64 ReadInt();
 		public abstract void ReadIntArray(Int64[] refArray, bool needInit);
+		public abstract void ReadIntArray(SparseArray<Int64> refArray, bool needInit);
 		public abstract void ReadIntArray2D(Int64[,] refArray, bool needInit);
 		public abstract void ReadIntArray3D(Int64[, ,] refArray, bool needInit);
 		public abstract void ReadStrArray(string[] refArray, bool needInit);
+		public abstract void ReadStrArray(SparseArray<string> refArray, bool needInit);
 		public abstract void ReadStrArray2D(string[,] refArray, bool needInit);
 		public abstract void ReadStrArray3D(string[, ,] refArray, bool needInit);
 		public abstract double ReadFloat();
 		public abstract void ReadFloatArray(double[] refArray, bool needInit);
+		public abstract void ReadFloatArray(SparseArray<double> refArray, bool needInit);
 		public abstract void ReadFloatArray2D(double[,] refArray, bool needInit);
 		public abstract void ReadFloatArray3D(double[, ,] refArray, bool needInit);
 		public abstract void ReadPcFloatArray(double[] refArray, bool needInit);
+		public abstract void ReadPcFloatArray(SparseArray<double> refArray, bool needInit);
 		public abstract void ReadPcFloatArray2D(double[,] refArray, bool needInit);
 		public abstract void ReadPcFloatArray3D(double[, ,] refArray, bool needInit);
 		public abstract KeyValuePair<string, EraSaveDataType> ReadVariableCode();
@@ -339,6 +344,14 @@ namespace MinorShift.Emuera.Sub
 						oriArray[x] = refArray[x];
 				}
 				return;
+			}
+
+			public override void ReadIntArray(SparseArray<Int64> refArray, bool needInit)
+			{
+				Int64[] buffer = refArray == null ? null : refArray.ToArray();
+				ReadIntArray(buffer, needInit);
+				if (refArray != null)
+					refArray.FromArray(buffer);
 			}
 			public override void ReadIntArray2D(Int64[,] refArray, bool needInit)
 			{
@@ -609,6 +622,14 @@ namespace MinorShift.Emuera.Sub
 				}
 				return;
 			}
+
+			public override void ReadStrArray(SparseArray<string> refArray, bool needInit)
+			{
+				string[] buffer = refArray == null ? null : refArray.ToArray();
+				ReadStrArray(buffer, needInit);
+				if (refArray != null)
+					refArray.FromArray(buffer);
+			}
 			public override void ReadStrArray2D(string[,] refArray, bool needInit)
 			{
 				string[,] oriArray = null;
@@ -707,6 +728,14 @@ namespace MinorShift.Emuera.Sub
 				if (needInit && refArray != null)
 					for (int x = copyLength; x < length0; x++)
 						refArray[x] = 0;
+			}
+
+			public override void ReadPcFloatArray(SparseArray<double> refArray, bool needInit)
+			{
+				double[] buffer = refArray == null ? null : refArray.ToArray();
+				ReadPcFloatArray(buffer, needInit);
+				if (refArray != null)
+					refArray.FromArray(buffer);
 			}
 
 			public override void ReadPcFloatArray2D(double[,] refArray, bool needInit)
@@ -811,6 +840,14 @@ namespace MinorShift.Emuera.Sub
 						oriArray[x] = refArray[x];
 				}
 				return;
+			}
+
+			public override void ReadFloatArray(SparseArray<double> refArray, bool needInit)
+			{
+				double[] buffer = refArray == null ? null : refArray.ToArray();
+				ReadFloatArray(buffer, needInit);
+				if (refArray != null)
+					refArray.FromArray(buffer);
 			}
 
 			public override void ReadFloatArray2D(double[,] refArray, bool needInit)

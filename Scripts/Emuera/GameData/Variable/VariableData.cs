@@ -19,8 +19,8 @@ namespace MinorShift.Emuera.GameData.Variable
 		readonly Int64[] dataInteger;
 		readonly string[] dataString;
 		readonly double[] dataFloat;
-		readonly Int64[][] dataIntegerArray;
-		readonly string[][] dataStringArray;
+		readonly SparseArray<Int64>[] dataIntegerArray;
+		readonly SparseArray<string>[] dataStringArray;
 		readonly double[][] dataFloatArray;
 		readonly Int64[][,] dataIntegerArray2D;
 		readonly string[][,] dataStringArray2D;
@@ -34,8 +34,8 @@ namespace MinorShift.Emuera.GameData.Variable
 		public Int64[] DataInteger { get { return dataInteger; } }
 		public string[] DataString { get { return dataString; } }
 		public double[] DataFloat { get { return dataFloat; } }
-		public Int64[][] DataIntegerArray { get { return dataIntegerArray; } }
-		public string[][] DataStringArray { get { return dataStringArray; } }
+		public SparseArray<Int64>[] DataIntegerArray { get { return dataIntegerArray; } }
+		public SparseArray<string>[] DataStringArray { get { return dataStringArray; } }
 		public double[][] DataFloatArray { get { return dataFloatArray; } }
 		public Int64[][,] DataIntegerArray2D { get { return dataIntegerArray2D; } }
 		public string[][,] DataStringArray2D { get { return dataStringArray2D; } }
@@ -93,16 +93,16 @@ namespace MinorShift.Emuera.GameData.Variable
 			dataInteger = new Int64[(int)VariableCode.__COUNT_INTEGER__];
 			dataFloat = new double[1];//RESULTF only
 
-			dataIntegerArray = new Int64[(int)VariableCode.__COUNT_INTEGER_ARRAY__][];
+			dataIntegerArray = new SparseArray<Int64>[(int)VariableCode.__COUNT_INTEGER_ARRAY__];
 			for (int i = 0; i < dataIntegerArray.Length; i++)
-				dataIntegerArray[i] = new Int64[constant.VariableIntArrayLength[i]];
+				dataIntegerArray[i] = new SparseArray<Int64>() { Length = constant.VariableIntArrayLength[i] };
 
 			dataString = new string[(int)VariableCode.__COUNT_STRING__];
 
-			dataStringArray = new string[(int)VariableCode.__COUNT_STRING_ARRAY__][];
+			dataStringArray = new SparseArray<string>[(int)VariableCode.__COUNT_STRING_ARRAY__];
 
 			for (int i = 0; i < dataStringArray.Length; i++)
-				dataStringArray[i] = new string[constant.VariableStrArrayLength[i]];
+				dataStringArray[i] = new SparseArray<string>() { Length = constant.VariableStrArrayLength[i] };
 
 
 			dataIntegerArray2D = new Int64[(int)VariableCode.__COUNT_INTEGER_ARRAY_2D__][,];
@@ -302,6 +302,8 @@ namespace MinorShift.Emuera.GameData.Variable
 			varTokenDic.Add("GAMEBASE_INFO", new StrConstantToken(VariableCode.GAMEBASE_INFO, this, gamebase.ScriptDetail));
 			varTokenDic.Add("GAMEBASE_YEAR", new StrConstantToken(VariableCode.GAMEBASE_YEAR, this, gamebase.ScriptYear));
 			varTokenDic.Add("GAMEBASE_TITLE", new StrConstantToken(VariableCode.GAMEBASE_TITLE, this, gamebase.ScriptTitle));
+			varTokenDic.Add("GAMEBASE_URL", new StrConstantToken(VariableCode.GAMEBASE_URL, this, gamebase.UpdateCheckURL));
+			varTokenDic.Add("GAMEBASE_VERSIONNAME", new StrConstantToken(VariableCode.GAMEBASE_VERSIONNAME, this, gamebase.VersionName));
 
 
 			varTokenDic.Add("GAMEBASE_GAMECODE", new IntConstantToken(VariableCode.GAMEBASE_GAMECODE, this, gamebase.ScriptUniqueCode));
@@ -348,9 +350,9 @@ namespace MinorShift.Emuera.GameData.Variable
 			localvarTokenDic.Add("LOCAL", new VariableLocal(VariableCode.LOCAL, size, CreateLocalInt));
 			size = constant.VariableIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARG)];
 			localvarTokenDic.Add("ARG", new VariableLocal(VariableCode.ARG, size, CreateLocalInt));
-			size = constant.VariableIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.LOCALF)];
+			size = constant.VariableFloatArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.LOCALF)];
 			localvarTokenDic.Add("LOCALF", new VariableLocal(VariableCode.LOCALF, size, CreateLocalFloat));
-			size = constant.VariableIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARGF)];
+			size = constant.VariableFloatArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARGF)];
 			localvarTokenDic.Add("ARGF", new VariableLocal(VariableCode.ARGF, size, CreateLocalFloat));
 			size = constant.VariableStrArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.LOCALS)];
 			localvarTokenDic.Add("LOCALS", new VariableLocal(VariableCode.LOCALS, size, CreateLocalStr));
@@ -627,12 +629,10 @@ namespace MinorShift.Emuera.GameData.Variable
 		public void SetDefaultGlobalValue()
 		{
 
-			Int64[] globalInt = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.GLOBAL];
-			string[] globalStr = dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.GLOBALS];
-			for (int i = 0; i < globalInt.Length; i++)
-				globalInt[i] = 0;
-			for (int i = 0; i < globalStr.Length; i++)
-				globalStr[i] = null;
+			SparseArray<Int64> globalInt = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.GLOBAL];
+			SparseArray<string> globalStr = dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.GLOBALS];
+			globalInt.Clear();
+			globalStr.Clear();
 			foreach (UserDefinedVariableToken var in userDefinedGlobalVarList)
 				var.SetDefault();
 		}
@@ -668,12 +668,10 @@ namespace MinorShift.Emuera.GameData.Variable
 					case (int)(VariableCode.__LOWERCASE__ & VariableCode.GLOBAL):
 						break;
 					case (int)(VariableCode.__LOWERCASE__ & VariableCode.ITEMPRICE):
-						//constant.ItemPrice.CopyTo(dataIntegerArray[i], 0);
-						Buffer.BlockCopy(constant.ItemPrice, 0, dataIntegerArray[i], 0, 8 * dataIntegerArray[i].Length);
+						dataIntegerArray[i].FromArray(constant.ItemPrice);
 						break;
 					default:
-						for (int j = 0; j < dataIntegerArray[i].Length; j++)
-							dataIntegerArray[i][j] = 0;
+						dataIntegerArray[i].Clear();
 						break;
 				}
 			}
@@ -690,12 +688,11 @@ namespace MinorShift.Emuera.GameData.Variable
 					case (int)(VariableCode.__LOWERCASE__ & VariableCode.STR):
 						{
 							string[] csvStrData = constant.GetCsvNameList(VariableCode.__DUMMY_STR__);
-							csvStrData.CopyTo(dataStringArray[i], 0);
+							dataStringArray[i].FromArray(csvStrData);
 							break;
 						}
 					default:
-						for (int j = 0; j < dataStringArray[i].Length; j++)
-							dataStringArray[i][j] = null;
+						dataStringArray[i].Clear();
 						break;
 				}
 			}
@@ -740,9 +737,10 @@ namespace MinorShift.Emuera.GameData.Variable
 							array3D[x, y, z] = null;
 			}
 
-			Int64[] palamlv = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.PALAMLV];
+			SparseArray<Int64> palamlv = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.PALAMLV];
 			List<Int64> defPalam = Config.PalamLvDef;
-			defPalam.CopyTo(0, palamlv, 0, Math.Min(palamlv.Length, defPalam.Count));
+			for (int i = 0; i < Math.Min(palamlv.Length, defPalam.Count); i++)
+				palamlv[i] = defPalam[i];
 			//palamlv[0] = 0;
 			//palamlv[1] = 100;
 			//palamlv[2] = 500;
@@ -754,9 +752,10 @@ namespace MinorShift.Emuera.GameData.Variable
 			//palamlv[8] = 150000;
 			//palamlv[9] = 250000;
 
-			Int64[] explv = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXPLV];
+			SparseArray<Int64> explv = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXPLV];
 			List<Int64> defExpLv = Config.ExpLvDef;
-			defExpLv.CopyTo(0, explv, 0, Math.Min(explv.Length, defExpLv.Count));
+			for (int i = 0; i < Math.Min(explv.Length, defExpLv.Count); i++)
+				explv[i] = defExpLv[i];
 			//explv[0] = 0;
 			//explv[1] = 1;
 			//explv[2] = 4;
@@ -766,7 +765,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			//dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ASSIPLAY][0] = 0;
 			//dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MASTER][0] = 0;
-			long[] array;
+			SparseArray<Int64> array;
 			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ASSI];
 			if (array.Length > 0) array[0] = -1;
 			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TARGET];
@@ -1288,6 +1287,14 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 		}
 
+		private void copyListToArray<T>(List<T> srcList, SparseArray<T> destArray)
+		{
+			destArray.Clear();
+			int count = Math.Min(srcList.Count, destArray.Length);
+			for (int i = 0; i < count; i++)
+				destArray[i] = srcList[i];
+		}
+
 		private void copyListToArray2D<T>(List<T[]> srcList, T[,] destArray)
 		{
 			int countX = Math.Min(srcList.Count, destArray.GetLength(0));
@@ -1472,9 +1479,15 @@ namespace MinorShift.Emuera.GameData.Variable
 					break;
 				case EraSaveDataType.IntArray:
 					if (vToken == null || !vToken.IsInteger || vToken.Dimension != 1)
-						reader.ReadIntArray(null, true);
+						reader.ReadIntArray((long[])null, true);
 					else
-						reader.ReadIntArray((long[])vToken.GetArray(), true);
+					{
+						object arrObj = vToken.GetArray();
+						if (arrObj is SparseArray<Int64> sparseArray)
+							reader.ReadIntArray(sparseArray, true);
+						else
+							reader.ReadIntArray((long[])arrObj, true);
+					}
 					break;
 				case EraSaveDataType.IntArray2D:
 					if (vToken == null || !vToken.IsInteger || vToken.Dimension != 2)
@@ -1490,9 +1503,15 @@ namespace MinorShift.Emuera.GameData.Variable
 					break;
 				case EraSaveDataType.StrArray:
 					if (vToken == null || !vToken.IsString || vToken.Dimension != 1)
-						reader.ReadStrArray(null, true);
+						reader.ReadStrArray((string[])null, true);
 					else
-						reader.ReadStrArray((string[])vToken.GetArray(), true);
+					{
+						object arrObj = vToken.GetArray();
+						if (arrObj is SparseArray<string> sparseArray)
+							reader.ReadStrArray(sparseArray, true);
+						else
+							reader.ReadStrArray((string[])arrObj, true);
+					}
 					break;
 				case EraSaveDataType.StrArray2D:
 					if (vToken == null || !vToken.IsString || vToken.Dimension != 2)
@@ -1514,9 +1533,15 @@ namespace MinorShift.Emuera.GameData.Variable
 					break;
 				case EraSaveDataType.PcFloatArray:
 					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 1)
-						reader.ReadPcFloatArray(null, true);
+						reader.ReadPcFloatArray((double[])null, true);
 					else
-						reader.ReadPcFloatArray((double[])vToken.GetArray(), true);
+					{
+						object arrObj = vToken.GetArray();
+						if (arrObj is SparseArray<double> sparseArray)
+							reader.ReadPcFloatArray(sparseArray, true);
+						else
+							reader.ReadPcFloatArray((double[])arrObj, true);
+					}
 					break;
 				case EraSaveDataType.PcFloatArray2D:
 					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 2)
@@ -1538,9 +1563,15 @@ namespace MinorShift.Emuera.GameData.Variable
 					break;
 				case EraSaveDataType.FloatArray:
 					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 1)
-						reader.ReadFloatArray(null, true);
+						reader.ReadFloatArray((double[])null, true);
 					else
-						reader.ReadFloatArray((double[])vToken.GetArray(), true);
+					{
+						object arrObj = vToken.GetArray();
+						if (arrObj is SparseArray<double> sparseArray)
+							reader.ReadFloatArray(sparseArray, true);
+						else
+							reader.ReadFloatArray((double[])arrObj, true);
+					}
 					break;
 				case EraSaveDataType.FloatArray2D:
 					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 2)

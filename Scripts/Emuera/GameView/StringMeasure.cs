@@ -6,7 +6,6 @@ using MinorShift.Emuera.Sub;
 using MinorShift._Library;
 //using System.Windows.Forms;
 using uEmuera.Drawing;
-using GodotFont = Godot.Font;
 
 namespace MinorShift.Emuera.GameView
 {
@@ -17,10 +16,6 @@ namespace MinorShift.Emuera.GameView
 	/// </summary>
 	internal sealed class StringMeasure : IDisposable
 	{
-		const string BundledConsoleFontPath = "res://Fonts/MS Gothic.ttf";
-		static readonly bool UseGodotTextMeasure = Godot.OS.GetName() == "Android";
-		static GodotFont godotMeasureFont;
-
 		public StringMeasure()
 		{
 			textDrawingMode = Config.TextDrawingMode;
@@ -46,49 +41,13 @@ namespace MinorShift.Emuera.GameView
 
 		public int GetDisplayLength(string s, Font font)
 		{
-            if (string.IsNullOrEmpty(s))
-            	return 0;
-            if (UseGodotTextMeasure)
-            {
-            	GodotFont measureFont = GetGodotMeasureFont();
-            	if (measureFont != null)
-            		return System.Math.Max(0, (int)System.Math.Ceiling(measureFont.GetStringSize(s, fontSize: (int)System.Math.Round(font.Size)).X));
-            }
-            if (textDrawingMode == TextDrawingMode.GRAPHICS)
-            {
-            	if (s.Contains("\t"))
-            		s = s.Replace("\t", "        ");
-            //	ranges[0].Length = s.Length;
-            //	//CharacterRange[] ranges = new CharacterRange[] { new CharacterRange(0, s.Length) };
-            //	sf.SetMeasurableCharacterRanges(ranges);
-            //	Region[] regions = graph.MeasureCharacterRanges(s, font, layoutRect, sf);
-            //	RectangleF rectF = regions[0].GetBounds(graph);
-            //	//return (int)rectF.Width;//プロポーショナルでなくても数ピクセルずれる
-            //	return (int)((int)((rectF.Width - 1) / fontDisplaySize + 0.95f) * fontDisplaySize);
-            }
-            //else if (textDrawingMode == TextDrawingMode.TEXTRENDERER)
-            //{
-            //	Size size = TextRenderer.MeasureText(graph, s, font, layoutSize, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
-            //	//Size size = TextRenderer.MeasureText(g, s, StaticConfig.Font);
-            //	return size.Width;
-            //}
-            //else// if (StaticConfig.TextDrawingMode == TextDrawingMode.WINAPI)
-            //{
-            //	Size size = GDI.MeasureText(s, font);
-            //	return size.Width;
-            //}
-            ////来るわけがない
-            ////else
-            ////    throw new ExeEE("描画モード不明");
-
-            return uEmuera.Utils.GetDisplayLength(s, font);
-		}
-
-		static GodotFont GetGodotMeasureFont()
-		{
-			if (godotMeasureFont == null)
-				godotMeasureFont = Godot.ResourceLoader.Load<GodotFont>(BundledConsoleFontPath);
-			return godotMeasureFont;
+			if (string.IsNullOrEmpty(s))
+				return 0;
+			if (textDrawingMode == TextDrawingMode.GRAPHICS && s.Contains("\t"))
+				s = s.Replace("\t", "        ");
+			// Godot 的真实字形测量会随平台字体 fallback 改变；控制台布局必须与
+			// STRLEN/半角全角单元格一致，否则中文地图和箱线字符在 Android 上列错位。
+			return uEmuera.Utils.GetDisplayLength(s, font);
 		}
 
 

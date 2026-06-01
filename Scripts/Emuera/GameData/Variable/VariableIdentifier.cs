@@ -13,11 +13,19 @@ namespace MinorShift.Emuera.GameData.Variable
 	internal sealed class VariableIdentifier
 	{
 		private VariableIdentifier(VariableCode code)
-		{ this.code = code; }
+		{
+			this.code = code;
+			descriptor = VariableDescriptorTable.GetDescriptorByCode(code);
+		}
 		private VariableIdentifier(VariableCode code, string scope)
-		{ this.code = code; this.scope = scope; }
+		{
+			this.code = code;
+			this.scope = scope;
+			descriptor = VariableDescriptorTable.GetDescriptorByCode(code);
+		}
 		readonly VariableCode code;
 		readonly string scope;
+		readonly VariableDescriptor descriptor;
 		public VariableCode Code
 		{ get { return code; } }
 		public string Scope
@@ -26,6 +34,8 @@ namespace MinorShift.Emuera.GameData.Variable
 		{ get { return (int)(code & VariableCode.__LOWERCASE__); } }
 		public VariableCode CodeFlag
 		{ get { return code & VariableCode.__UPPERCASE__; } }
+		public VariableDescriptor Descriptor
+		{ get { return descriptor; } }
 		//public int Dimension
 		//{
 		//    get
@@ -52,70 +62,70 @@ namespace MinorShift.Emuera.GameData.Variable
 		{
 			get
 			{
-				return ((code & VariableCode.__CHARACTER_DATA__) == VariableCode.__CHARACTER_DATA__);
+				return descriptor.HasAttribute(VariableAttribute.CharacterData);
 			}
 		}
 		public bool IsInteger
 		{
 			get
 			{
-				return ((code & VariableCode.__INTEGER__) == VariableCode.__INTEGER__);
+				return descriptor.IsInteger;
 			}
 		}
 		public bool IsString
 		{
 			get
 			{
-				return ((code & VariableCode.__STRING__) == VariableCode.__STRING__);
+				return descriptor.IsString;
 			}
 		}
 		public bool IsFloat
 		{
 			get
 			{
-				return ((code & VariableCode.__FLOAT__) == VariableCode.__FLOAT__);
+				return descriptor.IsFloat;
 			}
 		}
 		public bool IsArray1D
 		{
 			get
 			{
-				return ((code & VariableCode.__ARRAY_1D__) == VariableCode.__ARRAY_1D__);
+				return descriptor.Dimension == VariableDimension.Array1D;
 			}
 		}
 		public bool IsArray2D
 		{
 			get
 			{
-				return ((code & VariableCode.__ARRAY_2D__) == VariableCode.__ARRAY_2D__);
+				return descriptor.Dimension == VariableDimension.Array2D;
 			}
 		}
 		public bool IsArray3D
 		{
 			get
 			{
-				return ((code & VariableCode.__ARRAY_3D__) == VariableCode.__ARRAY_3D__);
+				return descriptor.Dimension == VariableDimension.Array3D;
 			}
 		}
 		public bool Readonly
 		{
 			get
 			{
-				return ((code & VariableCode.__UNCHANGEABLE__) == VariableCode.__UNCHANGEABLE__);
+				return descriptor.HasAttribute(VariableAttribute.Unchangeable);
 			}
 		}
 		public bool IsCalc
 		{
 			get
 			{
-				return ((code & VariableCode.__CALC__) == VariableCode.__CALC__);
+				return descriptor.HasAttribute(VariableAttribute.Calc);
 			}
 		}
 		public bool IsLocal
 		{
 			get
 			{
-				return ((code & VariableCode.__LOCAL__) == VariableCode.__LOCAL__);
+				return descriptor.HasAttribute(VariableAttribute.Local);
 			}
 		}
 		//public bool IsConstant
@@ -129,7 +139,7 @@ namespace MinorShift.Emuera.GameData.Variable
         {
             get
             {
-                return ((code & VariableCode.__CAN_FORBID__) == VariableCode.__CAN_FORBID__);
+                return descriptor.HasAttribute(VariableAttribute.CanForbid);
             }
         }
 		readonly static Dictionary<string, VariableCode> nameDic = new Dictionary<string, VariableCode>();

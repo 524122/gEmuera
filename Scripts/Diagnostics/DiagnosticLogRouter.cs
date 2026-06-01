@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using Godot;
 
 namespace gEmuera.Diagnostics
 {
@@ -20,6 +19,7 @@ namespace gEmuera.Diagnostics
         static int _cachedLoggingEnabled;
         static int _cachedRuntimeLogLevel = (int)EmueraLogLevel.Error;
         static int _cachedCategoryMask = (int)EmueraLogCategory.None;
+        static readonly double StopwatchTickToMilliseconds = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
         // 限流状态（轻量，非线程安全但可接受偶尔竞争）
         static readonly Dictionary<string, RateLimitBucket> _rateLimitBuckets = new Dictionary<string, RateLimitBucket>();
@@ -201,7 +201,7 @@ namespace gEmuera.Diagnostics
             if (string.IsNullOrEmpty(eventId))
                 eventId = "<unknown>";
 
-            long nowMs = (long)Time.GetTicksMsec();
+            long nowMs = GetMonotonicMilliseconds();
             lock (_rateLimitLock)
             {
                 // 帧计数刷新
@@ -275,6 +275,16 @@ namespace gEmuera.Diagnostics
         }
 
         public static long GetDroppedTotal() => Interlocked.Read(ref _droppedTotal);
+
+        /// <summary>
+        /// 诊断系统可能被后台 Emuera 线程在 Godot 退出阶段调用，不能依赖 Godot.Time 等引擎对象。
+        /// Stopwatch 是 CLR 单调时钟，适合日志限流和相对时间戳。
+        /// </summary>
+        public static long GetMonotonicMilliseconds()
+        {
+            return (long)(System.Diagnostics.Stopwatch.GetTimestamp() * StopwatchTickToMilliseconds);
+        }
+
         public static Dictionary<string, long> GetDroppedSummary()
         {
             lock (_droppedByEventId)
@@ -299,7 +309,7 @@ namespace gEmuera.Diagnostics
             return new DiagnosticLogRecord(
                 seq,
                 DateTimeOffset.UtcNow,
-                (long)Time.GetTicksMsec(),
+                GetMonotonicMilliseconds(),
                 level,
                 category,
                 eventId ?? "",

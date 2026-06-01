@@ -479,7 +479,7 @@ public partial class EmueraContent : Control
 		scaledContentRoot.AddChild(lineContainer);
 
 		htmlIslandContainer = new VBoxContainer();
-		htmlIslandContainer.MouseFilter = MouseFilterEnum.Ignore;
+		htmlIslandContainer.MouseFilter = MouseFilterEnum.Pass;
 		htmlIslandContainer.ClipContents = false;
 		htmlIslandContainer.AddThemeConstantOverride("separation", 0);
 		scaledContentRoot.AddChild(htmlIslandContainer);
@@ -572,29 +572,13 @@ public partial class EmueraContent : Control
 
 	int FontSize => Config.FontSize > 0 ? Config.FontSize : 18;
 
-	// Cached line height derived from the active font. Console rows are fixed
-	// height for predictable emuera layout and fast scroll-size calculation.
-	int _effectiveLineHeight = -1;
-	int EffectiveLineHeight
-	{
-		get
-		{
-			if (_effectiveLineHeight < 0)
-			{
-				if (mainFont != null)
-				{
-					int fontH = (int)System.Math.Ceiling(mainFont.GetHeight(FontSize));
-					int lineSpacing = 3;
-					_effectiveLineHeight = System.Math.Max(Config.LineHeight, fontH + lineSpacing);
-				}
-				else
-				{
-					_effectiveLineHeight = System.Math.Max(Config.LineHeight, FontSize + 9);
-				}
-			}
-			return _effectiveLineHeight;
-		}
-	}
+	// 控制台布局必须使用 emuera 配置行高，不能让 Godot 字体 fallback 的真实 metrics
+	// 反向撑高行盒。字体只参与 ConsoleTextPart 的绘制，并在固定行盒内裁剪。
+	int EffectiveLineHeight => Config.LineHeight > 0 ? Config.LineHeight : FontSize;
+
+	// HTML div 内部子行的推进距离必须与 v24/snake 核心一致，使用脚本配置行高。
+	// Godot 实际字体行高不能参与 div 子内容流式排版。
+	int HtmlDivLineHeight => EffectiveLineHeight;
 
 	void ApplyFont(Control control)
 	{
@@ -607,29 +591,19 @@ public partial class EmueraContent : Control
 	// is needed here because many console parts are absolutely positioned.
 	static void SetFixedControlSize(Control control, Vector2 size)
 	{
+		if (control is ConsoleTextPart textPart)
+			textPart.SetFixedSize(size);
 		control.CustomMinimumSize = size;
 		control.Size = size;
 	}
 
-	// Render a text fragment as a fixed-size Label. emuera gives absolute X/width
-	// for console text, so autowrap is deliberately disabled here.
-	Label CreateTextPart(string text, EmuColor color, EmuFont font, float width)
+	// Render a text fragment in emuera's fixed half/full-width grid. Godot Label
+	// uses real glyph advance, which makes CJK/box-drawing maps drift on Android.
+	Control CreateTextPart(string text, EmuColor color, EmuFont font, float width)
 	{
-		var label = new Label();
-		label.MouseFilter = MouseFilterEnum.Ignore;
-		label.Text = uEmuera.Utils.StripZeroWidth(text) ?? "";
-		ApplyFont(label);
-		label.AddThemeColorOverride("font_color", color.ToGodotColor());
-		if (font?.Bold == true)
-		{
-			label.AddThemeConstantOverride("outline_size", 1);
-			label.AddThemeColorOverride("font_outline_color", color.ToGodotColor());
-		}
-		label.VerticalAlignment = VerticalAlignment.Center;
-		label.ClipText = true;
-		label.AutowrapMode = TextServer.AutowrapMode.Off;
-		SetFixedControlSize(label, new Vector2(width, EffectiveLineHeight));
-		return label;
+		var textPart = new ConsoleTextPart(mainFont, FontSize, color.ToGodotColor(), font?.Bold == true, text);
+		SetFixedControlSize(textPart, new Vector2(width, EffectiveLineHeight));
+		return textPart;
 	}
 
 	const string BundledConsoleFontPath = "res://Fonts/MS Gothic.ttf";
@@ -696,27 +670,29 @@ public partial class EmueraContent : Control
 		return System.Math.Min(0, part.Top);
 	}
 
-	int GetPartBottom(AConsoleDisplayPart part, bool reserveImageOverflow)
+	int GetPartBottom(AConsoleDisplayPart part, bool reserveImageOverflow, int lineHeight = -1)
 	{
+		int baseLineHeight = lineHeight > 0 ? lineHeight : EffectiveLineHeight;
 		if (part == null)
-			return EffectiveLineHeight;
+			return baseLineHeight;
 		if (part is ConsoleImagePart image)
 		{
 			// SkiaSharp 核心按固定 LineHeight 推进行号，再把越界图片作为 escaped part 覆盖绘制。
 			// Godot 行布局也不能被图片撑高，否则会在图片后产生大量空白行；按钮命中范围才需要单独保留图片高度。
 			if (reserveImageOverflow && (image.Display == DisplayMode.Relative || image.Display == DisplayMode.AbsoluteLeftTop))
-				return GetImagePartBottom(image);
-			return EffectiveLineHeight;
+				return GetImagePartBottom(image, baseLineHeight);
+			return baseLineHeight;
 		}
-		if (part is ConsoleDivPart div && div.IsRelative)
-			return System.Math.Max(EffectiveLineHeight, div.Y + div.DivHeight);
-		return System.Math.Max(EffectiveLineHeight, part.Bottom);
+		if (part is ConsoleDivPart)
+			return baseLineHeight;
+		return System.Math.Max(baseLineHeight, part.Bottom);
 	}
 
-	int GetImagePartBottom(ConsoleImagePart image)
+	int GetImagePartBottom(ConsoleImagePart image, int lineHeight = -1)
 	{
+		int baseLineHeight = lineHeight > 0 ? lineHeight : EffectiveLineHeight;
 		if (image == null)
-			return EffectiveLineHeight;
+			return baseLineHeight;
 		int imageBottom = image.dest_rect.Y + System.Math.Abs(image.dest_rect.Height);
 		if (imageBottom <= image.dest_rect.Y)
 		{
@@ -726,7 +702,7 @@ public partial class EmueraContent : Control
 			if (naturalHeight > 0)
 				imageBottom = image.dest_rect.Y + naturalHeight;
 		}
-		return System.Math.Max(EffectiveLineHeight, imageBottom);
+		return System.Math.Max(baseLineHeight, imageBottom);
 	}
 
 	// 从 ConsoleImagePart 关联的精灵或纹理缓存中获取自然高度，用于 dest_rect.Height 异常时的回退。
@@ -770,13 +746,14 @@ public partial class EmueraContent : Control
 		return top;
 	}
 
-	int GetButtonBottom(ConsoleButtonString button, bool reserveImageOverflow = false)
+	int GetButtonBottom(ConsoleButtonString button, bool reserveImageOverflow = false, int lineHeight = -1)
 	{
-		int bottom = EffectiveLineHeight;
+		int baseLineHeight = lineHeight > 0 ? lineHeight : EffectiveLineHeight;
+		int bottom = baseLineHeight;
 		if (button?.StrArray == null)
 			return bottom;
 		foreach (var part in button.StrArray)
-			bottom = System.Math.Max(bottom, GetPartBottom(part, reserveImageOverflow));
+			bottom = System.Math.Max(bottom, GetPartBottom(part, reserveImageOverflow, baseLineHeight));
 		return bottom;
 	}
 
@@ -927,7 +904,7 @@ public partial class EmueraContent : Control
 					if (GenericUtils.IsUiLayoutTraceEnabled("button"))
 						QueueUiLayoutTrace(btn, "button", "", button.PointX, buttonTop, button.Width, buttonHeight);
 
-					int btnRight = button.PointX + button.Width;
+					int btnRight = Mathf.CeilToInt(btn.Position.X + btn.Size.X);
 					if (btnRight > maxLineRight) maxLineRight = btnRight;
 				}
 				else
@@ -936,7 +913,7 @@ public partial class EmueraContent : Control
 					{
 						AddPartToContainer(part, lineControl, 0);
 					}
-					int right = button.PointX + button.Width;
+					int right = GetButtonVisualRight(button, -1, false);
 					if (right > maxLineRight) maxLineRight = right;
 				}
 			}
@@ -990,6 +967,7 @@ public partial class EmueraContent : Control
 	{
 		if (buttonHeight <= 0)
 			buttonHeight = EffectiveLineHeight;
+		Rect2 hitRect = GetButtonVisualBounds(button, buttonTop, buttonHeight, button.PointX, button.PointX);
 		var btn = new Panel();
 		btn.FocusMode = FocusModeEnum.None;
 		btn.MouseForcePassScrollEvents = false;
@@ -1002,12 +980,13 @@ public partial class EmueraContent : Control
 		btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, inputs, generation);
 		btn.MouseEntered += () => GenericUtils.SetPointingButton(inputs, generation);
 		btn.MouseExited += () => GenericUtils.ClearPointingButton(generation);
+		btn.SetMeta("button_input", inputs);
 		btn.SetMeta("generation", generation);
 
 		var contentBox = new Control();
 		contentBox.MouseFilter = MouseFilterEnum.Ignore;
 		contentBox.ClipContents = false;
-		contentBox.Position = new Vector2(0, -buttonTop);
+		contentBox.Position = new Vector2(button.PointX - hitRect.Position.X, -hitRect.Position.Y);
 		btn.AddChild(contentBox);
 
 		foreach (var part in button.StrArray)
@@ -1019,11 +998,142 @@ public partial class EmueraContent : Control
 				c.MouseFilter = MouseFilterEnum.Ignore;
 		}
 
-		SetFixedControlSize(contentBox, new Vector2(button.Width, buttonHeight));
-		btn.CustomMinimumSize = new Vector2(button.Width, buttonHeight);
-		btn.Position = new Vector2(button.PointX, buttonTop);
-		btn.Size = new Vector2(button.Width, buttonHeight);
+		SetFixedControlSize(contentBox, hitRect.Size);
+		btn.CustomMinimumSize = hitRect.Size;
+		btn.Position = hitRect.Position;
+		btn.Size = hitRect.Size;
 		return btn;
+	}
+
+	Rect2 GetButtonVisualBounds(ConsoleButtonString button, int buttonTop, int buttonHeight, int renderRelX, int renderOriginX)
+	{
+		float left = button.PointX;
+		float top = buttonTop;
+		float right = button.PointX + System.Math.Max(button.Width, 1);
+		float bottom = buttonTop + System.Math.Max(buttonHeight, 1);
+		bool hasVisualPart = false;
+		if (button?.StrArray != null)
+		{
+			foreach (var part in button.StrArray)
+				hasVisualPart |= ExpandPartVisualBounds(part, renderRelX, renderOriginX, ref left, ref top, ref right, ref bottom);
+		}
+
+		// v24/snake 的 div 自带矩形命中；Godot 版必须把这些非文本宽度合并进 Panel，
+		// 否则 <button><div>...</div></button> 会因为按钮流式宽度为 0 而只能在 quick 面板点击。
+		if (!hasVisualPart && right <= left)
+			right = left + 1;
+		if (bottom <= top)
+			bottom = top + System.Math.Max(buttonHeight, EffectiveLineHeight);
+		return new Rect2(new Vector2(left, top), new Vector2(right - left, bottom - top));
+	}
+
+	int GetButtonVisualRight(ConsoleButtonString button, int rowHeight = -1, bool asControlButton = true)
+	{
+		int buttonTop = GetButtonTop(button);
+		int buttonBottom = GetButtonBottom(button, true, rowHeight);
+		int buttonHeight = buttonBottom - buttonTop;
+		if (buttonHeight <= 0)
+			buttonHeight = rowHeight > 0 ? rowHeight : EffectiveLineHeight;
+		int renderRelX = asControlButton ? button.PointX : 0;
+		int renderOriginX = asControlButton ? button.PointX : 0;
+		var bounds = GetButtonVisualBounds(button, buttonTop, buttonHeight, renderRelX, renderOriginX);
+		return Mathf.CeilToInt(bounds.Position.X + bounds.Size.X);
+	}
+
+	bool ExpandPartVisualBounds(AConsoleDisplayPart part, int relX, int originX, ref float left, ref float top, ref float right, ref float bottom)
+	{
+		if (part == null)
+			return false;
+		Rect2 rect;
+		if (part is ConsoleStyledString css)
+		{
+			if (string.IsNullOrEmpty(css.Str))
+				return false;
+			rect = new Rect2(css.PointX - relX, 0, System.Math.Max(css.Width, 1), EffectiveLineHeight);
+		}
+		else if (part is ConsoleDivPart div)
+		{
+			rect = new Rect2(GetHtmlDivPosition(div, relX), new Vector2(System.Math.Max(div.DivWidth, 1), System.Math.Max(div.DivHeight, 1)));
+		}
+		else if (part is ConsoleImagePart image)
+		{
+			Vector2 pos = GetHtmlImagePosition(image, relX);
+			Vector2 size = GetImageRenderSize(image);
+			rect = new Rect2(pos, size);
+		}
+		else if (part is ConsoleRectangleShapePart rectShape)
+		{
+			rect = new Rect2(rectShape.PointX - relX, rectShape.Top,
+				System.Math.Max(rectShape.Width, 1),
+				System.Math.Max(rectShape.Bottom - rectShape.Top, 1));
+		}
+		else
+		{
+			rect = new Rect2(part.PointX - relX, part.Top,
+				System.Math.Max(part.Width, 1),
+				System.Math.Max(part.Bottom - part.Top, EffectiveLineHeight));
+		}
+
+		rect.Position = new Vector2(rect.Position.X + originX, rect.Position.Y);
+		left = System.Math.Min(left, rect.Position.X);
+		top = System.Math.Min(top, rect.Position.Y);
+		right = System.Math.Max(right, rect.Position.X + rect.Size.X);
+		bottom = System.Math.Max(bottom, rect.Position.Y + rect.Size.Y);
+		return true;
+	}
+
+	Vector2 GetImageRenderSize(ConsoleImagePart image)
+	{
+		int w = System.Math.Abs(image.dest_rect.Width);
+		int h = System.Math.Abs(image.dest_rect.Height);
+		if (w > 0 && h > 0)
+			return new Vector2(w, h);
+
+		if (TryGetKnownImageTextureSize(image, out int textureWidth, out int textureHeight))
+		{
+			if (w > 0)
+			{
+				h = textureWidth > 0 ? System.Math.Max(1, textureHeight * w / textureWidth) : w;
+				return new Vector2(w, h);
+			}
+			if (h > 0)
+			{
+				w = textureHeight > 0 ? System.Math.Max(1, textureWidth * h / textureHeight) : h;
+				return new Vector2(w, h);
+			}
+			return new Vector2(System.Math.Max(textureWidth, 1), System.Math.Max(textureHeight, 1));
+		}
+
+		int fallback = System.Math.Max(EffectiveLineHeight, 1);
+		return new Vector2(System.Math.Max(w, fallback), System.Math.Max(h, fallback));
+	}
+
+	static bool TryGetKnownImageTextureSize(ConsoleImagePart image, out int width, out int height)
+	{
+		width = 0;
+		height = 0;
+		ASprite sprite = image.Image;
+		if (sprite == null && !string.IsNullOrEmpty(image.ResourceName))
+			sprite = AppContents.GetSprite(image.ResourceName);
+
+		if (sprite?.DestBaseSize.Width > 0 && sprite.DestBaseSize.Height > 0)
+		{
+			width = sprite.DestBaseSize.Width;
+			height = sprite.DestBaseSize.Height;
+			return true;
+		}
+		if (sprite is ASpriteSingle single)
+		{
+			int srcW = System.Math.Abs(single.SrcRectangle.Width);
+			int srcH = System.Math.Abs(single.SrcRectangle.Height);
+			if (srcW > 0 && srcH > 0)
+			{
+				width = srcW;
+				height = srcH;
+				return true;
+			}
+		}
+		return false;
 	}
 
 	void QueueUiLayoutTrace(Control control, string kind, string resourceName, int targetX, int targetY, int targetW, int targetH)
@@ -1294,15 +1404,29 @@ public partial class EmueraContent : Control
 				continue;
 			int lineHeight = GetLineBottom(line);
 			var lineControl = new Control();
-			lineControl.MouseFilter = MouseFilterEnum.Ignore;
+			lineControl.MouseFilter = MouseFilterEnum.Pass;
 			lineControl.ClipContents = false;
 			AddLineBackground(line, lineControl, lineHeight);
 			foreach (var button in line.Buttons)
 			{
-				foreach (var part in button.StrArray)
-					AddPartToContainer(part, lineControl, 0);
+				if (button.IsButton)
+				{
+					int buttonTop = GetButtonTop(button);
+					int buttonHeight = GetButtonBottom(button, true) - buttonTop;
+					if (buttonHeight <= 0)
+						buttonHeight = EffectiveLineHeight;
+					var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
+					if (buttonTop < 0 || buttonHeight > EffectiveLineHeight)
+						btn.ZIndex = EscapedConsolePartZIndex;
+					lineControl.AddChild(btn);
+				}
+				else
+				{
+					foreach (var part in button.StrArray)
+						AddPartToContainer(part, lineControl, 0);
+				}
 			}
-			SetFixedControlSize(lineControl, new Vector2(0, lineHeight));
+			SetFixedControlSize(lineControl, new Vector2(GetLineRight(line), lineHeight));
 			htmlIslandContainer.AddChild(lineControl);
 		}
 		displayRevision++;
@@ -1975,9 +2099,7 @@ public partial class EmueraContent : Control
 	{
 		var wrapper = BuildDivControl(div, relX);
 		container.AddChild(wrapper);
-		if (!div.IsRelative)
-			return EffectiveLineHeight;
-		return System.Math.Max(EffectiveLineHeight, div.Y + div.DivHeight);
+		return EffectiveLineHeight;
 	}
 
 	// Build a nested Control tree for styled div output. Margins, borders, and
@@ -2040,12 +2162,13 @@ public partial class EmueraContent : Control
 		wrapper.AddChild(content);
 
 		int y = 0;
+		int childLineHeight = HtmlDivLineHeight;
 		foreach (var childLine in div.Children)
 		{
-			int childHeight = AddDisplayLineToContainer(childLine, content, y);
-			// div 子内容可以包含 180px 以上的立绘行；继续按字体行高推进会让后续子行覆盖图片，
-			// 在裁剪容器内表现为节点和目标矩形都正确但画面不可见。
-			y += childHeight > 0 ? childHeight : EffectiveLineHeight;
+			AddDisplayLineToContainer(childLine, content, y, childLineHeight);
+			// 原核心在 div 内按固定文本行高推进；div、图片等外溢部件由父级裁剪/覆盖绘制处理，
+			// 不参与普通文本流的行高扩张。
+			y += childLineHeight;
 		}
 
 		return wrapper;
@@ -2053,10 +2176,12 @@ public partial class EmueraContent : Control
 
 	// Render a child ConsoleDisplayLine into an existing container at yOffset.
 	// Used by nested divs and island output.
-	int AddDisplayLineToContainer(ConsoleDisplayLine line, Control container, int yOffset)
+	int AddDisplayLineToContainer(ConsoleDisplayLine line, Control container, int yOffset, int rowHeight = -1)
 	{
 		if (line == null)
 			return 0;
+		if (rowHeight <= 0)
+			rowHeight = EffectiveLineHeight;
 		var row = new Control();
 		row.MouseFilter = MouseFilterEnum.Pass;
 		row.ClipContents = false;
@@ -2067,11 +2192,11 @@ public partial class EmueraContent : Control
 			if (button.IsButton)
 			{
 				int buttonTop = GetButtonTop(button);
-				int buttonHeight = GetButtonBottom(button, true) - buttonTop;
+				int buttonHeight = GetButtonBottom(button, true, rowHeight) - buttonTop;
 				if (buttonHeight <= 0)
-					buttonHeight = EffectiveLineHeight;
+					buttonHeight = rowHeight;
 				var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
-				if (buttonTop < 0 || buttonHeight > EffectiveLineHeight)
+				if (buttonTop < 0 || buttonHeight > rowHeight)
 					btn.ZIndex = EscapedConsolePartZIndex;
 				row.AddChild(btn);
 			}
@@ -2082,14 +2207,14 @@ public partial class EmueraContent : Control
 			}
 		}
 
-		int maxHeight = GetLineBottom(line);
-		SetFixedControlSize(row, new Vector2(GetLineRight(line), maxHeight));
+		int maxHeight = rowHeight;
+		SetFixedControlSize(row, new Vector2(GetLineRight(line, rowHeight), maxHeight));
 		container.AddChild(row);
 		return maxHeight;
 	}
 
 	// Compute the right edge of a console line for manual minimum-size tracking.
-	static int GetLineRight(ConsoleDisplayLine line)
+	int GetLineRight(ConsoleDisplayLine line, int rowHeight = -1)
 	{
 		int right = 0;
 		if (line?.Buttons == null)
@@ -2098,7 +2223,7 @@ public partial class EmueraContent : Control
 		{
 			if (button == null)
 				continue;
-			right = System.Math.Max(right, button.PointX + button.Width);
+			right = System.Math.Max(right, GetButtonVisualRight(button, rowHeight));
 		}
 		return right;
 	}
@@ -2634,6 +2759,8 @@ public partial class EmueraContent : Control
 		player.Stop();
 		player.Stream = stream;
 		player.VolumeDb = LinearToDb(soundVolume);
+		player.PitchScale = 1.0f;
+		player.StreamPaused = false;
 		soundRepeatRemaining[channel] = loop ? -1 : Math.Max(repeat, 1);
 		player.Play();
 		GenericUtils.NotifySoundPlaybackStarted(channel, path, GetAudioStreamLengthMs(stream));
@@ -2650,7 +2777,12 @@ public partial class EmueraContent : Control
 		remaining--;
 		soundRepeatRemaining[channel] = remaining;
 		if (remaining > 0)
+		{
 			soundPlayers[channel].Play();
+			GenericUtils.NotifySoundPlaybackRepeated(channel);
+			return;
+		}
+		GenericUtils.NotifySoundPlaybackFinished(channel);
 	}
 
 	// Stop all sound effect channels without touching BGM.
@@ -2706,6 +2838,8 @@ public partial class EmueraContent : Control
 		bgmPlayer.Stop();
 		bgmPlayer.Stream = stream;
 		bgmPlayer.VolumeDb = LinearToDb(bgmVolume);
+		bgmPlayer.PitchScale = 1.0f;
+		bgmPlayer.StreamPaused = false;
 		bgmPlayer.Play();
 		GenericUtils.NotifyBgmPlaybackStarted(path, GetAudioStreamLengthMs(stream));
 	}
@@ -3421,6 +3555,8 @@ public partial class EmueraContent : Control
 		var scaleVector = new Vector2(contentScale, contentScale);
 		if (lineContainer != null)
 			lineContainer.Scale = scaleVector;
+		if (htmlIslandContainer != null)
+			htmlIslandContainer.Scale = scaleVector;
 		if (cbgContainer != null)
 			cbgContainer.Scale = scaleVector;
 	}
@@ -3547,7 +3683,10 @@ public partial class EmueraContent : Control
 		{
 			if (contentDragStartedOnButton && !contentDragMoved && IsPointerRelease(@event))
 			{
-				CallDeferred(nameof(ResetButtonTapDragStateIfStillPending));
+				// Android/Godot 上 release 不一定回到最初的 Panel.GuiInput。
+				// 主画面 HTML_PRINT 按钮必须由 root 兜底提交，否则只剩 quick 面板能点击。
+				if (!HandleContentPointerInput(@event, false))
+					CallDeferred(nameof(ResetButtonTapDragStateIfStillPending));
 				return;
 			}
 			HandleContentPointerInput(@event, false);
@@ -3599,6 +3738,13 @@ public partial class EmueraContent : Control
 
 		if (pressed)
 		{
+			if (button == null && TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var hitButton, out var hitInput, out var hitGeneration))
+			{
+				button = hitButton;
+				input = hitInput;
+				generation = hitGeneration;
+			}
+
 			MinorShift._Library.WinInput.PulseVirtualKey(0x01);
 			StopContentInertia();
 			contentDragActive = true;
@@ -3727,6 +3873,44 @@ public partial class EmueraContent : Control
 				GetViewport().SetInputAsHandled();
 		}
 		return handled;
+	}
+
+	// Android 上触摸事件有时只到达 ScrollContainer/root，绕过按钮 Panel.GuiInput。
+	// 这里按当前渲染树反向命中一次，保持主视图按钮和 quick 按钮的输入路径一致。
+	bool TryFindConsoleButtonAtGlobalPosition(Vector2 globalPosition, out Control button, out string input, out long generation)
+	{
+		button = null;
+		input = null;
+		generation = 0;
+		if (scaledContentRoot == null || !GodotObject.IsInstanceValid(scaledContentRoot))
+			return false;
+		return TryFindConsoleButtonAtGlobalPosition(scaledContentRoot, globalPosition, out button, out input, out generation);
+	}
+
+	bool TryFindConsoleButtonAtGlobalPosition(Node node, Vector2 globalPosition, out Control button, out string input, out long generation)
+	{
+		button = null;
+		input = null;
+		generation = 0;
+		if (node == null || !GodotObject.IsInstanceValid(node))
+			return false;
+
+		var children = node.GetChildren();
+		for (int i = children.Count - 1; i >= 0; i--)
+		{
+			if (TryFindConsoleButtonAtGlobalPosition(children[i], globalPosition, out button, out input, out generation))
+				return true;
+		}
+
+		if (node is not Control control || !control.Visible || !control.HasMeta("button_input"))
+			return false;
+		if (!control.GetGlobalRect().HasPoint(globalPosition))
+			return false;
+
+		input = control.GetMeta("button_input").As<string>();
+		generation = control.HasMeta("generation") ? control.GetMeta("generation").AsInt64() : 0;
+		button = control;
+		return !string.IsNullOrEmpty(input);
 	}
 
 	// Detect multi-touch gestures before normal drag/tap handling. Single touch
@@ -4098,14 +4282,18 @@ public partial class EmueraContent : Control
 			return;
 		}
 
-		if (button.Size.X <= 0 || button.Size.Y <= 0 || lineContainer == null || !GodotObject.IsInstanceValid(lineContainer))
+		if (button.Size.X <= 0 || button.Size.Y <= 0 || scaledContentRoot == null || !GodotObject.IsInstanceValid(scaledContentRoot))
 		{
 			UpdatePointerPosition(fallbackGlobalPosition);
 			return;
 		}
 
 		var globalCenter = button.GetGlobalTransformWithCanvas() * (button.Size * 0.5f);
-		var contentCenter = lineContainer.GetGlobalTransformWithCanvas().AffineInverse() * globalCenter;
+		// HTML island 和普通行不是同一个直接父容器；统一换算到 scaledContentRoot，
+		// 再除以当前缩放，才能得到 emuera 核心期望的未缩放控制台坐标。
+		var contentCenter = scaledContentRoot.GetGlobalTransformWithCanvas().AffineInverse() * globalCenter;
+		if (contentScale > 0.001f)
+			contentCenter /= contentScale;
 		GenericUtils.SetPointerPosition(contentCenter.X, contentCenter.Y);
 	}
 
@@ -4405,11 +4593,28 @@ public partial class EmueraContent : Control
 				MinorShift._Library.WinInput.PulseVirtualKey(0x0D);
 			else if (keyEvent.Keycode == Key.Escape)
 				MinorShift._Library.WinInput.PulseVirtualKey(0x1B);
-			if (inputpad != null && inputpad.IsShow)
-				return;
+			int windowsKeyData = ToWindowsKeyData(keyEvent);
 			var console = GlobalStatic.Console;
 			if (console != null && EmueraThread.instance != null)
 			{
+				if (windowsKeyData == (0x44 | 0x00020000))
+				{
+					console.ToggleHotkeyState(out string message);
+					GenericUtils.InputTrace("INPUT.HOTKEY.TOGGLE", () => message ?? "");
+					GetViewport().SetInputAsHandled();
+					return;
+				}
+				if (console.TryEvaluateHotkey(windowsKeyData, out long hotkeyInput))
+				{
+					// HOTKEY.ERB は WinForms の KeyData 値を前提にした簡易インタプリタ。
+					// Godot 版ではハードウェアキーボード入力だけをここで数値入力へ変換し、
+					// タッチ・クイックボタンの入力経路には影響させない。
+					EmueraThread.instance.Input(hotkeyInput.ToString(), true);
+					GetViewport().SetInputAsHandled();
+					return;
+				}
+				if (inputpad != null && inputpad.IsShow)
+					return;
 				if (console.IsWaitAnyKey)
 				{
 					EmueraThread.instance.Input("", false);
@@ -4421,6 +4626,130 @@ public partial class EmueraContent : Control
 					GetViewport().SetInputAsHandled();
 				}
 			}
+		}
+	}
+
+	static int ToWindowsKeyData(InputEventKey keyEvent)
+	{
+		int keyCode = ToWindowsKeyCode(keyEvent.Keycode);
+		int modifiers = 0;
+		if (keyEvent.ShiftPressed)
+			modifiers |= 0x00010000;
+		if (keyEvent.CtrlPressed)
+			modifiers |= 0x00020000;
+		if (keyEvent.AltPressed)
+			modifiers |= 0x00040000;
+		return keyCode | modifiers;
+	}
+
+	static int ToWindowsKeyCode(Key key)
+	{
+		if (key >= Key.A && key <= Key.Z)
+			return 0x41 + (int)(key - Key.A);
+		if (key >= Key.Key0 && key <= Key.Key9)
+			return 0x30 + (int)(key - Key.Key0);
+		if (key >= Key.F1 && key <= Key.F12)
+			return 0x70 + (int)(key - Key.F1);
+		if (key >= Key.Kp0 && key <= Key.Kp9)
+			return 0x60 + (int)(key - Key.Kp0);
+		return key switch
+		{
+			Key.Enter or Key.KpEnter => 0x0D,
+			Key.Escape => 0x1B,
+			Key.Space => 0x20,
+			Key.Tab => 0x09,
+			Key.Backspace => 0x08,
+			Key.Left => 0x25,
+			Key.Up => 0x26,
+			Key.Right => 0x27,
+			Key.Down => 0x28,
+			Key.Home => 0x24,
+			Key.End => 0x23,
+			Key.Pageup => 0x21,
+			Key.Pagedown => 0x22,
+			Key.Insert => 0x2D,
+			Key.Delete => 0x2E,
+			Key.Quoteleft => 0xC0,
+			_ => (int)key,
+		};
+	}
+
+	sealed partial class ConsoleTextPart : Control
+	{
+		readonly Font font;
+		readonly int fontSize;
+		readonly Color color;
+		readonly bool bold;
+		readonly string text;
+		Vector2 fixedSize;
+
+		public ConsoleTextPart(Font font, int fontSize, Color color, bool bold, string text)
+		{
+			this.font = font;
+			this.fontSize = fontSize > 0 ? fontSize : 18;
+			this.color = color;
+			this.bold = bold;
+			this.text = uEmuera.Utils.StripZeroWidth(text) ?? "";
+			MouseFilter = MouseFilterEnum.Ignore;
+			ClipContents = true;
+		}
+
+		public void SetFixedSize(Vector2 size)
+		{
+			fixedSize = size;
+			UpdateMinimumSize();
+			QueueRedraw();
+		}
+
+		public override Vector2 _GetMinimumSize()
+		{
+			return fixedSize;
+		}
+
+		public override void _Draw()
+		{
+			if (font == null || string.IsNullOrEmpty(text))
+				return;
+
+			float baseline = GetTextBaseline(font, fontSize, Size.Y);
+			float exactX = 0.0f;
+			float drawX = 0.0f;
+			for (int i = 0; i < text.Length; i++)
+			{
+				bool half = uEmuera.Utils.CheckHalfSize(text[i]);
+				// 布局宽度由 Utils.GetDisplayLength 决定，奇数字号下半角字符会按累计整数截断。
+				// 绘制也用同一格点推进，避免 Button 和 Label 之间出现 0.5px 累计偏移。
+				float nextExactX = exactX + GetCellWidth(half);
+				float nextDrawX = (int)nextExactX;
+				float cellWidth = nextDrawX - drawX;
+				DrawGridChar(text[i], drawX, baseline, cellWidth);
+				exactX = nextExactX;
+				drawX = nextDrawX;
+			}
+		}
+
+		static float GetTextBaseline(Font font, int fontSize, float height)
+		{
+			float fontHeight = font.GetHeight(fontSize);
+			float ascent = font.GetAscent(fontSize);
+			return Mathf.Round((height - fontHeight) * 0.5f + ascent);
+		}
+
+		float GetCellWidth(bool half)
+		{
+			return half ? fontSize / 2.0f : fontSize;
+		}
+
+		void DrawGridChar(char value, float x, float baseline, float cellWidth)
+		{
+			// 每个字符仍按 emuera 的网格起点绘制，但不能再按单元格宽度裁剪字形。
+			// Godot 字体 fallback 下，DRAWLINE/箱线字符的实际 glyph 往往宽于半角格；
+			// 若逐格裁剪会出现横线缺失。片段边界继续由本 Control 的 ClipContents 统一限制。
+			string glyph = value.ToString();
+			float drawWidth = System.Math.Max(1.0f, System.Math.Max(cellWidth, Size.X - x));
+			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, fontSize, color);
+			if (bold)
+				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, color);
 		}
 	}
 

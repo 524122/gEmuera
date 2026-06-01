@@ -2,6 +2,7 @@ using System;
 //using System.Drawing;
 using System.Collections.Generic;
 //using System.Windows.Forms;
+using System.Globalization;
 using MinorShift._Library;
 using MinorShift.Emuera.GameView;
 using MinorShift.Emuera.GameData.Expression;
@@ -63,6 +64,8 @@ namespace MinorShift.Emuera
 
 #endif
 			WorkingDir = ExeDir;
+			CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+			CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 			GenericUtils.Info($"[LOAD] ExeDir={ExeDir}");
 			GenericUtils.Info($"[LOAD] CoreProfile={CoreProfile}");
 			ResetSnakeStartupErrorLog();
@@ -108,6 +111,7 @@ namespace MinorShift.Emuera
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
 			ConfigData.Instance.LoadConfig();
+			JSONConfig.Load(ConfigData.Instance);
 			ApplyAndroidWindowWidthPolicy();
 			global::FrameRateHelper.ApplyConfigFps();
 			//二重起動の禁止かつ二重起動

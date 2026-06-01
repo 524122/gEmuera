@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using MinorShift.Emuera.GameProc;
+using MinorShift.Emuera.GameData;
 using MinorShift.Emuera.GameData.Variable;
 
 namespace MinorShift.Emuera.GameData.Function
@@ -10,7 +11,7 @@ namespace MinorShift.Emuera.GameData.Function
 	{
 		public CalledFunction CalledFunction { get; private set; }
 		public string Name { get; private set; }
-		public Type RetType { get; private set; }
+		public EraType RetType { get; private set; }
 		public UserDifinedFunctionDataArgType[] ArgTypeList { get; private set; }
 
 		internal static UserDefinedRefMethod Create(UserDefinedFunctionData funcData)
@@ -18,11 +19,11 @@ namespace MinorShift.Emuera.GameData.Function
 			UserDefinedRefMethod ret = new UserDefinedRefMethod();
 			ret.Name = funcData.Name;
 			if (funcData.TypeIsFloat)
-				ret.RetType = typeof(double);
+				ret.RetType = EraType.Float;
 			else if (funcData.TypeIsStr)
-				ret.RetType = typeof(string);
+				ret.RetType = EraType.String;
 			else
-				ret.RetType = typeof(Int64);
+				ret.RetType = EraType.Integer;
 			ret.ArgTypeList = funcData.ArgList;
 			return ret;
 		}

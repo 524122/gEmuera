@@ -102,7 +102,7 @@ namespace MinorShift.Emuera.GameData.Function
                 ["INRANGE"] = new InRangeMethod(),
                 ["INRANGEARRAY"] = new InRangeArrayMethod(),
                 ["INRANGECARRAY"] = new InRangeArrayMethod(true),
-                ["GETNUMB"] = new GetnumMethod(),
+                ["GETNUMB"] = new GetnumBMethod(),
                 ["ARRAYMSORT"] = new ArrayMultiSortMethod(),
                 ["ARRAYMSORTEX"] = new ArrayMultiSortExMethod(),
                 //文字列操作系
@@ -176,6 +176,7 @@ namespace MinorShift.Emuera.GameData.Function
                 ["SPRITEDISPOSE"] = new SpriteDisposeMethod(),
                 ["CBGSETG"] = new CBGSetGraphicsMethod(),
                 ["CBGSETSPRITE"] = new CBGSetCIMGMethod(),
+                ["CBGSETCIMG"] = new CBGSetCIMGMethod(),
                 ["CBGCLEAR"] = new CBGClearMethod(),
                 ["CBGCLEARBUTTON"] = new CBGClearButtonMethod(),
                 ["CBGREMOVERANGE"] = new CBGRemoveRangeMethod(),
@@ -252,10 +253,10 @@ namespace MinorShift.Emuera.GameData.Function
                 ["UNCHECKED_SUB"] = new UncheckedMathMethod("SUB"),
                 ["UNCHECKED_MUL"] = new UncheckedMathMethod("MUL"),
                 ["UNCHECKED_NEG"] = new UncheckedMathMethod("NEG"),
-                ["BITSET"] = new BitMethod("SET"),
-                ["BITGET"] = new BitMethod("GET"),
-                ["BITTOGGLE"] = new BitMethod("TOGGLE"),
-                ["BITINDEXOFFIRST"] = new BitMethod("INDEX"),
+                ["BITSET"] = new BitSetMethod(),
+                ["BITGET"] = new BitGetMethod(),
+                ["BITTOGGLE"] = new BitToggleMethod(),
+                ["BITINDEXOFFIRST"] = new BitIndexOfFirstMethod(),
                 ["SQL_CONNECTION_OPEN"] = new SqlConnectionOpenMethod(),
                 ["SQL_CONNECT"] = new SqlConnectMethod(),
                 ["SQL_DISCONNECT"] = new SqlDisconnectMethod(),
@@ -308,7 +309,7 @@ namespace MinorShift.Emuera.GameData.Function
                 ["GETMETHF"] = new GetMethFMethod(),
                 ["GETMETHS"] = new GetMethSMethod(),
                 ["EVAL"] = new EvalMethod(),
-                ["EVALF"] = new EvalMethod(),
+                ["EVALF"] = new EvalFMethod(),
                 ["EVALS"] = new EvalSMethod(),
                 ["ENUMFILES"] = new EnumFilesMethod(),
                 ["GETVAR"] = new GetVarMethod(),
@@ -381,6 +382,7 @@ namespace MinorShift.Emuera.GameData.Function
 
                 ["FLOWINPUT"] = new FlowInputMethod(),
                 ["FLOWINPUTS"] = new FlowInputsMethod(),
+                ["BITMAP_CACHE_ENABLE"] = new BitmapCacheEnableMethod(),
                 ["HOTKEY_STATE"] = new HotkeyStateMethod(),
                 ["HOTKEY_STATE_INIT"] = new HotkeyStateInitMethod()
             };

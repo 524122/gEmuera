@@ -24,6 +24,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		readonly ConstantData constant;
 		readonly VariableData varData;
 		MTRandom rand = new MTRandom();
+		Random newRand = new Random();
 		const string RuntimeDataStoreBinaryMarker = "__RDS__";
 		const string RuntimeDataStoreTextMarker = "__RDS_TEXT__";
 		const string RuntimeDataStoreTextEndMarker = "__RDS_TEXT_END__";
@@ -33,6 +34,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public VariableData VariableData { get { return varData; } }
 		public ConstantData Constant { get { return constant; } }
+		public MTRandom Rand { get { return rand; } }
 
 		public VariableEvaluator(GameBase gamebase, ConstantData constant)
 		{
@@ -47,19 +49,26 @@ namespace MinorShift.Emuera.GameData.Variable
 		public void Randomize(Int64 seed)
 		{
 			rand = new MTRandom(seed);
+			newRand = new Random((int)seed);
 		}
 
 		public void InitRanddata()
 		{
-			rand.SetRand(this.RANDDATA);
+			SparseArray<Int64> randData = this.RANDDATA;
+			rand.SetRand(randData.ToArray(randData.Length));
 		}
 
 		public void DumpRanddata()
 		{
-			rand.GetRand(this.RANDDATA);
+			SparseArray<Int64> randData = this.RANDDATA;
+			Int64[] denseRandData = randData.ToArray(randData.Length);
+			rand.GetRand(denseRandData);
+			randData.FromArray(denseRandData);
 		}
 		public Int64 GetNextRand(Int64 max)
 		{
+			if (Config.UseNewRandom)
+				return newRand.NextInt64(max);
 			return rand.NextInt64(max);
 		}
 
@@ -151,10 +160,29 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 		}
 
+		public void SetValueAll(FixedVariableTerm p, double srcValue, int start, int end)
+		{
+			var identifier = p.Identifier;
+			if (identifier.IsCalc)
+				return;
+			if (identifier.IsArray1D)
+			{
+				if (start != 0 || end != identifier.GetLength())
+					p.IsArrayRangeValid((Int64)start, (Int64)end, "VARSET", 3L, 4L);
+				else if (identifier.IsCharacterData)
+					identifier.CheckElement(new Int64[] { p.Index1, p.Index2 });
+			}
+			else if (identifier.IsCharacterData)
+			{
+				identifier.CheckElement(new Int64[] { p.Index1, p.Index2, p.Index3 });
+			}
+			identifier.SetValueAll(srcValue, start, end, (int)p.Index1);
+		}
+
 		public void SetValueAllEachChara(FixedVariableTerm p, SingleTerm index, Int64 srcValue, int start, int end)
 		{
             var identifier = p.Identifier;
-            if (!identifier.IsInteger)
+            if (!identifier.IsInteger && !identifier.IsFloat)
 				throw new CodeEE("整数型でない変数" + identifier.Name + "に整数値を代入しようとしました");
 			if (identifier.IsConst)
 				throw new CodeEE("読み取り専用の変数" + identifier.Name + "に代入しようとしました");
@@ -170,11 +198,11 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			if (identifier.IsArray1D)
 			{
-				if (index.GetOperandType() == typeof(Int64))
+				if (index.GetEraType() == EraType.Integer)
 					indexNum = index.Int;
 				else
 					indexNum = constant.KeywordToInteger(identifier.Code, index.Str, 1);
-                if (indexNum < 0 || indexNum >= ((long[])(identifier.GetArrayChara(0))).Length)
+                if (indexNum < 0 || indexNum >= Get1DLength(identifier.GetArrayChara(0)))
 					throw new CodeEE("キャラクタ配列変数" + identifier.Name + "の第２引数(" + indexNum.ToString() + ")は配列の範囲外です");
 			}
 
@@ -211,11 +239,11 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			if (identifier.IsArray1D)
 			{
-				if (index.GetOperandType() == typeof(Int64))
+				if (index.GetEraType() == EraType.Integer)
 					indexNum = index.Int;
 				else
 					indexNum = constant.KeywordToInteger(identifier.Code, index.Str, 1);
-                if (indexNum < 0 || indexNum >= ((string[])(identifier.GetArrayChara(0))).Length)
+                if (indexNum < 0 || indexNum >= Get1DLength(identifier.GetArrayChara(0)))
 					throw new CodeEE("キャラクタ配列変数" + identifier.Name + "の第２引数(" + indexNum.ToString() + ")は配列の範囲外です");
 			}
 
@@ -225,6 +253,35 @@ namespace MinorShift.Emuera.GameData.Variable
                 arguments[0] = i;
                 identifier.SetValue(srcValue, arguments);
             }
+		}
+
+		public void SetValueAllEachChara(FixedVariableTerm p, SingleTerm index, double srcValue, int start, int end)
+		{
+			var identifier = p.Identifier;
+			if (identifier.IsConst)
+				throw new CodeEE("読み取り専用の変数" + identifier.Name + "に代入しようとしました");
+			if (identifier.IsCalc)
+				return;
+			if (varData.CharacterList.Count == 0)
+				return;
+
+			Int64 indexNum = -1;
+			if (identifier.IsArray1D)
+			{
+				if (index.GetEraType() == EraType.Integer)
+					indexNum = index.Int;
+				else
+					indexNum = constant.KeywordToInteger(identifier.Code, index.Str, 1);
+				if (indexNum < 0 || indexNum >= Get1DLength(identifier.GetArrayChara(0)))
+					throw new CodeEE("キャラクタ配列変数" + identifier.Name + "の第２引数(" + indexNum.ToString() + ")は配列の範囲外です");
+			}
+
+			long[] arguments = new long[] { -1, indexNum };
+			for (int i = start; i < end; ++i)
+			{
+				arguments[0] = i;
+				identifier.SetValue(srcValue, arguments);
+			}
 		}
 
 		public Int64 GetArraySum(FixedVariableTerm p, Int64 index1, Int64 index2)
@@ -301,6 +358,80 @@ namespace MinorShift.Emuera.GameData.Variable
             return sum;
 		}
 
+		public double GetArraySumDouble(FixedVariableTerm p, Int64 index1, Int64 index2)
+		{
+			double sum = 0;
+			var identifier = p.Identifier;
+
+			if (identifier.IsCharacterData)
+			{
+				if (identifier.IsArray1D)
+				{
+					long[] arguments = new long[] { p.Index1, -1 };
+					for (int i = (int)index1; i < (int)index2; ++i)
+					{
+						arguments[1] = i;
+						sum += identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					}
+				}
+				else
+				{
+					long[] arguments = new long[] { p.Index1, p.Index2, -1 };
+					for (int i = (int)index1; i < (int)index2; ++i)
+					{
+						arguments[2] = i;
+						sum += identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					}
+				}
+			}
+			else
+			{
+				if (identifier.IsArray1D)
+				{
+					long[] arguments = new long[] { -1 };
+					for (int i = (int)index1; i < (int)index2; ++i)
+					{
+						arguments[0] = i;
+						sum += identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					}
+				}
+				else if (identifier.IsArray2D)
+				{
+					long[] arguments = new long[] { p.Index1, -1 };
+					for (int i = (int)index1; i < (int)index2; ++i)
+					{
+						arguments[1] = i;
+						sum += identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					}
+				}
+				else
+				{
+					long[] arguments = new long[] { p.Index1, p.Index2, -1 };
+					for (int i = (int)index1; i < (int)index2; ++i)
+					{
+						arguments[2] = i;
+						sum += identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					}
+				}
+			}
+
+			return sum;
+		}
+
+		public double GetArraySumCharaDouble(FixedVariableTerm p, Int64 index1, Int64 index2)
+		{
+			double sum = 0;
+			var identifier = p.Identifier;
+			long[] arguments = new long[2] { -1, p.Index2 };
+
+			for (int i = (int)index1; i < (int)index2; ++i)
+			{
+				arguments[0] = i;
+				sum += identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+			}
+			return sum;
+		}
+
         public string GetJoinedStr(FixedVariableTerm p, string delimiter, Int64 index1, Int64 length)
         {
             var pIdentifier = p.Identifier;
@@ -310,7 +441,7 @@ namespace MinorShift.Emuera.GameData.Variable
             {
                 if (pIdentifier.IsArray1D)
                 {
-                    return string.Join(delimiter, (string[])pIdentifier.GetArray(), (int)index1, count);
+                    return JoinString1D(delimiter, pIdentifier.GetArray(), (int)index1, count);
                 }
                 // JOIN系関数は大量配列で呼ばれるため、+= による累積コピーを避ける。
                 // Android/Mono では短命な中間文字列が GC スパイクに直結する。
@@ -429,6 +560,29 @@ namespace MinorShift.Emuera.GameData.Variable
 			return ret;
 		}
 
+		public Int64 GetMatch(FixedVariableTerm p, double target, Int64 start, Int64 end)
+		{
+			Int64 ret = 0;
+			var identifier = p.Identifier;
+			long[] arguments = null;
+			int idx = 0;
+			if (identifier.IsCharacterData)
+			{
+				arguments = new long[] { p.Index1, -1 };
+				idx = 1;
+			}
+			else
+				arguments = new long[] { -1 };
+
+			for (int i = (int)start; i < (int)end; ++i)
+			{
+				arguments[idx] = i;
+				if (identifier.GetFloatValue(GlobalStatic.EMediator, arguments) == target)
+					++ret;
+			}
+			return ret;
+		}
+
         public Int64 GetMatchChara(FixedVariableTerm p, Int64 target, Int64 start, Int64 end)
         {
             Int64 ret = 0;
@@ -464,9 +618,25 @@ namespace MinorShift.Emuera.GameData.Variable
 			return ret;
 		}
 
+		public Int64 GetMatchChara(FixedVariableTerm p, double target, Int64 start, Int64 end)
+		{
+			Int64 ret = 0;
+			var identifier = p.Identifier;
+			long[] arguments = new long[3] { -1, p.Index2, p.Index3 };
+
+			for (int i = (int)start; i < (int)end; ++i)
+			{
+				arguments[0] = i;
+				if (identifier.GetFloatValue(GlobalStatic.EMediator, arguments) == target)
+					ret++;
+			}
+
+			return ret;
+		}
+
 		public Int64 FindElement(FixedVariableTerm p, Int64 target, Int64 start, Int64 end, bool isExact, bool isLast)
 		{
-			Int64[] array;
+			object array;
             var identifier = p.Identifier;
 
             //指定値の配列要素の範囲外かのチェックは済んでるので、これだけでよい
@@ -474,15 +644,15 @@ namespace MinorShift.Emuera.GameData.Variable
 				return -1;
 
 			if (identifier.IsCharacterData)
-                array = (long[])identifier.GetArrayChara((int)p.Index1);
+                array = identifier.GetArrayChara((int)p.Index1);
 			else
-				array = (Int64[])identifier.GetArray();
+				array = identifier.GetArray();
 
 			if (isLast)
 			{
 				for (int i = (int)end - 1; i >= (int)start; --i)
 				{
-					if (target == array[i])
+					if (target == GetInt1D(array, i))
 						return (Int64)i;
 				}
 			}
@@ -490,7 +660,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 				for (int i = (int)start; i < (int)end; ++i)
 				{
-					if (target == array[i])
+					if (target == GetInt1D(array, i))
 						return (Int64)i;
 				}
 			}
@@ -499,23 +669,23 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public Int64 FindElement(FixedVariableTerm p, Regex target, Int64 start, Int64 end, bool isExact, bool isLast)
 		{
-			string[] array;
+			object array;
 
 			//指定値の配列要素の範囲外かのチェックは済んでるので、これだけでよい
 			if (start >= end)
 				return -1;
             var identifier = p.Identifier;
             if (identifier.IsCharacterData)
-                array = (string[])identifier.GetArrayChara((int)p.Index1);
+                array = identifier.GetArrayChara((int)p.Index1);
 			else
-				array = (string[])identifier.GetArray();
+				array = identifier.GetArray();
 
 			if (isLast)
 			{
 				for (int i = (int)end - 1; i >= (int)start; --i)
 				{
 					//1823 Nullなら空文字列として扱う
-					string str = array[i] ?? "";
+					string str = GetStr1D(array, i) ?? "";
 					if (isExact)
 					{
 						Match match = target.Match(str);
@@ -536,7 +706,7 @@ namespace MinorShift.Emuera.GameData.Variable
 				for (int i = (int)start; i < (int)end; ++i)
 				{
 					//1823 Nullなら空文字列として扱う
-					string str = array[i] ?? "";
+					string str = GetStr1D(array, i) ?? "";
 					if (isExact)
 					{
 						//正規表現に引っかかった文字列の長さ＝元の文字列の長さなら完全一致
@@ -624,6 +794,75 @@ namespace MinorShift.Emuera.GameData.Variable
             return ret;
         }
 
+		public double GetMaxArrayDouble(FixedVariableTerm p, Int64 start, Int64 end, bool isMax)
+		{
+			double value;
+			var identifier = p.Identifier;
+			int idx = 0;
+			long[] arguments;
+			if (identifier.IsCharacterData)
+			{
+				arguments = new long[] { p.Index1, start };
+				idx = 1;
+			}
+			else
+				arguments = new long[] { start };
+
+			double ret = identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+			if (isMax)
+			{
+				for (int i = (int)start + 1; i < (int)end; ++i)
+				{
+					arguments[idx] = i;
+					value = identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					if (value > ret)
+						ret = value;
+				}
+			}
+			else
+			{
+				for (int i = (int)start + 1; i < (int)end; ++i)
+				{
+					arguments[idx] = i;
+					value = identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					if (value < ret)
+						ret = value;
+				}
+			}
+			return ret;
+		}
+
+		public double GetMaxArrayCharaDouble(FixedVariableTerm p, Int64 start, Int64 end, bool isMax)
+		{
+			double value;
+			var identifier = p.Identifier;
+			long[] arguments = new long[3] { start, p.Index2, p.Index3 };
+
+			double ret = identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+			if (isMax)
+			{
+				for (int i = (int)start + 1; i < (int)end; ++i)
+				{
+					arguments[0] = i;
+					value = identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					if (value > ret)
+						ret = value;
+				}
+			}
+			else
+			{
+				for (int i = (int)start + 1; i < (int)end; ++i)
+				{
+					arguments[0] = i;
+					value = identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+					if (value < ret)
+						ret = value;
+				}
+			}
+
+			return ret;
+		}
+
 		public Int64 GetInRangeArray(FixedVariableTerm p, Int64 min, Int64 max, Int64 start, Int64 end)
 		{
             Int64 value;
@@ -662,31 +901,81 @@ namespace MinorShift.Emuera.GameData.Variable
                 if (value >= min && value < max)
                     ret++;
             }
-            
+
+			return ret;
+		}
+
+		public Int64 GetInRangeArrayDouble(FixedVariableTerm p, double min, double max, Int64 start, Int64 end)
+		{
+            double value;
+			Int64 ret = 0;
+            var identifier = p.Identifier;
+            long[] arguments = null;
+            int idx = 0;
+            if(identifier.IsCharacterData)
+            {
+                arguments = new long[] { p.Index1, -1 };
+                idx = 1;
+            }
+            else
+                arguments = new long[] { -1 };
+
+            for (int i = (int)start; i < (int)end; ++i)
+            {
+                arguments[idx] = i;
+                value = identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+                if (value >= min && value < max)
+                    ret++;
+            }
+			return ret;
+		}
+
+		public Int64 GetInRangeArrayCharaDouble(FixedVariableTerm p, double min, double max, Int64 start, Int64 end)
+		{
+			Int64 ret = 0;
+            double value;
+            var identifier = p.Identifier;
+            long[] arguments = new long[3] { -1, p.Index2, p.Index3 };
+            for (int i = (int)start; i < (int)end; i++)
+            {
+                arguments[0] = i;
+                value = identifier.GetFloatValue(GlobalStatic.EMediator, arguments);
+                if (value >= min && value < max)
+                    ret++;
+            }
+
 			return ret;
 		}
 
 		public void ShiftArray(FixedVariableTerm p, int shift, Int64 def, int start, int num)
 		{
-			Int64[] array;
+			object array;
             var identifier = p.Identifier;
             if (identifier.IsCharacterData)
-                array = (long[])identifier.GetArrayChara((int)p.Index1);
+                array = identifier.GetArrayChara((int)p.Index1);
 			else
-				array = (Int64[])identifier.GetArray();
+				array = identifier.GetArray();
 
-			if (start >= array.Length)
+			int arrayLength = Get1DLength(array);
+			if (start >= arrayLength)
 				throw new CodeEE("命令ARRAYSHIFTの第４引数(" + start.ToString() + ")が配列" + p.Identifier.Name + "の範囲を超えています");
 
 			if (num == -1)
-				num = array.Length - start;
-			if ((start + num) > array.Length)
-				num = array.Length - start;
+				num = arrayLength - start;
+			if ((start + num) > arrayLength)
+				num = arrayLength - start;
 
-			if (Math.Abs(shift) >= array.Length && start == 0 && num >= array.Length)
+			if (array is SparseArray<Int64> sparseArray)
 			{
-				for (int i = 0; i < array.Length; i++)
-					array[i] = def;
+				sparseArray.Shift(shift, def, start, num);
+				return;
+			}
+
+			Int64[] denseArray = (Int64[])array;
+			if (Math.Abs(shift) >= denseArray.Length && start == 0 && num >= denseArray.Length)
+			{
+				for (int i = 0; i < denseArray.Length; i++)
+					denseArray[i] = def;
 				return;
 			}
 
@@ -699,18 +988,18 @@ namespace MinorShift.Emuera.GameData.Variable
 				destStart = start;
 			}
 			Int64[] temp = new Int64[num];
-			Buffer.BlockCopy(array, start * 8, temp, 0, 8 * num);
+			Buffer.BlockCopy(denseArray, start * 8, temp, 0, 8 * num);
 
 			//これを満たすのはshift > 0であることは自明
 			if (sourceStart == 0)
 			{
 				if (length > 0)
 					for (int i = start; i < (start + shift); i++)
-						array[i] = def;
+						denseArray[i] = def;
 				else
 				{
 					for (int i = start; i < (start + num); i++)
-						array[i] = def;
+						denseArray[i] = def;
 					return;
 				}
 			}
@@ -718,11 +1007,11 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 				if (length > 0)
 					for (int i = (start + length); i < (start + num); i++)
-						array[i] = def;
+						denseArray[i] = def;
 				else
 				{
 					for (int i = start; i < (start + num); i++)
-						array[i] = def;
+						denseArray[i] = def;
 					return;
 				}
 			}
@@ -733,23 +1022,96 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			if (length > 0)
 				//Array.Copy(temp, sourceStart, array, destStart, length);
-				Buffer.BlockCopy(temp, sourceStart * 8, array, destStart * 8, length * 8);
+				Buffer.BlockCopy(temp, sourceStart * 8, denseArray, destStart * 8, length * 8);
 
 			//if ((start + num) < array.Length)
 			//    //Array.Copy(temp, (start + num), array, (start + num), array.Length - (start + num));
 			//    Buffer.BlockCopy(temp, (start + num) * 8, array, (start + num) * 8, (array.Length - (start + num)) * 8);
 		}
 
+		public void ShiftArray(FixedVariableTerm p, int shift, double def, int start, int num)
+		{
+			object array;
+			var identifier = p.Identifier;
+			if (identifier.IsCharacterData)
+				array = identifier.GetArrayChara((int)p.Index1);
+			else
+				array = identifier.GetArray();
+
+			int arrayLength = Get1DLength(array);
+			if (start >= arrayLength)
+				throw new CodeEE("命令ARRAYSHIFTの第４引数(" + start.ToString() + ")が配列" + p.Identifier.Name + "の範囲を超えています");
+
+			if (num == -1)
+				num = arrayLength - start;
+			if ((start + num) > arrayLength)
+				num = arrayLength - start;
+
+			if (array is SparseArray<double> sparseArray)
+			{
+				sparseArray.Shift(shift, def, start, num);
+				return;
+			}
+
+			double[] denseArray = (double[])array;
+			if (Math.Abs(shift) >= denseArray.Length && start == 0 && num >= denseArray.Length)
+			{
+				for (int i = 0; i < denseArray.Length; i++)
+					denseArray[i] = def;
+				return;
+			}
+
+			int sourceStart = 0;
+			int destStart = start + shift;
+			int length = num - Math.Abs(shift);
+			if (shift < 0)
+			{
+				sourceStart = -shift;
+				destStart = start;
+			}
+			double[] temp = new double[num];
+			Buffer.BlockCopy(denseArray, start * 8, temp, 0, 8 * num);
+
+			if (sourceStart == 0)
+			{
+				if (length > 0)
+					for (int i = start; i < (start + shift); i++)
+						denseArray[i] = def;
+				else
+				{
+					for (int i = start; i < (start + num); i++)
+						denseArray[i] = def;
+					return;
+				}
+			}
+			else
+			{
+				if (length > 0)
+					for (int i = (start + length); i < (start + num); i++)
+						denseArray[i] = def;
+				else
+				{
+					for (int i = start; i < (start + num); i++)
+						denseArray[i] = def;
+					return;
+				}
+			}
+
+			if (length > 0)
+				Buffer.BlockCopy(temp, sourceStart * 8, denseArray, destStart * 8, length * 8);
+		}
+
 		public void ShiftArray(FixedVariableTerm p, int shift, string def, int start, int num)
 		{
-			string[] arrays;
+			object arrays;
             var identifier = p.Identifier;
             if (identifier.IsCharacterData)
-                arrays = (string[])identifier.GetArrayChara((int)p.Index1);
+                arrays = identifier.GetArrayChara((int)p.Index1);
 			else
-				arrays = (string[])identifier.GetArray();
+				arrays = identifier.GetArray();
 
-			if (start >= arrays.Length)
+			int arrayLength = Get1DLength(arrays);
+			if (start >= arrayLength)
 				throw new CodeEE("命令ARRAYSHIFTの第４引数(" + start.ToString() + ")が配列" + p.Identifier.Name + "の範囲を超えています");
 
 			//for (int i = 0; i < arrays.Length; i++)
@@ -757,14 +1119,21 @@ namespace MinorShift.Emuera.GameData.Variable
 			//Array.Clear(arrays, 0, arrays.Length);
 
 			if (num == -1)
-				num = arrays.Length - start;
-			if ((start + num) > arrays.Length)
-				num = arrays.Length - start;
+				num = arrayLength - start;
+			if ((start + num) > arrayLength)
+				num = arrayLength - start;
 
-			if (Math.Abs(shift) >= arrays.Length && start == 0 && num >= arrays.Length)
+			if (arrays is SparseArray<string> sparseArrays)
 			{
-				for (int i = 0; i < arrays.Length; i++)
-					arrays[i] = def;
+				sparseArrays.Shift(shift, def, start, num);
+				return;
+			}
+
+			string[] denseArrays = (string[])arrays;
+			if (Math.Abs(shift) >= denseArrays.Length && start == 0 && num >= denseArrays.Length)
+			{
+				for (int i = 0; i < denseArrays.Length; i++)
+					denseArrays[i] = def;
 				return;
 			}
 
@@ -780,17 +1149,17 @@ namespace MinorShift.Emuera.GameData.Variable
 				destStart = start;
 			}
 			string[] temps = new string[num];
-			Array.Copy(arrays, start, temps, 0, num);
+			Array.Copy(denseArrays, start, temps, 0, num);
 
 			if (destStart > start)
 			{
 				if (length > 0)
 					for (int i = start; i < (start + shift); i++)
-						arrays[i] = def;
+						denseArrays[i] = def;
 				else
 				{
 					for (int i = start; i < (start + num); i++)
-						arrays[i] = def;
+						denseArrays[i] = def;
 					return;
 				}
 			}
@@ -798,17 +1167,17 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 				if (length > 0)
 					for (int i = (start + length); i < (start + num); i++)
-						arrays[i] = def;
+						denseArrays[i] = def;
 				else
 				{
 					for (int i = start; i < (start + num); i++)
-						arrays[i] = def;
+						denseArrays[i] = def;
 					return;
 				}
 			}
 
 			if (length > 0)
-				Array.Copy(temps, sourceStart, arrays, destStart, length);
+				Array.Copy(temps, sourceStart, denseArrays, destStart, length);
 			//if ((start + num) < arrays.Length)
 			//    Array.Copy(temps, (start + num), arrays, (start + num), arrays.Length - (start + num));
 		}
@@ -816,51 +1185,93 @@ namespace MinorShift.Emuera.GameData.Variable
 		public void RemoveArray(FixedVariableTerm p, int start, int num)
 		{
             var identifier = p.Identifier;
-            if (identifier.IsInteger)
+			if (identifier.IsInteger)
 			{
-				Int64[] array;
+				object array;
 				if (identifier.IsCharacterData)
-                    array = (long[])identifier.GetArrayChara((int)p.Index1);
+                    array = identifier.GetArrayChara((int)p.Index1);
 				else
-					array = (Int64[])identifier.GetArray();
+					array = identifier.GetArray();
 
-                if (start >= array.Length)
+				int arrayLength = Get1DLength(array);
+                if (start >= arrayLength)
 					throw new CodeEE("命令ARRAYREMOVEの第２引数(" + start.ToString() + ")が配列" + p.Identifier.Name + "の範囲を超えています");
 				if (num <= 0)
-					num = array.Length;
-				Int64[] temp = new Int64[array.Length];
+					num = arrayLength;
+				if (array is SparseArray<Int64> sparseArray)
+				{
+					sparseArray.RemoveRange(start, num);
+					return;
+				}
+
+				Int64[] denseArray = (Int64[])array;
+				Int64[] temp = new Int64[denseArray.Length];
 				//array.CopyTo(temp, 0);
 				//for (int i = 0; i < array.Length; i++)
 				//    array[i] = 0;
 				//Array.Clear(array, 0, array.Length);
 				if (start > 0)
 					//Array.Copy(array, 0, temp, 0, start);
-					Buffer.BlockCopy(array, 0, temp, 0, start * 8);
-				if ((start + num) < array.Length)
+					Buffer.BlockCopy(denseArray, 0, temp, 0, start * 8);
+				if ((start + num) < denseArray.Length)
 					//Array.Copy(array, (start + num), temp, start, (array.Length - (start + num)));
-					Buffer.BlockCopy(array, (start + num) * 8, temp, start * 8, (array.Length - (start + num)) * 8);
+					Buffer.BlockCopy(denseArray, (start + num) * 8, temp, start * 8, (denseArray.Length - (start + num)) * 8);
 				//temp.CopyTo(array, 0);
-				Buffer.BlockCopy(temp, 0, array, 0, temp.Length * 8);
+				Buffer.BlockCopy(temp, 0, denseArray, 0, temp.Length * 8);
+			}
+			else if (identifier.IsFloat)
+			{
+				object array;
+				if (identifier.IsCharacterData)
+					array = identifier.GetArrayChara((int)p.Index1);
+				else
+					array = identifier.GetArray();
+
+				int arrayLength = Get1DLength(array);
+				if (start >= arrayLength)
+					throw new CodeEE("命令ARRAYREMOVEの第２引数(" + start.ToString() + ")が配列" + p.Identifier.Name + "の範囲を超えています");
+				if (num <= 0)
+					num = arrayLength;
+				if (array is SparseArray<double> sparseArray)
+				{
+					sparseArray.RemoveRange(start, num);
+					return;
+				}
+
+				double[] denseArray = (double[])array;
+				double[] temp = new double[denseArray.Length];
+				if (start > 0)
+					Buffer.BlockCopy(denseArray, 0, temp, 0, start * 8);
+				if ((start + num) < denseArray.Length)
+					Buffer.BlockCopy(denseArray, (start + num) * 8, temp, start * 8, (denseArray.Length - (start + num)) * 8);
+				Buffer.BlockCopy(temp, 0, denseArray, 0, temp.Length * 8);
 			}
 			else
 			{
-				string[] arrays;
+				object arrays;
 				if (identifier.IsCharacterData)
-                    arrays = (string[])identifier.GetArrayChara((int)p.Index1);
+                    arrays = identifier.GetArrayChara((int)p.Index1);
 				else
-					arrays = (string[])identifier.GetArray();
+					arrays = identifier.GetArray();
 
                 if (num <= 0)
-					num = arrays.Length;
-				string[] temps = new string[arrays.Length];
+					num = Get1DLength(arrays);
+				if (arrays is SparseArray<string> sparseArrays)
+				{
+					sparseArrays.RemoveRange(start, num);
+					return;
+				}
+
+				string[] denseArrays = (string[])arrays;
+				string[] temps = new string[denseArrays.Length];
 				//arrays.CopyTo(temps, 0);
 				//for (int i = 0; i < arrays.Length; i++)
 				//    arrays[i] = "";
 				if (start > 0)
-					Array.Copy(arrays, 0, temps, 0, start);
-				if ((start + num) < arrays.Length)
-					Array.Copy(arrays, (start + num), temps, start, (arrays.Length - (start + num)));
-				temps.CopyTo(arrays, 0);
+					Array.Copy(denseArrays, 0, temps, 0, start);
+				if ((start + num) < denseArrays.Length)
+					Array.Copy(denseArrays, (start + num), temps, start, (denseArrays.Length - (start + num)));
+				temps.CopyTo(denseArrays, 0);
 			}
 		}
 
@@ -871,45 +1282,90 @@ namespace MinorShift.Emuera.GameData.Variable
             var identifier = p.Identifier;
             if (identifier.IsInteger)
 			{
-				Int64[] array;
+				object array;
 				if (identifier.IsCharacterData)
-                    array = (long[])identifier.GetArrayChara((int)p.Index1);
+                    array = identifier.GetArrayChara((int)p.Index1);
 				else
-					array = (Int64[])identifier.GetArray();
+					array = identifier.GetArray();
 
-                if (start >= array.Length)
+				int arrayLength = Get1DLength(array);
+                if (start >= arrayLength)
 					throw new CodeEE("命令ARRAYSORTの第３引数(" + start.ToString() + ")が配列" + identifier.Name + "の範囲を超えています");
 				if (num <= 0)
-					num = array.Length - start;
+					num = arrayLength - start;
+				if (array is SparseArray<Int64> sparseArray)
+				{
+					sparseArray.Sort(order == SortOrder.ASCENDING, start, num);
+					return;
+				}
+
+				Int64[] denseArray = (Int64[])array;
 				Int64[] temp = new Int64[num];
-				Array.Copy(array, start, temp, 0, num);
+				Array.Copy(denseArray, start, temp, 0, num);
 
 				if (order == SortOrder.ASCENDING)
 					Array.Sort(temp);
 				else if (order == SortOrder.DESENDING)
 					Array.Sort(temp, delegate(Int64 a, Int64 b) { return b.CompareTo(a); });
-				Array.Copy(temp, 0, array, start, num);
+				Array.Copy(temp, 0, denseArray, start, num);
+			}
+			else if (identifier.IsFloat)
+			{
+				object array;
+				if (identifier.IsCharacterData)
+					array = identifier.GetArrayChara((int)p.Index1);
+				else
+					array = identifier.GetArray();
+
+				int arrayLength = Get1DLength(array);
+				if (start >= arrayLength)
+					throw new CodeEE("命令ARRAYSORTの第３引数(" + start.ToString() + ")が配列" + identifier.Name + "の範囲を超えています");
+				if (num <= 0)
+					num = arrayLength - start;
+				if (array is SparseArray<double> sparseArray)
+				{
+					sparseArray.Sort(order == SortOrder.ASCENDING, start, num);
+					return;
+				}
+
+				double[] denseArray = (double[])array;
+				double[] temp = new double[num];
+				Array.Copy(denseArray, start, temp, 0, num);
+
+				if (order == SortOrder.ASCENDING)
+					Array.Sort(temp);
+				else if (order == SortOrder.DESENDING)
+					Array.Sort(temp, delegate(double a, double b) { return b.CompareTo(a); });
+				Array.Copy(temp, 0, denseArray, start, num);
 			}
 			else
 			{
-				string[] array;
+				object array;
 				if (identifier.IsCharacterData)
-                    array = (string[])identifier.GetArrayChara((int)p.Index1);
+                    array = identifier.GetArrayChara((int)p.Index1);
                 else
-					array = (string[])identifier.GetArray();
+					array = identifier.GetArray();
 
-                if (start >= array.Length)
+				int arrayLength = Get1DLength(array);
+                if (start >= arrayLength)
 					throw new CodeEE("命令ARRAYSORTの第３引数(" + start.ToString() + ")が配列" + identifier.Name + "の範囲を超えています");
 				if (num <= 0)
-					num = array.Length - start;
+					num = arrayLength - start;
+				if (array is SparseArray<string> sparseArray)
+				{
+					sparseArray.Sort(order == SortOrder.ASCENDING, start, num);
+					return;
+				}
+
+				string[] denseArray = (string[])array;
 				string[] temp = new string[num];
-				Array.Copy(array, start, temp, 0, num);
+				Array.Copy(denseArray, start, temp, 0, num);
 
 				if (order == SortOrder.ASCENDING)
 					Array.Sort(temp);
 				else if (order == SortOrder.DESENDING)
 					Array.Sort(temp, delegate(string a, string b) { return b.CompareTo(a); });
-				Array.Copy(temp, 0, array, start, num);
+				Array.Copy(temp, 0, denseArray, start, num);
 			}
 		}
 
@@ -921,11 +1377,11 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 				if (var1.IsArray1D)
 				{
-					Int64[] array1 = (Int64[])var1.GetArray();
-					Int64[] array2 = (Int64[])var2.GetArray();
-					int length = (array1.Length >= array2.Length) ? array2.Length : array1.Length;
+					object array1 = var1.GetArray();
+					object array2 = var2.GetArray();
+					int length = Math.Min(Get1DLength(array1), Get1DLength(array2));
 					for (int i = 0; i < length; i++)
-						array2[i] = array1[i];
+						SetInt1D(array2, i, GetInt1D(array1, i));
 				}
 				else if (var1.IsArray2D)
 				{
@@ -956,15 +1412,54 @@ namespace MinorShift.Emuera.GameData.Variable
 					}
 				}
 			}
+			else if (var1.IsFloat)
+			{
+				if (var1.IsArray1D)
+				{
+					object array1 = var1.GetArray();
+					object array2 = var2.GetArray();
+					int length = Math.Min(Get1DLength(array1), Get1DLength(array2));
+					for (int i = 0; i < length; i++)
+						SetFloat1D(array2, i, GetFloat1D(array1, i));
+				}
+				else if (var1.IsArray2D)
+				{
+					double[,] array1 = (double[,])var1.GetArray();
+					double[,] array2 = (double[,])var2.GetArray();
+					int length1 = (array1.GetLength(0) >= array2.GetLength(0)) ? array2.GetLength(0) : array1.GetLength(0);
+					int length2 = (array1.GetLength(1) >= array2.GetLength(1)) ? array2.GetLength(1) : array1.GetLength(1);
+					for (int i = 0; i < length1; i++)
+					{
+						for (int j = 0; j < length2; j++)
+							array2[i, j] = array1[i, j];
+					}
+				}
+				else
+				{
+					double[, ,] array1 = (double[, ,])var1.GetArray();
+					double[, ,] array2 = (double[, ,])var2.GetArray();
+					int length1 = (array1.GetLength(0) >= array2.GetLength(0)) ? array2.GetLength(0) : array1.GetLength(0);
+					int length2 = (array1.GetLength(1) >= array2.GetLength(1)) ? array2.GetLength(1) : array1.GetLength(1);
+					int length3 = (array1.GetLength(2) >= array2.GetLength(2)) ? array2.GetLength(2) : array1.GetLength(2);
+					for (int i = 0; i < length1; i++)
+					{
+						for (int j = 0; j < length2; j++)
+						{
+							for (int k = 0; k < length3; k++)
+								array2[i, j, k] = array1[i, j, k];
+						}
+					}
+				}
+			}
 			else
 			{
 				if (var1.IsArray1D)
 				{
-					string[] array1 = (string[])var1.GetArray();
-					string[] array2 = (string[])var2.GetArray();
-					int length = (array1.Length >= array2.Length) ? array2.Length : array1.Length;
+					object array1 = var1.GetArray();
+					object array2 = var2.GetArray();
+					int length = Math.Min(Get1DLength(array1), Get1DLength(array2));
 					for (int i = 0; i < length; i++)
-						array2[i] = array1[i];
+						SetStr1D(array2, i, GetStr1D(array1, i));
 				}
 				else if (var1.IsArray2D)
 				{
@@ -997,10 +1492,84 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 		}
 
+		static int Get1DLength(object array)
+		{
+			if (array is SparseArray<Int64> sparseLong)
+				return sparseLong.Length;
+			if (array is SparseArray<string> sparseString)
+				return sparseString.Length;
+			if (array is SparseArray<double> sparseDouble)
+				return sparseDouble.Length;
+			if (array is Array denseArray)
+				return denseArray.Length;
+			throw new ExeEE("配列データの型が不正です");
+		}
+
+		static Int64 GetInt1D(object array, long index)
+		{
+			if (array is SparseArray<Int64> sparseArray)
+				return sparseArray[index];
+			return ((Int64[])array)[index];
+		}
+
+		static void SetInt1D(object array, long index, Int64 value)
+		{
+			if (array is SparseArray<Int64> sparseArray)
+				sparseArray[index] = value;
+			else
+				((Int64[])array)[index] = value;
+		}
+
+		static double GetFloat1D(object array, long index)
+		{
+			if (array is SparseArray<double> sparseArray)
+				return sparseArray[index];
+			return ((double[])array)[index];
+		}
+
+		static void SetFloat1D(object array, long index, double value)
+		{
+			if (array is SparseArray<double> sparseArray)
+				sparseArray[index] = value;
+			else
+				((double[])array)[index] = value;
+		}
+
+		static string GetStr1D(object array, long index)
+		{
+			if (array is SparseArray<string> sparseArray)
+				return sparseArray[index];
+			return ((string[])array)[index];
+		}
+
+		static void SetStr1D(object array, long index, string value)
+		{
+			if (array is SparseArray<string> sparseArray)
+				sparseArray[index] = value;
+			else
+				((string[])array)[index] = value;
+		}
+
+		static string JoinString1D(string delimiter, object array, int start, int count)
+		{
+			if (array is string[] denseArray)
+				return string.Join(delimiter, denseArray, start, count);
+
+			var sparseArray = (SparseArray<string>)array;
+			var builder = new StringBuilder();
+			for (int i = 0; i < count; i++)
+			{
+				if (i > 0)
+					builder.Append(delimiter);
+				builder.Append(sparseArray[start + i]);
+			}
+			return builder.ToString();
+		}
+
 
 		public string GetHavingItemsString()
 		{
-			Int64[] array = this.ITEM;
+			SparseArray<Int64> array = this.ITEM;
 			string[] itemnames = this.ITEMNAME;
 			int length = Math.Min(array.Length, itemnames.Length);
 			int count = 0;
@@ -1045,7 +1614,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			if ((target < 0) || (target >= varData.CharacterList.Count))
 				throw new CodeEE("存在しない登録キャラクタを参照しようとしました");
 			CharacterData chara = varData.CharacterList[(int)target];
-			Int64[] array = null;
+			SparseArray<Int64> array = null;
 			string[] arrayName = null;
 			int i = 0;
 			switch (func)
@@ -1133,7 +1702,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			//    throw new ExeEE("存在しない名称を取得しようとした");
 			CharacterData chara = varData.CharacterList[(int)target];
 			Int64 param = chara.DataIntegerArray[(int)(VariableCode.PALAM & VariableCode.__LOWERCASE__)][paramCode];
-			Int64[] paramlv = varData.DataIntegerArray[(int)(VariableCode.PALAMLV & VariableCode.__LOWERCASE__)];
+			SparseArray<Int64> paramlv = varData.DataIntegerArray[(int)(VariableCode.PALAMLV & VariableCode.__LOWERCASE__)];
 			string paramName = constant.GetCsvNameList(VariableCode.PALAMNAME)[paramCode];
 			if ((param == 0) && (string.IsNullOrEmpty(paramName)))
 				return null;
@@ -1290,6 +1859,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		{
 			//グローバルは初期化しない方が都合がよい。
 			//varData.SetDefaultGlobalValue();
+			RuntimeDataStore.ClearSaveData(constant);
 			varData.SetDefaultLocalValue();
 			varData.SetDefaultValue(constant);
 			foreach (CharacterData chara in varData.CharacterList)
@@ -1299,6 +1869,8 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public void ResetGlobalData()
 		{
+			RuntimeDataStore.ClearGlobalData(constant);
+			RuntimeDataStore.ClearStaticData(constant);
 			varData.SetDefaultGlobalValue();
 		}
 
@@ -1581,8 +2153,8 @@ namespace MinorShift.Emuera.GameData.Variable
 			ASSIPLAY = 0;
 			PREVCOM = -1;
 			NEXTCOM = -1;
-			Int64[] array;
-			string[] sarray;
+			SparseArray<Int64> array;
+			SparseArray<string> sarray;
 			array = varData.DataIntegerArray[(int)(VariableCode.TFLAG & VariableCode.__LOWERCASE__)];
 			for (int i = 0; i < array.Length; i++)
 				array[i] = 0;
@@ -1621,7 +2193,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		public void UpdateAfterShowUsercom()
 		{
 			//UP = 0,DOWN = 0,LOSEBASE = 0
-			Int64[] array;
+			SparseArray<Int64> array;
 			array = varData.DataIntegerArray[(int)(VariableCode.UP & VariableCode.__LOWERCASE__)];
 			for (int i = 0; i < array.Length; i++)
 				array[i] = 0;
@@ -1654,7 +2226,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		public void UpdateAfterInputCom()
 		{
 			//本家の仕様にあわせ、選択中以外のキャラクタも全部リセット。
-			Int64[] array;
+			SparseArray<Int64> array;
 			foreach (CharacterData chara in varData.CharacterList)
 			{
 				array = chara.DataIntegerArray[(int)(VariableCode.NOWEX & VariableCode.__LOWERCASE__)];
@@ -1667,7 +2239,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		public void UpdateAfterSourceCheck()
 		{
 			//本家の仕様にあわせ、選択中以外のキャラクタも全部リセット。
-			Int64[] array;
+			SparseArray<Int64> array;
 			foreach (CharacterData chara in varData.CharacterList)
 			{
 				array = chara.DataIntegerArray[(int)(VariableCode.SOURCE & VariableCode.__LOWERCASE__)];
@@ -1681,7 +2253,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		//1756 ↑だったのは今は昔の話である
 		public void UpdateInUpcheck(EmueraConsole window, bool skipPrint)
 		{
-			Int64[] up, down, param;
+			SparseArray<Int64> up, down, param;
 			string[] paramname = constant.GetCsvNameList(VariableCode.PALAMNAME);
 			up = varData.DataIntegerArray[(int)(VariableCode.UP & VariableCode.__LOWERCASE__)];
 			down = varData.DataIntegerArray[(int)(VariableCode.DOWN & VariableCode.__LOWERCASE__)];
@@ -1737,7 +2309,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public void CUpdateInUpcheck(EmueraConsole window, Int64 target, bool skipPrint)
 		{
-			Int64[] up, down, param;
+			SparseArray<Int64> up, down, param;
 			string[] paramname = constant.GetCsvNameList(VariableCode.PALAMNAME);
 			if ((target < 0) || (target >= varData.CharacterList.Count))
 				return;
@@ -1790,11 +2362,12 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		private void setDefaultStain(CharacterData chara)
 		{
-			long[] array = chara.DataIntegerArray[(int)(VariableCode.STAIN & VariableCode.__LOWERCASE__)];
+			SparseArray<Int64> array = chara.DataIntegerArray[(int)(VariableCode.STAIN & VariableCode.__LOWERCASE__)];
 			//STAINの配列要素数 < _REPLACE.CSVのSTAIN初期値の指定数の時エラーになるのを対処
 			if (array.Length >= Config.StainDefault.Count)
 			{
-				Config.StainDefault.CopyTo(array);
+				for (int i = 0; i < Config.StainDefault.Count; i++)
+					array[i] = Config.StainDefault[i];
 				for (int i = Config.StainDefault.Count; i < array.Length; i++)
 					array[i] = 0;
 			}
@@ -1820,7 +2393,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		/// <returns></returns>
 		public void VarSize(VariableToken varID)
 		{
-			Int64[] resultArray = RESULT_ARRAY;
+			SparseArray<Int64> resultArray = RESULT_ARRAY;
 			if (varID.IsArray2D)
 			{
 				resultArray[0] = varID.GetLength(0);
@@ -1840,7 +2413,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public bool ItemSales(Int64 itemNo)
 		{
-			Int64[] itemSales = ITEMSALES;
+			SparseArray<Int64> itemSales = ITEMSALES;
 			string[] itemNames = constant.GetCsvNameList(VariableCode.ITEMNAME);
 			if ((itemNo < 0) || (itemNo >= itemSales.Length) || (itemNo >= itemNames.Length))
 				return false;
@@ -1867,7 +2440,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public void SetEncodingResult(int[] ary)
 		{
-			long[] resary = varData.DataIntegerArray[(int)(VariableCode.RESULT & VariableCode.__LOWERCASE__)];
+			SparseArray<Int64> resary = varData.DataIntegerArray[(int)(VariableCode.RESULT & VariableCode.__LOWERCASE__)];
 			resary[0] = ary.Length;
 			for (int i = 0; i < ary.Length; i++)
 				resary[i + 1] = ary[i];
@@ -2318,7 +2891,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 			varData.SaveToStreamExtended(writer);
 			varData.SaveFloatToStreamExtended(writer);
-			SaveRuntimeDataStoreText(writer);
+			SaveRuntimeDataStoreText(writer, false);
 		}
 
 		public void LoadFromStream(EraDataReader reader)
@@ -2354,11 +2927,11 @@ namespace MinorShift.Emuera.GameData.Variable
 						varData.CharacterList[i].LoadFromStreamExtended(reader);
 				varData.LoadFromStreamExtended(reader, reader.DataVersion);
 				varData.TryLoadFloatFromStreamExtended(reader);
-				TryLoadRuntimeDataStoreText(reader);
+				TryLoadRuntimeDataStoreText(reader, false);
 			}
 			else
 			{
-				RuntimeDataStore.Clear();
+				RuntimeDataStore.ClearSaveData(constant);
 			}
 		}
 
@@ -2382,6 +2955,8 @@ namespace MinorShift.Emuera.GameData.Variable
 							bWriter.WriteString("");//saveMes
 							varData.SaveGlobalToStreamBinary(bWriter);
 							bWriter.WriteEOF();
+							SaveRuntimeDataStore(bWriter, true);
+							bWriter.WriteEOF();
 							bWriter.Close();
 						}
 					}
@@ -2394,6 +2969,7 @@ namespace MinorShift.Emuera.GameData.Variable
 							varData.SaveGlobalToStream(writer);
 							writer.EmuStart();
 							varData.SaveGlobalToStream1808(writer);
+							SaveRuntimeDataStoreText(writer, true);
 							writer.Close();
 						}
 					}
@@ -2426,6 +3002,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			EraDataReader reader = null;
 			EraBinaryDataReader bReader = null;
 			FileStream fs = null;
+			RuntimeDataStore.ClearGlobalData(constant);
 			try
 			{
 				fs = new FileStream(filepath, FileMode.Open, FileAccess.Read);
@@ -2442,7 +3019,7 @@ namespace MinorShift.Emuera.GameData.Variable
 						return false;
 					bReader.ReadString();//saveMes
 					varData.LoadFromStreamBinary(bReader);
-					LoadRuntimeDataStoreTail(bReader, false);
+					LoadRuntimeDataStoreTail(bReader, true);
 				}
 				else
 				{
@@ -2456,6 +3033,7 @@ namespace MinorShift.Emuera.GameData.Variable
 					if (reader.SeekEmuStart())
 					{
 						varData.LoadGlobalFromStream1808(reader);
+						TryLoadRuntimeDataStoreText(reader, true);
 					}
 				}
 				return true;
@@ -2489,7 +3067,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 			varData.SaveToStreamBinary(bWriter);
 			bWriter.WriteEOF();
-			SaveRuntimeDataStore(bWriter);
+			SaveRuntimeDataStore(bWriter, false);
 			bWriter.WriteEOF();
 		}
 
@@ -2519,58 +3097,54 @@ namespace MinorShift.Emuera.GameData.Variable
 				chara.LoadFromStreamBinary(bReader);
 			}
 			varData.LoadFromStreamBinary(bReader);
-			LoadRuntimeDataStoreTail(bReader, true);
+			LoadRuntimeDataStoreTail(bReader, false);
 		}
 
-		void SaveRuntimeDataStore(EraBinaryDataWriter bWriter)
+		void SaveRuntimeDataStore(EraBinaryDataWriter bWriter, bool globalData)
 		{
-			foreach (var mapPair in RuntimeDataStore.Maps)
-				bWriter.WriteWithKey(mapPair.Key, mapPair.Value);
-			foreach (var xmlPair in RuntimeDataStore.XmlDocuments)
-				if (xmlPair.Value != null)
-					bWriter.WriteWithKey(xmlPair.Key, xmlPair.Value);
-			foreach (var dtPair in RuntimeDataStore.DataTables)
-				if (dtPair.Value != null)
-					bWriter.WriteWithKey(dtPair.Key, dtPair.Value);
+			IEnumerable<string> mapKeys = globalData ? constant.GlobalSaveMaps : constant.SaveMaps;
+			foreach (string key in mapKeys)
+				if (RuntimeDataStore.Maps.TryGetValue(key, out var map))
+					bWriter.WriteWithKey(key, map);
+			IEnumerable<string> xmlKeys = globalData ? constant.GlobalSaveXmls : constant.SaveXmls;
+			foreach (string key in xmlKeys)
+				if (RuntimeDataStore.XmlDocuments.TryGetValue(key, out XmlDocument document) && document != null)
+					bWriter.WriteWithKey(key, document);
+			IEnumerable<string> dtKeys = globalData ? constant.GlobalSaveDTs : constant.SaveDTs;
+			foreach (string key in dtKeys)
+				if (RuntimeDataStore.DataTables.TryGetValue(key, out DataTable table) && table != null)
+					bWriter.WriteWithKey(key, table);
 		}
 
-		void LoadRuntimeDataStoreTail(EraBinaryDataReader bReader, bool clearIfMissing)
+		void LoadRuntimeDataStoreTail(EraBinaryDataReader bReader, bool globalData)
 		{
 			if (bReader.EOF())
-			{
-				if (clearIfMissing)
-					RuntimeDataStore.Clear();
 				return;
-			}
 
 			byte next = bReader.PeekByte();
 			if (next == (byte)EraSaveDataType.EOF)
 			{
 				bReader.ReadDataType();
-				if (clearIfMissing)
-					RuntimeDataStore.Clear();
 				return;
 			}
 
 			if (next == EmMapDataType || next == EmXmlDataType || next == EmDataTableDataType)
 			{
-				LoadRuntimeDataStoreEmData(bReader, clearIfMissing);
+				LoadRuntimeDataStoreEmData(bReader, globalData);
 				return;
 			}
 
-			LoadRuntimeDataStore(bReader);
+			LoadRuntimeDataStore(bReader, globalData);
 		}
 
-		void LoadRuntimeDataStoreEmData(EraBinaryDataReader bReader, bool clearBeforeLoad)
+		void LoadRuntimeDataStoreEmData(EraBinaryDataReader bReader, bool globalData)
 		{
-			if (clearBeforeLoad)
-				RuntimeDataStore.Clear();
 			while (!bReader.EOF())
 			{
 				byte type = (byte)bReader.ReadDataType();
 				if (type == (byte)EraSaveDataType.EOF)
 				{
-					RefreshRuntimeDataStoreNextRowId();
+					RuntimeDataStore.RefreshNextDataTableRowId();
 					return;
 				}
 
@@ -2578,60 +3152,30 @@ namespace MinorShift.Emuera.GameData.Variable
 				switch (type)
 				{
 					case EmMapDataType:
-						RuntimeDataStore.Maps[key] = bReader.ReadMap();
+						Dictionary<string, string> map = bReader.ReadMap();
+						if (globalData ? RuntimeDataStore.IsGlobalMap(constant, key) : RuntimeDataStore.IsSaveMap(constant, key))
+							RuntimeDataStore.Maps[key] = map;
 						break;
 					case EmXmlDataType:
-						RuntimeDataStore.XmlDocuments[key] = bReader.ReadXml();
+						XmlDocument document = bReader.ReadXml();
+						if (globalData ? RuntimeDataStore.IsGlobalXml(constant, key) : RuntimeDataStore.IsSaveXml(constant, key))
+							RuntimeDataStore.XmlDocuments[key] = document;
 						break;
 					case EmDataTableDataType:
 						DataTable table = bReader.ReadDataTable();
-						NormalizeRuntimeDataTable(table);
-						RuntimeDataStore.DataTables[key] = table;
+						RuntimeDataStore.NormalizeDataTable(table);
+						if (globalData ? RuntimeDataStore.IsGlobalDataTable(constant, key) : RuntimeDataStore.IsSaveDataTable(constant, key))
+							RuntimeDataStore.DataTables[key] = table;
 						break;
 					default:
 						throw new FileEE("セーブデータのRuntimeDataStoreデータ型が異常です");
 				}
 			}
-			RefreshRuntimeDataStoreNextRowId();
+			RuntimeDataStore.RefreshNextDataTableRowId();
 		}
 
-		static void NormalizeRuntimeDataTable(DataTable table)
+		void LoadRuntimeDataStore(EraBinaryDataReader bReader, bool globalData)
 		{
-			if (table == null)
-				return;
-			if ((table.PrimaryKey == null || table.PrimaryKey.Length == 0) && table.Columns.Contains("id"))
-				table.PrimaryKey = new[] { table.Columns["id"] };
-		}
-
-		static void RefreshRuntimeDataStoreNextRowId()
-		{
-			long nextId = Math.Max(1, RuntimeDataStore.NextDataTableRowId);
-			foreach (DataTable table in RuntimeDataStore.DataTables.Values)
-			{
-				NormalizeRuntimeDataTable(table);
-				if (table == null || !table.Columns.Contains("id"))
-					continue;
-				foreach (DataRow row in table.Rows)
-				{
-					if (row == null || row.IsNull("id"))
-						continue;
-					try
-					{
-						long id = Convert.ToInt64(row["id"]);
-						if (id >= nextId)
-							nextId = id + 1;
-					}
-					catch (InvalidCastException) { }
-					catch (FormatException) { }
-					catch (OverflowException) { }
-				}
-			}
-			RuntimeDataStore.NextDataTableRowId = nextId;
-		}
-
-		void LoadRuntimeDataStore(EraBinaryDataReader bReader)
-		{
-			RuntimeDataStore.Clear();
 			string marker = bReader.ReadString();
 			if (marker != RuntimeDataStoreBinaryMarker)
 				throw new FileEE("セーブデータのRuntimeDataStoreマーカーが異常です");
@@ -2647,7 +3191,8 @@ namespace MinorShift.Emuera.GameData.Variable
 					string value = bReader.ReadString();
 					map[key] = value;
 				}
-				RuntimeDataStore.Maps[mapName] = map;
+				if (globalData ? RuntimeDataStore.IsGlobalMap(constant, mapName) : RuntimeDataStore.IsSaveMap(constant, mapName))
+					RuntimeDataStore.Maps[mapName] = map;
 			}
 			long xmlCount = bReader.ReadInt64();
 			for (long i = 0; i < xmlCount; i++)
@@ -2658,7 +3203,8 @@ namespace MinorShift.Emuera.GameData.Variable
 				{
 					var doc = new XmlDocument();
 					doc.LoadXml(xmlContent);
-					RuntimeDataStore.XmlDocuments[xmlName] = doc;
+					if (globalData ? RuntimeDataStore.IsGlobalXml(constant, xmlName) : RuntimeDataStore.IsSaveXml(constant, xmlName))
+						RuntimeDataStore.XmlDocuments[xmlName] = doc;
 				}
 			}
 			long dtCount = bReader.ReadInt64();
@@ -2671,17 +3217,33 @@ namespace MinorShift.Emuera.GameData.Variable
 					var dt = new DataTable();
 					using (var sr = new System.IO.StringReader(dtXml))
 						dt.ReadXml(sr);
-					RuntimeDataStore.DataTables[dtName] = dt;
+					RuntimeDataStore.NormalizeDataTable(dt);
+					if (globalData ? RuntimeDataStore.IsGlobalDataTable(constant, dtName) : RuntimeDataStore.IsSaveDataTable(constant, dtName))
+						RuntimeDataStore.DataTables[dtName] = dt;
 				}
 			}
 			RuntimeDataStore.NextDataTableRowId = bReader.ReadInt64();
+			RuntimeDataStore.RefreshNextDataTableRowId();
 		}
 
-		void SaveRuntimeDataStoreText(EraDataWriter writer)
+		void SaveRuntimeDataStoreText(EraDataWriter writer, bool globalData)
 		{
 			writer.Write(RuntimeDataStoreTextMarker);
-			writer.Write((Int64)RuntimeDataStore.Maps.Count);
-			foreach (var mapPair in RuntimeDataStore.Maps)
+			writeRuntimeDataStoreMapText(writer, globalData ? constant.GlobalSaveMaps : constant.SaveMaps);
+			writeRuntimeDataStoreXmlText(writer, globalData ? constant.GlobalSaveXmls : constant.SaveXmls);
+			writeRuntimeDataStoreDataTableText(writer, globalData ? constant.GlobalSaveDTs : constant.SaveDTs);
+			writer.Write(RuntimeDataStore.NextDataTableRowId);
+			writer.Write(RuntimeDataStoreTextEndMarker);
+		}
+
+		void writeRuntimeDataStoreMapText(EraDataWriter writer, IEnumerable<string> keys)
+		{
+			var entries = new List<KeyValuePair<string, Dictionary<string, string>>>();
+			foreach (string key in keys)
+				if (RuntimeDataStore.Maps.TryGetValue(key, out var map))
+					entries.Add(new KeyValuePair<string, Dictionary<string, string>>(key, map));
+			writer.Write((Int64)entries.Count);
+			foreach (var mapPair in entries)
 			{
 				WriteEncodedString(writer, mapPair.Key);
 				writer.Write((Int64)mapPair.Value.Count);
@@ -2691,14 +3253,30 @@ namespace MinorShift.Emuera.GameData.Variable
 					WriteEncodedString(writer, entry.Value ?? "");
 				}
 			}
-			writer.Write((Int64)RuntimeDataStore.XmlDocuments.Count);
-			foreach (var xmlPair in RuntimeDataStore.XmlDocuments)
+		}
+
+		void writeRuntimeDataStoreXmlText(EraDataWriter writer, IEnumerable<string> keys)
+		{
+			var entries = new List<KeyValuePair<string, XmlDocument>>();
+			foreach (string key in keys)
+				if (RuntimeDataStore.XmlDocuments.TryGetValue(key, out XmlDocument document) && document != null)
+					entries.Add(new KeyValuePair<string, XmlDocument>(key, document));
+			writer.Write((Int64)entries.Count);
+			foreach (var xmlPair in entries)
 			{
 				WriteEncodedString(writer, xmlPair.Key);
 				WriteEncodedString(writer, xmlPair.Value?.OuterXml ?? "");
 			}
-			writer.Write((Int64)RuntimeDataStore.DataTables.Count);
-			foreach (var dtPair in RuntimeDataStore.DataTables)
+		}
+
+		void writeRuntimeDataStoreDataTableText(EraDataWriter writer, IEnumerable<string> keys)
+		{
+			var entries = new List<KeyValuePair<string, DataTable>>();
+			foreach (string key in keys)
+				if (RuntimeDataStore.DataTables.TryGetValue(key, out DataTable table) && table != null)
+					entries.Add(new KeyValuePair<string, DataTable>(key, table));
+			writer.Write((Int64)entries.Count);
+			foreach (var dtPair in entries)
 			{
 				WriteEncodedString(writer, dtPair.Key);
 				using (var sw = new System.IO.StringWriter())
@@ -2707,13 +3285,10 @@ namespace MinorShift.Emuera.GameData.Variable
 					WriteEncodedString(writer, sw.ToString());
 				}
 			}
-			writer.Write(RuntimeDataStore.NextDataTableRowId);
-			writer.Write(RuntimeDataStoreTextEndMarker);
 		}
 
-		bool TryLoadRuntimeDataStoreText(EraDataReader reader)
+		bool TryLoadRuntimeDataStoreText(EraDataReader reader, bool globalData)
 		{
-			RuntimeDataStore.Clear();
 			string marker;
 			try
 			{
@@ -2738,7 +3313,8 @@ namespace MinorShift.Emuera.GameData.Variable
 					string value = ReadEncodedString(reader);
 					map[key] = value;
 				}
-				RuntimeDataStore.Maps[mapName] = map;
+				if (globalData ? RuntimeDataStore.IsGlobalMap(constant, mapName) : RuntimeDataStore.IsSaveMap(constant, mapName))
+					RuntimeDataStore.Maps[mapName] = map;
 			}
 
 			long xmlCount = reader.ReadInt64();
@@ -2750,7 +3326,8 @@ namespace MinorShift.Emuera.GameData.Variable
 				{
 					var doc = new XmlDocument();
 					doc.LoadXml(xmlContent);
-					RuntimeDataStore.XmlDocuments[xmlName] = doc;
+					if (globalData ? RuntimeDataStore.IsGlobalXml(constant, xmlName) : RuntimeDataStore.IsSaveXml(constant, xmlName))
+						RuntimeDataStore.XmlDocuments[xmlName] = doc;
 				}
 			}
 
@@ -2764,10 +3341,13 @@ namespace MinorShift.Emuera.GameData.Variable
 					var dt = new DataTable();
 					using (var sr = new System.IO.StringReader(dtXml))
 						dt.ReadXml(sr);
-					RuntimeDataStore.DataTables[dtName] = dt;
+					RuntimeDataStore.NormalizeDataTable(dt);
+					if (globalData ? RuntimeDataStore.IsGlobalDataTable(constant, dtName) : RuntimeDataStore.IsSaveDataTable(constant, dtName))
+						RuntimeDataStore.DataTables[dtName] = dt;
 				}
 			}
 			RuntimeDataStore.NextDataTableRowId = reader.ReadInt64();
+			RuntimeDataStore.RefreshNextDataTableRowId();
 			string endMarker = reader.ReadString();
 			if (endMarker != RuntimeDataStoreTextEndMarker)
 				throw new FileEE("セーブデータのRuntimeDataStore終端マーカーが異常です");
@@ -2836,6 +3416,9 @@ namespace MinorShift.Emuera.GameData.Variable
 			EraDataReader reader = null;
 			EraBinaryDataReader bReader = null;
 			FileStream fs = null;
+			// 原核心在 LOADDATA 前只清理 VarExt 声明为 SAVE_* 的 EM 扩展数据。
+			// 非保存域 MAP/XML/DT 是标题阶段等脚本初始化出的运行期缓存，读旧档时必须保留。
+			RuntimeDataStore.ClearSaveData(constant);
 			try
 			{
 				fs = new FileStream(filepath, FileMode.Open, FileAccess.Read);
@@ -2892,7 +3475,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		#endregion
 		#region Property
-		public Int64[] RESULT_ARRAY
+		public SparseArray<Int64> RESULT_ARRAY
 		{
 			get { return varData.DataIntegerArray[(int)(VariableCode.RESULT & VariableCode.__LOWERCASE__)]; }
 		}
@@ -2900,6 +3483,11 @@ namespace MinorShift.Emuera.GameData.Variable
 		{
 			get { return varData.DataIntegerArray[(int)(VariableCode.RESULT & VariableCode.__LOWERCASE__)][0]; }
 			set { varData.DataIntegerArray[(int)(VariableCode.RESULT & VariableCode.__LOWERCASE__)][0] = value; }
+		}
+		public double RESULTF
+		{
+			get { return varData.DataFloat[(int)(VariableCode.RESULTF & VariableCode.__LOWERCASE__)]; }
+			set { varData.DataFloat[(int)(VariableCode.RESULTF & VariableCode.__LOWERCASE__)] = value; }
 		}
 		public Int64 COUNT
 		{
@@ -2917,7 +3505,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 			set { varData.DataStringArray[(int)(VariableCode.RESULTS & VariableCode.__LOWERCASE__)][0] = value; }
 		}
-		public string[] RESULTS_ARRAY
+		public SparseArray<string> RESULTS_ARRAY
 		{
 			get { return varData.DataStringArray[(int)(VariableCode.RESULTS & VariableCode.__LOWERCASE__)]; }
 		}
@@ -2927,7 +3515,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			get { return varData.DataIntegerArray[(int)(VariableCode.TARGET & VariableCode.__LOWERCASE__)][0]; }
 			set { varData.DataIntegerArray[(int)(VariableCode.TARGET & VariableCode.__LOWERCASE__)][0] = value; }
 		}
-		public Int64[] SELECTCOM_ARRAY
+		public SparseArray<Int64> SELECTCOM_ARRAY
 		{
 			get { return varData.DataIntegerArray[(int)(VariableCode.SELECTCOM & VariableCode.__LOWERCASE__)]; }
 		}
@@ -2941,7 +3529,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			get { return constant.GetCsvNameList(VariableCode.ITEMNAME); }
 		}
 
-		public Int64[] ITEMSALES
+		public SparseArray<Int64> ITEMSALES
 		{
 			get { return varData.DataIntegerArray[(int)(VariableCode.ITEMSALES & VariableCode.__LOWERCASE__)]; }
 		}
@@ -2951,12 +3539,12 @@ namespace MinorShift.Emuera.GameData.Variable
 			get { return constant.ItemPrice; }
 		}
 
-		private Int64[] ITEM
+		private SparseArray<Int64> ITEM
 		{
 			get { return varData.DataIntegerArray[(int)(VariableCode.ITEM & VariableCode.__LOWERCASE__)]; }
 		}
 
-		public Int64[] RANDDATA
+		public SparseArray<Int64> RANDDATA
 		{
 			get { return varData.DataIntegerArray[(int)(VariableCode.RANDDATA & VariableCode.__LOWERCASE__)]; }
 		}
@@ -2976,14 +3564,14 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		private Int64 get_Variable_canforbid(VariableCode code)
 		{
-			long[] array = varData.DataIntegerArray[(int)(code & VariableCode.__LOWERCASE__)];
+			SparseArray<Int64> array = varData.DataIntegerArray[(int)(code & VariableCode.__LOWERCASE__)];
 			if (array.Length == 0)
 				return -1;
 			return array[0];
 		}
 		private void set_Variable_canforbid(VariableCode code, Int64 value)
 		{
-			long[] array = varData.DataIntegerArray[(int)(code & VariableCode.__LOWERCASE__)];
+			SparseArray<Int64> array = varData.DataIntegerArray[(int)(code & VariableCode.__LOWERCASE__)];
 			if (array.Length == 0)
 				return;
 			array[0] = value;

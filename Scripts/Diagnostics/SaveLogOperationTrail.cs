@@ -1,7 +1,6 @@
 using System;
 using System.Text;
 using System.Threading;
-using Godot;
 
 namespace gEmuera.Diagnostics
 {
@@ -42,7 +41,7 @@ namespace gEmuera.Diagnostics
                 _buffer[index] = new OperationEntry(
                     sequence,
                     DateTimeOffset.UtcNow,
-                    (long)Time.GetTicksMsec(),
+                    DiagnosticLogRouter.GetMonotonicMilliseconds(),
                     kind ?? "",
                     input ?? "",
                     codeBefore ?? "",

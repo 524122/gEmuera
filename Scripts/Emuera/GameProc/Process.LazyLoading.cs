@@ -69,7 +69,7 @@ namespace MinorShift.Emuera.GameProc
 			List<string> filesToLoad = files.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 			var loader = new ErbLoader(console, exm, this);
 			int start = Environment.TickCount;
-			if (loader.loadErbs(filesToLoad, labelDic, true))
+			if (loader.LoadErbsAsync(filesToLoad, labelDic, true).GetAwaiter().GetResult())
 			{
 				RecordLazyLoadingRuntime(functionName, filesToLoad.Count, Environment.TickCount - start);
 				RemoveLazyLoadingEntriesForFiles(filesToLoad);
@@ -126,7 +126,7 @@ namespace MinorShift.Emuera.GameProc
 
 			int start = Environment.TickCount;
 			var loader = new ErbLoader(console, exm, this);
-			if (loader.loadErbs(filesToLoad, labelDic, true))
+			if (loader.LoadErbsAsync(filesToLoad, labelDic, true).GetAwaiter().GetResult())
 			{
 				int elapsed = Environment.TickCount - start;
 				RecordLazyLoadingRuntime("EVENTLOAD_PRELOAD", filesToLoad.Count, elapsed);
@@ -430,12 +430,22 @@ namespace MinorShift.Emuera.GameProc
 							canLazyLoad = false;
 							break;
 						}
+						if (currentLabel.IsMethod)
+						{
+							canLazyLoad = false;
+							break;
+						}
 						fileLabels.Add(currentLabel.LabelName);
 					}
 					else if (line.Current == '#' && currentLabel != null)
 					{
 						LogicalLineParser.ParseSharpLine(currentLabel, line, position, onlyEvents);
 						if (currentLabel.IsEvent)
+						{
+							canLazyLoad = false;
+							break;
+						}
+						if (currentLabel.IsMethod)
 						{
 							canLazyLoad = false;
 							break;
@@ -464,7 +474,7 @@ namespace MinorShift.Emuera.GameProc
 			{
 				if (label.Position == null || !files.Contains(NormalizeRelativePath(label.Position.Filename)))
 					continue;
-				if (label.IsEvent)
+				if (label.IsEvent || label.IsMethod)
 					files.Remove(NormalizeRelativePath(label.Position.Filename));
 			}
 
@@ -518,7 +528,7 @@ namespace MinorShift.Emuera.GameProc
 						continue;
 
 					anyLabel = true;
-					if (label.IsEvent)
+					if (label.IsEvent || label.IsMethod)
 					{
 						valid = false;
 						break;

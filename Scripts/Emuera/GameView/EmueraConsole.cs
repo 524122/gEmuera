@@ -6,7 +6,7 @@ using System.IO;
 using Godot;
 using MinorShift._Library;
 using MinorShift.Emuera.Sub;
-//using MinorShift.Emuera.GameData;
+using MinorShift.Emuera.GameData;
 using MinorShift.Emuera.GameProc;
 //using System.Drawing.Imaging;
 //using MinorShift.Emuera.Forms;
@@ -124,6 +124,7 @@ namespace MinorShift.Emuera.GameView
 		public EmueraConsole(MainWindow parent)
 		{
 			window = parent;
+			hotkeyState = new HotkeyState();
 
 			//1.713 この段階でsetStBarを使用してはいけない
 			//setStBar(StaticConfig.DrawLineString);
@@ -193,6 +194,7 @@ namespace MinorShift.Emuera.GameView
 			public bool followScroll = false;
 			public int initialScrollY = int.MinValue;
 			public bool isSnakeImageLayer = false;
+			public long snakeImageDepth = 0;
 			public string snakeImageName = null;
 			public readonly int zdepth;
 			public bool isButton = false;
@@ -202,6 +204,12 @@ namespace MinorShift.Emuera.GameView
 			{
 				if (other == null)
 					return -1;
+				if (isSnakeImageLayer && other.isSnakeImageLayer)
+				{
+					int snakeDepthOrder = -snakeImageDepth.CompareTo(other.snakeImageDepth);
+					if (snakeDepthOrder != 0)
+						return snakeDepthOrder;
+				}
 				//逆順でSort
 				return -zdepth.CompareTo(other.zdepth);
 			}
@@ -212,14 +220,18 @@ namespace MinorShift.Emuera.GameView
 			{
 				for(var i=0; i<cbgList.Count; ++i)
 				{
-                ClientBackGroundImage cimg = cbgList[i];
-                //使い捨て無名Imageを一応disposeしておく
-                if (cimg.Img != null && cimg.Img.Name.Length == 0)
+					ClientBackGroundImage cimg = cbgList[i];
+					if (cimg.isSnakeImageLayer)
+						continue;
+					//使い捨て無名Imageを一応disposeしておく
+					if (cimg.Img != null && cimg.Img.Name.Length == 0)
 						cimg.Img.Dispose();
+					cbgList.RemoveAt(i);
+					i--;
 				}
-				cbgList.Clear();
 				CBG_ClearBMap();
 				cbgList.Add(new ClientBackGroundImage(0));
+				cbgList.Sort();
 			}
 		}
 
@@ -232,7 +244,9 @@ namespace MinorShift.Emuera.GameView
 				for (int i = 0; i < cbgList.Count;i++)
 				{
 					ClientBackGroundImage cimg = cbgList[i];
-					if (cimg.zdepth < zmin || cimg.zdepth > zmax || cimg.zdepth == 0)//0はダミーなので削除しない
+					// Snake 的 SETIMAGELAYER 在原实现里由独立 ImageLayerManager 管理。
+					// Godot 版复用 CBG 列表渲染时，CBGREMOVERANGE 仍只能影响 CBG 自己的层。
+					if (cimg.isSnakeImageLayer || cimg.zdepth < zmin || cimg.zdepth > zmax || cimg.zdepth == 0)//0はダミーなので削除しない
 						continue;
 
 					//使い捨て無名Imageを一応disposeしておく
@@ -276,13 +290,13 @@ namespace MinorShift.Emuera.GameView
 				return new List<ClientBackGroundImage>(cbgList);
 		}
 
-		public bool CBG_SetGraphics(GraphicsImage gra, int x, int y, int zdepth)
+		public bool CBG_SetGraphics(GraphicsImage gra, int x, int y, int zdepth, int width = 0, int height = 0, float opacity = 1.0f, float[][] colorMatrix = null)
 		{
 			if (gra == null || !gra.IsCreated)
 				return false;
-			return CBG_SetImage(new SpriteG("", gra, new Rectangle(0, 0, gra.Width, gra.Height)), x, y, zdepth);
+			return CBG_SetImage(new SpriteG("", gra, new Rectangle(0, 0, gra.Width, gra.Height)), x, y, zdepth, width, height, opacity, colorMatrix);
 		}
-		public bool CBG_SetImage(ASprite image, int x, int y, int zdepth)
+		public bool CBG_SetImage(ASprite image, int x, int y, int zdepth, int width = 0, int height = 0, float opacity = 1.0f, float[][] colorMatrix = null)
 		{
 			if (image == null || !image.IsCreated)
 				return false;
@@ -294,6 +308,10 @@ namespace MinorShift.Emuera.GameView
 				cbg.Img = image;
 				cbg.x = x;
 				cbg.y = y;
+				cbg.width = width;
+				cbg.height = height;
+				cbg.opacity = clampOpacity(opacity);
+				cbg.colorMatrix = colorMatrix;
 				//cbg.zdepth = zdepth;
 				cbgList.Add(cbg);
 				cbgList.Sort();
@@ -365,7 +383,9 @@ namespace MinorShift.Emuera.GameView
 			{
 				for (int i = 0; i < cbgList.Count; i++)
 				{
-					if (cbgList[i].isSnakeImageLayer && cbgList[i].zdepth == zdepth)
+					// SETIMAGELAYER 的脚本可见 depth 是 long，允许 0 和 -1 同时存在。
+					// CBG 渲染层内部保留 zdepth==0 作为文字哑元，因此这里只能用原始 depth 做逻辑匹配。
+					if (cbgList[i].isSnakeImageLayer && cbgList[i].snakeImageDepth == depth)
 					{
 						cbgList.RemoveAt(i);
 						i--;
@@ -381,6 +401,7 @@ namespace MinorShift.Emuera.GameView
 				cbg.colorMatrix = colorMatrix;
 				cbg.followScroll = followScroll;
 				cbg.isSnakeImageLayer = true;
+				cbg.snakeImageDepth = depth;
 				cbg.snakeImageName = spriteName;
 				cbgList.Add(cbg);
 				cbgList.Sort();
@@ -389,12 +410,13 @@ namespace MinorShift.Emuera.GameView
 
 		public void ClearImageLayer(long depth)
 		{
-			int zdepth = normalizeSnakeDepth(depth);
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
 				{
-					if (cbgList[i].isSnakeImageLayer && cbgList[i].zdepth == zdepth)
+					// SETIMAGELAYER 的脚本可见 depth 是 long，允许 0 和 -1 同时存在。
+					// CBG 渲染层内部保留 zdepth==0 作为文字哑元，因此这里只能用原始 depth 做逻辑匹配。
+					if (cbgList[i].isSnakeImageLayer && cbgList[i].snakeImageDepth == depth)
 					{
 						cbgList.RemoveAt(i);
 						i--;
@@ -420,12 +442,11 @@ namespace MinorShift.Emuera.GameView
 
 		public bool ExistsImageLayer(long depth)
 		{
-			int zdepth = normalizeSnakeDepth(depth);
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
 				{
-					if (cbgList[i].isSnakeImageLayer && cbgList[i].zdepth == zdepth)
+					if (cbgList[i].isSnakeImageLayer && cbgList[i].snakeImageDepth == depth)
 						return true;
 				}
 			}
@@ -699,7 +720,7 @@ namespace MinorShift.Emuera.GameView
 				window.Focus();
 			}
 			ClearDisplay();
-			if (!emuera.Initialize())
+			if (!emuera.InitializeAsync().GetAwaiter().GetResult())
 			{
 				state = ConsoleState.Error;
 				OutputLog(null);
@@ -1180,7 +1201,7 @@ namespace MinorShift.Emuera.GameView
 			if(IsWaitingPrimitive)
 			{
 				//callEmueraProgramは呼び出し先で行う。
-				InputMouseKey(4, 0, 0, 0,0);
+				InputMouseKey(4, 0, 0, 0, 0, 0);
 				return;
 			}
 			if (inputReq.DisplayTime)
@@ -1329,7 +1350,7 @@ namespace MinorShift.Emuera.GameView
 			//clientPointをクライアント左下基準の座標に置き換え
 			Point clientPoint = point;
 			clientPoint.Y = point.Y - ClientHeight;
-			InputMouseKey(2, delta, clientPoint.X, clientPoint.Y, 0);
+			InputMouseKey(2, delta, clientPoint.X, clientPoint.Y, 0, 0);
 		}
 
 		internal void MouseDown(Point point, MouseButtons button)
@@ -1356,20 +1377,20 @@ namespace MinorShift.Emuera.GameView
 				}
 
 			}
-			InputMouseKey(1, (int)button, clientPoint.X, clientPoint.Y, buttonNum);
+			InputMouseKey(1, (int)button, clientPoint.X, clientPoint.Y, buttonNum, 0);
 		}
 
 		//1823 Key入力を捕まえる
 		internal void PressPrimitiveKey(int keycode, int keydata, int keymod)
 		{
 			if (IsWaitingPrimitive)
-				InputMouseKey(3, keycode, keydata, 0, 0);
+				InputMouseKey(3, keycode, keydata, 0, 0, 0);
 		}
 
 		//1823 Key入力を捕まえる
-		internal void InputMouseKey(int type, int result1, int result2, int result3, int result4)
+		internal void InputMouseKey(int type, int result1, int result2, int result3, int result4, long result5)
 		{
-			emuera.InputResult5(type, result1, result2, result3, result4);
+			emuera.InputResult5(type, result1, result2, result3, result4, result5);
 
 			inProcess = true;
 			try
@@ -1920,6 +1941,7 @@ namespace MinorShift.Emuera.GameView
 		public uEmuera.Drawing.Color? TextBackgroundColor { get; set; }
 		public bool BitmapCacheEnabledForNextLine { get; set; }
 		public bool StrictFontFallback { get; set; }
+		readonly HotkeyState hotkeyState;
 		// Godot 版不使用 SkiaSharp，但 v24 脚本会通过这些 API 探测渲染后端。
 		// 保留与改版 emuera 默认值一致的可见状态，避免迁移脚本误判为旧 GDI 模式。
 		public int SnakeTextDrawingMode { get; private set; } = 3;
@@ -1938,6 +1960,26 @@ namespace MinorShift.Emuera.GameView
 			SnakeImageQuality = imageQuality;
 			SnakeFontHinting = fontHinting;
 			SnakeFontEdging = fontEdging;
+		}
+
+		public void HotkeyStateInitialize(long size)
+		{
+			hotkeyState.Initialize(size);
+		}
+
+		public void HotkeyStateSet(long index, long value)
+		{
+			hotkeyState.Set(index, value);
+		}
+
+		public bool ToggleHotkeyState(out string message)
+		{
+			return hotkeyState.Toggle(out message);
+		}
+
+		public bool TryEvaluateHotkey(int keyData, out long result)
+		{
+			return hotkeyState.TryEvaluate(keyData, out result);
 		}
 
 		public void PrintHTMLIsland(string html)
@@ -2115,7 +2157,7 @@ namespace MinorShift.Emuera.GameView
 					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
 					if (term == null)
 						throw new CodeEE("解釈不能なコードです");
-					if (term.GetOperandType() == typeof(Int64))
+					if (term.GetEraType() == EraType.Integer)
 					{
 						if (outputDebugConsole)
 							com = "DEBUGPRINTFORML {" + com + "}";
@@ -2420,7 +2462,7 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Initializing;
 			PrintSingleLine("ERB再読み込み中……", true);
 			force_temporary = true;
-			emuera.ReloadErb();
+			emuera.ReloadErbAsync().GetAwaiter().GetResult();
 			force_temporary = false;
             PrintSingleLine("再読み込み完了", true);
 			RefreshStrings(true);
@@ -2470,7 +2512,7 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Initializing;
             PrintSingleLine("ERB再読み込み中……", true);
 			force_temporary = true;
-			emuera.ReloadPartialErb(path);
+			emuera.ReloadPartialErbAsync(path).GetAwaiter().GetResult();
 			force_temporary = false;
             PrintSingleLine("再読み込み完了", true);
 			RefreshStrings(true);
@@ -2521,7 +2563,7 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Initializing;
             PrintSingleLine("ERB再読み込み中……", true);
 			force_temporary = true;
-            emuera.ReloadPartialErb(paths);
+            emuera.ReloadPartialErbAsync(paths).GetAwaiter().GetResult();
 			force_temporary = false;
             PrintSingleLine("再読み込み完了", true);
 			RefreshStrings(true);

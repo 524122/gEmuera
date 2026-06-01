@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 //using Microsoft.VisualBasic;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameView;
@@ -36,6 +37,11 @@ namespace MinorShift.Emuera.GameProc
 		/// </summary>
 		/// <param name="filepath"></param>
 		public bool LoadErbFiles(string erbDir, bool displayReport, LabelDictionary labelDictionary, bool useLazyLoading = false)
+		{
+			return LoadErbFilesAsync(erbDir, displayReport, labelDictionary, useLazyLoading).GetAwaiter().GetResult();
+		}
+
+		public async Task<bool> LoadErbFilesAsync(string erbDir, bool displayReport, LabelDictionary labelDictionary, bool useLazyLoading = false)
 		{
 			//1.713 labelDicをnewする位置を変更。
 			//checkScript();の時点でExpressionPerserがProcess.instance.LabelDicを必要とするから。
@@ -84,7 +90,7 @@ namespace MinorShift.Emuera.GameProc
 						output.PrintSystemLine(filename + "読み込み中・・・");
 #endif
 					//System.Windows.Forms.//Application.DoEvents();
-					loadErb(file, filename, isOnlyEvent);
+					await Task.Run(() => loadErb(file, filename, isOnlyEvent));
 				}
 				ParserMediator.FlushWarningList();
 #if UEMUERA_DEBUG
@@ -92,7 +98,7 @@ namespace MinorShift.Emuera.GameProc
 #endif
 				if (displayReport)
 					output.PrintSystemLine("ユーザー定義関数のリストを構築中・・・");
-				setLabelsArg();
+				await Task.Run(() => setLabelsArg());
 				ParserMediator.FlushWarningList();
 				labelDic.Initialized = true;
 #if UEMUERA_DEBUG
@@ -100,7 +106,7 @@ namespace MinorShift.Emuera.GameProc
 #endif
 				if (displayReport)
 					output.PrintSystemLine("スクリプトの構文チェック中・・・");
-				checkScript();
+				await Task.Run(() => checkScript());
 				ParserMediator.FlushWarningList();
 				if (parentProcess.LazyCurrentLazyStatus == Process.LazyStatus.BuildTable)
 				{
@@ -146,37 +152,45 @@ namespace MinorShift.Emuera.GameProc
 		/// <param name="filename"></param>
 		public bool loadErbs(List<string> path, LabelDictionary labelDictionary, bool isLazyLoading = false)
 		{
-			string fname;
-            List<string> isOnlyEvent = new List<string>();
-            noError = true;
+			return LoadErbsAsync(path, labelDictionary, isLazyLoading).GetAwaiter().GetResult();
+		}
+
+		public async Task<bool> LoadErbsAsync(List<string> path, LabelDictionary labelDictionary, bool isLazyLoading = false)
+		{
+			List<string> isOnlyEvent = new List<string>();
+			noError = true;
 			labelDic = labelDictionary;
 			if (!isLazyLoading)
 				labelDic.Initialized = false;
-			foreach (string fpath in path)
+			await Task.Run(() =>
 			{
-				if (fpath.StartsWith(Program.ErbDir, Config.SCIgnoreCase) && !Program.AnalysisMode)
-					fname = fpath.Substring(Program.ErbDir.Length);
-				else
-					fname = fpath;
-				if (Program.AnalysisMode)
-					output.PrintSystemLine(fname + "読み込み中・・・");
-				//System.Windows.Forms.//Application.DoEvents();
-                loadErb(fpath, fname, isOnlyEvent, isLazyLoading);
-			}
-            if (Program.AnalysisMode)
-                output.NewLine();
-            ParserMediator.FlushWarningList();
+				foreach (string fpath in path)
+				{
+					string fname;
+					if (fpath.StartsWith(Program.ErbDir, Config.SCIgnoreCase) && !Program.AnalysisMode)
+						fname = fpath.Substring(Program.ErbDir.Length);
+					else
+						fname = fpath;
+					if (Program.AnalysisMode)
+						output.PrintSystemLine(fname + "読み込み中・・・");
+					//System.Windows.Forms.//Application.DoEvents();
+					loadErb(fpath, fname, isOnlyEvent, isLazyLoading);
+				}
+			});
+			if (Program.AnalysisMode)
+				output.NewLine();
+			ParserMediator.FlushWarningList();
 			if (!isLazyLoading)
 			{
-				setLabelsArg();
+				await Task.Run(() => setLabelsArg());
 				ParserMediator.FlushWarningList();
 				labelDic.Initialized = true;
-				checkScript();
+				await Task.Run(() => checkScript());
 				ParserMediator.FlushWarningList();
 			}
 			parentProcess.scaningLine = null;
-            isOnlyEvent.Clear();
-            return noError;
+			isOnlyEvent.Clear();
+			return noError;
 		}
 
 		private sealed class PPState
@@ -671,9 +685,9 @@ namespace MinorShift.Emuera.GameProc
 							{
 								if (canDef)// && label.ArgOptional)
 								{
-									if (vTerm.GetOperandType() == typeof(double))
+									if (vTerm.GetEraType() == EraType.Float)
 										def = new SingleTerm(0.0);
-									else if (vTerm.GetOperandType() == typeof(Int64))
+									else if (vTerm.GetEraType() == EraType.Integer)
 										def = new SingleTerm(0);
 									else
 										def = new SingleTerm("");
@@ -688,7 +702,7 @@ namespace MinorShift.Emuera.GameProc
 							{ errMes = "引数の初期値を定義できるのは\"ARG\"、\"ARGS\"、\"ARGF\"またはプライベート変数のみです"; goto err; }
 							else if (vTerm.Identifier.IsReference)
 							{ errMes = "参照渡しの引数に初期値は定義できません"; goto err; }
-							if (vTerm.GetOperandType() != def.GetOperandType())
+							if (vTerm.GetEraType() != def.GetEraType())
 							{ errMes = "引数の型と初期値の型が一致していません"; goto err; }
 						}
 						args[i] = vTerm;
@@ -1320,11 +1334,12 @@ namespace MinorShift.Emuera.GameProc
 
 								foreach (CaseExpression exp in caseExps)
 								{
-									if (exp.GetOperandType() != term.GetOperandType())
+									if (exp.GetEraType() != term.GetEraType())
 										ParserMediator.Warn("CASEの引数の型がSELECTCASEと一致しません", caseLine, 2, true, false);
 								}
 
 							}
+							selectLine.SelectCaseJumpTable = SelectCaseJumpTable.TryBuild(selectLine, term.GetEraType());
 						}
 						break;
 					case FunctionCode.REND:

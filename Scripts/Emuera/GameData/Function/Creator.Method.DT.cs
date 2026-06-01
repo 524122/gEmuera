@@ -18,8 +18,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtCreateMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -37,8 +37,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtExistMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -52,8 +52,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtReleaseMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -70,8 +70,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtClearMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -89,8 +89,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtNoCaseMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.Integer };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -108,7 +108,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtColumnAddMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -151,8 +151,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtColumnExistMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -168,8 +168,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtColumnRemoveMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -188,8 +188,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtColumnLengthMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -204,7 +204,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtColumnNamesMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -238,7 +238,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtRowAddMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -266,7 +266,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtRowSetMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -295,7 +295,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtRowRemoveMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -344,8 +344,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtRowLengthMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -360,7 +360,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtCellGetMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -390,7 +390,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtCellGetfMethod()
             {
-                ReturnType = typeof(double);
+                ReturnType = EraType.Float;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -420,7 +420,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtCellGetsMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -450,7 +450,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtCellIsNullMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -480,7 +480,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtCellSetMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -531,7 +531,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtCellSetfMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -577,7 +577,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtSelectMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -623,7 +623,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtToXmlMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -662,8 +662,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtFromXmlMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -907,7 +907,7 @@ namespace MinorShift.Emuera.GameData.Function
 
         static void WriteIntegerResults(ExpressionMediator exm, VariableTerm destination, long[] values)
         {
-            long[] target;
+            var target = exm.VEvaluator.RESULT_ARRAY;
             if (destination != null && destination.Identifier.IsInteger && destination.Identifier.IsArray1D)
             {
                 try
@@ -920,7 +920,6 @@ namespace MinorShift.Emuera.GameData.Function
                 }
                 catch { }
             }
-            target = exm.VEvaluator.RESULT_ARRAY;
             int max = Math.Min(values.Length, target.Length);
             for (int i = 0; i < max; i++)
                 target[i] = values[i];

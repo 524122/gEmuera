@@ -22,7 +22,7 @@ namespace gEmuera.Diagnostics
         public InputReplayBuffer(int capacity)
         {
             _buffer = new ReplayEntry[Math.Max(16, capacity)];
-            _startTickMs = (long)Time.GetTicksMsec();
+            _startTickMs = DiagnosticLogRouter.GetMonotonicMilliseconds();
         }
 
         public int Count
@@ -46,7 +46,7 @@ namespace gEmuera.Diagnostics
                 }
                 _buffer[index] = new ReplayEntry(
                     Interlocked.Increment(ref _sequence),
-                    Math.Max(0, (long)Time.GetTicksMsec() - _startTickMs),
+                    Math.Max(0, DiagnosticLogRouter.GetMonotonicMilliseconds() - _startTickMs),
                     kind ?? "",
                     input ?? "",
                     globalPos,

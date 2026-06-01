@@ -43,6 +43,7 @@ namespace MinorShift.Emuera
 #if UEMUERA_DEBUG
 		public static List<FunctionLabelLine> StackList = new List<FunctionLabelLine>();
 #endif
+		public static CtrlZ ctrlZ = new CtrlZ();
 		public static bool ExistPlugin;
 		public static void Reset()
 		{

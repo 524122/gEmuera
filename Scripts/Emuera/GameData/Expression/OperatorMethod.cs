@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 //using System.Windows.Forms;
@@ -116,7 +116,7 @@ namespace MinorShift.Emuera.GameData.Expression
 				if (var.Identifier.IsConst)
 					throw new CodeEE("変更できない変数をインクリメントすることはできません");
 			}
-			if (o1.GetOperandType() == typeof(Int64))
+			if (o1.GetEraType() == EraType.Integer)
 			{
 				if (op == OperatorCode.Plus)
 					return o1;
@@ -124,7 +124,7 @@ namespace MinorShift.Emuera.GameData.Expression
 				if (unaryDic.TryGetValue(op, out operator_method))
 					method = operator_method;
 			}
-			else if (o1.GetOperandType() == typeof(double))
+			else if (o1.GetEraType() == EraType.Float)
 			{
 				if (op == OperatorCode.Plus)
 					return o1;
@@ -134,11 +134,11 @@ namespace MinorShift.Emuera.GameData.Expression
 			if(method != null)
 				return new FunctionMethodTerm(method, new IOperandTerm[] { o1 });
             string errMes = "";
-            if (o1.GetOperandType() == typeof(Int64))
+            if (o1.GetEraType() == EraType.Integer)
                 errMes += "数値型";
-            else if (o1.GetOperandType() == typeof(string))
+            else if (o1.GetEraType() == EraType.String)
                 errMes += "文字列型";
-            else if (o1.GetOperandType() == typeof(double))
+            else if (o1.GetEraType() == EraType.Float)
                 errMes += "実数型";
             else
                 errMes += "不定型";
@@ -157,7 +157,7 @@ namespace MinorShift.Emuera.GameData.Expression
 				if (var.Identifier.IsConst)
 					throw new CodeEE("変更できない変数をインクリメントすることはできません");
 			}
-			if (o1.GetOperandType() == typeof(Int64))
+			if (o1.GetEraType() == EraType.Integer)
 			{
                 OperatorMethod operator_method = null;
                 if (unaryAfterDic.TryGetValue(op, out operator_method))
@@ -166,9 +166,9 @@ namespace MinorShift.Emuera.GameData.Expression
 			if (method != null)
 				return new FunctionMethodTerm(method, new IOperandTerm[] { o1 });
             string errMes = "";
-            if (o1.GetOperandType() == typeof(Int64))
+            if (o1.GetEraType() == EraType.Integer)
                 errMes += "数値型";
-            else if (o1.GetOperandType() == typeof(string))
+            else if (o1.GetEraType() == EraType.String)
                 errMes += "文字列型";
             else
                 errMes += "不定型";
@@ -179,32 +179,32 @@ namespace MinorShift.Emuera.GameData.Expression
 		public static IOperandTerm ReduceBinaryTerm(OperatorCode op, IOperandTerm left, IOperandTerm right)
 		{
             OperatorMethod method = null;
-			if ((left.GetOperandType() == typeof(Int64)) && (right.GetOperandType() == typeof(Int64)))
+			if ((left.GetEraType() == EraType.Integer) && (right.GetEraType() == EraType.Integer))
 			{
                 OperatorMethod operator_method = null;
                 if (binaryIntIntDic.TryGetValue(op, out operator_method))
 					method = operator_method;
 			}
-			else if ((left.GetOperandType() == typeof(string)) && (right.GetOperandType() == typeof(string)))
+			else if ((left.GetEraType() == EraType.String) && (right.GetEraType() == EraType.String))
 			{
                 OperatorMethod operator_method = null;
                 if (binaryStrStrDic.TryGetValue(op, out operator_method))
 					method = operator_method;
 			}
-			else if (((left.GetOperandType() == typeof(Int64)) && (right.GetOperandType() == typeof(string)))
-				 || ((left.GetOperandType() == typeof(string)) && (right.GetOperandType() == typeof(Int64))))
+			else if (((left.GetEraType() == EraType.Integer) && (right.GetEraType() == EraType.String))
+				 || ((left.GetEraType() == EraType.String) && (right.GetEraType() == EraType.Integer)))
 			{
 				if (op == OperatorCode.Mult)
 					method = binaryMultIntStr;
 			}
-			else if ((left.GetOperandType() == typeof(double)) && (right.GetOperandType() == typeof(double)))
+			else if ((left.GetEraType() == EraType.Float) && (right.GetEraType() == EraType.Float))
 			{
                 OperatorMethod operator_method = null;
                 if (binaryFloatFloatDic.TryGetValue(op, out operator_method))
 					method = operator_method;
 			}
-			else if (((left.GetOperandType() == typeof(Int64)) && (right.GetOperandType() == typeof(double)))
-				 || ((left.GetOperandType() == typeof(double)) && (right.GetOperandType() == typeof(Int64))))
+			else if (((left.GetEraType() == EraType.Integer) && (right.GetEraType() == EraType.Float))
+				 || ((left.GetEraType() == EraType.Float) && (right.GetEraType() == EraType.Integer)))
 			{
                 OperatorMethod operator_method = null;
                 if (binaryMixedFloatDic.TryGetValue(op, out operator_method))
@@ -213,19 +213,19 @@ namespace MinorShift.Emuera.GameData.Expression
 			if (method != null)
 				return new FunctionMethodTerm(method, new IOperandTerm[] { left, right });
 			string errMes = "";
-                if (left.GetOperandType() == typeof(Int64))
+                if (left.GetEraType() == EraType.Integer)
                     errMes += "数値型と";
-                else if (left.GetOperandType() == typeof(string))
+                else if (left.GetEraType() == EraType.String)
                     errMes += "文字列型と";
-                else if (left.GetOperandType() == typeof(double))
+                else if (left.GetEraType() == EraType.Float)
                     errMes += "実数型と";
                 else
                     errMes += "不定型と";
-                if (right.GetOperandType() == typeof(Int64))
+                if (right.GetEraType() == EraType.Integer)
                     errMes += "数値型の";
-                else if (right.GetOperandType() == typeof(string))
+                else if (right.GetEraType() == EraType.String)
                     errMes += "文字列型の";
-                else if (right.GetOperandType() == typeof(double))
+                else if (right.GetEraType() == EraType.Float)
                     errMes += "実数型の";
                 else
                     errMes += "不定型の";
@@ -236,11 +236,11 @@ namespace MinorShift.Emuera.GameData.Expression
 		public static IOperandTerm ReduceTernaryTerm(IOperandTerm o1, IOperandTerm o2, IOperandTerm o3)
 		{
             OperatorMethod method = null;
-			if ((o1.GetOperandType() == typeof(Int64)) && (o2.GetOperandType() == typeof(Int64)) && (o3.GetOperandType() == typeof(Int64)))
+			if ((o1.GetEraType() == EraType.Integer) && (o2.GetEraType() == EraType.Integer) && (o3.GetEraType() == EraType.Integer))
 				method = ternaryIntIntInt;
-			else if ((o1.GetOperandType() == typeof(Int64)) && (o2.GetOperandType() == typeof(string)) && (o3.GetOperandType() == typeof(string)))
+			else if ((o1.GetEraType() == EraType.Integer) && (o2.GetEraType() == EraType.String) && (o3.GetEraType() == EraType.String))
 				method = ternaryIntStrStr;
-			else if ((o1.GetOperandType() == typeof(Int64)) && (o2.GetOperandType() == typeof(double)) && (o3.GetOperandType() == typeof(double)))
+			else if ((o1.GetEraType() == EraType.Integer) && (o2.GetEraType() == EraType.Float) && (o3.GetEraType() == EraType.Float))
 				method = ternaryIntFloatFloat;
 			if (method != null)
 				return new FunctionMethodTerm(method, new IOperandTerm[] { o1, o2, o3 });
@@ -264,7 +264,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public PlusIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -278,8 +278,8 @@ namespace MinorShift.Emuera.GameData.Expression
 			public PlusStrStr()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(string);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String };
 			}
 
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -293,7 +293,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MinusIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -307,7 +307,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MultIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -321,13 +321,13 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MultStrInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(string);
+				ReturnType = EraType.String;
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
 				Int64 value = 0;
 				string str = null;
-				if (arguments[0].GetOperandType() == typeof(Int64))
+				if (arguments[0].GetEraType() == EraType.Integer)
 				{
 					value = arguments[0].GetIntValue(exm);
 					str = arguments[1].GetStrValue(exm);
@@ -360,7 +360,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public DivIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -375,7 +375,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public ModIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -391,7 +391,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public EqualIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -408,7 +408,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public EqualStrStr()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -424,7 +424,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public NotEqualIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -440,7 +440,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public NotEqualStrStr()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -456,7 +456,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public GreaterIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -472,7 +472,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public GreaterStrStr()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -487,7 +487,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LessIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -502,7 +502,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LessStrStr()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -519,7 +519,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public GreaterEqualIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -535,7 +535,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public GreaterEqualStrStr()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -550,7 +550,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LessEqualIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -566,7 +566,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LessEqualStrStr()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -582,7 +582,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public AndIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -599,7 +599,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public OrIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -615,7 +615,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public XorIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -634,7 +634,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public NandIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -651,7 +651,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public NorIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -667,7 +667,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public BitAndIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -681,7 +681,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public BitOrIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -695,7 +695,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public BitXorIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -709,7 +709,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public RightShiftIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -723,7 +723,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LeftShiftIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -737,7 +737,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public PlusInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -751,7 +751,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MinusInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -765,7 +765,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public NotInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -780,7 +780,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public BitNotInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -794,7 +794,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public IncrementInt()
 			{
 				CanRestructure = false;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -808,7 +808,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public DecrementInt()
 			{
 				CanRestructure = false;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -822,7 +822,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public IncrementAfterInt()
 			{
 				CanRestructure = false;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -837,7 +837,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public DecrementAfterInt()
 			{
 				CanRestructure = false;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -853,7 +853,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public TernaryIntIntInt()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -867,7 +867,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public TernaryIntStrStr()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(string);
+				ReturnType = EraType.String;
 			}
 
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -881,7 +881,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public TernaryIntFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -892,7 +892,7 @@ namespace MinorShift.Emuera.GameData.Expression
 
 		private static double ToDouble(IOperandTerm term, ExpressionMediator exm)
 		{
-			return term.GetOperandType() == typeof(Int64) ? term.GetIntValue(exm) : term.GetFloatValue(exm);
+			return term.GetEraType() == EraType.Integer ? term.GetIntValue(exm) : term.GetFloatValue(exm);
 		}
 
 		private sealed class PlusFloatFloat : OperatorMethod
@@ -900,7 +900,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public PlusFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -914,7 +914,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MinusFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -928,7 +928,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MultFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -942,7 +942,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public DivFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -959,7 +959,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public EqualFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -973,7 +973,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public NotEqualFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -987,7 +987,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LessFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1001,7 +1001,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public GreaterFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1015,7 +1015,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LessEqualFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1029,7 +1029,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public GreaterEqualFloatFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1043,7 +1043,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public PlusMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1057,7 +1057,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MinusMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1071,7 +1071,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MultMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1085,7 +1085,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public DivMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1102,7 +1102,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public EqualMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1116,7 +1116,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public NotEqualMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1130,7 +1130,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LessMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1144,7 +1144,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public GreaterMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1158,7 +1158,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public LessEqualMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1172,7 +1172,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public GreaterEqualMixedFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1186,7 +1186,7 @@ namespace MinorShift.Emuera.GameData.Expression
 			public MinusFloat()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(double);
+				ReturnType = EraType.Float;
 			}
 
 			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)

@@ -61,7 +61,18 @@ namespace MinorShift.Emuera.GameProc
 					{
 						ArgumentParser.SetArgumentTo(func);
 						if (func.IsError)
+						{
+							// Snake/v24 兼容：某些游戏会把 PRINT/PRINTFORM 等命令名当作变量使用。
+							// 如果参数解析失败的原因是"命令名...が変数/関数のように使われています"，
+							// 降级为警告并跳过该行，而不是终止执行。
+							string err = func.ErrMes ?? "";
+							if (err.Contains("が変数のように使われています") || err.Contains("が関数のように使われています"))
+							{
+								ParserMediator.Warn(err, func, 2, true, false);
+								continue;
+							}
 							throw new CodeEE(func.ErrMes);
+						}
 					}
 					if ((skipPrint) && (func.Function.IsPrint()))
 					{
@@ -148,7 +159,7 @@ namespace MinorShift.Emuera.GameProc
 						str = bArg.PrintStrTerm.GetStrValue(exm);
 						//ボタン処理に絡んで表示がおかしくなるため、PRINTBUTTONでの改行コードはオミット
 						str = str.Replace("\n", "");
-						if (bArg.ButtonWord.GetOperandType() == typeof(long))
+						if (bArg.ButtonWord.GetEraType() == EraType.Integer)
 							exm.Console.PrintButton(str, bArg.ButtonWord.GetIntValue(exm));
 						else
 							exm.Console.PrintButton(str, bArg.ButtonWord.GetStrValue(exm));
@@ -166,7 +177,7 @@ namespace MinorShift.Emuera.GameProc
 						//ボタン処理に絡んで表示がおかしくなるため、PRINTBUTTONでの改行コードはオミット
 						str = str.Replace("\n", "");
 						bool isRight = (func.FunctionCode == FunctionCode.PRINTBUTTONC) ? true : false;
-						if (bArg.ButtonWord.GetOperandType() == typeof(long))
+						if (bArg.ButtonWord.GetEraType() == EraType.Integer)
 							exm.Console.PrintButtonC(str, bArg.ButtonWord.GetIntValue(exm), isRight);
 						else
 							exm.Console.PrintButtonC(str, bArg.ButtonWord.GetStrValue(exm), isRight);
@@ -189,7 +200,6 @@ namespace MinorShift.Emuera.GameProc
 					exm.Console.PrintBar();
 					exm.Console.NewLine();
 					break;
-				case FunctionCode.CUSTOMDRAWLINE:
 				case FunctionCode.DRAWLINEFORM:
 					{
 						if (skipPrint)
@@ -386,15 +396,16 @@ namespace MinorShift.Emuera.GameProc
 						//値を読み出す前に添え字を確定させておかないと、RANDが添え字にある場合正しく処理できない
 						FixedVariableTerm vTerm1 = arg.var1.GetFixedVariableTerm(exm);
 						FixedVariableTerm vTerm2 = arg.var2.GetFixedVariableTerm(exm);
-						if (vTerm1.GetOperandType() != vTerm2.GetOperandType())
+						EraType swapType = vTerm1.GetEraType();
+						if (swapType != vTerm2.GetEraType())
 							throw new CodeEE("入れ替える変数の型が異なります");
-						if (vTerm1.GetOperandType() == typeof(Int64))
+						if (swapType == EraType.Integer)
 						{
 							Int64 temp = vTerm1.GetIntValue(exm);
 							vTerm1.SetValue(vTerm2.GetIntValue(exm), exm);
 							vTerm2.SetValue(temp, exm);
 						}
-						else if (arg.var1.GetOperandType() == typeof(string))
+						else if (swapType == EraType.String)
 						{
 							string temps = vTerm1.GetStrValue(exm);
 							vTerm1.SetValue(vTerm2.GetStrValue(exm), exm);
@@ -647,15 +658,20 @@ namespace MinorShift.Emuera.GameProc
 						}
 						else
 							num = -1;
-						if (dest.Identifier.IsInteger)
+						if (dest.Identifier.IsFloat)
 						{
-							Int64 def = arrayArg.Num2.GetIntValue(exm);
+							double def = arrayArg.Num2.GetFloatValue(exm);
 							vEvaluator.ShiftArray(dest, shift, def, start, num);
 						}
-						else
+						else if (dest.Identifier.IsString)
 						{
 							string defs = arrayArg.Num2.GetStrValue(exm);
 							vEvaluator.ShiftArray(dest, shift, defs, start, num);
+						}
+						else
+						{
+							Int64 def = arrayArg.Num2.GetIntValue(exm);
+							vEvaluator.ShiftArray(dest, shift, def, start, num);
 						}
 						break;
 					}
@@ -726,14 +742,14 @@ namespace MinorShift.Emuera.GameProc
 								throw new CodeEE("ARRAYCOPY命令の第２引数\"" + names[1] + "\"は値を変更できない変数です");
 							if ((vars[0].IsArray1D && !vars[1].IsArray1D) || (vars[0].IsArray2D && !vars[1].IsArray2D) || (vars[0].IsArray3D && !vars[1].IsArray3D))
 								throw new CodeEE("ARRAYCOPY命令の２つの配列変数の次元数が一致していません");
-							if ((vars[0].IsInteger && vars[1].IsString) || (vars[0].IsString && vars[1].IsInteger))
+							if (vars[0].GetEraType() != vars[1].GetEraType())
 								throw new CodeEE("ARRAYCOPY命令の２つの配列変数の型が一致していません");
 						}
 						else
 						{
 							vars[0] = GlobalStatic.IdentifierDictionary.GetVariableToken(((SingleTerm)varName1).Str, null, true);
 							vars[1] = GlobalStatic.IdentifierDictionary.GetVariableToken(((SingleTerm)varName2).Str, null, true);
-							if ((vars[0].IsInteger && vars[1].IsString) || (vars[0].IsString && vars[1].IsInteger))
+							if (vars[0].GetEraType() != vars[1].GetEraType())
 								throw new CodeEE("ARRAYCOPY命令の２つの配列変数の型が一致していません");
 						}
 						vEvaluator.CopyArray(vars[0], vars[1]);
@@ -767,7 +783,7 @@ namespace MinorShift.Emuera.GameProc
 					{
 						string throwMessage = ((ExpressionArgument)func.Argument).Term.GetStrValue(exm);
 						bool inBeforeThrow = state.IsInBeforeThrow;
-						if (inBeforeThrow)
+						if (inBeforeThrow || state.InBeforeError)
 						{
 							console.PrintSingleLine(throwMessage);
 							break;
@@ -783,6 +799,7 @@ namespace MinorShift.Emuera.GameProc
 							throw new CodeEE(throwMessage);
 						}
 						state.IntoFunction(beforeThrow, null, null);
+						state.InBeforeThrow = true;
 						break;
 					}
 				case FunctionCode.CLEARTEXTBOX:

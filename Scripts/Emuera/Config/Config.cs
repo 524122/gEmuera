@@ -128,6 +128,7 @@ namespace MinorShift.Emuera
 			ForbidUpdateCheck = instance.GetConfigValue<bool>(ConfigCode.ForbidUpdateCheck);
 			PluginAvailableWarn = instance.GetConfigValue<bool>(ConfigCode.PluginAvailableWarn);
 			DisableBeforeErrorThrow = instance.GetConfigValue<bool>(ConfigCode.DisableBeforeErrorThrow);
+			UseScopedVariableInstruction = instance.GetConfigValue<bool>(ConfigCode.UseScopedVariableInstruction);
 			
 			CompatiFuncArgAutoConvert = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgAutoConvert);
 			CompatiFuncArgOptional = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgOptional);
@@ -202,6 +203,19 @@ namespace MinorShift.Emuera
 
 			if (Godot.OS.GetName() == "Android" && InfiniteLoopAlertTime < 20000)
 				InfiniteLoopAlertTime = 20000;
+		}
+
+		internal static void SetJsonConfig(JSONConfigData data)
+		{
+			if (data == null)
+				return;
+
+			// setting.json 是 v24/snake 的新增配置层。Godot 移植版只直接消耗能稳定映射的选项；
+			// 渲染后端保留为兼容状态，实际渲染仍由 Godot 管线负责。
+			UseButtonFocusBackgroundColor = data.UseButtonFocusBackgroundColor;
+			UseNewRandom = data.UseNewRandom;
+			UseScopedVariableInstruction = data.UseScopedVariableInstruction;
+			RenderingBackend = data.RenderingBackend;
 		}
 
 
@@ -539,6 +553,10 @@ namespace MinorShift.Emuera
 		public static bool CheckDuplicateIdentifier { get; private set; }
 		public static bool PluginAvailableWarn { get; private set; }
 		public static bool DisableBeforeErrorThrow { get; private set; }
+		public static bool UseScopedVariableInstruction { get; private set; } = true;
+		public static bool UseButtonFocusBackgroundColor { get; private set; }
+		public static bool UseNewRandom { get; private set; }
+		public static RenderingBackend RenderingBackend { get; private set; } = RenderingBackend.Auto;
 
 		public static int Language { get; private set; }
 
