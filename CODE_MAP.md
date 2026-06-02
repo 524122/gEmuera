@@ -1,6 +1,6 @@
 # CODE_MAP
 
-更新时间：2026-06-01
+更新时间：2026-06-02
 
 用途：这是给 AI 和维护者快速定位代码用的地图。优先读本文件，再按路径进入源码。地图只记录结构、职责、主要接口和关键函数，不复制源码实现。
 
@@ -49,7 +49,7 @@ project.godot
 ```
 
 线程模型：
-- Godot 主线程：UI、输入、`EmueraContent`、`SpriteManager.UpdateOtherThreads()`、GPU ColorMatrix 队列。
+- Godot 主线程：UI、输入、`EmueraContent`、`SpriteManager.UpdateOtherThreads()`（接收异步图片解码结果并主线程上传纹理）、GPU ColorMatrix 队列。
 - 后台线程：`EmueraThread.Work()` 执行 `Program.Main()`、ERB 解释、阻塞式输入等待。
 - 跨线程桥：`GenericUtils` 的 UI 队列、日志队列、显示队列；输入通过 `EmueraThread.Input()` 唤醒后台线程。
 
@@ -102,7 +102,7 @@ project.godot
 | `Scripts/EmueraImage.cs` | `EmueraImage : Control` | 绘制 `Texture2D` / `AtlasTexture` 的控件，支持 ColorMatrix material。 | `SetColorMatrix`, `_Draw` |
 | `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `ExportDiagnosticPackage`, `RestartGame` |
 | `Scripts/FirstWindow.cs` | `FirstWindow : Control` | 启动器；扫描 `era*` 游戏目录，切换语言/核心 profile，进入主场景。 | `_Ready`, `_ExitTree`, `_Notification`, `ResolveStartupGamePath` |
-| `Scripts/SpriteManager.cs` | `SpriteManager`, `TextureInfo`, `SpriteInfo` | 图片/精灵纹理缓存；AtlasTexture 管理；后台请求与主线程限流加载。 | `Init`, `GetSprite`, `GetTextureInfo`, `GetTextureInfoOtherThread`, `UpdateOtherThreads`, `UpdateCleanup`, `ForceClear` |
+| `Scripts/SpriteManager.cs` | `SpriteManager`, `TextureInfo`, `SpriteInfo` | 图片/精灵纹理缓存；AtlasTexture 管理；文件图片后台 I/O/解码请求；主线程限流接收解码结果并创建纹理。 | `Init`, `GetSprite`, `GetTextureInfo`, `TryGetTextureInfoCached`, `RequestTextureInfoAsync`, `GetTextureInfoOtherThread`, `UpdateOtherThreads`, `TextureLoadVersion`, `UpdateCleanup`, `ForceClear` |
 | `Scripts/ColorMatrixGPU.cs` | `ColorMatrixGPU` | ColorMatrix shader material 创建、缓存、LRU、uniform 设置。 | `CreateMaterial`, `GetSharedMaterial`, `GetMatrixKey`, `SetMatrixUniforms`, `CreateCompositMaterial` |
 | `Scripts/QuickButtons.cs` | `QuickButtons : CanvasLayer` | 快捷按钮浮层；显示当前可选输入，处理点击/触摸。 | `_Ready`, `_Process`, `_Input`, `AddButton`, `Clear`, `ShiftLine`, `SetInputEnabled` |
 | `Scripts/Inputpad.cs` | `Inputpad : Control` | 屏幕输入面板；数字/文字输入 UI。 | `_Ready`, `_Process`, `UpdateInputType`, `ShowPad`, `HidePad`, `HasInputFocus` |
@@ -377,7 +377,7 @@ project.godot
 | 任务 | 优先看 |
 |---|---|
 | 资源 CSV 到 sprite | `AppContents`, `SpriteManager.GetSprite`, `uEmuera.Utils.ResourcePrepare` |
-| 纹理缓存/主线程加载限流 | `SpriteManager.GetTextureInfoOtherThread`, `SpriteManager.UpdateOtherThreads`, `TextureInfo.RecreateTexture` |
+| 纹理缓存/异步解码/主线程纹理上传 | `SpriteManager.TryGetTextureInfoCached`, `SpriteManager.RequestTextureInfoAsync`, `SpriteManager.UpdateOtherThreads`, `SpriteManager.TextureLoadVersion`, `TextureInfo.RecreateTexture` |
 | Graphics surface 绘制 | `GraphicsImage.GCreate`, `GDrawCImg`, `GDrawG`, `GDrawString`, `GDrawLine` |
 | GPU ColorMatrix | `ColorMatrixGPU.GetSharedMaterial`, `ColorMatrixGPU.SetMatrixUniforms`, `GraphicsImage.ApplyColorMatrixGPU` |
 | Godot 控件绘制图片 | `EmueraImage._Draw` |

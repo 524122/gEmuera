@@ -63,6 +63,13 @@ public partial class EmueraContent : Control
 	Dictionary<int, List<SpriteManager.TextureInfo>> lineTexturePins = new Dictionary<int, List<SpriteManager.TextureInfo>>();
 	List<SpriteManager.TextureInfo> cbgTexturePins = new List<SpriteManager.TextureInfo>();
 	List<SpriteManager.TextureInfo> activeTexturePinCollector;
+	HashSet<int> asyncTexturePendingLineNos = new HashSet<int>();
+	int activeRenderLineNo = -1;
+	long observedTextureLoadVersion = 0;
+	bool renderingCbgTextures = false;
+	bool renderingHtmlIslandTextures = false;
+	bool pendingCbgAsyncTextureRefresh = false;
+	bool pendingHtmlIslandAsyncTextureRefresh = false;
 
 	// Texture lookup failures are memoized to avoid repeated recursive file scans
 	// on Android storage where I/O stalls are very visible.
@@ -72,6 +79,8 @@ public partial class EmueraContent : Control
 	// CanvasItem churn and texture upload pressure during rapid script updates.
 	List<EmueraImage> cbgNodes = new List<EmueraImage>();
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> renderedCbgLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
+	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> lastCbgSourceLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
+	ConsoleDisplayLine[] lastHtmlIslandLines = null;
 
 	// Batched display updates defer expensive follow-up work until a group of
 	// lines has been applied.
@@ -554,6 +563,9 @@ public partial class EmueraContent : Control
 			SafeQueueFree(child);
 		ResetLineIndexes();
 		failedTextureSearches.Clear();
+		asyncTexturePendingLineNos.Clear();
+		pendingCbgAsyncTextureRefresh = false;
+		pendingHtmlIslandAsyncTextureRefresh = false;
 		displayRevision++;
 		RefreshQuickInputGate();
 		quickRenderedRevision = -1;
@@ -716,7 +728,7 @@ public partial class EmueraContent : Control
 		}
 		if (!string.IsNullOrEmpty(image?.ResourceName))
 		{
-			var ti = SpriteManager.GetTextureInfo(image.ResourceName, image.ResourceName);
+			SpriteManager.TryGetTextureInfoCached(image.ResourceName, image.ResourceName, out var ti);
 			if (ti != null && ti.height > 0)
 				return ti.height;
 		}
@@ -884,8 +896,10 @@ public partial class EmueraContent : Control
 		// committed only after the row is inserted, which keeps replacement/update
 		// flows balanced even when rendering throws before registration.
 		var previousTexturePinCollector = activeTexturePinCollector;
+		int previousRenderLineNo = activeRenderLineNo;
 		var newTexturePins = new List<SpriteManager.TextureInfo>();
 		activeTexturePinCollector = newTexturePins;
+		activeRenderLineNo = line.LineNo;
 		try
 		{
 			AddLineBackground(line, lineControl, lineHeight);
@@ -921,6 +935,7 @@ public partial class EmueraContent : Control
 		finally
 		{
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeRenderLineNo = previousRenderLineNo;
 		}
 
 		// PRINT_IMAGE 会用后续的 <br> 行为大图预留显示高度。即使这些行没有可见子节点，
@@ -928,6 +943,7 @@ public partial class EmueraContent : Control
 		int fixedLineHeight = lineHeight;
 		var lineSize = new Vector2(maxLineRight, fixedLineHeight);
 		SetFixedControlSize(lineControl, lineSize);
+		bool asyncTexturePendingDuringRender = asyncTexturePendingLineNos.Contains(line.LineNo);
 
 		int insertIndex = -1;
 		if (lineControls.TryGetValue(line.LineNo, out var existingControl))
@@ -946,6 +962,8 @@ public partial class EmueraContent : Control
 		lineControl.SetMeta("line_no", line.LineNo);
 		RegisterLine(line.LineNo, line, lineControl, lineSize);
 		RegisterLineTexturePins(line.LineNo, newTexturePins);
+		if (asyncTexturePendingDuringRender)
+			asyncTexturePendingLineNos.Add(line.LineNo);
 		displayRevision++;
 
 		// Enforce node cap to prevent unbounded memory growth
@@ -1398,36 +1416,48 @@ public partial class EmueraContent : Control
 		ClearHtmlIsland();
 		if (htmlIslandContainer == null || lines == null)
 			return;
-		foreach (var line in lines)
+		lastHtmlIslandLines = lines;
+		pendingHtmlIslandAsyncTextureRefresh = false;
+
+		bool previousHtmlIslandRender = renderingHtmlIslandTextures;
+		renderingHtmlIslandTextures = true;
+		try
 		{
-			if (line == null)
-				continue;
-			int lineHeight = GetLineBottom(line);
-			var lineControl = new Control();
-			lineControl.MouseFilter = MouseFilterEnum.Pass;
-			lineControl.ClipContents = false;
-			AddLineBackground(line, lineControl, lineHeight);
-			foreach (var button in line.Buttons)
+			foreach (var line in lines)
 			{
-				if (button.IsButton)
+				if (line == null)
+					continue;
+				int lineHeight = GetLineBottom(line);
+				var lineControl = new Control();
+				lineControl.MouseFilter = MouseFilterEnum.Pass;
+				lineControl.ClipContents = false;
+				AddLineBackground(line, lineControl, lineHeight);
+				foreach (var button in line.Buttons)
 				{
-					int buttonTop = GetButtonTop(button);
-					int buttonHeight = GetButtonBottom(button, true) - buttonTop;
-					if (buttonHeight <= 0)
-						buttonHeight = EffectiveLineHeight;
-					var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
-					if (buttonTop < 0 || buttonHeight > EffectiveLineHeight)
-						btn.ZIndex = EscapedConsolePartZIndex;
-					lineControl.AddChild(btn);
+					if (button.IsButton)
+					{
+						int buttonTop = GetButtonTop(button);
+						int buttonHeight = GetButtonBottom(button, true) - buttonTop;
+						if (buttonHeight <= 0)
+							buttonHeight = EffectiveLineHeight;
+						var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
+						if (buttonTop < 0 || buttonHeight > EffectiveLineHeight)
+							btn.ZIndex = EscapedConsolePartZIndex;
+						lineControl.AddChild(btn);
+					}
+					else
+					{
+						foreach (var part in button.StrArray)
+							AddPartToContainer(part, lineControl, 0);
+					}
 				}
-				else
-				{
-					foreach (var part in button.StrArray)
-						AddPartToContainer(part, lineControl, 0);
-				}
+				SetFixedControlSize(lineControl, new Vector2(GetLineRight(line), lineHeight));
+				htmlIslandContainer.AddChild(lineControl);
 			}
-			SetFixedControlSize(lineControl, new Vector2(GetLineRight(line), lineHeight));
-			htmlIslandContainer.AddChild(lineControl);
+		}
+		finally
+		{
+			renderingHtmlIslandTextures = previousHtmlIslandRender;
 		}
 		displayRevision++;
 		RefreshQuickInputGate();
@@ -1443,6 +1473,8 @@ public partial class EmueraContent : Control
 			return;
 		foreach (var child in htmlIslandContainer.GetChildren())
 			SafeQueueFree(child);
+		lastHtmlIslandLines = null;
+		pendingHtmlIslandAsyncTextureRefresh = false;
 		displayRevision++;
 		RefreshQuickInputGate();
 	}
@@ -1465,6 +1497,7 @@ public partial class EmueraContent : Control
 	void UnregisterLine(int lineNo)
 	{
 		ReleaseLineTexturePins(lineNo);
+		asyncTexturePendingLineNos.Remove(lineNo);
 		lineObjects.Remove(lineNo);
 		lineControls.Remove(lineNo);
 		lineNumbers.Remove(lineNo);
@@ -1943,12 +1976,13 @@ public partial class EmueraContent : Control
 					bool exists = uEmuera.Utils.FileExists(tryPath);
 					if (exists)
 					{
-						var ti = SpriteManager.GetTextureInfo(resName, tryPath);
-						if (ti != null)
+						if (TryGetDisplayTextureInfo(resName, tryPath, out var ti))
 						{
 							texture = ti.texture;
 							break;
 						}
+						if (RequestAsyncTextureForCurrentRender(resName, tryPath))
+							break;
 					}
 				}
 				// Subdirectory search: scan ContentDir recursively for a matching filename
@@ -1962,17 +1996,21 @@ public partial class EmueraContent : Control
 						var found = uEmuera.Utils.FindFileRecursive(Program.ContentDir, target);
 						if (!string.IsNullOrEmpty(found))
 						{
-							var ti = SpriteManager.GetTextureInfo(resName, found);
-							if (ti != null)
+							if (TryGetDisplayTextureInfo(resName, found, out var ti))
 							{
 								GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] Found \"{resName}\" via subdirectory search: {found}");
 								texture = ti.texture;
 								break;
 							}
+							if (RequestAsyncTextureForCurrentRender(resName, found))
+							{
+								GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] Found \"{resName}\" via subdirectory search: {found}");
+								break;
+							}
 						}
 					}
 				}
-				if (texture == null)
+				if (texture == null && !HasPendingAsyncTextureForCurrentRender())
 				{
 					failedTextureSearches.Add(resName);
 					GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] All fallback paths failed for \"{resName}\"");
@@ -2410,7 +2448,13 @@ public partial class EmueraContent : Control
 
 		if (sprite.Bitmap is uEmuera.Drawing.BitmapTexture bt)
 		{
-			var ti = bt.TextureInfo;
+			var ti = bt.CachedTextureInfo;
+			if (ti == null)
+			{
+				if (bt.RequestTextureInfoAsync())
+					TrackAsyncTextureRequestForCurrentRender();
+				return null;
+			}
 			if (ti == null || ti.texture == null)
 				return null;
 			TrackTexturePin(ti);
@@ -2448,9 +2492,7 @@ public partial class EmueraContent : Control
 			if (singleSprite.BaseImage?.Bitmap != null)
 			{
 				var bmp = singleSprite.BaseImage.Bitmap;
-				var ti = SpriteManager.GetTextureInfo(bmp.path, bmp.path);
-				if (ti == null && !string.IsNullOrEmpty(bmp.filename))
-					ti = SpriteManager.GetTextureInfo(bmp.filename, bmp.path);
+				var ti = GetDisplayTextureInfoForBitmap(bmp);
 				if (ti != null)
 				{
 					TrackTexturePin(ti);
@@ -2486,9 +2528,7 @@ public partial class EmueraContent : Control
 				if (baseImage?.Bitmap != null)
 				{
 					var bmp = baseImage.Bitmap;
-					var ti = SpriteManager.GetTextureInfo(bmp.path, bmp.path);
-					if (ti == null && !string.IsNullOrEmpty(bmp.filename))
-						ti = SpriteManager.GetTextureInfo(bmp.filename, bmp.path);
+					var ti = GetDisplayTextureInfoForBitmap(bmp);
 					if (ti != null)
 					{
 						TrackTexturePin(ti);
@@ -2501,6 +2541,64 @@ public partial class EmueraContent : Control
 		}
 
 		return null;
+	}
+
+	SpriteManager.TextureInfo GetDisplayTextureInfoForBitmap(uEmuera.Drawing.Bitmap bmp)
+	{
+		if (bmp == null)
+			return null;
+		if (bmp is uEmuera.Drawing.BitmapTexture bt)
+		{
+			var ti = bt.CachedTextureInfo;
+			if (ti == null && bt.RequestTextureInfoAsync())
+				TrackAsyncTextureRequestForCurrentRender();
+			return ti;
+		}
+
+		// 动态生成或兼容层来源的 Bitmap 需要立即读取像素，继续同步解析；
+		// 只有文件 backed 的 BitmapTexture 用非阻塞显示路径。
+		var sync = SpriteManager.GetTextureInfo(bmp.path, bmp.path);
+		if (sync == null && !string.IsNullOrEmpty(bmp.filename))
+			sync = SpriteManager.GetTextureInfo(bmp.filename, bmp.path);
+		return sync;
+	}
+
+	bool TryGetDisplayTextureInfo(string name, string filename, out SpriteManager.TextureInfo ti)
+	{
+		if (SpriteManager.TryGetTextureInfoCached(name, filename, out ti))
+		{
+			TrackTexturePin(ti);
+			return true;
+		}
+		return false;
+	}
+
+	bool RequestAsyncTextureForCurrentRender(string name, string filename)
+	{
+		if (!SpriteManager.RequestTextureInfoAsync(name, filename))
+			return false;
+		TrackAsyncTextureRequestForCurrentRender();
+		return true;
+	}
+
+	void TrackAsyncTextureRequestForCurrentRender()
+	{
+		// Android 外部存储 I/O 与图片解码是主要帧尖峰来源。
+		// 异步完成后只重建请求来源，避免把整个控制台重新生成一遍。
+		if (activeRenderLineNo >= 0)
+			asyncTexturePendingLineNos.Add(activeRenderLineNo);
+		else if (renderingCbgTextures)
+			pendingCbgAsyncTextureRefresh = true;
+		else if (renderingHtmlIslandTextures)
+			pendingHtmlIslandAsyncTextureRefresh = true;
+	}
+
+	bool HasPendingAsyncTextureForCurrentRender()
+	{
+		if (activeRenderLineNo >= 0 && asyncTexturePendingLineNos.Contains(activeRenderLineNo))
+			return true;
+		return (renderingCbgTextures && pendingCbgAsyncTextureRefresh)
+			|| (renderingHtmlIslandTextures && pendingHtmlIslandAsyncTextureRefresh);
 	}
 
 	static string BuildAtlasCacheKey(ASprite sprite, int x, int y, int width, int height)
@@ -2606,6 +2704,68 @@ public partial class EmueraContent : Control
 		// Layout is handled automatically by Godot containers
 	}
 
+	void ProcessAsyncTextureRefreshes()
+	{
+		long version = SpriteManager.TextureLoadVersion;
+		if (version == observedTextureLoadVersion)
+			return;
+		observedTextureLoadVersion = version;
+
+		bool changed = false;
+		if (asyncTexturePendingLineNos.Count > 0)
+		{
+			var lineNos = new List<int>(asyncTexturePendingLineNos);
+			asyncTexturePendingLineNos.Clear();
+			lineNos.Sort();
+
+			bool previousBatching = batchingDisplayLines;
+			batchingDisplayLines = true;
+			try
+			{
+				for (int i = 0; i < lineNos.Count; i++)
+				{
+					int lineNo = lineNos[i];
+					if (lineObjects.TryGetValue(lineNo, out var line))
+					{
+						AddLine(line, true);
+						changed = true;
+					}
+				}
+			}
+			finally
+			{
+				batchingDisplayLines = previousBatching;
+			}
+		}
+
+		if (pendingHtmlIslandAsyncTextureRefresh)
+		{
+			var lines = lastHtmlIslandLines;
+			pendingHtmlIslandAsyncTextureRefresh = false;
+			if (lines != null)
+			{
+				SetHtmlIsland(lines);
+				changed = true;
+			}
+		}
+
+		if (pendingCbgAsyncTextureRefresh)
+		{
+			pendingCbgAsyncTextureRefresh = false;
+			if (lastCbgSourceLayers.Count > 0)
+			{
+				RefreshCBG(lastCbgSourceLayers);
+				changed = true;
+			}
+		}
+
+		if (changed)
+		{
+			RefreshQuickInputGate();
+			QueueScaleBoundsUpdate();
+		}
+	}
+
 	// Refresh client background graphics from the core. Nodes are reused by index
 	// so animated/background-heavy scenes avoid repeated allocation.
 	internal void RefreshCBG(List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> list)
@@ -2616,10 +2776,14 @@ public partial class EmueraContent : Control
 		ReleaseCbgTexturePins();
 		if (list == null || list.Count == 0)
 		{
+			lastCbgSourceLayers.Clear();
+			pendingCbgAsyncTextureRefresh = false;
 			TrimCbgNodes(0);
 			return;
 		}
 
+		lastCbgSourceLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>(list);
+		pendingCbgAsyncTextureRefresh = false;
 		int nodeIndex = 0;
 		renderedCbgLayers.Clear();
 		int currentScrollY = GetCurrentContentScrollY();
@@ -2629,6 +2793,8 @@ public partial class EmueraContent : Control
 		var previousTexturePinCollector = activeTexturePinCollector;
 		var newCbgTexturePins = new List<SpriteManager.TextureInfo>();
 		activeTexturePinCollector = newCbgTexturePins;
+		bool previousCbgRender = renderingCbgTextures;
+		renderingCbgTextures = true;
 		try
 		{
 			foreach (var cbg in list)
@@ -2672,6 +2838,7 @@ public partial class EmueraContent : Control
 		}
 		finally
 		{
+			renderingCbgTextures = previousCbgRender;
 			activeTexturePinCollector = previousTexturePinCollector;
 			cbgTexturePins = newCbgTexturePins;
 		}
@@ -3603,6 +3770,7 @@ public partial class EmueraContent : Control
 		RefreshCbgAnimationPauseState();
 		RefreshQuickInputGate();
 		RefreshUiDiagnosticOverlay();
+		ProcessAsyncTextureRefreshes();
 		if (quickInputGateActive && Time.GetTicksMsec() - quickInputGateTick >= QuickInputGateFallbackMs && !EmueraThread.instance.Running())
 		{
 			RestoreQuickInputGate();
