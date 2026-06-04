@@ -42,6 +42,9 @@ public partial class EmueraMain : Node
     static ConcurrentQueue<TextRenderItem> textRenderQueue = new ConcurrentQueue<TextRenderItem>();
     static int gpuWorkIdCounter = 0;
     static int textRenderIdCounter = 0;
+    static readonly object configMapCacheLock = new object();
+    static System.Collections.Generic.Dictionary<string, string> cachedShiftJisToUtf8Map;
+    static System.Collections.Generic.Dictionary<string, string> cachedUtf8ZhCnToUtf8Map;
 
     /// <summary>
     /// True once _Process has been called at least once, indicating the main loop is running
@@ -562,6 +565,16 @@ public partial class EmueraMain : Node
 
     void LoadConfigMaps()
     {
+        lock (configMapCacheLock)
+        {
+            if (cachedShiftJisToUtf8Map != null && cachedUtf8ZhCnToUtf8Map != null)
+            {
+                uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(cachedShiftJisToUtf8Map);
+                uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(cachedUtf8ZhCnToUtf8Map);
+                return;
+            }
+        }
+
         char[] split = new char[] { '\r', '\n' };
         var shiftjisPath = "res://Text/emuera_config_shiftjis.bytes";
         var utf8Path = "res://Text/emuera_config_utf8.txt";
@@ -611,7 +624,13 @@ public partial class EmueraMain : Node
         {
             utf8cn_map[utf8cn_str_list[i]] = utf8_str_list[i];
         }
-        uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(jis_map);
-        uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(utf8cn_map);
+        lock (configMapCacheLock)
+        {
+            // res://Text 配置映射在进程内不变化，缓存后重启游戏不再重复读盘和构建字典。
+            cachedShiftJisToUtf8Map ??= jis_map;
+            cachedUtf8ZhCnToUtf8Map ??= utf8cn_map;
+            uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(cachedShiftJisToUtf8Map);
+            uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(cachedUtf8ZhCnToUtf8Map);
+        }
     }
 }

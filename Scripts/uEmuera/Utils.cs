@@ -240,6 +240,137 @@ namespace uEmuera
             return File.Exists(path);
         }
 
+        public static string ResolveScriptDirectoryPath(string path)
+        {
+            return ResolveScriptRelativePath(path, true);
+        }
+
+        public static string ResolveScriptFilePath(string path)
+        {
+            return ResolveScriptRelativePath(path, false);
+        }
+
+        public static string GetRelativePathFromGameDir(string path)
+        {
+            string normalizedPath = NormalizePath(path);
+            string gameDir = NormalizePath(MinorShift.Emuera.Program.ExeDir ?? "");
+            if (string.IsNullOrEmpty(normalizedPath) || string.IsNullOrEmpty(gameDir))
+                return normalizedPath;
+            if (normalizedPath.Contains("://") || gameDir.Contains("://"))
+                return normalizedPath;
+
+            try
+            {
+                string relative = Path.GetRelativePath(Path.GetFullPath(gameDir), Path.GetFullPath(normalizedPath));
+                return CanonicalizeGameRelativePrefix(NormalizePath(relative));
+            }
+            catch
+            {
+                string prefix = gameDir.TrimEnd('/') + "/";
+                if (normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return CanonicalizeGameRelativePrefix(normalizedPath.Substring(prefix.Length));
+                return CanonicalizeGameRelativePrefix(normalizedPath);
+            }
+        }
+
+        static string ResolveScriptRelativePath(string path, bool directory)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return null;
+
+            // ERB 文件系函数按原核心语义应以游戏目录为基准。
+            // Godot/Android 下进程工作目录不等于游戏目录，所以这里显式补回
+            // v24/snake 的 Utils.GetValidPath 边界，同时继续复用 Godot 文件 API。
+            string candidate = RemoveParentTraversal(NormalizePath(path.Trim()));
+            if (!IsRootedOrGodotPath(candidate))
+            {
+                if (!TryResolveKnownGameSubdirectory(candidate, out candidate))
+                {
+                    string gameDir = MinorShift.Emuera.Program.ExeDir ?? "";
+                    if (!string.IsNullOrEmpty(gameDir))
+                        candidate = Path.Combine(gameDir, candidate);
+                }
+            }
+            candidate = NormalizePath(candidate);
+
+            if (directory)
+                return DirectoryExists(candidate) ? ResolveExistingDirectoryPath(candidate) : candidate;
+            return FileExists(candidate) ? ResolveExistingFilePath(candidate) : candidate;
+        }
+
+        static bool TryResolveKnownGameSubdirectory(string path, out string resolved)
+        {
+            resolved = path;
+            string normalized = NormalizePath(path);
+            string trimmed = normalized.TrimStart('/');
+            int slash = trimmed.IndexOf('/');
+            string head = slash >= 0 ? trimmed.Substring(0, slash) : trimmed;
+            string rest = slash >= 0 ? trimmed.Substring(slash + 1) : "";
+            string baseDir = null;
+
+            if (string.Equals(head, "resources", StringComparison.OrdinalIgnoreCase))
+                baseDir = MinorShift.Emuera.Program.ContentDir;
+            else if (string.Equals(head, "csv", StringComparison.OrdinalIgnoreCase))
+                baseDir = MinorShift.Emuera.Program.CsvDir;
+            else if (string.Equals(head, "erb", StringComparison.OrdinalIgnoreCase))
+                baseDir = MinorShift.Emuera.Program.ErbDir;
+            else if (string.Equals(head, "dat", StringComparison.OrdinalIgnoreCase))
+                baseDir = MinorShift.Emuera.Program.DatDir;
+            else if (string.Equals(head, "debug", StringComparison.OrdinalIgnoreCase))
+                baseDir = MinorShift.Emuera.Program.DebugDir;
+
+            if (string.IsNullOrEmpty(baseDir))
+                return false;
+            resolved = string.IsNullOrEmpty(rest) ? baseDir : Path.Combine(baseDir, rest);
+            return true;
+        }
+
+        static string CanonicalizeGameRelativePrefix(string path)
+        {
+            if (string.IsNullOrEmpty(path) || path.Contains("://") || IsRootedOrGodotPath(path))
+                return path;
+
+            string normalized = NormalizePath(path);
+            int slash = normalized.IndexOf('/');
+            string head = slash >= 0 ? normalized.Substring(0, slash) : normalized;
+            string rest = slash >= 0 ? normalized.Substring(slash) : "";
+
+            if (string.Equals(head, "resources", StringComparison.OrdinalIgnoreCase))
+                return "resources" + rest;
+            if (string.Equals(head, "csv", StringComparison.OrdinalIgnoreCase))
+                return "csv" + rest;
+            if (string.Equals(head, "erb", StringComparison.OrdinalIgnoreCase))
+                return "erb" + rest;
+            if (string.Equals(head, "dat", StringComparison.OrdinalIgnoreCase))
+                return "dat" + rest;
+            if (string.Equals(head, "debug", StringComparison.OrdinalIgnoreCase))
+                return "debug" + rest;
+            return normalized;
+        }
+
+        static bool IsRootedOrGodotPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return false;
+            if (path.Contains("://"))
+                return true;
+            try
+            {
+                return Path.IsPathRooted(path);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        static string RemoveParentTraversal(string path)
+        {
+            while (path.Contains("../", StringComparison.Ordinal))
+                path = path.Replace("../", "");
+            return path == ".." ? "" : path;
+        }
+
         /// <summary>
         /// Recursively search a directory for a file matching the given name (case-insensitive).
         /// Returns the full path if found, null otherwise.
@@ -779,6 +910,16 @@ namespace uEmuera
             }
             return result;
         }
+
+        static readonly string[] contentImageExtensionOrder =
+        {
+            ".png",
+            ".bmp",
+            ".jpg",
+            ".gif",
+            ".webp",
+        };
+
         public static Dictionary<string, string> GetContentFiles()
         {
             if(content_files != null)
@@ -790,19 +931,17 @@ namespace uEmuera
                 return content_files;
 
             List<string> bmpfilelist = new List<string>();
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.png", SearchOption.TopDirectoryOnly));
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.bmp", SearchOption.TopDirectoryOnly));
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.jpg", SearchOption.TopDirectoryOnly));
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.gif", SearchOption.TopDirectoryOnly));
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.webp", SearchOption.TopDirectoryOnly));
-#if(UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.PNG", SearchOption.TopDirectoryOnly));
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.BMP", SearchOption.TopDirectoryOnly));
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.JPG", SearchOption.TopDirectoryOnly));
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.GIF", SearchOption.TopDirectoryOnly));
-            bmpfilelist.AddRange(GetFilePaths(contentdir, "*.WEBP", SearchOption.TopDirectoryOnly));
-
-#endif
+            var allFiles = GetFilePaths(contentdir, "*", SearchOption.TopDirectoryOnly);
+            for (int extIndex = 0; extIndex < contentImageExtensionOrder.Length; ++extIndex)
+            {
+                var wantedExt = contentImageExtensionOrder[extIndex];
+                for (int i = 0; i < allFiles.Count; ++i)
+                {
+                    var file = allFiles[i];
+                    if (string.Equals(Path.GetExtension(file), wantedExt, StringComparison.OrdinalIgnoreCase))
+                        bmpfilelist.Add(file);
+                }
+            }
             var filecount = bmpfilelist.Count;
             for(int i=0; i<filecount; ++i)
             {

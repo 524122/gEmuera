@@ -16,6 +16,9 @@ public partial class QuickButtons : CanvasLayer
 	Font fontFile;
 	int fontSize;
 	bool layoutUpdateQueued;
+	int layoutBatchDepth;
+	bool layoutBatchPending;
+	bool layoutBatchKeepBottom;
 	bool resizingWidth;
 	bool scrollingByDrag;
 	bool dragMoved;
@@ -261,7 +264,7 @@ public partial class QuickButtons : CanvasLayer
 		}
 		currentRow = AcquireRow();
 		rowsContainer.AddChild(currentRow);
-		UpdatePanelSize(true);
+		RequestPanelSizeUpdate(true);
 	}
 
 	public void AddButton(string text, Godot.Color color, string code, long generation)
@@ -270,7 +273,29 @@ public partial class QuickButtons : CanvasLayer
 		ConfigureButton(btn, text, color, code, generation);
 		currentRow.AddChild(btn);
 		buttons.Add(btn);
-		UpdatePanelSize(ShouldStickToBottom());
+		RequestPanelSizeUpdate(ShouldStickToBottom());
+	}
+
+	public void BeginBatch()
+	{
+		layoutBatchDepth++;
+	}
+
+	public void EndBatch()
+	{
+		if (layoutBatchDepth <= 0)
+			return;
+
+		layoutBatchDepth--;
+		if (layoutBatchDepth > 0)
+			return;
+
+		bool pending = layoutBatchPending;
+		bool keepBottom = layoutBatchKeepBottom;
+		layoutBatchPending = false;
+		layoutBatchKeepBottom = false;
+		if (pending)
+			UpdatePanelSize(keepBottom);
 	}
 
 	Panel AcquireButton()
@@ -569,7 +594,7 @@ public partial class QuickButtons : CanvasLayer
 			return;
 		currentRow = AcquireRow();
 		rowsContainer.AddChild(currentRow);
-		UpdatePanelSize(ShouldStickToBottom());
+		RequestPanelSizeUpdate(ShouldStickToBottom());
 	}
 
 	public void ShowPad()
@@ -598,7 +623,7 @@ public partial class QuickButtons : CanvasLayer
 			}
 			ApplyButtonMetrics(btn);
 		}
-		UpdatePanelSize(ShouldStickToBottom());
+		RequestPanelSizeUpdate(ShouldStickToBottom());
 	}
 
 	public void RefreshSizing()
@@ -616,7 +641,7 @@ public partial class QuickButtons : CanvasLayer
 		}
 		if (userWidth > 0)
 			userWidth = Mathf.Clamp(userWidth, EffectiveButtonWidth + ResizeHandleWidth, GetViewport().GetVisibleRect().Size.X - 40);
-		UpdatePanelSize(ShouldStickToBottom());
+		RequestPanelSizeUpdate(ShouldStickToBottom());
 	}
 
 	public void SetInputEnabled(bool enabled)
@@ -709,6 +734,18 @@ public partial class QuickButtons : CanvasLayer
 			&& Mathf.Abs(color.B - 0.5f) <= 0.063f;
 	}
 
+	void RequestPanelSizeUpdate(bool keepBottom)
+	{
+		if (layoutBatchDepth > 0)
+		{
+			layoutBatchPending = true;
+			layoutBatchKeepBottom = layoutBatchKeepBottom || keepBottom;
+			return;
+		}
+
+		UpdatePanelSize(keepBottom);
+	}
+
 	async void UpdatePanelSize(bool keepBottom)
 	{
 		if (panel == null || scroll == null || rowsContainer == null)
@@ -721,7 +758,10 @@ public partial class QuickButtons : CanvasLayer
 		int autoScrollInteractionSerial = quickScrollInteractionSerial;
 		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 		if (!IsControlAlive(panel) || !IsControlAlive(scroll) || !IsControlAlive(rowsContainer))
+		{
+			layoutUpdateQueued = false;
 			return;
+		}
 		layoutUpdateQueued = false;
 		var viewportSize = GetViewport().GetVisibleRect().Size;
 		var contentSize = rowsContainer.GetCombinedMinimumSize();

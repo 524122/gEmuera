@@ -2629,25 +2629,17 @@ public partial class EmueraContent : Control
 	// Trim old rows from the top to cap memory and scene-tree size.
 	public void RemoveTopLines(int count)
 	{
-		bool removedAny = false;
-		if (count > 0)
-			GenericUtils.ClearPointingButton();
-		for(int i = 0; i < count && lineContainer.GetChildCount() > 0; i++)
-		{
-			var child = lineContainer.GetChild(0);
-			removedAny = true;
-			if (child.HasMeta("line_no"))
-			{
-				int lineNo = (int)child.GetMeta("line_no");
-				UnregisterLine(lineNo);
-			}
-			SafeQueueFree(child);
-		}
-		if (removedAny)
-		{
-			displayRevision++;
-			RefreshQuickInputGate();
-		}
+		if (count <= 0 || lineContainer == null)
+			return;
+
+		int removeCount = System.Math.Min(count, lineContainer.GetChildCount());
+		if (removeCount <= 0)
+			return;
+
+		var children = new List<Node>(removeCount);
+		for (int i = 0; i < removeCount; i++)
+			children.Add(lineContainer.GetChild(i));
+		RemoveLineChildren(children);
 	}
 
 	// Re-apply the row cap after the user changes MaxVisibleLines.
@@ -2663,12 +2655,32 @@ public partial class EmueraContent : Control
 	// Remove recent rows when the core overwrites or updates the bottom output.
 	public void RemoveBottomLines(int count)
 	{
+		if (count <= 0 || lineContainer == null)
+			return;
+
+		int childCount = lineContainer.GetChildCount();
+		int removeCount = System.Math.Min(count, childCount);
+		if (removeCount <= 0)
+			return;
+
+		var children = new List<Node>(removeCount);
+		for (int i = 0; i < removeCount; i++)
+			children.Add(lineContainer.GetChild(childCount - 1 - i));
+		RemoveLineChildren(children);
+	}
+
+	void RemoveLineChildren(List<Node> children)
+	{
+		if (children == null || children.Count == 0)
+			return;
+
+		GenericUtils.ClearPointingButton();
 		bool removedAny = false;
-		if (count > 0)
-			GenericUtils.ClearPointingButton();
-		for(int i = 0; i < count && lineContainer.GetChildCount() > 0; i++)
+		for (int i = 0; i < children.Count; i++)
 		{
-			var child = lineContainer.GetChild(lineContainer.GetChildCount() - 1);
+			var child = children[i];
+			if (child == null || !GodotObject.IsInstanceValid(child))
+				continue;
 			removedAny = true;
 			if (child.HasMeta("line_no"))
 			{
@@ -3188,44 +3200,52 @@ public partial class EmueraContent : Control
 				return;
 			}
 
-			quickButtons.Clear();
-			quickRenderedGeneration = lastButtonGeneration;
-			quickRenderedRevision = displayRevision;
-
-			if (lastButtonGeneration < 0)
-				return;
-
-			var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
-			foreach (var kvp in lineObjects)
+			quickButtons.BeginBatch();
+			try
 			{
-				var line = kvp.Value;
-				var lineButtons = new List<(string text, Godot.Color color, string code)>();
-				CollectQuickButtons(line, lineButtons);
-				if (lineButtons.Count > 0)
-					lineGroups.Add((kvp.Key, lineButtons));
-			}
+				quickButtons.Clear();
+				quickRenderedGeneration = lastButtonGeneration;
+				quickRenderedRevision = displayRevision;
 
-			lineGroups.Sort((a, b) => a.lineNo.CompareTo(b.lineNo));
+				if (lastButtonGeneration < 0)
+					return;
 
-			if (lineGroups.Count == 0)
-				return;
-
-			if (shouldAutoShowQuick)
-			{
-				ClearQuickAutoHiddenState();
-				quickButtons.ShowPad();
-				quickButtons.SetInputEnabled(true);
-				UpdateSystemButtonVisuals();
-			}
-
-			for (int i = 0; i < lineGroups.Count; i++)
-			{
-				foreach (var btn in lineGroups[i].buttons)
+				var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
+				foreach (var kvp in lineObjects)
 				{
-					quickButtons.AddButton(btn.text, btn.color, btn.code, lastButtonGeneration);
+					var line = kvp.Value;
+					var lineButtons = new List<(string text, Godot.Color color, string code)>();
+					CollectQuickButtons(line, lineButtons);
+					if (lineButtons.Count > 0)
+						lineGroups.Add((kvp.Key, lineButtons));
 				}
-				if (i < lineGroups.Count - 1)
-					quickButtons.ShiftLine();
+
+				lineGroups.Sort((a, b) => a.lineNo.CompareTo(b.lineNo));
+
+				if (lineGroups.Count == 0)
+					return;
+
+				if (shouldAutoShowQuick)
+				{
+					ClearQuickAutoHiddenState();
+					quickButtons.ShowPad();
+					quickButtons.SetInputEnabled(true);
+					UpdateSystemButtonVisuals();
+				}
+
+				for (int i = 0; i < lineGroups.Count; i++)
+				{
+					foreach (var btn in lineGroups[i].buttons)
+					{
+						quickButtons.AddButton(btn.text, btn.color, btn.code, lastButtonGeneration);
+					}
+					if (i < lineGroups.Count - 1)
+						quickButtons.ShiftLine();
+				}
+			}
+			finally
+			{
+				quickButtons.EndBatch();
 			}
 		}
 	}
@@ -4880,6 +4900,12 @@ public partial class EmueraContent : Control
 				return;
 
 			float baseline = GetTextBaseline(font, fontSize, Size.Y);
+			if (!ShouldUseGridDrawing(text))
+			{
+				DrawPlainText(baseline);
+				return;
+			}
+
 			float exactX = 0.0f;
 			float drawX = 0.0f;
 			for (int i = 0; i < text.Length; i++)
@@ -4896,6 +4922,14 @@ public partial class EmueraContent : Control
 			}
 		}
 
+		void DrawPlainText(float baseline)
+		{
+			float drawWidth = System.Math.Max(1.0f, Size.X);
+			DrawString(font, new Vector2(0, baseline), text, HorizontalAlignment.Left, drawWidth, fontSize, color);
+			if (bold)
+				DrawString(font, new Vector2(1.0f, baseline), text, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, color);
+		}
+
 		static float GetTextBaseline(Font font, int fontSize, float height)
 		{
 			float fontHeight = font.GetHeight(fontSize);
@@ -4906,6 +4940,30 @@ public partial class EmueraContent : Control
 		float GetCellWidth(bool half)
 		{
 			return half ? fontSize / 2.0f : fontSize;
+		}
+
+		static bool ShouldUseGridDrawing(string value)
+		{
+			// 普通文字按整段字体 advance 绘制，以贴近 v24/snake 的 GDI/SkiaSharp 横向间距。
+			// 地图、表格、箱线和空白对齐仍走固定半角/全角格点，避免移动端布局漂移。
+			for (int i = 0; i < value.Length; i++)
+			{
+				char c = value[i];
+				if (uEmuera.Utils.CheckZeroWidth(c))
+					continue;
+				if (char.IsWhiteSpace(c) || IsGridSensitiveChar(c))
+					return true;
+			}
+			return false;
+		}
+
+		static bool IsGridSensitiveChar(char c)
+		{
+			return (c >= '\u2500' && c <= '\u257F') // Box Drawing
+				|| (c >= '\u2580' && c <= '\u259F') // Block Elements
+				|| (c >= '\u25A0' && c <= '\u25FF') // Geometric Shapes
+				|| (c >= '\u2800' && c <= '\u28FF') // Braille Patterns
+				|| c == '\u3000';
 		}
 
 		void DrawGridChar(char value, float x, float baseline, float cellWidth)
