@@ -2940,7 +2940,10 @@ namespace MinorShift.Emuera.GameProc.Function
 				string keyword = func.Argument.ConstStr;
 				if (Config.ICFunction)//1756 BEGINのキーワードは関数扱いらしい
 					keyword = keyword.ToUpper();
-				state.SetBegin(keyword);
+				// v24/snake 核心允许普通 BEGIN 中断当前系统函数栈。
+				// erablue resort 的一日结束报告会在 @SHOW_SHOP 栈内执行 BEGIN ABLUP，
+				// 若按当前 SystemState 的 __CAN_BEGIN__ 严格检查会误报。
+				state.SetBegin(keyword, true);
 				state.Return(0);
 				exm.Console.ResetStyle();
 			}
