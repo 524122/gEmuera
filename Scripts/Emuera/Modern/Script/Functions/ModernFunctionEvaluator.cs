@@ -3769,14 +3769,10 @@ internal sealed class ModernFunctionEvaluator
 				return 1;
 			}
 
-			if (term.Identifier.Dimension != VariableDimension.Array1D)
-				throw new NotSupportedException("VARSETEX currently supports scalar and one-dimensional variables in the modern mobile core.");
-
+			bool setAllDims = arguments.Count < 3 || arguments[2].GetIntValue(context) != 0;
 			long start = arguments.Count >= 4 ? arguments[3].GetIntValue(context) : 0;
-			long end = arguments.Count == 5 ? arguments[4].GetIntValue(context) : GetVariableArrayLength(term.Identifier, context);
-			var range = ValidateArrayRange(term.Identifier, context, start, end);
-			for (long i = range.Start; i < range.End; i++)
-				SetVariableValue(term.Identifier, context, i, arguments[1]);
+			// VARSETEX 的范围总是作用于最后一维；多维变量的前置维度是否全扫由第 3 参数决定。
+			SetVarSetExArrayValue(term, arguments[1], context, setAllDims, start, arguments.Count == 5 ? arguments[4] : null);
 			return 1;
 		}
 	}
@@ -6695,6 +6691,14 @@ internal sealed class ModernFunctionEvaluator
 		return (start, end);
 	}
 
+	static (long Start, long End) ValidateArrayDimensionRange(ModernVariableToken token, int dimension, long start, long end)
+	{
+		long length = token.GetLength(dimension);
+		if (start < 0 || end < 0 || start > end || end > length)
+			throw new IndexOutOfRangeException($"{token.Name}: invalid dimension {dimension} range {start}..{end}.");
+		return (start, end);
+	}
+
 	static int GetCharacterCount()
 	{
 		var data = GlobalStatic.VariableData ?? GlobalStatic.VEvaluator?.VariableData;
@@ -6944,23 +6948,91 @@ internal sealed class ModernFunctionEvaluator
 
 	static void SetVariableValue(ModernVariableToken token, ModernExpressionContext context, long index, AExpression value)
 	{
+		SetVariableValue(token, context, token.Dimension == VariableDimension.Scalar ? Array.Empty<long>() : new[] { index }, value);
+	}
+
+	static void SetVariableValue(ModernVariableToken token, ModernExpressionContext context, long[] indices, AExpression value)
+	{
 		if (token.IsString)
 		{
 			if (!value.IsString)
 				throw new InvalidOperationException($"{token.Name} cannot receive a numeric value.");
-			token.SetValue(value.GetStrValue(context) ?? "", context, token.Dimension == VariableDimension.Scalar ? Array.Empty<long>() : new[] { index });
+			token.SetValue(value.GetStrValue(context) ?? "", context, token.Dimension == VariableDimension.Scalar ? Array.Empty<long>() : indices);
 		}
 		else if (token.IsFloat)
 		{
 			if (value.IsString)
 				throw new InvalidOperationException($"{token.Name} cannot receive a string value.");
-			token.SetValue(ExpressionToDouble(value, context), context, token.Dimension == VariableDimension.Scalar ? Array.Empty<long>() : new[] { index });
+			token.SetValue(ExpressionToDouble(value, context), context, token.Dimension == VariableDimension.Scalar ? Array.Empty<long>() : indices);
 		}
 		else
 		{
 			if (!value.IsInteger)
 				throw new InvalidOperationException($"{token.Name} cannot receive a non-integer value.");
-			token.SetValue(value.GetIntValue(context), context, token.Dimension == VariableDimension.Scalar ? Array.Empty<long>() : new[] { index });
+			token.SetValue(value.GetIntValue(context), context, token.Dimension == VariableDimension.Scalar ? Array.Empty<long>() : indices);
+		}
+	}
+
+	static void SetVarSetExArrayValue(
+		ModernVariableTerm term,
+		AExpression value,
+		ModernExpressionContext context,
+		bool setAllDims,
+		long start,
+		AExpression endExpression)
+	{
+		int dimensionCount = (int)term.Identifier.Dimension;
+		if (dimensionCount <= 0)
+			throw new InvalidOperationException($"{term.Identifier.Name} is not an array.");
+
+		long[] selected = term.GetArgumentValues(context);
+		int prefixCount = Math.Max(0, selected.Length - dimensionCount);
+		if (selected.Length < prefixCount + dimensionCount)
+			throw new InvalidOperationException($"{term.Identifier.Name} needs {dimensionCount} array indices.");
+
+		int lastDimension = dimensionCount - 1;
+		long selectedLast = selected[prefixCount + lastDimension];
+		long end = endExpression != null ? endExpression.GetIntValue(context) : term.Identifier.GetLength(lastDimension);
+		long rangeStart = dimensionCount == 1 ? start : Math.Max(start, selectedLast);
+		var range = ValidateArrayDimensionRange(term.Identifier, lastDimension, rangeStart, end);
+
+		var indices = new long[selected.Length];
+		Array.Copy(selected, indices, selected.Length);
+		FillVarSetExDimension(term.Identifier, context, value, indices, prefixCount, 0, dimensionCount, setAllDims, range);
+	}
+
+	static void FillVarSetExDimension(
+		ModernVariableToken token,
+		ModernExpressionContext context,
+		AExpression value,
+		long[] indices,
+		int prefixCount,
+		int dimension,
+		int dimensionCount,
+		bool setAllDims,
+		(long Start, long End) range)
+	{
+		if (dimension == dimensionCount - 1)
+		{
+			for (long i = range.Start; i < range.End; i++)
+			{
+				indices[prefixCount + dimension] = i;
+				SetVariableValue(token, context, indices, value);
+			}
+			return;
+		}
+
+		if (!setAllDims)
+		{
+			FillVarSetExDimension(token, context, value, indices, prefixCount, dimension + 1, dimensionCount, false, range);
+			return;
+		}
+
+		long length = token.GetLength(dimension);
+		for (long i = 0; i < length; i++)
+		{
+			indices[prefixCount + dimension] = i;
+			FillVarSetExDimension(token, context, value, indices, prefixCount, dimension + 1, dimensionCount, true, range);
 		}
 	}
 

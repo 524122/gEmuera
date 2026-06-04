@@ -100,6 +100,13 @@ internal abstract class ModernVariableToken
 		throw new InvalidOperationException($"{Name} is not an array.");
 	}
 
+	public virtual int GetLength(int dimension)
+	{
+		if (dimension == 0 && Dimension == VariableDimension.Array1D)
+			return GetLength();
+		throw new IndexOutOfRangeException($"{Name} has no dimension {dimension}.");
+	}
+
 	public virtual object GetArray(ModernExpressionContext context)
 	{
 		throw new InvalidOperationException($"{Name} is not an array.");
@@ -198,6 +205,13 @@ internal sealed class ModernPrivateVariableToken : ModernVariableToken
 		for (int i = 0; i < definition.Lengths.Count; i++)
 			total *= definition.Lengths[i];
 		return (int)total;
+	}
+
+	public override int GetLength(int dimension)
+	{
+		if (dimension < 0 || dimension >= definition.Lengths.Count)
+			throw new IndexOutOfRangeException($"{Name} has no dimension {dimension}.");
+		return definition.Lengths[dimension];
 	}
 
 	public override bool IsReference
@@ -591,6 +605,16 @@ internal sealed class ModernLegacyCharaInt2DVariableToken : ModernLegacyCharaVar
 		int index2 = CheckedIndex(arguments[2], array.GetLength(1), Name, "array2");
 		array[index1, index2] = checked(array[index1, index2] + value);
 		return array[index1, index2];
+	}
+
+	public override int GetLength(int dimension)
+	{
+		if (dimension < 0 || dimension > 1)
+			throw new IndexOutOfRangeException($"{Name} has no dimension {dimension}.");
+		var legacyData = GlobalStatic.VariableData ?? GlobalStatic.VEvaluator?.VariableData;
+		if (legacyData == null || legacyData.CharacterList.Count == 0)
+			return 0;
+		return legacyData.CharacterList[0].DataIntegerArray2D[CodeIndex].GetLength(dimension);
 	}
 }
 
