@@ -6177,7 +6177,7 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 			else if (token.IsArray2D)
 			{
-				int len1 = token.GetLength();
+				int len1 = token.GetLength(0);
 				int len2 = token.GetLength(1);
 				int selected1 = (int)GetVarSetExIndex(varTerm, 0, exm);
 				int selected2 = (int)GetVarSetExIndex(varTerm, 1, exm);
@@ -6191,7 +6191,7 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 			else if (token.IsArray3D)
 			{
-				int len1 = token.GetLength();
+				int len1 = token.GetLength(0);
 				int len2 = token.GetLength(1);
 				int len3 = token.GetLength(2);
 				int selected1 = (int)GetVarSetExIndex(varTerm, 0, exm);

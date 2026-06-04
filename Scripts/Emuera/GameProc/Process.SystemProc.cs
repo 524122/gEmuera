@@ -796,7 +796,9 @@ namespace MinorShift.Emuera.GameProc
 			state.SystemState = SystemStateCode.LoadData_CallEventLoad;
 			loadEventLoadStartTick = Environment.TickCount;
 			ResetLazyLoadingRuntimeStats();
-			PreloadEventLoadLazyErbs();
+			// Snake 原核心在 EVENTLOAD 中按函数命中懒加载。这里如果提前同步加载所有热标签文件，
+			// Android 上会把一次读档卡顿放大到几十秒，且会触发用户看到的强制中断提示。
+			// 保持按需加载，避免 EVENTLOAD 前出现无界批量 I/O。
 			//EVENTLOADを呼び出してLoadData_CallEventLoadへ移行。
 			if (!callFunction("EVENTLOAD", false, true))
 			{
