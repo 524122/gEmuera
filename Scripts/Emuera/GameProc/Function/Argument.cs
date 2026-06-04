@@ -260,6 +260,20 @@ namespace MinorShift.Emuera.GameProc.Function
 		public readonly IOperandTerm[] Values;
 	}
 
+	internal sealed class SpSetBgImageArgument : Argument
+	{
+		public SpSetBgImageArgument(IOperandTerm name, IOperandTerm depth, IOperandTerm opacity)
+		{
+			Name = name;
+			Depth = depth;
+			Opacity = opacity;
+		}
+
+		public readonly IOperandTerm Name;
+		public readonly IOperandTerm Depth;
+		public readonly IOperandTerm Opacity;
+	}
+
 	internal sealed class SpForNextArgment : Argument
 	{
 		public SpForNextArgment(VariableTerm var, IOperandTerm start, IOperandTerm end, IOperandTerm step)

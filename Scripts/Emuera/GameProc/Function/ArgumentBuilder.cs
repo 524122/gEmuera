@@ -228,6 +228,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_SAVECHARA] = new SP_SAVECHARA_ArgumentBuilder();
 			argb[FunctionArgType.SP_REF] = new SP_REF_ArgumentBuilder(false);
 			argb[FunctionArgType.SP_REFBYNAME] = new SP_REF_ArgumentBuilder(true);
+			argb[FunctionArgType.SP_SETBGIMAGE] = new SP_SETBGIMAGE_ArgumentBuilder();
 			argb[FunctionArgType.SP_HTMLSPLIT] = new SP_HTMLSPLIT_ArgumentBuilder();
 			argb[FunctionArgType.SP_DT_COLUMN_OPTIONS] = new SP_DT_COLUMN_OPTIONS_ArgumentBuilder();
 			
@@ -1667,6 +1668,51 @@ namespace MinorShift.Emuera.GameProc.Function
                     term = new VariableTerm(varToken, new IOperandTerm[] { new SingleTerm(0) });
 				}
 				return new SpHtmlSplitArgument(terms[0], destVar, term);
+			}
+		}
+
+		private sealed class SP_SETBGIMAGE_ArgumentBuilder : ArgumentBuilder
+		{
+			public SP_SETBGIMAGE_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[] { EraType.String, EraType.Integer, EraType.Integer };
+				minArg = 1;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				StringStream st = line.PopArgumentPrimitive();
+				List<IOperandTerm> termList = new List<IOperandTerm>();
+				LexicalAnalyzer.SkipHalfSpace(st);
+				if (st.EOS)
+				{
+					warn("引数が設定されていません", line, 2, false);
+					return null;
+				}
+
+				// SETBGIMAGE 的第 1 参数是 v24 资源名语义，title 这类裸词
+				// 必须按图片名处理，不能进入普通表达式后被当成变量标识符。
+				StrFormWord nameWord = LexicalAnalyzer.AnalyseFormattedString(st, FormStrEndWith.Comma, false);
+				termList.Add(ExpressionParser.ToStrFormTerm(nameWord));
+				if (!st.EOS)
+				{
+					st.ShiftNext();
+					LexicalAnalyzer.SkipHalfSpace(st);
+					if (!st.EOS)
+					{
+						WordCollection wc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
+						termList.AddRange(ExpressionParser.ReduceArguments(wc, ArgsEndWith.EoL, false));
+					}
+				}
+
+				IOperandTerm[] terms = termList.ToArray();
+				if (!checkArgumentType(line, exm, terms))
+					return null;
+
+				return new SpSetBgImageArgument(
+					terms[0],
+					terms.Length > 1 ? terms[1] : null,
+					terms.Length > 2 ? terms[2] : null);
 			}
 		}
 		
