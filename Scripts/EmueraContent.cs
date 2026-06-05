@@ -115,6 +115,7 @@ public partial class EmueraContent : Control
 	List<SpriteManager.TextureInfo> cbgTexturePins = new List<SpriteManager.TextureInfo>();
 	List<SpriteManager.TextureInfo> activeTexturePinCollector;
 	HashSet<int> asyncTexturePendingLineNos = new HashSet<int>();
+	Dictionary<int, ConsoleDisplayLine> pendingAsyncLineUpdates = new Dictionary<int, ConsoleDisplayLine>();
 	int activeRenderLineNo = -1;
 	long observedTextureLoadVersion = 0;
 	bool renderingCbgTextures = false;
@@ -132,6 +133,20 @@ public partial class EmueraContent : Control
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> renderedCbgLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> lastCbgSourceLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	ConsoleDisplayLine[] lastHtmlIslandLines = null;
+
+	struct CbgRenderEntry
+	{
+		public MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage Layer;
+		public Texture2D SourceTexture;
+		public Rect2 SourceRegion;
+		public Vector2 Position;
+		public Vector2 Size;
+		public Vector2 DrawOffset;
+		public Vector2 DrawSize;
+		public bool FlipX;
+		public bool FlipY;
+		public Color Modulate;
+	}
 
 	// Batched display updates defer expensive follow-up work until a group of
 	// lines has been applied.
@@ -187,6 +202,8 @@ public partial class EmueraContent : Control
 	bool contentInertiaActive = false;
 	float contentInertiaDeceleration = 900.0f;
 	int contentScrollInteractionSerial = 0;
+	string canvasVisualButtonInput;
+	long canvasVisualButtonGeneration = long.MinValue;
 
 	// Desired scroll is a mirror of the viewport position we want after Godot has
 	// completed its layout pass. This prevents layout refreshes from snapping the
@@ -653,6 +670,7 @@ public partial class EmueraContent : Control
 	public void Clear()
 	{
 		GenericUtils.ClearPointingButton();
+		ClearCanvasVisualButton();
 		if (lineContainer != null)
 		{
 			foreach(var child in lineContainer.GetChildren())
@@ -662,6 +680,7 @@ public partial class EmueraContent : Control
 		consoleRenderSurface?.MarkDirty();
 		failedTextureSearches.Clear();
 		asyncTexturePendingLineNos.Clear();
+		pendingAsyncLineUpdates.Clear();
 		pendingCbgAsyncTextureRefresh = false;
 		pendingHtmlIslandAsyncTextureRefresh = false;
 		displayRevision++;
@@ -1036,6 +1055,13 @@ public partial class EmueraContent : Control
 				}
 			}
 		}
+		catch
+		{
+			SafeQueueFree(lineControl);
+			ReleaseTexturePinList(newTexturePins);
+			asyncTexturePendingLineNos.Remove(line.LineNo);
+			throw;
+		}
 		finally
 		{
 			activeTexturePinCollector = previousTexturePinCollector;
@@ -1048,6 +1074,13 @@ public partial class EmueraContent : Control
 		var lineSize = new Vector2(maxLineRight, fixedLineHeight);
 		SetFixedControlSize(lineControl, lineSize);
 		bool asyncTexturePendingDuringRender = asyncTexturePendingLineNos.Contains(line.LineNo);
+		bool hasExistingLine = lineObjects.ContainsKey(line.LineNo) || lineControls.ContainsKey(line.LineNo);
+		if (ShouldDeferLineReplacementForAsyncTexture(line, isUpdate, hasExistingLine, asyncTexturePendingDuringRender))
+		{
+			SafeQueueFree(lineControl);
+			ReleaseTexturePinList(newTexturePins);
+			return;
+		}
 
 		int insertIndex = -1;
 		if (lineControls.TryGetValue(line.LineNo, out var existingControl))
@@ -1068,6 +1101,8 @@ public partial class EmueraContent : Control
 		RegisterLineTexturePins(line.LineNo, newTexturePins);
 		if (asyncTexturePendingDuringRender)
 			asyncTexturePendingLineNos.Add(line.LineNo);
+		else
+			pendingAsyncLineUpdates.Remove(line.LineNo);
 		displayRevision++;
 		if (UseCanvasRenderBackend)
 			NotifyConsoleRenderContentChanged();
@@ -1084,6 +1119,18 @@ public partial class EmueraContent : Control
 			else
 				QueueDisplayFollowUp();
 		}
+	}
+
+	bool ShouldDeferLineReplacementForAsyncTexture(ConsoleDisplayLine line, bool isUpdate, bool hasExistingLine, bool asyncTexturePending)
+	{
+		if (line == null || !isUpdate || !hasExistingLine || !asyncTexturePending)
+			return false;
+
+		// 刷新已有行时，如果新图片仍在异步解码，先保留旧行画面。
+		// 否则旧节点会被空白临时行替换，玩家会看到图片闪白；纹理完成后再用挂起的新行做真正替换。
+		pendingAsyncLineUpdates[line.LineNo] = line;
+		asyncTexturePendingLineNos.Add(line.LineNo);
+		return true;
 	}
 
 	// 企业级说明：普通行与 HTML/Div 子行共用同一按钮构建入口，避免触摸命中、焦点、样式和内容裁剪规则在移动端产生分叉。
@@ -1656,6 +1703,7 @@ public partial class EmueraContent : Control
 		ReleaseCanvasDivOverlays(lineNo);
 		ClearCanvasOverlayIndexesForLine(lineNo);
 		asyncTexturePendingLineNos.Remove(lineNo);
+		pendingAsyncLineUpdates.Remove(lineNo);
 		lineObjects.Remove(lineNo);
 		lineControls.Remove(lineNo);
 		canvasLineButtonHits.Remove(lineNo);
@@ -1683,6 +1731,7 @@ public partial class EmueraContent : Control
 		ClearCanvasOverlayIndexes();
 		lineObjects.Clear();
 		lineControls.Clear();
+		pendingAsyncLineUpdates.Clear();
 		canvasLineButtonHits.Clear();
 		canvasRowsWithPositionedNodes.Clear();
 		lineSizes.Clear();
@@ -3187,9 +3236,10 @@ public partial class EmueraContent : Control
 				for (int i = 0; i < lineNos.Count; i++)
 				{
 					int lineNo = lineNos[i];
-					if (lineObjects.TryGetValue(lineNo, out var line))
+					if (pendingAsyncLineUpdates.TryGetValue(lineNo, out var pendingLine)
+						|| lineObjects.TryGetValue(lineNo, out pendingLine))
 					{
-						AddLine(line, true);
+						AddLine(pendingLine, true);
 						changed = true;
 					}
 				}
@@ -3236,9 +3286,9 @@ public partial class EmueraContent : Control
 		if (cbgContainer == null)
 			return;
 
-		ReleaseCbgTexturePins();
 		if (list == null || list.Count == 0)
 		{
+			ReleaseCbgTexturePins();
 			lastCbgSourceLayers.Clear();
 			pendingCbgAsyncTextureRefresh = false;
 			TrimCbgNodes(0);
@@ -3247,14 +3297,13 @@ public partial class EmueraContent : Control
 
 		lastCbgSourceLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>(list);
 		pendingCbgAsyncTextureRefresh = false;
-		int nodeIndex = 0;
-		renderedCbgLayers.Clear();
 		int currentScrollY = GetCurrentContentScrollY();
 		// Treat one CBG refresh as an ownership transaction. GetSpriteTexture pins
 		// into this temporary collector, then the collector becomes cbgTexturePins
 		// only after all visible layers have been rebuilt.
 		var previousTexturePinCollector = activeTexturePinCollector;
 		var newCbgTexturePins = new List<SpriteManager.TextureInfo>();
+		var entries = new List<CbgRenderEntry>();
 		activeTexturePinCollector = newCbgTexturePins;
 		bool previousCbgRender = renderingCbgTextures;
 		renderingCbgTextures = true;
@@ -3271,42 +3320,75 @@ public partial class EmueraContent : Control
 				if (texture == null)
 					continue;
 
-				var emuImg = GetOrCreateCbgNode(nodeIndex);
+				var entry = new CbgRenderEntry
+				{
+					Layer = cbg,
+				};
 				if (texture is AtlasTexture atlas)
 				{
-					emuImg.SourceTexture = atlas.Atlas;
-					emuImg.SourceRegion = atlas.Region;
+					entry.SourceTexture = atlas.Atlas;
+					entry.SourceRegion = atlas.Region;
 				}
 				else
 				{
-					emuImg.SourceTexture = texture;
-					emuImg.SourceRegion = default;
+					entry.SourceTexture = texture;
+					entry.SourceRegion = default;
 				}
 				bool flipX = cbg.width < 0;
 				bool flipY = cbg.height < 0;
 				int w = cbg.width != 0 ? System.Math.Abs(cbg.width) : (cbg.Img.DestBaseSize.Width > 0 ? cbg.Img.DestBaseSize.Width : texture.GetWidth());
 				int h = cbg.height != 0 ? System.Math.Abs(cbg.height) : (cbg.Img.DestBaseSize.Height > 0 ? cbg.Img.DestBaseSize.Height : texture.GetHeight());
-				emuImg.DrawOffset = GetSpriteHtmlDrawOffset(cbg.Img, cbg.Img.Name, w, h);
-				emuImg.DrawSize = GetSpriteHtmlDrawSize(cbg.Img, cbg.Img.Name, w, h);
-				emuImg.Position = GetCbgLayerPosition(cbg, currentScrollY);
-				emuImg.Size = new Vector2(w, h);
-				emuImg.FlipX = flipX;
-				emuImg.FlipY = flipY;
-				emuImg.Modulate = new Godot.Color(1, 1, 1, cbg.opacity);
-				emuImg.SetColorMatrix(cbg.colorMatrix);
-				emuImg.Visible = true;
-				renderedCbgLayers.Add(cbg);
-				nodeIndex++;
+				entry.DrawOffset = GetSpriteHtmlDrawOffset(cbg.Img, cbg.Img.Name, w, h);
+				entry.DrawSize = GetSpriteHtmlDrawSize(cbg.Img, cbg.Img.Name, w, h);
+				entry.Position = GetCbgLayerPosition(cbg, currentScrollY);
+				entry.Size = new Vector2(w, h);
+				entry.FlipX = flipX;
+				entry.FlipY = flipY;
+				entry.Modulate = new Godot.Color(1, 1, 1, cbg.opacity);
+				entries.Add(entry);
 			}
+		}
+		catch
+		{
+			ReleaseTexturePinList(newCbgTexturePins);
+			throw;
 		}
 		finally
 		{
 			renderingCbgTextures = previousCbgRender;
 			activeTexturePinCollector = previousTexturePinCollector;
-			cbgTexturePins = newCbgTexturePins;
 		}
+
+		if (pendingCbgAsyncTextureRefresh && cbgNodes.Count > 0)
+		{
+			// 刷新背景层时如果新纹理还没就绪，保留旧 CBG 节点和旧 pin。
+			// 否则本帧会把旧背景裁掉，玩家会看到白/空背景，等异步完成后再提交新背景。
+			ReleaseTexturePinList(newCbgTexturePins);
+			return;
+		}
+
+		ReleaseCbgTexturePins();
+		renderedCbgLayers.Clear();
+		for (int i = 0; i < entries.Count; i++)
+		{
+			var entry = entries[i];
+			var emuImg = GetOrCreateCbgNode(i);
+			emuImg.SourceTexture = entry.SourceTexture;
+			emuImg.SourceRegion = entry.SourceRegion;
+			emuImg.DrawOffset = entry.DrawOffset;
+			emuImg.DrawSize = entry.DrawSize;
+			emuImg.Position = entry.Position;
+			emuImg.Size = entry.Size;
+			emuImg.FlipX = entry.FlipX;
+			emuImg.FlipY = entry.FlipY;
+			emuImg.Modulate = entry.Modulate;
+			emuImg.SetColorMatrix(entry.Layer.colorMatrix);
+			emuImg.Visible = true;
+			renderedCbgLayers.Add(entry.Layer);
+		}
+		cbgTexturePins = newCbgTexturePins;
 		lastCbgScrollVertical = currentScrollY;
-		TrimCbgNodes(nodeIndex);
+		TrimCbgNodes(entries.Count);
 	}
 
 	// Convert emuera CBG z-depth rules into a Godot position. Positive z-depth
@@ -4359,6 +4441,50 @@ public partial class EmueraContent : Control
 		HandleContentPointerInput(@event, true, btn, input, generation);
 	}
 
+	void SetCanvasVisualButton(string input, long generation)
+	{
+		input ??= "";
+		if (canvasVisualButtonGeneration == generation
+			&& string.Equals(canvasVisualButtonInput ?? "", input, StringComparison.Ordinal))
+			return;
+		canvasVisualButtonInput = input;
+		canvasVisualButtonGeneration = generation;
+		QueueCanvasVisualRedraw();
+	}
+
+	void ClearCanvasVisualButton()
+	{
+		if (canvasVisualButtonGeneration == long.MinValue && string.IsNullOrEmpty(canvasVisualButtonInput))
+			return;
+		canvasVisualButtonInput = null;
+		canvasVisualButtonGeneration = long.MinValue;
+		QueueCanvasVisualRedraw();
+	}
+
+	void QueueCanvasVisualRedraw()
+	{
+		if (!UseCanvasRenderBackend || consoleRenderSurface == null || !GodotObject.IsInstanceValid(consoleRenderSurface))
+			return;
+		consoleRenderSurface.QueueRedraw();
+	}
+
+	bool IsCanvasButtonVisuallySelected(ConsoleButtonString button)
+	{
+		if (button == null || !button.IsButton)
+			return false;
+		if (canvasVisualButtonGeneration == long.MinValue)
+			return false;
+		return button.Generation == canvasVisualButtonGeneration
+			&& string.Equals(button.Inputs ?? "", canvasVisualButtonInput ?? "", StringComparison.Ordinal);
+	}
+
+	bool IsContentBackLogView()
+	{
+		if (scrollContainer == null)
+			return false;
+		return scrollContainer.ScrollVertical < GetMaxContentVerticalScroll();
+	}
+
 	// Unified pointer handler for mouse, touch emulation, inline buttons, drag
 	// scrolling, inertia, and click-to-advance.
 	bool HandleContentPointerInput(InputEvent @event, bool acceptEvent, Control button = null, string input = null, long generation = 0)
@@ -4373,6 +4499,15 @@ public partial class EmueraContent : Control
 
 		if (scrollContainer == null || (!contentDragActive && !scrollContainer.GetGlobalRect().HasPoint(pointerPosition)))
 			return false;
+
+		if (motion && !contentDragActive)
+		{
+			if (TryFindConsoleButtonAtGlobalPosition(pointerPosition, out _, out var hoverInput, out var hoverGeneration, out _, out _))
+				SetCanvasVisualButton(hoverInput, hoverGeneration);
+			else
+				ClearCanvasVisualButton();
+			return false;
+		}
 
 		if (pressed && contentDragActive && button == null)
 		{
@@ -4404,6 +4539,10 @@ public partial class EmueraContent : Control
 			contentDragButtonGeneration = generation;
 			contentDragButtonContentCenterValid = hitContentCenterValid;
 			contentDragButtonContentCenter = hitContentCenter;
+			if (contentDragStartedOnButton)
+				SetCanvasVisualButton(input, generation);
+			else
+				ClearCanvasVisualButton();
 			contentDragStartPosition = pointerPosition;
 			contentDragLastPosition = pointerPosition;
 			contentLastDragTick = Time.GetTicksMsec();
@@ -4436,6 +4575,7 @@ public partial class EmueraContent : Control
 			{
 				contentDragMoved = true;
 				contentScrollInteractionSerial++;
+				ClearCanvasVisualButton();
 				if (GenericUtils.IsScrollTraceActive)
 					TraceScroll("drag_start", () => $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
 				if (GenericUtils.IsTouchTraceEnabled("drag"))
@@ -5201,6 +5341,7 @@ public partial class EmueraContent : Control
 		contentDragButtonGeneration = 0;
 		contentDragButtonContentCenterValid = false;
 		contentDragButtonContentCenter = Vector2.Zero;
+		ClearCanvasVisualButton();
 	}
 
 	// Defensive cleanup for a button press that was consumed by raw input before

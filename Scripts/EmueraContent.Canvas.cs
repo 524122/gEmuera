@@ -101,13 +101,6 @@ public partial class EmueraContent
 		int maxLineRight = GetLineRight(line);
 		var lineSize = new Vector2(maxLineRight, lineHeight);
 
-		if (lineControls.TryGetValue(line.LineNo, out var existingControl))
-		{
-			UnregisterLine(line.LineNo);
-			if (existingControl != null)
-				SafeQueueFree(existingControl);
-		}
-
 		var previousTexturePinCollector = activeTexturePinCollector;
 		int previousRenderLineNo = activeRenderLineNo;
 		var newTexturePins = new List<SpriteManager.TextureInfo>();
@@ -135,12 +128,30 @@ public partial class EmueraContent
 		}
 
 		bool asyncTexturePendingDuringRender = asyncTexturePendingLineNos.Contains(line.LineNo);
+		bool hasExistingLine = lineObjects.ContainsKey(line.LineNo) || lineControls.ContainsKey(line.LineNo);
+		if (ShouldDeferLineReplacementForAsyncTexture(line, isUpdate, hasExistingLine, asyncTexturePendingDuringRender))
+		{
+			ReleaseCanvasImageOverlayList(newOverlayNodes);
+			ReleaseCanvasDivOverlayList(newDivOverlayNodes);
+			ReleaseTexturePinList(newTexturePins);
+			return;
+		}
+
+		if (lineControls.TryGetValue(line.LineNo, out var existingControl))
+		{
+			UnregisterLine(line.LineNo);
+			if (existingControl != null)
+				SafeQueueFree(existingControl);
+		}
+
 		RegisterLine(line.LineNo, line, null, lineSize);
 		RegisterCanvasImageOverlays(line.LineNo, newOverlayNodes);
 		RegisterCanvasDivOverlays(line.LineNo, newDivOverlayNodes);
 		RegisterLineTexturePins(line.LineNo, newTexturePins);
 		if (asyncTexturePendingDuringRender)
 			asyncTexturePendingLineNos.Add(line.LineNo);
+		else
+			pendingAsyncLineUpdates.Remove(line.LineNo);
 		displayRevision++;
 		NotifyConsoleRenderContentChanged();
 
@@ -905,10 +916,12 @@ public partial class EmueraContent
 					continue;
 				if (button.StrArray == null)
 					continue;
+				bool isSelecting = owner.IsCanvasButtonVisuallySelected(button);
+				bool isBackLog = owner.IsContentBackLogView();
 				foreach (var part in button.StrArray)
 				{
 					stats.DrawnParts++;
-					DrawPart(part, y, 0);
+					DrawPart(part, y, 0, isSelecting, isBackLog);
 				}
 			}
 		}
@@ -991,13 +1004,13 @@ public partial class EmueraContent
 				+ " widest_line=" + ((int)owner.widestLineWidth);
 		}
 
-		void DrawPart(AConsoleDisplayPart part, float lineY, int relX)
+		void DrawPart(AConsoleDisplayPart part, float lineY, int relX, bool isSelecting, bool isBackLog)
 		{
 			if (part == null)
 				return;
 			if (part is ConsoleStyledString css)
 			{
-				DrawStyledString(css, lineY, relX);
+				DrawStyledString(css, lineY, relX, isSelecting, isBackLog);
 				return;
 			}
 			if (part is ConsoleImagePart image)
@@ -1016,7 +1029,7 @@ public partial class EmueraContent
 					lineY + rectShape.Top,
 					rectShape.Width,
 					Mathf.Max(rectShape.Bottom - rectShape.Top, 1)),
-					rectShape.pColor.ToGodotColor());
+					(isSelecting ? rectShape.pButtonColor : rectShape.pColor).ToGodotColor());
 				return;
 			}
 			if (part is ConsoleErrorShapePart errShape)
@@ -1026,7 +1039,7 @@ public partial class EmueraContent
 			}
 		}
 
-		void DrawStyledString(ConsoleStyledString css, float lineY, int relX)
+		void DrawStyledString(ConsoleStyledString css, float lineY, int relX, bool isSelecting, bool isBackLog)
 		{
 			if (css == null || string.IsNullOrEmpty(css.Str))
 				return;
@@ -1043,7 +1056,18 @@ public partial class EmueraContent
 			{
 				width = css.Width > 0 ? css.Width : 9999;
 			}
-			DrawText(css.Str, css.pColor.ToGodotColor(), css.Font?.Bold == true, x, lineY, width);
+			var color = css.pColor;
+			if (isSelecting)
+			{
+				// 原核心在按钮处于焦点/选中状态时使用 bcolor，并可为非空文字绘制灰色焦点背景。
+				// Canvas 自绘不经过 ConsoleStyledString.DrawTo，必须在这里显式复刻这段颜色语义。
+				if (Config.UseButtonFocusBackgroundColor && css.Width > 0 && !string.IsNullOrWhiteSpace(css.Str))
+					DrawRect(new Rect2(x, lineY, Mathf.Max(1.0f, width), owner.EffectiveLineHeight), new Color(50.0f / 255.0f, 50.0f / 255.0f, 50.0f / 255.0f, 1.0f));
+				color = css.pButtonColor;
+			}
+			else if (isBackLog && !css.pColorChanged)
+				color = Config.LogColor;
+			DrawText(css.Str, color.ToGodotColor(), css.Font?.Bold == true, x, lineY, width);
 		}
 
 		void DrawText(string text, Color color, bool bold, float x, float lineY, float width)
@@ -1072,6 +1096,8 @@ public partial class EmueraContent
 				float nextExactX = exactX + (half ? owner.FontSize / 2.0f : owner.FontSize);
 				float nextDrawX = x + (int)nextExactX;
 				float cellWidth = nextDrawX - drawX;
+				// 逐字符绘制只负责保持 emuera 的半角/全角格点起点，裁剪仍由整段宽度决定。
+				// 若按单元格宽度裁剪，Godot 字体 fallback 下的箱线/空白敏感字符会出现缺笔或整字丢失。
 				float drawWidth = Mathf.Max(cellWidth, x + width - drawX);
 				DrawGridChar(text[i], drawX, lineY + baseline, drawWidth, color, bold);
 				exactX = nextExactX;

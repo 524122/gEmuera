@@ -19,11 +19,14 @@ namespace MinorShift.Emuera.Content
 		static readonly Dictionary<string, ASprite> imageDictionary = new Dictionary<string, ASprite>();
 		static readonly Dictionary<string, LazySpriteDefinition> lazyImageDictionary = new Dictionary<string, LazySpriteDefinition>();
 		static readonly Dictionary<string, Point> spriteBasePositions = new Dictionary<string, Point>();
+		static readonly Dictionary<string, string> resolvedExistingResourcePathCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		static readonly Dictionary<int, GraphicsImage> gList;
+		const int LazySpriteSlowRealizeThresholdMs = 50;
 
 		private sealed class LazySpriteDefinition
 		{
-			public string[] Tokens;
+			public string RawCsvLine;
+			public string SpriteName;
 			public string Directory;
 			public ScriptPosition Position;
 			public bool IsAnime;
@@ -195,6 +198,7 @@ namespace MinorShift.Emuera.Content
 		}
 		static public bool LoadContents()
 		{
+			resolvedExistingResourcePathCache.Clear();
 			if (!uEmuera.Utils.DirectoryExists(Program.ContentDir))
 				return true;
 			try
@@ -226,7 +230,7 @@ namespace MinorShift.Emuera.Content
 						string str = NormalizeResourceCsvLine(line, directory);
 						if (str.Length == 0 || str.StartsWith(";"))
 							continue;
-						string[] tokens = str.Split(',');
+						string[] tokens = SplitRawCsvLine(str);
 						//AContentItem item = CreateFromCsv(tokens);
 						ScriptPosition sp = new ScriptPosition(filename, lineNo);
 						ASprite item = CreateFromCsv(tokens, directory, currentAnime, sp) as ASprite;
@@ -264,6 +268,7 @@ namespace MinorShift.Emuera.Content
 			imageDictionary.Clear();
 			lazyImageDictionary.Clear();
 			spriteBasePositions.Clear();
+			resolvedExistingResourcePathCache.Clear();
 			foreach (var graph in gList.Values)
 				graph.GDispose();
 			gList.Clear();
@@ -327,8 +332,7 @@ namespace MinorShift.Emuera.Content
 			// 親画像のロード ConstImage
 			if (!resourceDic.ContainsKey(parentName))
 			{
-				string filepath = uEmuera.Utils.ResolveExistingFilePath(parentName);
-				if (!uEmuera.Utils.FileExists(filepath))
+				if (!TryResolveExistingResourcePath(parentName, out string filepath))
 				{
 					ParserMediator.Warn("指定された画像ファイルが見つかりません: " + arg2, sp, 1);
 					return null;
@@ -456,17 +460,18 @@ namespace MinorShift.Emuera.Content
 					string str = NormalizeResourceCsvLineForIndex(lines[l], directory, out isOptional);
 					if (str.Length == 0 || str.StartsWith(";"))
 						continue;
-					string[] tokens = str.Split(',');
-					if (tokens.Length < 2)
+					int tokenCount = ReadRawCsvHeadFields(str, out string token0, out string token1, out _, out _);
+					if (tokenCount < 2)
 						continue;
-					string spriteName = tokens[0].Trim().ToUpper();
-					string arg2 = tokens[1].Trim();
+					string spriteName = token0.Trim().ToUpper();
+					string arg2 = token1.Trim();
 					if (spriteName.Length == 0 || arg2.Length == 0)
 						continue;
 
 					var definition = new LazySpriteDefinition
 					{
-						Tokens = tokens,
+						RawCsvLine = str,
+						SpriteName = spriteName,
 						Directory = directory,
 						Position = new ScriptPosition(filename, l + 1),
 						IsAnime = arg2.Equals("ANIME", StringComparison.OrdinalIgnoreCase),
@@ -489,7 +494,7 @@ namespace MinorShift.Emuera.Content
 						continue;
 					}
 
-					if (currentAnime != null && currentAnime.Tokens[0].Trim().Equals(spriteName, StringComparison.OrdinalIgnoreCase))
+					if (currentAnime != null && string.Equals(currentAnime.SpriteName, spriteName, StringComparison.OrdinalIgnoreCase))
 					{
 						currentAnime.Frames.Add(definition);
 						continue;
@@ -512,9 +517,18 @@ namespace MinorShift.Emuera.Content
 		{
 			if (definition == null)
 				return null;
+			int start = System.Environment.TickCount;
+			ASprite result = RealizeLazySpriteCore(name, definition);
+			int elapsedMs = System.Environment.TickCount - start;
+			LogSlowLazySpriteRealize(name, definition, elapsedMs, result != null);
+			return result;
+		}
+
+		private static ASprite RealizeLazySpriteCore(string name, LazySpriteDefinition definition)
+		{
 			if (definition.IsAnime)
 			{
-				SpriteAnime anime = CreateFromCsv(definition.Tokens, definition.Directory, null, definition.Position) as SpriteAnime;
+				SpriteAnime anime = CreateFromCsv(SplitRawCsvLine(definition.RawCsvLine), definition.Directory, null, definition.Position) as SpriteAnime;
 				if (anime == null)
 					return null;
 				if (definition.Frames != null)
@@ -522,17 +536,26 @@ namespace MinorShift.Emuera.Content
 					for (int i = 0; i < definition.Frames.Count; i++)
 					{
 						var frame = definition.Frames[i];
-						CreateFromCsv(frame.Tokens, frame.Directory, anime, frame.Position);
+						CreateFromCsv(SplitRawCsvLine(frame.RawCsvLine), frame.Directory, anime, frame.Position);
 					}
 				}
 				imageDictionary[name] = anime;
 				return anime;
 			}
 
-			ASprite sprite = CreateFromCsv(definition.Tokens, definition.Directory, null, definition.Position) as ASprite;
+			ASprite sprite = CreateFromCsv(SplitRawCsvLine(definition.RawCsvLine), definition.Directory, null, definition.Position) as ASprite;
 			if (sprite != null)
 				imageDictionary[name] = sprite;
 			return sprite;
+		}
+
+		private static void LogSlowLazySpriteRealize(string name, LazySpriteDefinition definition, int elapsedMs, bool success)
+		{
+			if (elapsedMs < LazySpriteSlowRealizeThresholdMs)
+				return;
+			int frameCount = definition != null && definition.Frames != null ? definition.Frames.Count : 0;
+			global::GenericUtils.Warn(global::EmueraLogCategory.Sprite, () =>
+				$"[RESOURCE] lazy sprite realize slow: name={name}, anime={definition?.IsAnime}, frames={frameCount}, elapsed={elapsedMs}ms, success={success}");
 		}
 
 		private static string NormalizeResourceCsvLineForIndex(string line, string directory, out bool isOptional)
@@ -545,16 +568,16 @@ namespace MinorShift.Emuera.Content
 				return str;
 
 			string candidate = str.Substring(1).Trim();
-			string[] tokens = candidate.Split(',');
-			if (tokens.Length < 2)
+			int tokenCount = ReadRawCsvHeadFields(candidate, out string token0, out string token1, out _, out _);
+			if (tokenCount < 2)
 				return str;
-			string name = tokens[0].Trim();
-			string filename = tokens[1].Trim();
+			string name = token0.Trim();
+			string filename = token1.Trim();
 			if (name.Length == 0)
 				return str;
 			if (filename.Equals("ANIME", StringComparison.OrdinalIgnoreCase))
 			{
-				if (tokens.Length < 4)
+				if (tokenCount < 4)
 					return str;
 				isOptional = true;
 				return candidate;
@@ -562,7 +585,7 @@ namespace MinorShift.Emuera.Content
 			if (filename.IndexOf('.') < 0)
 				return str;
 			// 懒加载索引只接纳磁盘上真实存在的注释候选，避免SPRITECREATED返回真但实际取宽高失败。
-			if (!uEmuera.Utils.FileExists(uEmuera.Utils.ResolveExistingFilePath(directory + filename)))
+			if (!TryResolveExistingResourcePath(directory + filename, out _))
 				return str;
 			isOptional = true;
 			return candidate;
@@ -579,16 +602,105 @@ namespace MinorShift.Emuera.Content
 			// Some Snake resource packs keep optional sprite definitions behind a leading
 			// semicolon while still referencing those names from ERB HTML.
 			string candidate = str.Substring(1).Trim();
-			string[] tokens = candidate.Split(',');
-			if (tokens.Length < 6)
+			int tokenCount = ReadRawCsvHeadFields(candidate, out string token0, out string token1, out _, out _);
+			if (tokenCount < 6)
 				return str;
-			string name = tokens[0].Trim();
-			string filename = tokens[1].Trim();
+			string name = token0.Trim();
+			string filename = token1.Trim();
 			if (name.Length == 0 || filename.IndexOf('.') < 0)
 				return str;
-			if (!uEmuera.Utils.FileExists(uEmuera.Utils.ResolveExistingFilePath(directory + filename)))
+			if (!TryResolveExistingResourcePath(directory + filename, out _))
 				return str;
 			return candidate;
+		}
+
+		private static int ReadRawCsvHeadFields(string line, out string token0, out string token1, out string token2, out string token3)
+		{
+			token0 = "";
+			token1 = "";
+			token2 = "";
+			token3 = "";
+			if (line == null)
+				line = "";
+
+			// 资源 CSV 与原核心一致，只按裸逗号切分，不支持引号转义。
+			// 索引阶段只需要头字段和字段总数，避免给每行创建完整 string[]。
+			int count = 1;
+			int fieldIndex = 0;
+			int start = 0;
+			for (int i = 0; i <= line.Length; i++)
+			{
+				if (i < line.Length && line[i] != ',')
+					continue;
+				if (fieldIndex < 4)
+				{
+					string value = i == start ? "" : line.Substring(start, i - start);
+					if (fieldIndex == 0)
+						token0 = value;
+					else if (fieldIndex == 1)
+						token1 = value;
+					else if (fieldIndex == 2)
+						token2 = value;
+					else
+						token3 = value;
+				}
+				fieldIndex++;
+				if (i >= line.Length)
+					break;
+				count++;
+				start = i + 1;
+			}
+			return count;
+		}
+
+		private static string[] SplitRawCsvLine(string line)
+		{
+			if (line == null)
+				line = "";
+
+			// 保留 string.Split(',') 的空字段与尾随空字段语义，但用单次扫描减少内部枚举开销。
+			int count = 1;
+			for (int i = 0; i < line.Length; i++)
+			{
+				if (line[i] == ',')
+					count++;
+			}
+			string[] tokens = new string[count];
+			int fieldIndex = 0;
+			int start = 0;
+			for (int i = 0; i <= line.Length; i++)
+			{
+				if (i < line.Length && line[i] != ',')
+					continue;
+				tokens[fieldIndex++] = i == start ? "" : line.Substring(start, i - start);
+				start = i + 1;
+			}
+			return tokens;
+		}
+
+		private static bool TryResolveExistingResourcePath(string candidate, out string resolved)
+		{
+			resolved = "";
+			if (string.IsNullOrWhiteSpace(candidate))
+				return false;
+
+			string key = uEmuera.Utils.NormalizePath(candidate);
+			if (resolvedExistingResourcePathCache.TryGetValue(key, out resolved))
+				return resolved.Length != 0;
+
+			// Resource CSV paths are static during one game session. Cache misses as well
+			// to avoid repeated Android case-insensitive directory scans for the same file.
+			string actual = uEmuera.Utils.ResolveExistingFilePath(key);
+			if (!uEmuera.Utils.FileExists(actual))
+			{
+				resolvedExistingResourcePathCache[key] = "";
+				resolved = "";
+				return false;
+			}
+
+			resolvedExistingResourcePathCache[key] = actual;
+			resolved = actual;
+			return true;
 		}
 
 

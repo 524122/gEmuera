@@ -99,7 +99,7 @@ project.godot
 | `Scripts/EmueraMain.cs` | `EmueraMain : Node`, `GpuWorkItem`, `TextRenderItem` | 主场景入口；初始化配置映射、UI 根节点、线程和 GPU/文本渲染队列。 | `_Ready`, `_Process`, `_ExitTree`, `Run`, `Clear`, `Restart`, `GpuSubmitColorMatrix`, `SubmitTextRender` |
 | `Scripts/EmueraThread.cs` | `EmueraThread` | 后台执行 Emuera 核心；把 Godot 输入转成阻塞式 console 输入。 | `Start`, `End`, `Running`, `Input` |
 | `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退。 | `_Ready`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
-| `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表并用 `hitRectBuckets` 缩小扫描范围，未命中时再回退 overlay/旧控件树；移动端未写入用户配置时默认保留 240 行，桌面端默认 360 行；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
+| `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制，并复刻原核心按钮选中/焦点背景/BackLog 普通文字颜色语义；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表并用 `hitRectBuckets` 缩小扫描范围，未命中时再回退 overlay/旧控件树；移动端未写入用户配置时默认保留 240 行，桌面端默认 360 行；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
 | `Scripts/EmueraImage.cs` | `EmueraImage : Control` | 绘制 `Texture2D` / `AtlasTexture` 的控件，支持 ColorMatrix material。 | `SetColorMatrix`, `_Draw` |
 | `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放；在 `[debug.performance_sampling]` 开启时低频聚合普通帧与 Canvas 控制台渲染采样。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `SamplePerformanceFrame`, `SampleConsoleRenderFrame`, `ExportDiagnosticPackage`, `RestartGame` |
 | `Scripts/FirstWindow.cs` | `FirstWindow : Control` | 启动器；扫描 `era*` 游戏目录，切换语言/核心 profile，进入主场景。 | `_Ready`, `_ExitTree`, `_Notification`, `ResolveStartupGamePath` |
@@ -139,7 +139,7 @@ project.godot
 | `uEmuera/Drawing.cs` | `Bitmap`, `BitmapTexture`, `Graphics`, `Color`, `Font`, `Rectangle`, `Point`, `Size` | `System.Drawing` 替代层；包装 Godot Image/Texture、颜色、字体、几何类型。 | `Bitmap.Save`, `BitmapTexture`, `Color.FromArgb`, `Color.ToGodotColor`, `Rectangle.Intersect` |
 | `uEmuera/Forms.cs` | `Timer`, `MessageBox`, `ScrollBar`, `ToolTip`, `PictureBox`, `TextBox` | `System.Windows.Forms` 替代层；Timer 由 Godot loop 手动 Update。 | `Timer.Update`, `MessageBox.Show`, `ToolTip.SetToolTip` |
 | `uEmuera/Window.cs` | `MainWindow`, `DebugDialog` | 原主窗体兼容桩，桥接 `EmueraConsole` 和 `Process`。 | `MainWindow.Init`, `Update`, `Refresh`, `WaitForRefreshProcessed`, `Reboot` |
-| `uEmuera/Utils.cs` | `Logger`, `Utils` | 文件系统、编码、资源扫描、显示宽度、路径规范化工具。 | `SHIFTJIS_to_UTF8`, `NormalizePath`, `FileExists`, `GetFilePaths`, `GetDisplayLength`, `ResourcePrepare` |
+| `uEmuera/Utils.cs` | `Logger`, `Utils` | 文件系统、编码、资源扫描、显示宽度、路径规范化工具；Godot 文件 API 下的通配符枚举在单次目录扫描内复用 Regex 匹配，保持原通配符语义并避免按文件重复构造匹配器。 | `SHIFTJIS_to_UTF8`, `NormalizePath`, `FileExists`, `GetFilePaths`, `GetDisplayLength`, `ResourcePrepare` |
 | `uEmuera/Properties.cs` | `ResourceManager`, `Resources` | 原资源访问兼容。 | `GetString` |
 | `uEmuera/VisualBasic.cs` | `Strings`, `VbStrConv` | VB 字符串转换兼容。 | `StrConv` |
 | `uEmuera/Media.cs` | `Hand`, `Asterisk` | 系统声音兼容桩。 | `Play` |
@@ -171,7 +171,7 @@ project.godot
 |---|---|---|---|
 | `AContentFile.cs` | `AContentFile : IDisposable` | 内容文件抽象基类。 | `Dispose` |
 | `AContentItem.cs` | 空 namespace 占位 | 预留文件，当前不定义类型。 | 无 |
-| `AppContents.cs` | `AppContents`, `LazySpriteDefinition` | 资源/精灵表注册；读取资源 CSV；lazy sprite 索引。 | `CreateSpriteAnime`, `BuildLazyResourceIndex`, `RealizeLazySprite` |
+| `AppContents.cs` | `AppContents`, `LazySpriteDefinition` | 资源/精灵表注册；读取资源 CSV；lazy sprite 索引在启动阶段只保存原始 CSV 行和头字段，命中具体 sprite 时再完整裸逗号拆分；资源 CSV 路径存在性/大小写解析缓存；lazy sprite 首次实体化慢调用诊断。 | `CreateSpriteAnime`, `BuildLazyResourceIndex`, `RealizeLazySprite` |
 | `ConstImage.cs` | `AbstractImage`, `ConstImage` | 不可变图片资源，基于 Bitmap/Image。 | `CreateFrom`, `Dispose` |
 | `CroppedImage.cs` | `ASprite`, `ASpriteSingle`, `SpriteG`, `SpriteF`, `SpriteAnime` | 精灵裁剪、动画帧、绘制接口。 | `SpriteGetColor`, `GraphicsDraw`, `AddFrame`, `PauseAnimation`, `ResumeAnimation`, `GetCurrentFrameInfo` |
 | `GraphicsImage.cs` | `GraphicsImage : AbstractImage` | ERB 图形 surface；绘制 sprite、线、文字、多边形、旋转、ColorMatrix。 | `GCreate`, `GDrawCImg`, `ApplyColorMatrixGPU`, `GDrawG`, `GDrawString`, `GRotate`, `GDispose` |
@@ -180,7 +180,7 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `ConstantData.cs` | `ConstantData`, `CharacterTemplate`, `LazyErdNameData` | CSV 常量、角色模板、ERD 名称数据；维护整数/字符串/小数 1D 变量默认长度，`LOCALF/ARGF` 使用小数长度表；角色 CSV 热路径使用轻量字段读取避免整行 `Split(',')` 分配；读取 `VarExt*.csv` 中 MAP/XML/DT 的 `SAVE/GLOBAL/STATIC` 保存域声明。 | 常量读取、角色模板访问 |
+| `ConstantData.cs` | `ConstantData`, `CharacterTemplate`, `LazyErdNameData` | CSV 常量、角色模板、ERD 名称数据；维护整数/字符串/小数 1D 变量默认长度，`LOCALF/ARGF` 使用小数长度表；`VariableSize.CSV`、角色 CSV、名称 CSV、别名 CSV 和 `VarExt*.csv` 热路径使用轻量裸逗号字段读取，避免整行 `Split(',')` 分配；读取 `VarExt*.csv` 中 MAP/XML/DT 的 `SAVE/GLOBAL/STATIC` 保存域声明。 | 常量读取、角色模板访问 |
 | `DefineMacro.cs` | `DefineMacro` | `#DEFINE` 宏数据。 | 构造和字段 |
 | `EraType.cs` | `EraType`, `EraTypeHelper` | Era 值类型枚举和 CLR `Type` 过渡转换 helper；迁移期用于把旧 `long/string/double` 签名统一映射到整数/字符串/小数语义。 | `FromClrType`, `ToClrType`, 枚举定义 |
 | `GameBase.cs` | `GameBase` | 游戏基础信息、版本、标题、更新检查 URL/版本名等。 | `Load`, `Save`, 基础字段访问 |
@@ -246,7 +246,7 @@ project.godot
 | `Process.State.cs` | `ProcessState`, `SystemStateCode`, `BeginType` | CALL/JUMP/RETURN、BEGIN、函数栈、返回值、状态克隆；维护 `ExecutionContext` 栈，进入函数时绑定数组 REF、元素级 REF、OUT 空引用并创建局部执行上下文；`BEFORE_ERROR/BEFORE_THROW` 事件返回时绕过 `#FUNCTION` 快速 `ReturnF` 路径以保留错误重抛语义。 | `JumpTo`, `SetBegin`, `Begin`, `Return`, `IntoFunction`, `ReturnF`, `CurrentContext`, `Clone` |
 | `Process.SystemProc.cs` | partial `Process` | 系统流程处理。 | 系统状态执行 helper |
 | `Process.CalledFunction.cs` | `CalledFunction`, `UserDefinedFunctionArgument` | 调用栈条目和用户函数实参；转换并暂存普通参数、数组 REF、元素级 REF 和 OUT 空引用；用户函数参数按 `EraType` 处理整数到小数的兼容扩展和可变参数类型，`VariadicArgTerm` 不进入普通 transporter，统一由 `ProcessState.IntoFunction` 展开。 | `ConvertArg`, `SetTransporter`, 参数暂存数组 |
-| `Process.LazyLoading.cs` | partial `Process`, `LazyStatus` | ERB lazy loading 表、索引、按需加载、缓存；索引构建和局部更新会排除事件函数与 `#FUNCTION/#FUNCTIONS/#FUNCTIONF` 方法文件，避免预解析依赖的方法被延迟加载；EVENTLOAD 保持命中时按需加载，`PreloadEventLoadLazyErbs` 仅保留为诊断/实验入口，不在系统读档流程调用。 | `TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`, `SavePartialLazyLoadingList`, `PreloadEventLoadLazyErbs` |
+| `Process.LazyLoading.cs` | partial `Process`, `LazyStatus` | ERB lazy loading 表、索引、按需加载、缓存；Android 索引缺失/失效时优先用标签扫描建表，非 Android 保持 BuildTable/full-load 建表路径；首次真实命中仍执行完整 ERB 解析与检查；索引构建和局部更新会排除事件函数与 `#FUNCTION/#FUNCTIONS/#FUNCTIONF` 方法文件，避免预解析依赖的方法被延迟加载；运行期 lazy ERB 补加载带慢调用诊断；EVENTLOAD 保持命中时按需加载，`PreloadEventLoadLazyErbs` 仅保留为诊断/实验入口，不在系统读档流程调用。 | `TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`, `SavePartialLazyLoadingList`, `PreloadEventLoadLazyErbs` |
 | `ErbLoader.cs` | `ErbLoader`, `PPState` | 读取/预处理 ERB/ERH 文件，生成 logical lines/labels；提供 `LoadErbFilesAsync` / `LoadErbsAsync` 作为主入口，旧同步方法仅做兼容包装。 | `LoadErbFiles`, `LoadErbFilesAsync`, `loadErbs`, `LoadErbsAsync`, `warningDic` |
 | `HeaderFileLoader.cs` | `HeaderFileLoader` | 读取头文件/定义。 | header 加载入口 |
 | `SelectCaseJumpTable.cs` | `SelectCaseJumpTable` | Snake 兼容的 `SELECTCASE` 常量分支跳转表；对整数/字符串/小数常量 `CASE` 建表，范围、比较和运行期表达式回退顺序扫描。 | `TryBuild`, `Lookup` |
@@ -378,7 +378,7 @@ project.godot
 
 | 任务 | 优先看 |
 |---|---|
-| 资源 CSV 到 sprite | `AppContents`, `SpriteManager.GetSprite`, `uEmuera.Utils.ResourcePrepare` |
+| 资源 CSV 到 sprite | `AppContents`, `SpriteManager.GetSprite`, `uEmuera.Utils.ResourcePrepare`；资源 CSV 路径解析缓存、lazy sprite 原始行索引、命中后实体化和慢实体化诊断在 `AppContents` |
 | 纹理缓存/异步解码/主线程纹理上传 | `SpriteManager.TryGetTextureInfoCached`, `SpriteManager.RequestTextureInfoAsync`, `SpriteManager.UpdateOtherThreads`, `SpriteManager.TextureLoadVersion`, `TextureInfo.RecreateTexture` |
 | Graphics surface 绘制 | `GraphicsImage.GCreate`, `GDrawCImg`, `GDrawG`, `GDrawString`, `GDrawLine` |
 | GPU ColorMatrix | `ColorMatrixGPU.GetSharedMaterial`, `ColorMatrixGPU.SetMatrixUniforms`, `GraphicsImage.ApplyColorMatrixGPU` |
@@ -389,7 +389,7 @@ project.godot
 | 任务 | 优先看 |
 |---|---|
 | ERB 文件加载 | `ErbLoader.LoadErbFiles`, `ErbLoader.loadErbs` |
-| lazy loading | `Process.TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList` |
+| lazy loading | `Process.TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`；Android 索引缺失/失效优先走标签扫描建表，非 Android 回到 BuildTable/full-load 建表，慢补加载诊断在 `Process.LazyLoading.cs` |
 | 行解析 | `LogicalLineParser.ParseLine`, `ParseLabelLine`, `ParseSharpLine` |
 | label 查找 | `LabelDictionary.GetEventLabels`, `GetNonEventLabel`, `GetLabelDollar` |
 | 指令名映射 | `FunctionIdentifier.GetInstructionNameDic`, `FunctionIdentifier.IsPrint/IsInput/IsJump/IsMethod` |
