@@ -2004,18 +2004,16 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SNAKE_SETBGIMAGE_Instruction()
 			{
-				ArgBuilder = SNAKE_ARGS_ArgumentBuilder.Instance;
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_SETBGIMAGE);
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
-				ExpressionArrayArgument arg = (ExpressionArrayArgument)func.Argument;
-				if (arg.TermList.Length == 0 || arg.TermList[0] == null)
-					return;
-				string name = arg.TermList[0].GetStrValue(exm);
-				long depth = arg.TermList.Length > 1 && arg.TermList[1] != null ? arg.TermList[1].GetIntValue(exm) : 0;
-				float opacity = arg.TermList.Length > 2 && arg.TermList[2] != null ? arg.TermList[2].GetIntValue(exm) / 255.0f : 1.0f;
+				SpSetBgImageArgument arg = (SpSetBgImageArgument)func.Argument;
+				string name = arg.Name.GetStrValue(exm);
+				long depth = arg.Depth != null ? arg.Depth.GetIntValue(exm) : 0;
+				float opacity = arg.Opacity != null ? arg.Opacity.GetIntValue(exm) / 255.0f : 1.0f;
 				exm.Console.AddBackgroundImage(name, depth, opacity);
 			}
 		}
@@ -2038,7 +2036,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SNAKE_REMOVEBGIMAGE_Instruction()
 			{
-				ArgBuilder = SNAKE_ARGS_ArgumentBuilder.Instance;
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.FORM_STR_ANY);
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
@@ -2942,7 +2940,10 @@ namespace MinorShift.Emuera.GameProc.Function
 				string keyword = func.Argument.ConstStr;
 				if (Config.ICFunction)//1756 BEGINのキーワードは関数扱いらしい
 					keyword = keyword.ToUpper();
-				state.SetBegin(keyword);
+				// v24/snake 核心允许普通 BEGIN 中断当前系统函数栈。
+				// erablue resort 的一日结束报告会在 @SHOW_SHOP 栈内执行 BEGIN ABLUP，
+				// 若按当前 SystemState 的 __CAN_BEGIN__ 严格检查会误报。
+				state.SetBegin(keyword, true);
 				state.Return(0);
 				exm.Console.ResetStyle();
 			}

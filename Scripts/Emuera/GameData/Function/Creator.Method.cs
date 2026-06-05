@@ -4845,7 +4845,8 @@ namespace MinorShift.Emuera.GameData.Function
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
 				string path = arguments[0].GetStrValue(exm);
-				return !string.IsNullOrWhiteSpace(path) && System.IO.File.Exists(path) ? 1 : 0;
+				string resolved = uEmuera.Utils.ResolveScriptFilePath(path);
+				return !string.IsNullOrWhiteSpace(resolved) && uEmuera.Utils.FileExists(resolved) ? 1 : 0;
 			}
 		}
 
@@ -6176,7 +6177,7 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 			else if (token.IsArray2D)
 			{
-				int len1 = token.GetLength();
+				int len1 = token.GetLength(0);
 				int len2 = token.GetLength(1);
 				int selected1 = (int)GetVarSetExIndex(varTerm, 0, exm);
 				int selected2 = (int)GetVarSetExIndex(varTerm, 1, exm);
@@ -6190,7 +6191,7 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 			else if (token.IsArray3D)
 			{
-				int len1 = token.GetLength();
+				int len1 = token.GetLength(0);
 				int len2 = token.GetLength(1);
 				int len3 = token.GetLength(2);
 				int selected1 = (int)GetVarSetExIndex(varTerm, 0, exm);
@@ -7352,50 +7353,100 @@ namespace MinorShift.Emuera.GameData.Function
 
 
 		public sealed class EnumFilesMethod : FunctionMethod
-			{
+		{
 			public EnumFilesMethod()
-				{
+			{
 				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
-				}
-				public override string CheckArgumentType(string name, IOperandTerm[] arguments)
-				{
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
 				if (arguments.Length < 1)
 					return name + "関数には少なくとも1つの引数が必要です";
 				if (arguments.Length > 4)
 					return name + "関数の引数が多すぎます";
 				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
 					return name + "関数の1番目の引数の型が正しくありません";
+				if (arguments.Length > 1 && arguments[1] != null && arguments[1].GetEraType() != EraType.String)
+					return name + "関数の2番目の引数の型が正しくありません";
+				if (arguments.Length > 2 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+					return name + "関数の3番目の引数の型が正しくありません";
+				if (arguments.Length > 3 && arguments[3] != null &&
+					arguments[3].GetEraType() != EraType.Integer && !CanWriteStringArray(arguments[3]))
+					return name + "関数の4番目の引数の型が正しくありません";
 				return null;
-				}
-				public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
-				{
-				string dir = arguments[0].GetStrValue(exm) ?? "";
-				if (string.IsNullOrWhiteSpace(dir) || !System.IO.Directory.Exists(dir))
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string dir = uEmuera.Utils.ResolveScriptDirectoryPath(arguments[0].GetStrValue(exm));
+				if (string.IsNullOrWhiteSpace(dir) || !uEmuera.Utils.DirectoryExists(dir))
 					return -1;
 				string pattern = arguments.Length > 1 && arguments[1] != null ? arguments[1].GetStrValue(exm) : "*";
+				if (string.IsNullOrEmpty(pattern))
+					pattern = "*";
 				bool recursive = arguments.Length > 2 && arguments[2] != null && arguments[2].GetIntValue(exm) != 0;
-				int resultsIndex = arguments.Length > 3 && arguments[3] != null ? (int)arguments[3].GetIntValue(exm) : 0;
-				if (resultsIndex < 0) resultsIndex = 0;
 				System.IO.SearchOption option = recursive ? System.IO.SearchOption.AllDirectories : System.IO.SearchOption.TopDirectoryOnly;
-				string[] files;
+				List<string> files;
 				try
 				{
-					files = System.IO.Directory.EnumerateFiles(dir, string.IsNullOrEmpty(pattern) ? "*" : pattern, option).ToArray();
+					files = uEmuera.Utils.GetFilePaths(dir, pattern, option);
+					for (int i = 0; i < files.Count; i++)
+						files[i] = uEmuera.Utils.GetRelativePathFromGameDir(files[i]);
 				}
 				catch
 				{
 					return -1;
 				}
-				var results = exm.VEvaluator.RESULTS_ARRAY;
-				int offset = Math.Min(resultsIndex, results.Length);
-				int count = Math.Min(files.Length, results.Length - offset);
-				for (int i = 0; i < count; i++)
-					results[offset + i] = files[i];
-				return files.Length;
+				return CopyEnumFilesResult(exm, arguments, files);
+			}
+
+			static bool CanWriteStringArray(IOperandTerm argument)
+			{
+				if (argument is not VariableTerm variableTerm)
+					return false;
+				try
+				{
+					object output = variableTerm.Identifier.GetArray();
+					return output is string[] || output is SparseArray<string>;
+				}
+				catch
+				{
+					return false;
 				}
 			}
+
+			static Int64 CopyEnumFilesResult(ExpressionMediator exm, IOperandTerm[] arguments, List<string> files)
+			{
+				if (arguments.Length > 3 && arguments[3] != null && CanWriteStringArray(arguments[3]))
+				{
+					object output = ((VariableTerm)arguments[3]).Identifier.GetArray();
+					if (output is string[] array)
+					{
+						int arrayCount = Math.Min(files.Count, array.Length);
+						for (int i = 0; i < arrayCount; i++)
+							array[i] = files[i];
+						return arrayCount;
+					}
+
+					var sparseArray = (SparseArray<string>)output;
+					int sparseCount = Math.Min(files.Count, sparseArray.Length);
+					for (int i = 0; i < sparseCount; i++)
+						sparseArray[i] = files[i];
+					return sparseCount;
+				}
+
+				var results = exm.VEvaluator.RESULTS_ARRAY;
+				int resultsIndex = arguments.Length > 3 && arguments[3] != null ? (int)arguments[3].GetIntValue(exm) : 0;
+				if (resultsIndex < 0)
+					resultsIndex = 0;
+				int offset = Math.Min(resultsIndex, results.Length);
+				int resultCount = Math.Min(files.Count, results.Length - offset);
+				for (int i = 0; i < resultCount; i++)
+					results[offset + i] = files[i];
+				return arguments.Length > 3 ? files.Count : resultCount;
+			}
+		}
 
 		public sealed class GetVarMethod : FunctionMethod
 			{

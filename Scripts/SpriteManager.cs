@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
 using Godot;
 using MinorShift.Emuera.Content;
 using uEmuera.Drawing;
@@ -16,6 +18,10 @@ internal static class SpriteManager
 	const long DesktopTextureBudgetBytes = 512L * 1024L * 1024L;
 	const int MobileTextureEntryBudget = 384;
 	const int DesktopTextureEntryBudget = 1536;
+	const int MobileAsyncTextureConcurrency = 1;
+	const int DesktopAsyncTextureConcurrency = 2;
+	const int MobileAsyncTextureCompletionBudget = 2;
+	const int DesktopAsyncTextureCompletionBudget = 6;
 
 	internal class SpriteInfo : IDisposable
 	{
@@ -278,14 +284,8 @@ internal static class SpriteManager
 	public static TextureInfo GetTextureInfo(string name, string filename)
 	{
 		TextureInfo ti = null;
-		lock(dictLock)
-		{
-			if(texture_dict.TryGetValue(name, out ti))
-			{
-				ti.Touch();
-				return ti;
-			}
-		}
+		if (TryGetTextureInfoCached(name, filename, out ti))
+			return ti;
 		if(string.IsNullOrEmpty(filename))
 			return null;
 
@@ -307,6 +307,53 @@ internal static class SpriteManager
 				() => $"name={name} filename={GenericUtils.RedactTracePath(filename)} size={img.GetWidth()}x{img.GetHeight()}");
 		return CacheTextureInfo(name, filename, ti);
 	}
+
+	internal static bool TryGetTextureInfoCached(string name, string filename, out TextureInfo ti)
+	{
+		lock(dictLock)
+		{
+			ti = GetTextureInfoCachedLocked(name, filename);
+			if(ti != null)
+			{
+				ti.Touch();
+				return true;
+			}
+		}
+		return false;
+	}
+
+	internal static bool RequestTextureInfoAsync(string name, string filename)
+	{
+		if(string.IsNullOrEmpty(filename))
+			return false;
+
+		lock(dictLock)
+		{
+			if(GetTextureInfoCachedLocked(name, filename) != null)
+				return false;
+
+			// 仅用于 UI 显示的图片先把 Android 外部存储 I/O 和图片解码移出 Godot 主线程。
+			// ImageTexture 仍在 TextureInfo.texture 中按旧路径创建，避免后台线程触碰 RenderingServer/GPU 资源。
+			string key = BuildAsyncTextureLoadKey(filename, name);
+			if(async_loading_keys.Contains(key))
+				return true;
+
+			async_loading_keys.Add(key);
+			pending_async_texture_loads.Enqueue(new AsyncTextureLoadRequest
+			{
+				Name = name,
+				Filename = filename,
+				Key = key,
+				Epoch = async_texture_load_epoch,
+			});
+			if(async_texture_load_concurrency <= 0)
+				async_texture_load_concurrency = OS.HasFeature("mobile") ? MobileAsyncTextureConcurrency : DesktopAsyncTextureConcurrency;
+			StartPendingAsyncTextureLoadsLocked();
+			return true;
+		}
+	}
+
+	internal static long TextureLoadVersion => Volatile.Read(ref texture_load_version);
 
 	public static TextureInfoOtherThread GetTextureInfoOtherThread(
 		string name, string path, Action<TextureInfo> callback)
@@ -331,6 +378,23 @@ internal static class SpriteManager
 		public string path;
 		public Action<TextureInfo> callback;
 		public System.Threading.Mutex mutex;
+	}
+
+	class AsyncTextureLoadRequest
+	{
+		public string Name;
+		public string Filename;
+		public string Key;
+		public long Epoch;
+	}
+
+	class AsyncTextureLoadResult
+	{
+		public string Name;
+		public string Filename;
+		public string Key;
+		public long Epoch;
+		public Image Image;
 	}
 
 	static List<TextureInfoOtherThread> texture_other_threads = new List<TextureInfoOtherThread>();
@@ -448,23 +512,54 @@ internal static class SpriteManager
 	{
 		lock(dictLock)
 		{
-			if(texture_dict.TryGetValue(name, out var existing))
+			var fileOnly = System.IO.Path.GetFileName(filename);
+			var existing = GetTextureInfoCachedLocked(name, filename);
+			if(existing != null)
 			{
+				// 同一文件可能先被同步路径按 path 命中，又被异步 UI 路径按资源名完成。
+				// 任一别名已存在时都复用同一个 TextureInfo，避免移动端重复持有大图像素。
 				ti.Dispose();
 				existing.Touch();
+				SetTextureInfoAliasLocked(name, existing);
+				SetTextureInfoAliasLocked(filename, existing);
+				SetTextureInfoAliasLocked(fileOnly, existing);
 				return existing;
 			}
+
 			// Index by the requested name, full path, and file name. Era scripts use
 			// all three forms depending on command source, and resolving the alias once
 			// avoids repeated Android storage probes during display refresh.
-			texture_dict[name] = ti;
-			if (!string.IsNullOrEmpty(filename) && filename != name && !texture_dict.ContainsKey(filename))
-				texture_dict[filename] = ti;
-			var fileOnly = System.IO.Path.GetFileName(filename);
-			if (!string.IsNullOrEmpty(fileOnly) && fileOnly != name && !texture_dict.ContainsKey(fileOnly))
-				texture_dict[fileOnly] = ti;
+			SetTextureInfoAliasLocked(name, ti);
+			SetTextureInfoAliasLocked(filename, ti);
+			SetTextureInfoAliasLocked(fileOnly, ti);
 		}
 		return ti;
+	}
+
+	static void SetTextureInfoAliasLocked(string key, TextureInfo ti)
+	{
+		if (string.IsNullOrEmpty(key))
+			return;
+		if (texture_dict.TryGetValue(key, out var existing))
+		{
+			if (existing != null && !existing.IsDisposed)
+				return;
+			RemoveTextureInfoAliasesLocked(existing);
+		}
+		texture_dict[key] = ti;
+	}
+
+	static TextureInfo GetTextureInfoCachedLocked(string name, string filename)
+	{
+		TextureInfo ti = null;
+		if(!string.IsNullOrEmpty(name) && texture_dict.TryGetValue(name, out ti) && ti != null && !ti.IsDisposed)
+			return ti;
+		if(!string.IsNullOrEmpty(filename) && texture_dict.TryGetValue(filename, out ti) && ti != null && !ti.IsDisposed)
+			return ti;
+		string fileOnly = System.IO.Path.GetFileName(filename);
+		if(!string.IsNullOrEmpty(fileOnly) && texture_dict.TryGetValue(fileOnly, out ti) && ti != null && !ti.IsDisposed)
+			return ti;
+		return null;
 	}
 
 	static SpriteInfo GetSpriteInfo(TextureInfo textinfo, ASprite src)
@@ -558,6 +653,8 @@ internal static class SpriteManager
 
 	public static void UpdateOtherThreads()
 	{
+		ProcessAsyncTextureLoadCompletions();
+
 		TextureInfoOtherThread tiot = null;
 		lock(dictLock)
 		{
@@ -573,6 +670,109 @@ internal static class SpriteManager
 		tiot.mutex.ReleaseMutex();
 	}
 
+	static void ProcessAsyncTextureLoadCompletions()
+	{
+		int budget = OS.HasFeature("mobile") ? MobileAsyncTextureCompletionBudget : DesktopAsyncTextureCompletionBudget;
+		int processed = 0;
+		while(processed < budget && completed_async_texture_loads.TryDequeue(out var result))
+		{
+			processed++;
+			if(result == null)
+				continue;
+
+			try
+			{
+				if(result.Epoch != Volatile.Read(ref async_texture_load_epoch))
+				{
+					result.Image?.Dispose();
+					continue;
+				}
+
+				Image img = result.Image ?? CreatePlaceholderImage();
+				var ti = new TextureInfo(result.Name, img);
+				var cached = CacheTextureInfo(result.Name, result.Filename, ti);
+				if(GenericUtils.IsImageDebugEnabled("log_success"))
+					GenericUtils.ImageTrace("IMAGE.TEXTURE.ASYNC_READY", () => "async texture decoded",
+						() => $"name={result.Name} filename={GenericUtils.RedactTracePath(result.Filename)} size={cached.width}x{cached.height}");
+				Interlocked.Increment(ref texture_load_version);
+			}
+			finally
+			{
+				lock(dictLock)
+				{
+					async_loading_keys.Remove(result.Key);
+				}
+			}
+		}
+	}
+
+	static void StartPendingAsyncTextureLoadsLocked()
+	{
+		int limit = async_texture_load_concurrency > 0 ? async_texture_load_concurrency : MobileAsyncTextureConcurrency;
+		while(active_async_texture_loads < limit && pending_async_texture_loads.Count > 0)
+		{
+			var request = pending_async_texture_loads.Dequeue();
+			active_async_texture_loads++;
+			ThreadPool.QueueUserWorkItem(_ => RunAsyncTextureLoad(request));
+		}
+	}
+
+	static void RunAsyncTextureLoad(AsyncTextureLoadRequest request)
+	{
+		Image img = null;
+		try
+		{
+			if(request.Epoch != Volatile.Read(ref async_texture_load_epoch))
+				return;
+			if(string.IsNullOrEmpty(request.Filename) || !uEmuera.Utils.FileExists(request.Filename))
+			{
+				GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager.AsyncTexture] file not found: {request.Filename}");
+				img = CreatePlaceholderImage();
+			}
+			else
+			{
+				img = LoadImageOrPlaceholder(request.Filename, request.Name);
+			}
+			completed_async_texture_loads.Enqueue(new AsyncTextureLoadResult
+			{
+				Name = request.Name,
+				Filename = request.Filename,
+				Key = request.Key,
+				Epoch = request.Epoch,
+				Image = img,
+			});
+			img = null;
+		}
+		catch(Exception ex)
+		{
+			LogSpriteWarning(() => $"[SpriteManager.AsyncTexture] image load exception, using transparent placeholder: {request.Filename}, error={ex.Message}");
+			completed_async_texture_loads.Enqueue(new AsyncTextureLoadResult
+			{
+				Name = request.Name,
+				Filename = request.Filename,
+				Key = request.Key,
+				Epoch = request.Epoch,
+				Image = CreatePlaceholderImage(),
+			});
+		}
+		finally
+		{
+			img?.Dispose();
+			lock(dictLock)
+			{
+				if(active_async_texture_loads > 0)
+					active_async_texture_loads--;
+				StartPendingAsyncTextureLoadsLocked();
+			}
+		}
+	}
+
+	static string BuildAsyncTextureLoadKey(string filename, string name)
+	{
+		string key = !string.IsNullOrEmpty(filename) ? filename : name;
+		return uEmuera.Utils.NormalizePath(key ?? "").ToUpperInvariant();
+	}
+
 	internal static void ForceClear()
 	{
 		// Full reset is reserved for lifecycle/reload boundaries. Active display
@@ -581,9 +781,14 @@ internal static class SpriteManager
 		var disposeList = new List<TextureInfo>();
 		lock(dictLock)
 		{
+			Volatile.Write(ref async_texture_load_epoch, async_texture_load_epoch + 1);
+			async_loading_keys.Clear();
+			pending_async_texture_loads.Clear();
 			disposeList = CollectUniqueTexturesLocked();
 			texture_dict.Clear();
 		}
+		while(completed_async_texture_loads.TryDequeue(out var result))
+			result?.Image?.Dispose();
 		for (int i = 0; i < disposeList.Count; i++)
 			disposeList[i].Dispose();
 		GC.Collect();
@@ -662,6 +867,16 @@ internal static class SpriteManager
 		new Dictionary<string, List<CallbackInfo>>();
 	static Dictionary<string, TextureInfo> texture_dict =
 		new Dictionary<string, TextureInfo>();
+	static Queue<AsyncTextureLoadRequest> pending_async_texture_loads =
+		new Queue<AsyncTextureLoadRequest>();
+	static HashSet<string> async_loading_keys =
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	static readonly ConcurrentQueue<AsyncTextureLoadResult> completed_async_texture_loads =
+		new ConcurrentQueue<AsyncTextureLoadResult>();
 	static readonly object dictLock = new object();
 	static ulong lastCleanupMs = 0;
+	static int active_async_texture_loads = 0;
+	static int async_texture_load_concurrency = 0;
+	static long texture_load_version = 0;
+	static long async_texture_load_epoch = 0;
 }

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -87,6 +88,26 @@ internal static class GenericUtils
     static double _performanceFrameMsTotal;
     static double _performanceFrameMsMax;
     static int _performanceFrameCount;
+    static long _lastConsoleRenderSampleMs;
+    static double _consoleRenderMsTotal;
+    static double _consoleRenderMsMax;
+    static int _consoleRenderSampleCount;
+    static int _consoleRenderDrawCount;
+    static int _consoleRenderHitOnlyCount;
+    static int _consoleRenderHitRebuildCount;
+    static int _consoleRenderVisibleRowsTotal;
+    static int _consoleRenderVisibleRowsMax;
+    static int _consoleRenderCanvasRowsTotal;
+    static int _consoleRenderCanvasRowsMax;
+    static int _consoleRenderOverlayRowsTotal;
+    static int _consoleRenderOverlayRowsMax;
+    static int _consoleRenderPartsTotal;
+    static int _consoleRenderPartsMax;
+    static int _consoleRenderHitRectsTotal;
+    static int _consoleRenderHitRectsMax;
+    static readonly double[] _consoleRenderMsSamples = new double[512];
+    static int _consoleRenderMsSampleCount;
+    static int _consoleRenderMsSampleOverflow;
 
     public static bool HasPendingUIWork => Volatile.Read(ref pendingUiActions) > 0;
     public static bool HasPendingDisplayWork => Volatile.Read(ref pendingDisplayActions) > 0;
@@ -1408,6 +1429,120 @@ internal static class GenericUtils
         // 采样数据写入 ring buffer，不在每帧构造日志文本，避免诊断系统反向拖慢 APK。
         DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Performance,
             "PERF.SAMPLE", "performance sample", data.ToString().TrimEnd());
+    }
+
+    public static void SampleConsoleRenderFrame(double elapsedMs, bool draw, bool rebuildHits,
+        int visibleRows, int canvasRows, int overlayRows, int drawnParts, int rebuiltHitRects,
+        Func<string> snapshotDataFactory)
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
+            return;
+
+        double safeElapsedMs = Math.Max(0.0, elapsedMs);
+        _consoleRenderMsTotal += safeElapsedMs;
+        _consoleRenderMsMax = Math.Max(_consoleRenderMsMax, safeElapsedMs);
+        _consoleRenderSampleCount++;
+        if (draw)
+            _consoleRenderDrawCount++;
+        else
+            _consoleRenderHitOnlyCount++;
+        if (rebuildHits)
+            _consoleRenderHitRebuildCount++;
+        _consoleRenderVisibleRowsTotal += Math.Max(0, visibleRows);
+        _consoleRenderVisibleRowsMax = Math.Max(_consoleRenderVisibleRowsMax, visibleRows);
+        _consoleRenderCanvasRowsTotal += Math.Max(0, canvasRows);
+        _consoleRenderCanvasRowsMax = Math.Max(_consoleRenderCanvasRowsMax, canvasRows);
+        _consoleRenderOverlayRowsTotal += Math.Max(0, overlayRows);
+        _consoleRenderOverlayRowsMax = Math.Max(_consoleRenderOverlayRowsMax, overlayRows);
+        _consoleRenderPartsTotal += Math.Max(0, drawnParts);
+        _consoleRenderPartsMax = Math.Max(_consoleRenderPartsMax, drawnParts);
+        _consoleRenderHitRectsTotal += Math.Max(0, rebuiltHitRects);
+        _consoleRenderHitRectsMax = Math.Max(_consoleRenderHitRectsMax, rebuiltHitRects);
+        if (_consoleRenderMsSampleCount < _consoleRenderMsSamples.Length)
+            _consoleRenderMsSamples[_consoleRenderMsSampleCount++] = safeElapsedMs;
+        else
+            _consoleRenderMsSampleOverflow++;
+
+        long nowMs = GetTickMs();
+        long interval = Math.Max(250, cfg.PerformanceSamplingIntervalMs);
+        if (_lastConsoleRenderSampleMs != 0 && nowMs - _lastConsoleRenderSampleMs < interval)
+            return;
+        _lastConsoleRenderSampleMs = nowMs;
+
+        int count = Math.Max(1, _consoleRenderSampleCount);
+        double avg = _consoleRenderMsTotal / count;
+        double max = _consoleRenderMsMax;
+        int p95SampleCount = _consoleRenderMsSampleCount;
+        double p95 = max;
+        if (p95SampleCount > 0)
+        {
+            Array.Sort(_consoleRenderMsSamples, 0, p95SampleCount);
+            int p95Index = Math.Clamp((int)Math.Ceiling(p95SampleCount * 0.95) - 1, 0, p95SampleCount - 1);
+            p95 = _consoleRenderMsSamples[p95Index];
+        }
+
+        string snapshotData = "";
+        try
+        {
+            snapshotData = snapshotDataFactory?.Invoke() ?? "";
+        }
+        catch (Exception ex)
+        {
+            snapshotData = "snapshot_error=" + ex.GetType().Name;
+        }
+
+        var data = new StringBuilder(320);
+        data.Append("backend=canvas")
+            .Append(" samples=").Append(count)
+            .Append(" draw_calls=").Append(_consoleRenderDrawCount)
+            .Append(" hit_only_rebuilds=").Append(_consoleRenderHitOnlyCount)
+            .Append(" hit_rebuilds=").Append(_consoleRenderHitRebuildCount)
+            .Append(" draw_ms_avg=").Append(FormatDiagnosticNumber(avg))
+            .Append(" draw_ms_p95=").Append(FormatDiagnosticNumber(p95))
+            .Append(" draw_ms_max=").Append(FormatDiagnosticNumber(max))
+            .Append(" visible_rows_avg=").Append(_consoleRenderVisibleRowsTotal / count)
+            .Append(" visible_rows_max=").Append(_consoleRenderVisibleRowsMax)
+            .Append(" canvas_rows_avg=").Append(_consoleRenderCanvasRowsTotal / count)
+            .Append(" canvas_rows_max=").Append(_consoleRenderCanvasRowsMax)
+            .Append(" overlay_rows_avg=").Append(_consoleRenderOverlayRowsTotal / count)
+            .Append(" overlay_rows_max=").Append(_consoleRenderOverlayRowsMax)
+            .Append(" parts_avg=").Append(_consoleRenderPartsTotal / count)
+            .Append(" parts_max=").Append(_consoleRenderPartsMax)
+            .Append(" hit_rects_avg=").Append(_consoleRenderHitRectsTotal / count)
+            .Append(" hit_rects_max=").Append(_consoleRenderHitRectsMax)
+            .Append(" sample_overflow=").Append(_consoleRenderMsSampleOverflow);
+        if (!string.IsNullOrEmpty(snapshotData))
+            data.Append(' ').Append(snapshotData.Trim());
+
+        _consoleRenderMsTotal = 0.0;
+        _consoleRenderMsMax = 0.0;
+        _consoleRenderSampleCount = 0;
+        _consoleRenderDrawCount = 0;
+        _consoleRenderHitOnlyCount = 0;
+        _consoleRenderHitRebuildCount = 0;
+        _consoleRenderVisibleRowsTotal = 0;
+        _consoleRenderVisibleRowsMax = 0;
+        _consoleRenderCanvasRowsTotal = 0;
+        _consoleRenderCanvasRowsMax = 0;
+        _consoleRenderOverlayRowsTotal = 0;
+        _consoleRenderOverlayRowsMax = 0;
+        _consoleRenderPartsTotal = 0;
+        _consoleRenderPartsMax = 0;
+        _consoleRenderHitRectsTotal = 0;
+        _consoleRenderHitRectsMax = 0;
+        _consoleRenderMsSampleCount = 0;
+        _consoleRenderMsSampleOverflow = 0;
+
+        // 性能采样打开时才聚合输出，默认 APK 不会进入这里；采样窗口记录 p95/max，
+        // 用于判断 Canvas 后端是否接近移动端可视绘制预算，而不是只看应用能否启动。
+        DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Performance,
+            "PERF.CONSOLE_RENDER", "console render performance sample", data.ToString());
+    }
+
+    static string FormatDiagnosticNumber(double value)
+    {
+        return value.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     public static List<string> CalcMd5List(byte[] bytes)

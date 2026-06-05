@@ -72,6 +72,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		SP_SAVECHARA,//<数値>, <文字列式>, <数値>（, <数値>...）第二引数省略可
 		SP_REF,
 		SP_REFBYNAME,
+		SP_SETBGIMAGE,
 		SP_HTMLSPLIT,
 		SP_DT_COLUMN_OPTIONS,
 	}

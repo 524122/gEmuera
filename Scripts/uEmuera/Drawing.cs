@@ -96,6 +96,10 @@ namespace uEmuera.Drawing
 		{
 			get { return EnsureTextureInfo(); }
 		}
+		internal SpriteManager.TextureInfo CachedTextureInfo
+		{
+			get { return TryResolveCachedTextureInfo(); }
+		}
 		SpriteManager.TextureInfo textureinfo = null;
 
 		SpriteManager.TextureInfo EnsureTextureInfo()
@@ -108,6 +112,29 @@ namespace uEmuera.Drawing
 			textureinfo = SpriteManager.GetTextureInfo(path, path);
 			if (textureinfo == null && !string.IsNullOrEmpty(filename))
 				textureinfo = SpriteManager.GetTextureInfo(filename, path);
+			if (textureinfo != null)
+			{
+				size.Width = textureinfo.width;
+				size.Height = textureinfo.height;
+			}
+			return textureinfo;
+		}
+
+		internal bool RequestTextureInfoAsync()
+		{
+			if (TryResolveCachedTextureInfo() != null)
+				return false;
+			return SpriteManager.RequestTextureInfoAsync(path, path)
+				|| (!string.IsNullOrEmpty(filename) && SpriteManager.RequestTextureInfoAsync(filename, path));
+		}
+
+		SpriteManager.TextureInfo TryResolveCachedTextureInfo()
+		{
+			if (textureinfo != null && !textureinfo.IsDisposed)
+				return textureinfo;
+			textureinfo = null;
+			if (!SpriteManager.TryGetTextureInfoCached(path, path, out textureinfo) && !string.IsNullOrEmpty(filename))
+				SpriteManager.TryGetTextureInfoCached(filename, path, out textureinfo);
 			if (textureinfo != null)
 			{
 				size.Width = textureinfo.width;
