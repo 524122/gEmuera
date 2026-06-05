@@ -1470,28 +1470,29 @@ check1break:
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					string[] tokens = st.Substring().Split(',');
-					if (tokens.Length < 2)
+					string line = st.Substring();
+					int tokenCount = ReadCsvHeadFields(line, out string token0, out string token1, out string token2);
+					if (tokenCount < 2)
 					{
 						ParserMediator.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-					if (tokens[0].Length == 0)
+					if (token0.Length == 0)
 					{
 						ParserMediator.Warn("\",\"で始まっています", position, 1);
 						continue;
 					}
-					if ((tokens[0].Equals("NO", Config.SCVariable))
-						|| (tokens[0].Equals("番号", Config.SCVariable)))
+					if ((token0.Equals("NO", Config.SCVariable))
+						|| (token0.Equals("番号", Config.SCVariable)))
 					{
 						if (tmpl != null)
 						{
 							ParserMediator.Warn("番号が二重に定義されました", position, 1);
 							continue;
 						}
-						if (!Int64.TryParse(tokens[1].TrimEnd(), out index))
+						if (!Int64.TryParse(token1.TrimEnd(), out index))
 						{
-							ParserMediator.Warn(tokens[1] + "を整数値に変換できません", position, 1);
+							ParserMediator.Warn(token1 + "を整数値に変換できません", position, 1);
 							continue;
 						}
 						tmpl = new CharacterTemplate(index, this);
@@ -1517,7 +1518,7 @@ check1break:
 						ParserMediator.Warn("番号が定義される前に他のデータが始まりました", position, 1);
 						continue;
 					}
-					toCharacterTemplate(position, tmpl, tokens);
+					toCharacterTemplate(position, tmpl, token0, token1, token2, tokenCount);
 				}
 			}
 			catch
@@ -1533,6 +1534,42 @@ check1break:
 			{
 				eReader.Dispose();
 			}
+		}
+
+		private static int ReadCsvHeadFields(string line, out string token0, out string token1, out string token2)
+		{
+			token0 = "";
+			token1 = "";
+			token2 = "";
+			if (line == null)
+				line = "";
+
+			// 角色 CSV 的热路径只会读取前 2-3 个字段。这里保留原版裸逗号 Split 语义，
+			// 但不为整行分配 string[]，避免上千个 CHARA*.CSV 启动加载时产生大量短命对象。
+			int count = 1;
+			int fieldIndex = 0;
+			int start = 0;
+			for (int i = 0; i <= line.Length; i++)
+			{
+				if (i < line.Length && line[i] != ',')
+					continue;
+				if (fieldIndex < 3)
+				{
+					string value = i == start ? "" : line.Substring(start, i - start);
+					if (fieldIndex == 0)
+						token0 = value;
+					else if (fieldIndex == 1)
+						token1 = value;
+					else
+						token2 = value;
+				}
+				fieldIndex++;
+				if (i >= line.Length)
+					break;
+				count++;
+				start = i + 1;
+			}
+			return count;
 		}
 
         private void SortCharacterTmplList()
@@ -1607,6 +1644,11 @@ check1break:
 
 		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string[] tokens)
 		{
+			toCharacterTemplate(position, chara, tokens[0], tokens[1], tokens.Length >= 3 ? tokens[2] : "", tokens.Length);
+		}
+
+		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string token0, string token1, string token2, int tokenCount)
+		{
 			if (chara == null)
 				return;
 			int length;
@@ -1615,24 +1657,24 @@ check1break:
 			Dictionary<string, int> namearray;
 
 			string errPos = null;
-			string varname = tokens[0].ToUpper();
+			string varname = token0.ToUpper();
 			switch (varname)
 			{
 				case "NAME":
 				case "名前":
-					chara.Name = tokens[1];
+					chara.Name = token1;
 					return;
 				case "CALLNAME":
 				case "呼び名":
-					chara.Callname = tokens[1];
+					chara.Callname = token1;
 					return;
 				case "NICKNAME":
 				case "あだ名":
-					chara.Nickname = tokens[1];
+					chara.Nickname = token1;
 					return;
 				case "MASTERNAME":
 				case "主人の呼び方":
-					chara.Mastername = tokens[1];
+					chara.Mastername = token1;
 					return;
 				case "MARK":
 				case "刻印":
@@ -1703,7 +1745,7 @@ check1break:
 					errPos = "cstr.csv";
 					break;
 				default:
-					ParserMediator.Warn("\"" + tokens[0] + "\"は解釈できない識別子です", position, 1);
+					ParserMediator.Warn("\"" + token0 + "\"は解釈できない識別子です", position, 1);
 					return;
 			}
 			if (length < 0)
@@ -1716,7 +1758,7 @@ check1break:
 				ParserMediator.Warn(varname + "は禁止設定された変数です", position, 2);
 				return;
 			}
-			bool p1isNumeric = tryToInt64(tokens[1].TrimEnd(), out long p1);
+			bool p1isNumeric = tryToInt64(token1.TrimEnd(), out long p1);
 			if (p1isNumeric && ((p1 < 0) || (p1 >= length)))
 			{
 				ParserMediator.Warn(p1.ToString() + "は配列の範囲外です", position, 1);
@@ -1725,15 +1767,15 @@ check1break:
 			int index = (int)p1;
 			if ((!p1isNumeric) && (namearray != null))
 			{
-				if (!namearray.TryGetValue(tokens[1], out index))
+				if (!namearray.TryGetValue(token1, out index))
 				{
-					ParserMediator.Warn(errPos + "に\"" + tokens[1] + "\"の定義がありません", position, 1);
+					ParserMediator.Warn(errPos + "に\"" + token1 + "\"の定義がありません", position, 1);
 					//ParserMediator.Warn("\"" + tokens[1] + "\"は解釈できない識別子です", position, 1);
 					return;
 				}
 				else if (index >= length)
 				{
-					ParserMediator.Warn("\"" + tokens[1] + "\"は配列の範囲外です", position, 1);
+					ParserMediator.Warn("\"" + token1 + "\"は配列の範囲外です", position, 1);
 					return;
 				}
 			}
@@ -1742,23 +1784,23 @@ check1break:
 			{
 				if (p1isNumeric)
 					ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
-				else if (tokens[1].Length == 0)
+				else if (token1.Length == 0)
 					ParserMediator.Warn("二つ目の識別子がありません", position, 1);
 				else
-					ParserMediator.Warn("\"" + tokens[1] + "\"は解釈できない識別子です", position, 1);
+					ParserMediator.Warn("\"" + token1 + "\"は解釈できない識別子です", position, 1);
 				return;
 			}
 			if (strArray != null)
 			{
-				if (tokens.Length < 3)
+				if (tokenCount < 3)
 					ParserMediator.Warn("三つ目の識別子がありません", position, 1);
 				if (strArray.ContainsKey(index))
 					ParserMediator.Warn(varname + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
-				strArray[index] = tokens[2];
+				strArray[index] = token2;
 			}
 			else
 			{
-				if ((tokens.Length < 3) || !tryToInt64(tokens[2], out long p2))
+				if ((tokenCount < 3) || !tryToInt64(token2, out long p2))
 					p2 = 1;
 				if (intArray.ContainsKey(index))
 					ParserMediator.Warn(varname + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);

@@ -1,6 +1,6 @@
 # CODE_MAP
 
-更新时间：2026-06-02
+更新时间：2026-06-05
 
 用途：这是给 AI 和维护者快速定位代码用的地图。优先读本文件，再按路径进入源码。地图只记录结构、职责、主要接口和关键函数，不复制源码实现。
 
@@ -99,7 +99,7 @@ project.godot
 | `Scripts/EmueraMain.cs` | `EmueraMain : Node`, `GpuWorkItem`, `TextRenderItem` | 主场景入口；初始化配置映射、UI 根节点、线程和 GPU/文本渲染队列。 | `_Ready`, `_Process`, `_ExitTree`, `Run`, `Clear`, `Restart`, `GpuSubmitColorMatrix`, `SubmitTextRender` |
 | `Scripts/EmueraThread.cs` | `EmueraThread` | 后台执行 Emuera 核心；把 Godot 输入转成阻塞式 console 输入。 | `Start`, `End`, `Running`, `Input` |
 | `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退。 | `_Ready`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
-| `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 表在内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表，未命中时再回退 overlay/旧控件树；移动端未写入用户配置时默认保留 240 行，桌面端默认 360 行；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
+| `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表并用 `hitRectBuckets` 缩小扫描范围，未命中时再回退 overlay/旧控件树；移动端未写入用户配置时默认保留 240 行，桌面端默认 360 行；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
 | `Scripts/EmueraImage.cs` | `EmueraImage : Control` | 绘制 `Texture2D` / `AtlasTexture` 的控件，支持 ColorMatrix material。 | `SetColorMatrix`, `_Draw` |
 | `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放；在 `[debug.performance_sampling]` 开启时低频聚合普通帧与 Canvas 控制台渲染采样。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `SamplePerformanceFrame`, `SampleConsoleRenderFrame`, `ExportDiagnosticPackage`, `RestartGame` |
 | `Scripts/FirstWindow.cs` | `FirstWindow : Control` | 启动器；扫描 `era*` 游戏目录，切换语言/核心 profile，进入主场景。 | `_Ready`, `_ExitTree`, `_Notification`, `ResolveStartupGamePath` |
@@ -180,7 +180,7 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `ConstantData.cs` | `ConstantData`, `CharacterTemplate`, `LazyErdNameData` | CSV 常量、角色模板、ERD 名称数据；维护整数/字符串/小数 1D 变量默认长度，`LOCALF/ARGF` 使用小数长度表；读取 `VarExt*.csv` 中 MAP/XML/DT 的 `SAVE/GLOBAL/STATIC` 保存域声明。 | 常量读取、角色模板访问 |
+| `ConstantData.cs` | `ConstantData`, `CharacterTemplate`, `LazyErdNameData` | CSV 常量、角色模板、ERD 名称数据；维护整数/字符串/小数 1D 变量默认长度，`LOCALF/ARGF` 使用小数长度表；角色 CSV 热路径使用轻量字段读取避免整行 `Split(',')` 分配；读取 `VarExt*.csv` 中 MAP/XML/DT 的 `SAVE/GLOBAL/STATIC` 保存域声明。 | 常量读取、角色模板访问 |
 | `DefineMacro.cs` | `DefineMacro` | `#DEFINE` 宏数据。 | 构造和字段 |
 | `EraType.cs` | `EraType`, `EraTypeHelper` | Era 值类型枚举和 CLR `Type` 过渡转换 helper；迁移期用于把旧 `long/string/double` 签名统一映射到整数/字符串/小数语义。 | `FromClrType`, `ToClrType`, 枚举定义 |
 | `GameBase.cs` | `GameBase` | 游戏基础信息、版本、标题、更新检查 URL/版本名等。 | `Load`, `Save`, 基础字段访问 |
@@ -372,7 +372,7 @@ project.godot
 | 快捷按钮 | `QuickButtons.AddButton`, `QuickButtons.SetInputEnabled`, `EmueraContent.SubmitQuickButtonInput` |
 | 屏幕输入面板 | `Inputpad.UpdateInputType`, `ShowPad`, `HidePad` |
 | 缩放 | `Scalepad.SetScale`, `EmueraContent.SetContentScale`, `ResolutionHelper.Apply` |
-| Canvas 性能采样 | `ConsoleRenderSurface._Draw`, `ConsoleRenderSurface.RebuildHitRectsOnly`, `GenericUtils.SampleConsoleRenderFrame`；开启 `[debug.performance_sampling]` 后输出 `PERF.CONSOLE_RENDER`，包含 `draw_ms_avg/p95/max`、可视行、Canvas 行、overlay 行、part、hit rect 和节点规模快照；普通绘制窗口与点击前 hit-only 重建窗口分开统计，`PERF.*` 在 Godot/logcat 镜像中保留 `data` 字段 |
+| Canvas 性能采样 | `ConsoleRenderSurface._Draw`, `ConsoleRenderSurface.RebuildHitRectsOnly`, `GenericUtils.SampleConsoleRenderFrame`；开启 `[debug.performance_sampling]` 后输出 `PERF.CONSOLE_RENDER`，包含 `draw_ms_avg/p95/max`、可视行、Canvas 行、overlay 行、part、hit rect 和节点规模快照；普通绘制窗口与点击前 hit-only 重建窗口分开统计，命中重建使用行级按钮矩形缓存与垂直桶索引，`PERF.*` 在 Godot/logcat 镜像中保留 `data` 字段 |
 
 ### 图片/精灵/ColorMatrix
 

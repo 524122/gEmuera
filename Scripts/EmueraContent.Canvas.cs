@@ -729,11 +729,13 @@ public partial class EmueraContent
 	{
 		readonly EmueraContent owner;
 		readonly List<ConsoleButtonHit> hitRects = new List<ConsoleButtonHit>(128);
+		readonly Dictionary<int, List<int>> hitRectBuckets = new Dictionary<int, List<int>>();
 		bool hitRectsDirty = true;
 		int lastScrollX = int.MinValue;
 		int lastScrollY = int.MinValue;
 		Vector2 lastViewportSize = Vector2.Zero;
 		float lastScale = -1;
+		const float HitBucketHeight = 64.0f;
 
 		struct ConsoleRenderStats
 		{
@@ -783,12 +785,19 @@ public partial class EmueraContent
 			if (hitRectsDirty)
 				RebuildHitRectsOnly();
 			Vector2 local = GetGlobalTransformWithCanvas().AffineInverse() * globalPosition;
-			for (int i = hitRects.Count - 1; i >= 0; i--)
+			int bucket = GetHitBucket(local.Y);
+			if (hitRectBuckets.TryGetValue(bucket, out var indexes))
 			{
-				if (hitRects[i].Rect.HasPoint(local))
+				for (int i = indexes.Count - 1; i >= 0; i--)
 				{
-					hit = hitRects[i];
-					return !string.IsNullOrEmpty(hit.Input);
+					int hitIndex = indexes[i];
+					if (hitIndex < 0 || hitIndex >= hitRects.Count)
+						continue;
+					if (hitRects[hitIndex].Rect.HasPoint(local))
+					{
+						hit = hitRects[hitIndex];
+						return !string.IsNullOrEmpty(hit.Input);
+					}
 				}
 			}
 			hit = default;
@@ -822,7 +831,10 @@ public partial class EmueraContent
 		{
 			var stats = new ConsoleRenderStats();
 			if (rebuildHits)
+			{
 				hitRects.Clear();
+				hitRectBuckets.Clear();
+			}
 			if (owner == null || owner.lineNumbers.Count == 0)
 				return stats;
 
@@ -842,6 +854,11 @@ public partial class EmueraContent
 				if (owner.lineObjects.TryGetValue(lineNo, out var line))
 				{
 					stats.CanvasRows++;
+					bool usedCachedHits = false;
+					if (rebuildHits)
+						usedCachedHits = AddCachedLineHitRects(lineNo, entry.Top, ref stats);
+					if (rebuildHits && !draw && usedCachedHits)
+						continue;
 					DrawLine(lineNo, line, entry.Top, entry.Size, draw, rebuildHits, ref stats);
 				}
 			}
@@ -866,13 +883,15 @@ public partial class EmueraContent
 					continue;
 				if (rebuildHits && button.IsButton)
 				{
+					if (owner.canvasLineButtonHits.ContainsKey(lineNo))
+						continue;
 					int buttonTop = owner.GetButtonTop(button);
 					int buttonHeight = owner.GetButtonBottom(button, true) - buttonTop;
 					if (buttonHeight <= 0)
 						buttonHeight = owner.EffectiveLineHeight;
 					var bounds = owner.GetButtonVisualBounds(button, buttonTop, buttonHeight, button.PointX, button.PointX);
 					var hitRect = new Rect2(bounds.Position + new Vector2(0, y), bounds.Size);
-					hitRects.Add(new ConsoleButtonHit
+					AddHitRect(new ConsoleButtonHit
 					{
 						Rect = hitRect,
 						Input = button.Inputs,
@@ -892,6 +911,44 @@ public partial class EmueraContent
 					DrawPart(part, y, 0);
 				}
 			}
+		}
+
+		bool AddCachedLineHitRects(int lineNo, float lineY, ref ConsoleRenderStats stats)
+		{
+			if (owner == null || !owner.canvasLineButtonHits.TryGetValue(lineNo, out var lineHits) || lineHits == null)
+				return false;
+			var offset = new Vector2(0, lineY);
+			for (int i = 0; i < lineHits.Length; i++)
+			{
+				var hit = lineHits[i];
+				hit.Rect = new Rect2(hit.Rect.Position + offset, hit.Rect.Size);
+				hit.ContentCenter += offset;
+				AddHitRect(hit);
+				stats.RebuiltHitRects++;
+			}
+			return true;
+		}
+
+		void AddHitRect(ConsoleButtonHit hit)
+		{
+			int index = hitRects.Count;
+			hitRects.Add(hit);
+			int firstBucket = GetHitBucket(hit.Rect.Position.Y);
+			int lastBucket = GetHitBucket(hit.Rect.Position.Y + hit.Rect.Size.Y);
+			for (int bucket = firstBucket; bucket <= lastBucket; bucket++)
+			{
+				if (!hitRectBuckets.TryGetValue(bucket, out var indexes))
+				{
+					indexes = new List<int>();
+					hitRectBuckets[bucket] = indexes;
+				}
+				indexes.Add(index);
+			}
+		}
+
+		static int GetHitBucket(float y)
+		{
+			return Mathf.FloorToInt(y / HitBucketHeight);
 		}
 
 		void SubmitRenderSample(long startTick, bool draw, bool rebuildHits, ConsoleRenderStats stats)

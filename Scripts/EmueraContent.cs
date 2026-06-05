@@ -59,6 +59,7 @@ public partial class EmueraContent : Control
 	// 让滚动、绘制、命中和 overlay 对齐不再每次从第一行累加。
 	Dictionary<int, ConsoleDisplayLine> lineObjects = new Dictionary<int, ConsoleDisplayLine>();
 	Dictionary<int, Control> lineControls = new Dictionary<int, Control>();
+	Dictionary<int, ConsoleButtonHit[]> canvasLineButtonHits = new Dictionary<int, ConsoleButtonHit[]>();
 	Dictionary<int, List<CanvasImageOverlay>> canvasImageOverlayNodes = new Dictionary<int, List<CanvasImageOverlay>>();
 	Dictionary<int, List<CanvasDivOverlay>> canvasDivOverlayNodes = new Dictionary<int, List<CanvasDivOverlay>>();
 	HashSet<int> canvasRowsWithPositionedNodes = new HashSet<int>();
@@ -1150,6 +1151,34 @@ public partial class EmueraContent : Control
 		return new Rect2(new Vector2(left, top), new Vector2(right - left, bottom - top));
 	}
 
+	ConsoleButtonHit[] BuildCanvasLineButtonHits(ConsoleDisplayLine line)
+	{
+		if (line?.Buttons == null)
+			return null;
+		List<ConsoleButtonHit> hits = null;
+		foreach (var button in line.Buttons)
+		{
+			if (button == null || !button.IsButton)
+				continue;
+			int buttonTop = GetButtonTop(button);
+			int buttonHeight = GetButtonBottom(button, true) - buttonTop;
+			if (buttonHeight <= 0)
+				buttonHeight = EffectiveLineHeight;
+			var bounds = GetButtonVisualBounds(button, buttonTop, buttonHeight, button.PointX, button.PointX);
+			if (bounds.Size.X <= 0 || bounds.Size.Y <= 0)
+				continue;
+			hits ??= new List<ConsoleButtonHit>();
+			hits.Add(new ConsoleButtonHit
+			{
+				Rect = bounds,
+				Input = button.Inputs,
+				Generation = button.Generation,
+				ContentCenter = bounds.Position + bounds.Size * 0.5f,
+			});
+		}
+		return hits == null ? null : hits.ToArray();
+	}
+
 	int GetButtonVisualRight(ConsoleButtonString button, int rowHeight = -1, bool asControlButton = true)
 	{
 		int buttonTop = GetButtonTop(button);
@@ -1592,6 +1621,18 @@ public partial class EmueraContent : Control
 	{
 		lineObjects[lineNo] = line;
 		lineControls[lineNo] = control;
+		if (UseCanvasRenderBackend && control == null)
+		{
+			var hits = BuildCanvasLineButtonHits(line);
+			if (hits != null && hits.Length > 0)
+				canvasLineButtonHits[lineNo] = hits;
+			else
+				canvasLineButtonHits.Remove(lineNo);
+		}
+		else
+		{
+			canvasLineButtonHits.Remove(lineNo);
+		}
 		lineSizes[lineNo] = size;
 		lineNumbers.Add(lineNo);
 		totalLineHeight += size.Y;
@@ -1617,6 +1658,7 @@ public partial class EmueraContent : Control
 		asyncTexturePendingLineNos.Remove(lineNo);
 		lineObjects.Remove(lineNo);
 		lineControls.Remove(lineNo);
+		canvasLineButtonHits.Remove(lineNo);
 		canvasRowsWithPositionedNodes.Remove(lineNo);
 		bool removedNumber = lineNumbers.Remove(lineNo);
 		if (!lineSizes.TryGetValue(lineNo, out var size))
@@ -1641,6 +1683,7 @@ public partial class EmueraContent : Control
 		ClearCanvasOverlayIndexes();
 		lineObjects.Clear();
 		lineControls.Clear();
+		canvasLineButtonHits.Clear();
 		canvasRowsWithPositionedNodes.Clear();
 		lineSizes.Clear();
 		lineNumbers.Clear();
