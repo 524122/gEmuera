@@ -59,6 +59,7 @@ namespace MinorShift.Emuera.GameProc
 			try
 			{
 				labelDic.RemoveAll();
+				labelDic.EnsureCapacity(EstimateLabelCapacity(erbFiles.Count, useLazyLoading), erbFiles.Count);
 				if (useLazyLoading)
 				{
 					parentProcess.LoadLazyLoadingTable(erbFiles);
@@ -160,6 +161,7 @@ namespace MinorShift.Emuera.GameProc
 			List<string> isOnlyEvent = new List<string>();
 			noError = true;
 			labelDic = labelDictionary;
+			labelDic.EnsureCapacity(EstimateLabelCapacity(path?.Count ?? 0, isLazyLoading), path?.Count ?? 0);
 			if (!isLazyLoading)
 				labelDic.Initialized = false;
 			await Task.Run(() =>
@@ -191,6 +193,19 @@ namespace MinorShift.Emuera.GameProc
 			parentProcess.scaningLine = null;
 			isOnlyEvent.Clear();
 			return noError;
+		}
+
+		static int EstimateLabelCapacity(int fileCount, bool useLazyLoading)
+		{
+			if (fileCount <= 0)
+				return 0;
+			int labelsPerFile = useLazyLoading ? 4 : 8;
+			long estimate = (long)fileCount * labelsPerFile;
+			if (estimate < 32)
+				estimate = 32;
+			if (estimate > 1_000_000)
+				estimate = 1_000_000;
+			return (int)estimate;
 		}
 
 		private sealed class PPState

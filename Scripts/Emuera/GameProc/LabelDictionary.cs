@@ -225,6 +225,23 @@ namespace MinorShift.Emuera.GameProc
 			totalFileCount = 0;
 		}
 
+		public void EnsureCapacity(int estimatedLabels, int estimatedFiles = 0)
+		{
+			if (estimatedLabels > 0)
+			{
+				labelAtDic.EnsureCapacity(estimatedLabels);
+				eventLabelDic.EnsureCapacity(estimatedLabels);
+				noneventLabelDic.EnsureCapacity(estimatedLabels);
+				int sideListCapacity = Math.Max(4, estimatedLabels / 8);
+				if (invalidList.Capacity < sideListCapacity)
+					invalidList.Capacity = sideListCapacity;
+				if (labelDollarList.Capacity < sideListCapacity)
+					labelDollarList.Capacity = sideListCapacity;
+			}
+			if (estimatedFiles > 0)
+				loadedFileDic.EnsureCapacity(estimatedFiles);
+		}
+
 		public void RemoveLabelWithPath(string fname)
 		{
 			bool removed = false;

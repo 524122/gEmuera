@@ -113,9 +113,18 @@ public partial class EmueraContent : Control
 	// render pass so GetSpriteTexture can remain a pure conversion helper.
 	Dictionary<int, List<SpriteManager.TextureInfo>> lineTexturePins = new Dictionary<int, List<SpriteManager.TextureInfo>>();
 	List<SpriteManager.TextureInfo> cbgTexturePins = new List<SpriteManager.TextureInfo>();
+	List<SpriteManager.TextureInfo> htmlIslandTexturePins = new List<SpriteManager.TextureInfo>();
 	List<SpriteManager.TextureInfo> activeTexturePinCollector;
 	HashSet<int> asyncTexturePendingLineNos = new HashSet<int>();
 	Dictionary<int, ConsoleDisplayLine> pendingAsyncLineUpdates = new Dictionary<int, ConsoleDisplayLine>();
+	struct PureImageFallbackLine
+	{
+		public ConsoleDisplayLine Line;
+		public int OriginalLineNo;
+		public ulong RemovedAtMs;
+	}
+	List<PureImageFallbackLine> recentPureImageFallbackLines = new List<PureImageFallbackLine>();
+	bool renderingAsyncImageFallbackLine = false;
 	int activeRenderLineNo = -1;
 	long observedTextureLoadVersion = 0;
 	bool renderingCbgTextures = false;
@@ -126,6 +135,11 @@ public partial class EmueraContent : Control
 	// Texture lookup failures are memoized to avoid repeated recursive file scans
 	// on Android storage where I/O stalls are very visible.
 	HashSet<string> failedTextureSearches = new HashSet<string>();
+	Dictionary<string, string> resolvedTextureSearchPaths = new Dictionary<string, string>();
+	ulong lastCanvasAnimationRefreshMs = 0;
+	const int MaxPureImageFallbackLines = 64;
+	const ulong PureImageFallbackTtlMs = 2000;
+	static readonly string[] CanvasImageFallbackExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tga" };
 
 	// CBG nodes are reused instead of recreated whenever possible. This reduces
 	// CanvasItem churn and texture upload pressure during rapid script updates.
@@ -249,6 +263,8 @@ public partial class EmueraContent : Control
 	const ulong ScrollToBottomStableMs = 80;
 	const int ScrollToBottomTolerancePx = 1;
 	const ulong ScrollTraceDragIntervalMs = 120;
+	const int AndroidAsyncTextureRefreshLineBudget = 4;
+	const int DesktopAsyncTextureRefreshLineBudget = 12;
 	const float ContentInertiaMinVelocity = 80.0f;
 	const float ContentInertiaFastVelocity = 4500.0f;
 	const float ContentInertiaMaxVelocity = 14000.0f;
@@ -679,6 +695,8 @@ public partial class EmueraContent : Control
 		ResetLineIndexes();
 		consoleRenderSurface?.MarkDirty();
 		failedTextureSearches.Clear();
+		resolvedTextureSearchPaths.Clear();
+		lastCanvasAnimationRefreshMs = 0;
 		asyncTexturePendingLineNos.Clear();
 		pendingAsyncLineUpdates.Clear();
 		pendingCbgAsyncTextureRefresh = false;
@@ -1123,14 +1141,128 @@ public partial class EmueraContent : Control
 
 	bool ShouldDeferLineReplacementForAsyncTexture(ConsoleDisplayLine line, bool isUpdate, bool hasExistingLine, bool asyncTexturePending)
 	{
-		if (line == null || !isUpdate || !hasExistingLine || !asyncTexturePending)
+		if (line == null || !asyncTexturePending)
+			return false;
+		if (renderingAsyncImageFallbackLine)
 			return false;
 
-		// 刷新已有行时，如果新图片仍在异步解码，先保留旧行画面。
-		// 否则旧节点会被空白临时行替换，玩家会看到图片闪白；纹理完成后再用挂起的新行做真正替换。
-		pendingAsyncLineUpdates[line.LineNo] = line;
-		asyncTexturePendingLineNos.Add(line.LineNo);
-		return true;
+		if (isUpdate && hasExistingLine)
+		{
+			// 刷新已有行时，如果新图片仍在异步解码，先保留旧行画面。
+			// 否则旧节点会被空白临时行替换，玩家会看到图片闪白；纹理完成后再用挂起的新行做真正替换。
+			pendingAsyncLineUpdates[line.LineNo] = line;
+			asyncTexturePendingLineNos.Add(line.LineNo);
+			return true;
+		}
+
+		if (!hasExistingLine && IsPureImageLine(line))
+		{
+			// 标题和 XRay 这类纯图片 HTML 行在首次提交时如果先显示 spacer，会在 REDRAW 恢复时闪出空/白块。
+			// 纯图片行没有可读文本需要抢先显示，因此等纹理就绪后再按原 LineNo 补回。
+			if (!renderingAsyncImageFallbackLine)
+				TryRenderRecentPureImageFallback(line.LineNo);
+			pendingAsyncLineUpdates[line.LineNo] = line;
+			asyncTexturePendingLineNos.Add(line.LineNo);
+			return true;
+		}
+
+		return false;
+	}
+
+	void RememberPureImageFallbackLine(int lineNo)
+	{
+		if (!lineObjects.TryGetValue(lineNo, out var line) || !IsPureImageLine(line))
+			return;
+
+		ulong now = Time.GetTicksMsec();
+		PruneExpiredPureImageFallbackLines(now);
+		recentPureImageFallbackLines.Add(new PureImageFallbackLine
+		{
+			Line = line,
+			OriginalLineNo = line.LineNo,
+			RemovedAtMs = now,
+		});
+		while (recentPureImageFallbackLines.Count > MaxPureImageFallbackLines)
+			recentPureImageFallbackLines.RemoveAt(0);
+	}
+
+	bool TryRenderRecentPureImageFallback(int targetLineNo)
+	{
+		ulong now = Time.GetTicksMsec();
+		PruneExpiredPureImageFallbackLines(now);
+		for (int pass = 0; pass < 2; pass++)
+		{
+			for (int i = recentPureImageFallbackLines.Count - 1; i >= 0; i--)
+			{
+				var fallback = recentPureImageFallbackLines[i];
+				if (fallback.Line == null)
+				{
+					recentPureImageFallbackLines.RemoveAt(i);
+					continue;
+				}
+				if (pass == 0 && fallback.OriginalLineNo != targetLineNo)
+					continue;
+
+				recentPureImageFallbackLines.RemoveAt(i);
+				// CLEARLINE/REDRAW 会先删除旧图片行，再输出同位置的新图片行。
+				// 标题这类连续图片行通常会复用 LineNo，优先按原 LineNo 匹配，避免 36 条标题切片顺序倒置。
+				// 新图异步解码期间，把刚删除的旧纯图片行挂到新 LineNo；该旧行已经从显示表移除，
+				// 不能在注册后恢复旧 LineNo，否则后续 Canvas/Control 替换会拿到不一致的行号。
+				// 纹理就绪后 pendingAsyncLineUpdates 会用真实新行替换它。
+				renderingAsyncImageFallbackLine = true;
+				// Keep the fallback registered under the target LineNo until the real image line is ready.
+				renderingAsyncImageFallbackLine = true;
+				try
+				{
+					fallback.Line.LineNo = targetLineNo;
+					AddLine(fallback.Line, true);
+					return true;
+				}
+				finally
+				{
+					renderingAsyncImageFallbackLine = false;
+				}
+			}
+		}
+		return false;
+	}
+
+	void PruneExpiredPureImageFallbackLines(ulong now)
+	{
+		for (int i = recentPureImageFallbackLines.Count - 1; i >= 0; i--)
+		{
+			var fallback = recentPureImageFallbackLines[i];
+			if (fallback.Line == null || now - fallback.RemovedAtMs > PureImageFallbackTtlMs)
+				recentPureImageFallbackLines.RemoveAt(i);
+		}
+	}
+
+	static bool IsPureImageLine(ConsoleDisplayLine line)
+	{
+		if (line?.Buttons == null || line.Buttons.Length == 0)
+			return false;
+		bool hasImage = false;
+		for (int i = 0; i < line.Buttons.Length; i++)
+		{
+			var button = line.Buttons[i];
+			if (button?.StrArray == null)
+				continue;
+			for (int j = 0; j < button.StrArray.Length; j++)
+			{
+				var part = button.StrArray[j];
+				if (part is ConsoleImagePart)
+				{
+					hasImage = true;
+					continue;
+				}
+				if (part is ConsoleSpacePart)
+					continue;
+				if (part is ConsoleStyledString styled && string.IsNullOrWhiteSpace(styled.Str))
+					continue;
+				return false;
+			}
+		}
+		return hasImage;
 	}
 
 	// 企业级说明：普通行与 HTML/Div 子行共用同一按钮构建入口，避免触摸命中、焦点、样式和内容裁剪规则在移动端产生分叉。
@@ -1596,12 +1728,18 @@ public partial class EmueraContent : Control
 
 	internal void SetHtmlIsland(ConsoleDisplayLine[] lines)
 	{
-		ClearHtmlIsland();
 		if (htmlIslandContainer == null || lines == null)
+		{
+			ClearHtmlIsland();
 			return;
+		}
 		lastHtmlIslandLines = lines;
 		pendingHtmlIslandAsyncTextureRefresh = false;
 
+		var previousTexturePinCollector = activeTexturePinCollector;
+		var newHtmlIslandTexturePins = new List<SpriteManager.TextureInfo>();
+		var newControls = new List<Control>();
+		activeTexturePinCollector = newHtmlIslandTexturePins;
 		bool previousHtmlIslandRender = renderingHtmlIslandTextures;
 		renderingHtmlIslandTextures = true;
 		try
@@ -1632,16 +1770,38 @@ public partial class EmueraContent : Control
 					{
 						foreach (var part in button.StrArray)
 							AddPartToContainer(part, lineControl, 0);
+						}
 					}
+					SetFixedControlSize(lineControl, new Vector2(GetLineRight(line), lineHeight));
+					newControls.Add(lineControl);
 				}
-				SetFixedControlSize(lineControl, new Vector2(GetLineRight(line), lineHeight));
-				htmlIslandContainer.AddChild(lineControl);
-			}
+		}
+		catch
+		{
+			ReleaseControlList(newControls);
+			ReleaseTexturePinList(newHtmlIslandTexturePins);
+			throw;
 		}
 		finally
 		{
 			renderingHtmlIslandTextures = previousHtmlIslandRender;
+			activeTexturePinCollector = previousTexturePinCollector;
 		}
+
+		if (pendingHtmlIslandAsyncTextureRefresh)
+		{
+			// HTML island 常用于整块标题/差分图。异步纹理未就绪时先保留旧 island；
+			// 没有旧 island 时也不提交透明占位，等纹理完成后一次性替换，避免白块闪烁。
+			ReleaseControlList(newControls);
+			ReleaseTexturePinList(newHtmlIslandTexturePins);
+			return;
+		}
+
+		ClearHtmlIslandControls();
+		ReleaseHtmlIslandTexturePins();
+		for (int i = 0; i < newControls.Count; i++)
+			htmlIslandContainer.AddChild(newControls[i]);
+		htmlIslandTexturePins = newHtmlIslandTexturePins;
 		displayRevision++;
 		RefreshQuickInputGate();
 		QueueScaleBoundsUpdate();
@@ -1654,12 +1814,29 @@ public partial class EmueraContent : Control
 	{
 		if (htmlIslandContainer == null)
 			return;
-		foreach (var child in htmlIslandContainer.GetChildren())
-			SafeQueueFree(child);
+		ClearHtmlIslandControls();
+		ReleaseHtmlIslandTexturePins();
 		lastHtmlIslandLines = null;
 		pendingHtmlIslandAsyncTextureRefresh = false;
 		displayRevision++;
 		RefreshQuickInputGate();
+	}
+
+	void ClearHtmlIslandControls()
+	{
+		if (htmlIslandContainer == null)
+			return;
+		foreach (var child in htmlIslandContainer.GetChildren())
+			SafeQueueFree(child);
+	}
+
+	void ReleaseControlList(List<Control> controls)
+	{
+		if (controls == null)
+			return;
+		for (int i = 0; i < controls.Count; i++)
+			SafeQueueFree(controls[i]);
+		controls.Clear();
 	}
 
 	// Register one row in all lookup tables and aggregate metrics used by the
@@ -1732,6 +1909,7 @@ public partial class EmueraContent : Control
 		lineObjects.Clear();
 		lineControls.Clear();
 		pendingAsyncLineUpdates.Clear();
+		recentPureImageFallbackLines.Clear();
 		canvasLineButtonHits.Clear();
 		canvasRowsWithPositionedNodes.Clear();
 		lineSizes.Clear();
@@ -2036,6 +2214,13 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < cbgTexturePins.Count; i++)
 			SpriteManager.UnpinTextureInfo(cbgTexturePins[i]);
 		cbgTexturePins.Clear();
+	}
+
+	void ReleaseHtmlIslandTexturePins()
+	{
+		for (int i = 0; i < htmlIslandTexturePins.Count; i++)
+			SpriteManager.UnpinTextureInfo(htmlIslandTexturePins[i]);
+		htmlIslandTexturePins.Clear();
 	}
 
 	// Width is only rescanned when the removed row may have been the widest one.
@@ -2840,13 +3025,11 @@ public partial class EmueraContent : Control
 	{
 		if (single == null || single.DestBaseSize.Width <= 0 || single.DestBaseSize.Height <= 0)
 			return false;
-		int srcW = System.Math.Abs(single.SrcRectangle.Width);
-		int srcH = System.Math.Abs(single.SrcRectangle.Height);
-		if (srcW == 0 || srcH == 0)
-			return false;
-		return srcW != single.DestBaseSize.Width
-			|| srcH != single.DestBaseSize.Height
-			|| TryGetSpriteHtmlBasePosition(single, resourceName, out _);
+		// v24/snake 原核心只有在 DestBasePosition 非零时，才把裁剪图块映射到
+		// DestBaseSize 表示的基准画布内部。仅仅 src 尺寸和 DestBaseSize 不同，
+		// 仍应把裁剪图块拉伸到调用方给出的目标矩形；否则立绘身体/表情这类
+		// 共用基准画布的资源会被错误缩小并分离显示。
+		return TryGetSpriteHtmlBasePosition(single, resourceName, out _);
 	}
 
 	static Vector2 GetSpriteHtmlDrawOffset(ASprite sprite, string resourceName, int width, int height)
@@ -3141,10 +3324,10 @@ public partial class EmueraContent : Control
 			if (lineNos.Count >= removeCount)
 				break;
 		}
-		RemoveLinesByNumber(lineNos);
+		RemoveLinesByNumber(lineNos, true);
 	}
 
-	void RemoveLinesByNumber(List<int> lineNos)
+	void RemoveLinesByNumber(List<int> lineNos, bool rememberPureImageFallback = false)
 	{
 		if (lineNos == null || lineNos.Count == 0)
 			return;
@@ -3155,6 +3338,8 @@ public partial class EmueraContent : Control
 		{
 			int lineNo = lineNos[i];
 			lineControls.TryGetValue(lineNo, out var control);
+			if (rememberPureImageFallback)
+				RememberPureImageFallbackLine(lineNo);
 			UnregisterLine(lineNo);
 			if (control != null && GodotObject.IsInstanceValid(control))
 				SafeQueueFree(control);
@@ -3218,7 +3403,10 @@ public partial class EmueraContent : Control
 	void ProcessAsyncTextureRefreshes()
 	{
 		long version = SpriteManager.TextureLoadVersion;
-		if (version == observedTextureLoadVersion)
+		if (version == observedTextureLoadVersion
+			&& asyncTexturePendingLineNos.Count == 0
+			&& !pendingHtmlIslandAsyncTextureRefresh
+			&& !pendingCbgAsyncTextureRefresh)
 			return;
 		observedTextureLoadVersion = version;
 
@@ -3226,16 +3414,17 @@ public partial class EmueraContent : Control
 		if (asyncTexturePendingLineNos.Count > 0)
 		{
 			var lineNos = new List<int>(asyncTexturePendingLineNos);
-			asyncTexturePendingLineNos.Clear();
 			lineNos.Sort();
+			int refreshLimit = System.Math.Min(lineNos.Count, GetAsyncTextureRefreshLineBudget());
 
 			bool previousBatching = batchingDisplayLines;
 			batchingDisplayLines = true;
 			try
 			{
-				for (int i = 0; i < lineNos.Count; i++)
+				for (int i = 0; i < refreshLimit; i++)
 				{
 					int lineNo = lineNos[i];
+					asyncTexturePendingLineNos.Remove(lineNo);
 					if (pendingAsyncLineUpdates.TryGetValue(lineNo, out var pendingLine)
 						|| lineObjects.TryGetValue(lineNo, out pendingLine))
 					{
@@ -3277,6 +3466,13 @@ public partial class EmueraContent : Control
 			RefreshQuickInputGate();
 			QueueScaleBoundsUpdate();
 		}
+	}
+
+	static int GetAsyncTextureRefreshLineBudget()
+	{
+		// Android 端把异步补图拆成小批次，避免多张图片同帧触发节点重建和纹理上传尖峰；
+		// 高端机只会多等几个渲染帧，低端骁龙 660 这类设备能明显降低卡顿风险。
+		return OS.GetName() == "Android" ? AndroidAsyncTextureRefreshLineBudget : DesktopAsyncTextureRefreshLineBudget;
 	}
 
 	// Refresh client background graphics from the core. Nodes are reused by index
@@ -3359,10 +3555,10 @@ public partial class EmueraContent : Control
 			activeTexturePinCollector = previousTexturePinCollector;
 		}
 
-		if (pendingCbgAsyncTextureRefresh && cbgNodes.Count > 0)
+		if (pendingCbgAsyncTextureRefresh)
 		{
 			// 刷新背景层时如果新纹理还没就绪，保留旧 CBG 节点和旧 pin。
-			// 否则本帧会把旧背景裁掉，玩家会看到白/空背景，等异步完成后再提交新背景。
+			// 初次显示时也不提交半成品图层，等异步完成后再一次性提交，避免标题/差分图白块闪烁。
 			ReleaseTexturePinList(newCbgTexturePins);
 			return;
 		}
@@ -5497,6 +5693,67 @@ public partial class EmueraContent : Control
 		};
 	}
 
+	static bool TryGetSolidBlockElementRect(char value, float cellWidth, float lineHeight, float fontHeight, out Rect2 rect)
+	{
+		rect = default;
+		cellWidth = Mathf.Max(1.0f, cellWidth);
+		lineHeight = Mathf.Max(1.0f, lineHeight);
+		float pad = lineHeight >= 8.0f ? 1.0f : 0.0f;
+		float glyphHeight = Mathf.Clamp(fontHeight > 0.0f ? fontHeight : lineHeight, 1.0f, Mathf.Max(1.0f, lineHeight - pad * 2.0f));
+		float glyphTop = Mathf.Round((lineHeight - glyphHeight) * 0.5f);
+		float maxGlyphTop = Mathf.Max(pad, lineHeight - pad - glyphHeight);
+		glyphTop = Mathf.Clamp(glyphTop, pad, maxGlyphTop);
+		float glyphBottom = Mathf.Min(lineHeight - pad, glyphTop + glyphHeight);
+		float glyphBodyHeight = Mathf.Max(1.0f, glyphBottom - glyphTop);
+
+		// TW 的体力/气力/精力、快C/快V 等条形图用 U+2585/U+2584 这类实体块。
+		// 宽度仍由 Utils.CheckHalfSize 决定以保证横向相连；这里只把字形限制在当前行网格内，
+		// 避免 Godot 字体 fallback 把块字形画到相邻行，造成竖向黏连。
+		if (value >= '\u2581' && value <= '\u2588')
+		{
+			int eighths = value - '\u2580';
+			float height = value == '\u2588'
+				? glyphBodyHeight
+				: Mathf.Max(1.0f, glyphBodyHeight * eighths / 8.0f);
+			float y = glyphBottom - height;
+			rect = new Rect2(0, y, cellWidth, height);
+			return true;
+		}
+		if (value == '\u2580')
+		{
+			float height = Mathf.Max(1.0f, glyphBodyHeight * 0.5f);
+			rect = new Rect2(0, glyphTop, cellWidth, height);
+			return true;
+		}
+		if (value == '\u2594')
+		{
+			float height = Mathf.Max(1.0f, glyphBodyHeight / 8.0f);
+			rect = new Rect2(0, glyphTop, cellWidth, height);
+			return true;
+		}
+		if (value >= '\u2589' && value <= '\u258F')
+		{
+			int eighths = 8 - (value - '\u2588');
+			float width = Mathf.Max(1.0f, cellWidth * eighths / 8.0f);
+			rect = new Rect2(0, glyphTop, width, glyphBodyHeight);
+			return true;
+		}
+		if (value == '\u2590')
+		{
+			float width = Mathf.Max(1.0f, cellWidth * 0.5f);
+			rect = new Rect2(cellWidth - width, glyphTop, width, glyphBodyHeight);
+			return true;
+		}
+		if (value == '\u2595')
+		{
+			float width = Mathf.Max(1.0f, cellWidth / 8.0f);
+			rect = new Rect2(cellWidth - width, glyphTop, width, glyphBodyHeight);
+			return true;
+		}
+
+		return false;
+	}
+
 	sealed partial class ConsoleTextPart : Control
 	{
 		readonly Font font;
@@ -5534,7 +5791,8 @@ public partial class EmueraContent : Control
 			if (font == null || string.IsNullOrEmpty(text))
 				return;
 
-			float baseline = GetTextBaseline(font, fontSize, Size.Y);
+			float fontHeight = font.GetHeight(fontSize);
+			float baseline = GetTextBaseline(font, fontSize, Size.Y, fontHeight);
 			if (!ShouldUseGridDrawing(text))
 			{
 				DrawPlainText(baseline);
@@ -5551,7 +5809,7 @@ public partial class EmueraContent : Control
 				float nextExactX = exactX + GetCellWidth(half);
 				float nextDrawX = (int)nextExactX;
 				float cellWidth = nextDrawX - drawX;
-				DrawGridChar(text[i], drawX, baseline, cellWidth);
+				DrawGridChar(text[i], drawX, 0, baseline, cellWidth, fontHeight);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
@@ -5565,9 +5823,10 @@ public partial class EmueraContent : Control
 				DrawString(font, new Vector2(1.0f, baseline), text, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, color);
 		}
 
-		static float GetTextBaseline(Font font, int fontSize, float height)
+		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f)
 		{
-			float fontHeight = font.GetHeight(fontSize);
+			if (fontHeight < 0.0f)
+				fontHeight = font.GetHeight(fontSize);
 			float ascent = font.GetAscent(fontSize);
 			return Mathf.Round((height - fontHeight) * 0.5f + ascent);
 		}
@@ -5601,8 +5860,13 @@ public partial class EmueraContent : Control
 				|| c == '\u3000';
 		}
 
-		void DrawGridChar(char value, float x, float baseline, float cellWidth)
+		void DrawGridChar(char value, float x, float lineTop, float baseline, float cellWidth, float fontHeight)
 		{
+			if (TryGetSolidBlockElementRect(value, cellWidth, Size.Y, fontHeight, out var blockRect))
+			{
+				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), color);
+				return;
+			}
 			// 每个字符仍按 emuera 的网格起点绘制，但不能再按单元格宽度裁剪字形。
 			// Godot 字体 fallback 下，DRAWLINE/箱线字符的实际 glyph 往往宽于半角格；
 			// 若逐格裁剪会出现横线缺失。片段边界继续由本 Control 的 ClipContents 统一限制。

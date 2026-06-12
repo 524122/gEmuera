@@ -440,14 +440,6 @@ namespace MinorShift.Emuera.GameView
 			if (cellWidthPx <= 0)
 				cellWidthPx = Config.PrintCLength * Config.FontSize / 2;
 
-			int maxLineWidth = Config.DrawableWidth;
-			int currentPx = printBuffer.CurrentLineWidth;
-			if (currentPx > 0 && currentPx + cellWidthPx > maxLineWidth)
-			{
-				ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
-				addRangeDisplayLine(dispList);
-			}
-
 			ConsoleButtonString[] buttons = HtmlManager.Html2ButtonList(str, stringMeasure, this);
 			if (buttons.Length == 0)
 				return;
@@ -461,17 +453,15 @@ namespace MinorShift.Emuera.GameView
 				contentWidth += Math.Max(0, button.Width);
 			}
 
-			int padPx = cellWidthPx - contentWidth;
-			if (padPx > 0 && alignmentRight)
-				appendHtmlCellSpace(padPx);
-			foreach (ConsoleButtonString button in buttons)
+			appendPrintCCell(contentWidth, cellWidthPx, alignmentRight, () =>
 			{
-				if (button == null)
-					continue;
-				printBuffer.AppendButton(button);
-			}
-			if (padPx > 0 && !alignmentRight)
-				appendHtmlCellSpace(padPx);
+				foreach (ConsoleButtonString button in buttons)
+				{
+					if (button == null)
+						continue;
+					printBuffer.AppendButton(button);
+				}
+			});
 		}
 
 		private void appendHtmlCellSpace(int width)
@@ -498,34 +488,7 @@ namespace MinorShift.Emuera.GameView
 
 			Font font = Config.Font;
 			int contentWidth = stringMeasure.GetDisplayLength(str, font);
-			int cellWidth = printCWidth;
-			int padPx = cellWidth - contentWidth;
-
-			if (printBuffer.IsEmpty)
-				printCCurrentLinePx = 0;
-
-			int maxLineWidth = Config.DrawableWidth;
-			bool fullColumnFits = (printCCurrentLinePx + cellWidth <= maxLineWidth);
-			bool contentFits = (printCCurrentLinePx + contentWidth <= maxLineWidth);
-
-			if (printCCurrentLinePx > 0 && !contentFits)
-			{
-				ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
-				addRangeDisplayLine(dispList);
-				printCCurrentLinePx = 0;
-				fullColumnFits = true;
-				contentFits = true;
-			}
-
-			if (alignmentRight && padPx > 0 && fullColumnFits)
-				appendHtmlCellSpace(padPx);
-
-			printBuffer.Append(str, Style, true);
-
-			if (!alignmentRight && padPx > 0 && fullColumnFits)
-				appendHtmlCellSpace(padPx);
-
-			printCCurrentLinePx = fullColumnFits ? printCCurrentLinePx + cellWidth : maxLineWidth;
+			appendPrintCCell(contentWidth, printCWidth, alignmentRight, () => printBuffer.Append(str, Style, true));
 		}
 
 		private void calcPrintCWidth(StringMeasure stringMeasure)
@@ -533,6 +496,58 @@ namespace MinorShift.Emuera.GameView
 			string str = new string(' ', Config.PrintCLength);
 			Font font = Config.Font;
 			printCWidth = stringMeasure.GetDisplayLength(str, font);
+		}
+
+		private void appendPrintCCell(int contentWidth, int cellWidth, bool alignmentRight, Action appendContent)
+		{
+			if (appendContent == null)
+				return;
+
+			int currentPx = getPrintCCurrentLinePx();
+			int maxLineWidth = Config.DrawableWidth;
+			bool fullColumnFits = currentPx + cellWidth <= maxLineWidth;
+			bool contentFits = currentPx + contentWidth <= maxLineWidth;
+
+			if (currentPx > 0 && !contentFits)
+			{
+				flushPrintBufferForPrintC();
+				currentPx = 0;
+				fullColumnFits = true;
+			}
+
+			int padPx = cellWidth - contentWidth;
+			if (alignmentRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			appendContent();
+
+			if (!alignmentRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			// HTML_PRINTC/PRINTC 可以混用。列累计以本 helper 为准，CurrentLineWidth
+			// 只作为外部按钮已经计算过宽度时的下限，避免结算表格后续列回到错误的起点。
+			printCCurrentLinePx = fullColumnFits ? currentPx + cellWidth : maxLineWidth;
+		}
+
+		private int getPrintCCurrentLinePx()
+		{
+			if (printBuffer.IsEmpty)
+			{
+				printCCurrentLinePx = 0;
+				return 0;
+			}
+
+			int actualWidth = printBuffer.CurrentLineWidth;
+			if (actualWidth > printCCurrentLinePx)
+				printCCurrentLinePx = actualWidth;
+			return printCCurrentLinePx;
+		}
+
+		private void flushPrintBufferForPrintC()
+		{
+			ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
+			addRangeDisplayLine(dispList);
+			printCCurrentLinePx = 0;
 		}
 
 		internal void PrintButton(string str, string p)
@@ -557,34 +572,7 @@ namespace MinorShift.Emuera.GameView
 
 			Font font = Config.Font;
 			int contentWidth = stringMeasure.GetDisplayLength(str, font);
-			int cellWidth = printCWidth;
-			int padPx = cellWidth - contentWidth;
-
-			if (printBuffer.IsEmpty)
-				printCCurrentLinePx = 0;
-
-			int maxLineWidth = Config.DrawableWidth;
-			bool fullColumnFits = (printCCurrentLinePx + cellWidth <= maxLineWidth);
-			bool contentFits = (printCCurrentLinePx + contentWidth <= maxLineWidth);
-
-			if (printCCurrentLinePx > 0 && !contentFits)
-			{
-				ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
-				addRangeDisplayLine(dispList);
-				printCCurrentLinePx = 0;
-				fullColumnFits = true;
-				contentFits = true;
-			}
-
-			if (isRight && padPx > 0 && fullColumnFits)
-				appendHtmlCellSpace(padPx);
-
-			printBuffer.AppendButton(str, Style, p);
-
-			if (!isRight && padPx > 0 && fullColumnFits)
-				appendHtmlCellSpace(padPx);
-
-			printCCurrentLinePx = fullColumnFits ? printCCurrentLinePx + cellWidth : maxLineWidth;
+			appendPrintCCell(contentWidth, printCWidth, isRight, () => printBuffer.AppendButton(str, Style, p));
 		}
 		internal void PrintButtonC(string str, long p, bool isRight)
 		{
@@ -596,34 +584,7 @@ namespace MinorShift.Emuera.GameView
 
 			Font font = Config.Font;
 			int contentWidth = stringMeasure.GetDisplayLength(str, font);
-			int cellWidth = printCWidth;
-			int padPx = cellWidth - contentWidth;
-
-			if (printBuffer.IsEmpty)
-				printCCurrentLinePx = 0;
-
-			int maxLineWidth = Config.DrawableWidth;
-			bool fullColumnFits = (printCCurrentLinePx + cellWidth <= maxLineWidth);
-			bool contentFits = (printCCurrentLinePx + contentWidth <= maxLineWidth);
-
-			if (printCCurrentLinePx > 0 && !contentFits)
-			{
-				ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
-				addRangeDisplayLine(dispList);
-				printCCurrentLinePx = 0;
-				fullColumnFits = true;
-				contentFits = true;
-			}
-
-			if (isRight && padPx > 0 && fullColumnFits)
-				appendHtmlCellSpace(padPx);
-
-			printBuffer.AppendButton(str, Style, p);
-
-			if (!isRight && padPx > 0 && fullColumnFits)
-				appendHtmlCellSpace(padPx);
-
-			printCCurrentLinePx = fullColumnFits ? printCCurrentLinePx + cellWidth : maxLineWidth;
+			appendPrintCCell(contentWidth, printCWidth, isRight, () => printBuffer.AppendButton(str, Style, p));
 		}
 
 		internal void PrintPlain(string str)
@@ -677,6 +638,7 @@ namespace MinorShift.Emuera.GameView
 			ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
 			//ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, temporary | force_temporary);
 			addRangeDisplayLine(dispList);
+			printCCurrentLinePx = 0;
 			//1819描画命令は分離
 			//RefreshStrings(false);
 		}

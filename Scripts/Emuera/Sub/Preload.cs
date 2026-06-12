@@ -32,7 +32,8 @@ namespace MinorShift.Emuera.Sub
 			if (Directory.Exists(path))
 			{
 				var query = Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
-					.AsParallel();
+					.AsParallel()
+					.WithDegreeOfParallelism(GetPreloadDegree());
 				query.Where(file => IsPreloadTarget(file, includeErb)).ForAll(LoadFile);
 			}
 			else if (File.Exists(path) && IsPreloadTarget(path, includeErb))
@@ -59,6 +60,15 @@ namespace MinorShift.Emuera.Sub
 				|| ext.Equals(".erh", StringComparison.OrdinalIgnoreCase)
 				|| ext.Equals(".erd", StringComparison.OrdinalIgnoreCase)
 				|| ext.Equals(".als", StringComparison.OrdinalIgnoreCase);
+		}
+
+		static int GetPreloadDegree()
+		{
+			// Android 外部存储在老设备上很容易被并行预读打出 I/O 和内存尖峰；
+			// 保留后台预热收益，但把并发控制在手机可承受的范围内。
+			if (global::Godot.OS.HasFeature("mobile"))
+				return 2;
+			return Math.Max(1, Math.Min(Environment.ProcessorCount, 4));
 		}
 
 		static void LoadFile(string path)

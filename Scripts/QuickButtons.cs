@@ -13,6 +13,7 @@ public partial class QuickButtons : CanvasLayer
 	List<Control> buttons = new List<Control>();
 	Stack<Panel> buttonPool = new Stack<Panel>();
 	Stack<HBoxContainer> rowPool = new Stack<HBoxContainer>();
+	Dictionary<uint, StyleBoxFlat> quickButtonStyleCache = new Dictionary<uint, StyleBoxFlat>();
 	Font fontFile;
 	int fontSize;
 	bool layoutUpdateQueued;
@@ -26,6 +27,8 @@ public partial class QuickButtons : CanvasLayer
 	bool scrollToBottomAfterLayout = true;
 	bool quickInertiaActive;
 	int quickScrollInteractionSerial;
+	bool quickContentSizeDirty = true;
+	Vector2 cachedQuickContentSize = Vector2.Zero;
 	float resizeStartMouseX;
 	float resizeStartWidth;
 	float quickInertiaDeceleration = 900.0f;
@@ -254,6 +257,7 @@ public partial class QuickButtons : CanvasLayer
 		dragPointerIsTouch = false;
 		dragPointerIndex = -1;
 		buttons.Clear();
+		quickButtonStyleCache.Clear();
 		var children = rowsContainer.GetChildren();
 		for (int i = 0; i < children.Count; i++)
 		{
@@ -264,6 +268,7 @@ public partial class QuickButtons : CanvasLayer
 		}
 		currentRow = AcquireRow();
 		rowsContainer.AddChild(currentRow);
+		MarkQuickContentSizeDirty();
 		RequestPanelSizeUpdate(true);
 	}
 
@@ -273,6 +278,7 @@ public partial class QuickButtons : CanvasLayer
 		ConfigureButton(btn, text, color, code, generation);
 		currentRow.AddChild(btn);
 		buttons.Add(btn);
+		MarkQuickContentSizeDirty();
 		RequestPanelSizeUpdate(ShouldStickToBottom());
 	}
 
@@ -590,10 +596,11 @@ public partial class QuickButtons : CanvasLayer
 
 	public void ShiftLine()
 	{
-		if (currentRow.GetChildCount() == 0)
+			if (currentRow.GetChildCount() == 0)
 			return;
 		currentRow = AcquireRow();
 		rowsContainer.AddChild(currentRow);
+		MarkQuickContentSizeDirty();
 		RequestPanelSizeUpdate(ShouldStickToBottom());
 	}
 
@@ -623,6 +630,7 @@ public partial class QuickButtons : CanvasLayer
 			}
 			ApplyButtonMetrics(btn);
 		}
+		MarkQuickContentSizeDirty();
 		RequestPanelSizeUpdate(ShouldStickToBottom());
 	}
 
@@ -641,6 +649,7 @@ public partial class QuickButtons : CanvasLayer
 		}
 		if (userWidth > 0)
 			userWidth = Mathf.Clamp(userWidth, EffectiveButtonWidth + ResizeHandleWidth, GetViewport().GetVisibleRect().Size.X - 40);
+		MarkQuickContentSizeDirty();
 		RequestPanelSizeUpdate(ShouldStickToBottom());
 	}
 
@@ -683,16 +692,30 @@ public partial class QuickButtons : CanvasLayer
 			: textColor;
 		var bgColor = new Color(1 - bgSource.R, 1 - bgSource.G, 1 - bgSource.B, 0.75f);
 
-		var normal = new StyleBoxFlat();
-		normal.BgColor = bgColor;
-		normal.CornerRadiusTopLeft = normal.CornerRadiusTopRight = 3;
-		normal.CornerRadiusBottomLeft = normal.CornerRadiusBottomRight = 3;
-		normal.ContentMarginLeft = QuickButtonPadding;
-		normal.ContentMarginRight = QuickButtonPadding;
-		normal.ContentMarginTop = QuickButtonPadding;
-		normal.ContentMarginBottom = QuickButtonPadding;
+		uint key = ColorCacheKey(bgColor);
+		if (!quickButtonStyleCache.TryGetValue(key, out var normal))
+		{
+			normal = new StyleBoxFlat();
+			normal.BgColor = bgColor;
+			normal.CornerRadiusTopLeft = normal.CornerRadiusTopRight = 3;
+			normal.CornerRadiusBottomLeft = normal.CornerRadiusBottomRight = 3;
+			normal.ContentMarginLeft = QuickButtonPadding;
+			normal.ContentMarginRight = QuickButtonPadding;
+			normal.ContentMarginTop = QuickButtonPadding;
+			normal.ContentMarginBottom = QuickButtonPadding;
+			quickButtonStyleCache[key] = normal;
+		}
 
 		btn.AddThemeStyleboxOverride("panel", normal);
+	}
+
+	static uint ColorCacheKey(Color color)
+	{
+		uint r = (uint)Mathf.Clamp(Mathf.RoundToInt(color.R * 255.0f), 0, 255);
+		uint g = (uint)Mathf.Clamp(Mathf.RoundToInt(color.G * 255.0f), 0, 255);
+		uint b = (uint)Mathf.Clamp(Mathf.RoundToInt(color.B * 255.0f), 0, 255);
+		uint a = (uint)Mathf.Clamp(Mathf.RoundToInt(color.A * 255.0f), 0, 255);
+		return r | (g << 8) | (b << 16) | (a << 24);
 	}
 
 	void ApplyFontToButtonLabel(Control btn)
@@ -764,7 +787,7 @@ public partial class QuickButtons : CanvasLayer
 		}
 		layoutUpdateQueued = false;
 		var viewportSize = GetViewport().GetVisibleRect().Size;
-		var contentSize = rowsContainer.GetCombinedMinimumSize();
+		var contentSize = GetQuickContentSize();
 		float maxWidth = viewportSize.X * 0.6f;
 		float maxHeight = Mathf.Max(QuickButtonHeight, viewportSize.Y - 66);
 		float minWidth = EffectiveButtonWidth;
@@ -785,7 +808,7 @@ public partial class QuickButtons : CanvasLayer
 			return;
 
 		var viewportSize = GetViewport().GetVisibleRect().Size;
-		var contentSize = rowsContainer.GetCombinedMinimumSize();
+		var contentSize = GetQuickContentSize();
 		float maxHeight = Mathf.Max(QuickButtonHeight, viewportSize.Y - 66);
 		float minWidth = EffectiveButtonWidth;
 		float width = userWidth > 0
@@ -930,7 +953,7 @@ public partial class QuickButtons : CanvasLayer
 	{
 		if (scroll == null || rowsContainer == null)
 			return 0;
-		float contentWidth = Mathf.Max(rowsContainer.Size.X, rowsContainer.GetCombinedMinimumSize().X);
+		float contentWidth = Mathf.Max(rowsContainer.Size.X, GetQuickContentSize().X);
 		return Mathf.RoundToInt(Mathf.Max(0, contentWidth - scroll.Size.X));
 	}
 
@@ -938,8 +961,25 @@ public partial class QuickButtons : CanvasLayer
 	{
 		if (scroll == null || rowsContainer == null)
 			return 0;
-		float contentHeight = Mathf.Max(rowsContainer.Size.Y, rowsContainer.GetCombinedMinimumSize().Y);
+		float contentHeight = Mathf.Max(rowsContainer.Size.Y, GetQuickContentSize().Y);
 		return Mathf.RoundToInt(Mathf.Max(0, contentHeight - scroll.Size.Y));
+	}
+
+	void MarkQuickContentSizeDirty()
+	{
+		quickContentSizeDirty = true;
+	}
+
+	Vector2 GetQuickContentSize()
+	{
+		if (rowsContainer == null)
+			return Vector2.Zero;
+		if (quickContentSizeDirty)
+		{
+			cachedQuickContentSize = rowsContainer.GetCombinedMinimumSize();
+			quickContentSizeDirty = false;
+		}
+		return cachedQuickContentSize;
 	}
 
 	static void EnsureSettingsLoaded()

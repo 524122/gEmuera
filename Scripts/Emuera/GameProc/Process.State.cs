@@ -101,6 +101,7 @@ namespace MinorShift.Emuera.GameProc
 		readonly EmueraConsole console = null;
 		readonly List<CalledFunction> functionList = new List<CalledFunction>();
 		readonly Stack<ExecutionContext> contextStack = new Stack<ExecutionContext>();
+		private Stack<ExecutionContext> savedContextStack;
 		private LogicalLine currentLine;
 		//private LogicalLine nextLine;
 		public int lineCount = 0;
@@ -134,7 +135,26 @@ namespace MinorShift.Emuera.GameProc
 
 		public ExecutionContext CurrentContext
 		{
-			get { return contextStack.Count > 0 ? contextStack.Peek() : null; }
+			get { return contextStack.Count > 0 ? contextStack.Peek() : savedContextStack != null && savedContextStack.Count > 0 ? savedContextStack.Peek() : null; }
+		}
+
+		public IEnumerable<ExecutionContext> ContextStack
+		{
+			get { return contextStack.Count > 0 ? contextStack : savedContextStack ?? contextStack; }
+		}
+
+		public ExecutionContext FindContextByLabel(string labelName)
+		{
+			Stack<ExecutionContext> stack = contextStack.Count > 0 ? contextStack : savedContextStack;
+			if (stack != null)
+			{
+				foreach (ExecutionContext context in stack)
+				{
+					if (context.Function != null && context.Function.LabelName == labelName)
+						return context;
+				}
+			}
+			return null;
 		}
 
 		public void PushContext(ExecutionContext context)
@@ -145,6 +165,33 @@ namespace MinorShift.Emuera.GameProc
 		public ExecutionContext PopContext()
 		{
 			return contextStack.Count > 0 ? contextStack.Pop() : null;
+		}
+
+		public int ContextStackCount
+		{
+			get { return contextStack.Count; }
+		}
+
+		public (int funcCount, int ctxCount, LogicalLine currentLine) CaptureCallState()
+		{
+			return (functionList.Count, contextStack.Count, currentLine);
+		}
+
+		public void RollbackToState(int targetFuncCount, int targetCtxCount, LogicalLine targetCurrentLine)
+		{
+			while (functionList.Count > targetFuncCount)
+			{
+				CalledFunction called = functionList[functionList.Count - 1];
+				if (called.CurrentLabel.hasPrivDynamicVar)
+					called.CurrentLabel.Out();
+				functionList.RemoveAt(functionList.Count - 1);
+			}
+			while (contextStack.Count > targetCtxCount)
+			{
+				ExecutionContext context = contextStack.Pop();
+				context?.Dispose();
+			}
+			currentLine = targetCurrentLine;
 		}
 
 		SystemStateCode sysStateCode = SystemStateCode.Title_Begin;
@@ -321,6 +368,20 @@ namespace MinorShift.Emuera.GameProc
 			foreach (CalledFunction called in functionList)
                 if (called.CurrentLabel.hasPrivDynamicVar)
                     called.CurrentLabel.Out();
+			while (contextStack.Count > 0)
+			{
+				ExecutionContext context = contextStack.Pop();
+				context.Dispose();
+			}
+			functionList.Clear();
+			begintype = BeginType.NULL;
+		}
+
+		public void ClearFunctionListPreserveTrace()
+		{
+			foreach (CalledFunction called in functionList)
+				if (called.CurrentLabel.hasPrivDynamicVar)
+					called.CurrentLabel.Out();
 			while (contextStack.Count > 0)
 			{
 				ExecutionContext context = contextStack.Pop();
@@ -741,6 +802,9 @@ namespace MinorShift.Emuera.GameProc
             //ret.sequential = this.sequential;
 			ret.sysStateCode = this.sysStateCode;
 			ret.begintype = this.begintype;
+			// 调试窗口求值会克隆 ProcessState。克隆体不执行原调用栈，但 LOCAL@FUNCNAME
+			// 仍需要读取原栈上下文，否则监视表达式中的 LOCAL/ARG 会退回空数组。
+			ret.savedContextStack = this.contextStack;
 			//ret.MethodReturnValue = this.MethodReturnValue;
 			return ret;
 

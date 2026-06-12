@@ -629,7 +629,7 @@ check1break:
 			for(int i = 0; i< countNameCsv;i++)
 			{
 				names[i] = new string[MaxDataList[i]];
-				nameToIntDics[i] = new Dictionary<string, int>();
+				nameToIntDics[i] = new Dictionary<string, int>(MaxDataList[i]);
 				aliases[i] = null;
 			}
 			ItemPrice = new Int64[MaxDataList[itemIndex]];
@@ -671,16 +671,16 @@ check1break:
 				string[] nameArray = names[i];
 				for (int j = 0; j < nameArray.Length; j++)
 				{
-					if (!string.IsNullOrEmpty(nameArray[j]) && !nameToIntDics[i].ContainsKey(nameArray[j]))
-						nameToIntDics[i].Add(nameArray[j], j);
+					if (!string.IsNullOrEmpty(nameArray[j]))
+						nameToIntDics[i].TryAdd(nameArray[j], j);
 				}
 				Dictionary<string, int> aliasDict = aliases[i];
 				if (aliasDict == null)
 					continue;
 				foreach (var alias in aliasDict)
 				{
-					if (!string.IsNullOrEmpty(alias.Key) && !nameToIntDics[i].ContainsKey(alias.Key))
-						nameToIntDics[i].Add(alias.Key, alias.Value);
+					if (!string.IsNullOrEmpty(alias.Key))
+						nameToIntDics[i].TryAdd(alias.Key, alias.Value);
 				}
 			}
 			//if (!Program.AnalysisMode)
@@ -688,15 +688,16 @@ check1break:
 			loadGlobalVarExSetting(csvDir, disp);
 
 			//逆引き辞書を作成2 (RELATION)
+			relationDic.EnsureCapacity(CharacterTmplList.Count * 3);
 			for (int i = 0; i < CharacterTmplList.Count; i++)
 			{
 				CharacterTemplate tmpl = CharacterTmplList[i];
-				if (!string.IsNullOrEmpty(tmpl.Name) && !relationDic.ContainsKey(tmpl.Name))
-					relationDic.Add(tmpl.Name, (int)tmpl.No);
-				if (!string.IsNullOrEmpty(tmpl.Callname) && !relationDic.ContainsKey(tmpl.Callname))
-                    relationDic.Add(tmpl.Callname, (int)tmpl.No);
-				if (!string.IsNullOrEmpty(tmpl.Nickname) && !relationDic.ContainsKey(tmpl.Nickname))
-                    relationDic.Add(tmpl.Nickname, (int)tmpl.No);
+				if (!string.IsNullOrEmpty(tmpl.Name))
+					relationDic.TryAdd(tmpl.Name, (int)tmpl.No);
+				if (!string.IsNullOrEmpty(tmpl.Callname))
+                    relationDic.TryAdd(tmpl.Callname, (int)tmpl.No);
+				if (!string.IsNullOrEmpty(tmpl.Nickname))
+                    relationDic.TryAdd(tmpl.Nickname, (int)tmpl.No);
 			}
 		}
 
@@ -848,8 +849,8 @@ check1break:
 			if (filepaths == null || filepaths.Count == 0 || string.IsNullOrEmpty(varname) || varlength <= 0)
 				return;
 
-			Dictionary<string, int> dict = new Dictionary<string, int>();
-			Dictionary<string, string> definedAt = new Dictionary<string, string>();
+			Dictionary<string, int> dict = new Dictionary<string, int>(varlength);
+			Dictionary<string, string> definedAt = new Dictionary<string, string>(varlength);
 			for (int i = 0; i < filepaths.Count; i++)
 			{
 				string[] nameArray = new string[varlength];
@@ -1412,16 +1413,20 @@ check1break:
 				return;
 			}
 			List<KeyValuePair<string, string>> csvPaths = Config.GetFiles(csvDir, "CHARA*.CSV");
+			EnsureCharacterTemplateListCapacity(csvPaths.Count);
 			for (int i = 0; i < csvPaths.Count; i++)
 				loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
 #if(UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
             csvPaths = Config.GetFiles(csvDir, "Chara*.CSV");
+            EnsureCharacterTemplateListCapacity(csvPaths.Count);
             for(int i = 0; i < csvPaths.Count; i++)
                 loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
             csvPaths = Config.GetFiles(csvDir, "CHARA*.csv");
+            EnsureCharacterTemplateListCapacity(csvPaths.Count);
             for(int i = 0; i < csvPaths.Count; i++)
                 loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
             csvPaths = Config.GetFiles(csvDir, "Chara*.csv");
+            EnsureCharacterTemplateListCapacity(csvPaths.Count);
             for(int i = 0; i < csvPaths.Count; i++)
                 loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
 #endif
@@ -1443,8 +1448,8 @@ check1break:
                 tmpl = CharacterTmplList[i];
                 tmpl.SetSpFlag();
             }
-			Dictionary<Int64, CharacterTemplate> nList = new Dictionary<Int64, CharacterTemplate>();
-			Dictionary<Int64, CharacterTemplate> spList = new Dictionary<Int64, CharacterTemplate>();
+			Dictionary<Int64, CharacterTemplate> nList = new Dictionary<Int64, CharacterTemplate>(count);
+			Dictionary<Int64, CharacterTemplate> spList = new Dictionary<Int64, CharacterTemplate>(Config.CompatiSPChara ? count : 0);
             for(int i = 0; i < count; ++i)
             {
                 tmpl = CharacterTmplList[i];
@@ -1464,6 +1469,15 @@ check1break:
 				else
 					targetList.Add(tmpl.No, tmpl);
 			}
+		}
+
+		private void EnsureCharacterTemplateListCapacity(int additionalFiles)
+		{
+			if (additionalFiles <= 0)
+				return;
+			int target = CharacterTmplList.Count + additionalFiles;
+			if (CharacterTmplList.Capacity < target)
+				CharacterTmplList.Capacity = target;
 		}
 
 		private void loadCharacterDataFile(string csvPath, string csvName, bool disp)
@@ -1621,6 +1635,11 @@ check1break:
 			nicknameToTemplateMap.Clear();
 			callnameToTemplateMap.Clear();
 			masternameToTemplateMap.Clear();
+			int count = CharacterTmplList.Count;
+			nameToTemplateMap.EnsureCapacity(count);
+			nicknameToTemplateMap.EnsureCapacity(count);
+			callnameToTemplateMap.EnsureCapacity(count);
+			masternameToTemplateMap.EnsureCapacity(count);
 			for (int i = CharacterTmplList.Count - 1; i >= 0; i--)
 			{
 				CharacterTemplate tmpl = CharacterTmplList[i];
@@ -2026,13 +2045,12 @@ check1break:
 					string aliasName = token1.Trim();
 					if (string.IsNullOrEmpty(aliasName))
 						continue;
-					if (target.ContainsKey(aliasName))
-					{
-						ParserMediator.Warn("別名\"" + aliasName + "\"は既に定義されています", position, 1);
-						continue;
+						if (!target.TryAdd(aliasName, index))
+						{
+							ParserMediator.Warn("別名\"" + aliasName + "\"は既に定義されています", position, 1);
+							continue;
+						}
 					}
-					target.Add(aliasName, index);
-				}
 			}
 			catch
 			{

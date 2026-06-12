@@ -22,6 +22,8 @@ internal static class SpriteManager
 	const int DesktopAsyncTextureConcurrency = 2;
 	const int MobileAsyncTextureCompletionBudget = 2;
 	const int DesktopAsyncTextureCompletionBudget = 6;
+	const int MobileCleanupDisposeBudget = 24;
+	const int DesktopCleanupDisposeBudget = 96;
 
 	internal class SpriteInfo : IDisposable
 	{
@@ -626,24 +628,29 @@ internal static class SpriteManager
 			for (int i = 0; i < unique.Count; i++)
 				totalBytes += unique[i].estimatedBytes;
 			int liveCount = unique.Count;
+			bool overBudget = totalBytes > budgetBytes || liveCount > budgetEntries;
 
 			// Visible console/CBG nodes pin their TextureInfo. Cleanup can therefore
 			// reclaim old off-screen CGs without invalidating textures still assigned
 			// to Godot Controls.
-			unique.Sort((a, b) => a.pasttime.CompareTo(b.pasttime));
+			if (overBudget)
+				unique.Sort((a, b) => a.pasttime.CompareTo(b.pasttime));
+			int cleanupBudget = OS.HasFeature("mobile") ? MobileCleanupDisposeBudget : DesktopCleanupDisposeBudget;
 			for (int i = 0; i < unique.Count; i++)
 			{
 				var ti = unique[i];
 				if (!CanEvict(ti))
 					continue;
 				bool expired = ti.pasttime <= now;
-				bool overBudget = totalBytes > budgetBytes || liveCount > budgetEntries;
+				overBudget = totalBytes > budgetBytes || liveCount > budgetEntries;
 				if (!expired && !overBudget)
 					continue;
 				RemoveTextureInfoAliasesLocked(ti);
 				disposeList.Add(ti);
 				totalBytes -= ti.estimatedBytes;
 				liveCount -= 1;
+				if (disposeList.Count >= cleanupBudget)
+					break;
 			}
 		}
 

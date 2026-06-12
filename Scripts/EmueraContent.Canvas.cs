@@ -325,11 +325,13 @@ public partial class EmueraContent
 		var node = overlay.Node;
 		if (node == null || !GodotObject.IsInstanceValid(node))
 			return;
-		if (!TryResolveCanvasImage(overlay.Image, overlay.RelX, out var info))
-		{
-			node.Visible = false;
-			return;
-		}
+			if (!TryResolveCanvasImage(overlay.Image, overlay.RelX, out var info))
+			{
+				// XRay/HTML 差分图刷新时，新帧可能还在异步解码。已有节点继续显示旧纹理，
+				// 等新纹理解析成功后再替换，避免刷新瞬间露出空白或白色图块。
+				node.Visible = node.SourceTexture != null && IsCanvasOverlayRectVisible(GetCanvasImageOverlayRect(node), visible);
+				return;
+			}
 		node.SourceTexture = info.SourceTexture;
 		node.SourceRegion = info.SourceRegion;
 		node.DrawOffset = info.DrawOffset;
@@ -414,52 +416,71 @@ public partial class EmueraContent
 
 	Texture2D ResolveCanvasTextureByResourceName(string resName)
 	{
-		var tryPaths = new List<string>
+		if (string.IsNullOrEmpty(resName))
+			return null;
+
+		bool TryResolveOrRequest(string path, bool cacheResolvedPath, out Texture2D candidateTexture)
 		{
-			resName,
-			System.IO.Path.Combine(Program.ContentDir, resName),
-			System.IO.Path.Combine(Program.ExeDir, resName),
-			System.IO.Path.Combine(Program.ExeDir, "resources", resName),
-		};
-		bool hasExt = resName.Contains(".");
-		if (!hasExt)
-		{
-			foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tga" })
-			{
-				tryPaths.Add(resName + ext);
-				tryPaths.Add(System.IO.Path.Combine(Program.ContentDir, resName + ext));
-				tryPaths.Add(System.IO.Path.Combine(Program.ExeDir, "resources", resName + ext));
-			}
+			if (TryResolveCanvasTexturePath(resName, path, cacheResolvedPath, out candidateTexture, out bool asyncRequested))
+				return true;
+			return asyncRequested;
 		}
 
-		foreach (var tryPath in tryPaths)
+		if (resolvedTextureSearchPaths.TryGetValue(resName, out var cachedPath))
 		{
-			if (!uEmuera.Utils.FileExists(tryPath))
-				continue;
-			if (TryGetDisplayTextureInfo(resName, tryPath, out var ti))
-				return ti.texture;
-			if (RequestAsyncTextureForCurrentRender(resName, tryPath))
-				return null;
+			if (TryResolveOrRequest(cachedPath, true, out var cachedTexture))
+				return cachedTexture;
+			resolvedTextureSearchPaths.Remove(resName);
+		}
+
+		bool hasExt = resName.Contains(".");
+		if (TryResolveOrRequest(resName, true, out var texture))
+			return texture;
+		if (TryResolveOrRequest(System.IO.Path.Combine(Program.ContentDir, resName), true, out texture))
+			return texture;
+		if (TryResolveOrRequest(System.IO.Path.Combine(Program.ExeDir, resName), true, out texture))
+			return texture;
+		if (TryResolveOrRequest(System.IO.Path.Combine(Program.ExeDir, "resources", resName), true, out texture))
+			return texture;
+
+		if (!hasExt)
+		{
+			foreach (var ext in CanvasImageFallbackExtensions)
+			{
+				string target = resName + ext;
+				if (TryResolveOrRequest(target, true, out texture))
+					return texture;
+				if (TryResolveOrRequest(System.IO.Path.Combine(Program.ContentDir, target), true, out texture))
+					return texture;
+				if (TryResolveOrRequest(System.IO.Path.Combine(Program.ExeDir, "resources", target), true, out texture))
+					return texture;
+			}
 		}
 
 		if (!string.IsNullOrEmpty(Program.ContentDir))
 		{
-			string[] exts = hasExt ? new[] { "" } : new[] { ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tga" };
-			foreach (var ext in exts)
+			if (hasExt)
 			{
-				string target = hasExt ? resName : resName + ext;
-				var found = uEmuera.Utils.FindFileRecursive(Program.ContentDir, target);
-				if (string.IsNullOrEmpty(found))
-					continue;
-				if (TryGetDisplayTextureInfo(resName, found, out var ti))
+				var found = uEmuera.Utils.FindFileRecursive(Program.ContentDir, resName);
+				if (!string.IsNullOrEmpty(found) && TryResolveOrRequest(found, true, out texture))
 				{
 					GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] Found \"{resName}\" via subdirectory search: {found}");
-					return ti.texture;
+					return texture;
 				}
-				if (RequestAsyncTextureForCurrentRender(resName, found))
+			}
+			else
+			{
+				foreach (var ext in CanvasImageFallbackExtensions)
 				{
-					GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] Found \"{resName}\" via subdirectory search: {found}");
-					return null;
+					string target = resName + ext;
+					var found = uEmuera.Utils.FindFileRecursive(Program.ContentDir, target);
+					if (string.IsNullOrEmpty(found))
+						continue;
+					if (TryResolveOrRequest(found, true, out texture))
+					{
+						GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] Found \"{resName}\" via subdirectory search: {found}");
+						return texture;
+					}
 				}
 			}
 		}
@@ -471,6 +492,25 @@ public partial class EmueraContent
 		}
 		return null;
 	}
+
+	bool TryResolveCanvasTexturePath(string resName, string path, bool cacheResolvedPath, out Texture2D texture, out bool asyncRequested)
+	{
+		texture = null;
+		asyncRequested = false;
+		if (string.IsNullOrEmpty(path) || !uEmuera.Utils.FileExists(path))
+			return false;
+		if (cacheResolvedPath)
+			resolvedTextureSearchPaths[resName] = path;
+		if (TryGetDisplayTextureInfo(resName, path, out var ti))
+			{
+				texture = ti.texture;
+				return true;
+			}
+			// 异步请求只表示“稍后可能可用”，不能当作本轮已有可绘制纹理。
+			// 返回 false 让调用方走挂起刷新逻辑，避免先提交空白/半成品图层。
+			asyncRequested = RequestAsyncTextureForCurrentRender(resName, path);
+			return false;
+		}
 
 	void NotifyConsoleRenderContentChanged()
 	{
@@ -681,6 +721,11 @@ public partial class EmueraContent
 	{
 		if (!UseCanvasRenderBackend || canvasAnimatedImageOverlayKeys.Count == 0)
 			return;
+		ulong nowMs = Time.GetTicksMsec();
+		ulong minIntervalMs = OS.HasFeature("mobile") ? 50UL : 16UL;
+		if (lastCanvasAnimationRefreshMs != 0 && nowMs - lastCanvasAnimationRefreshMs < minIntervalMs)
+			return;
+		lastCanvasAnimationRefreshMs = nowMs;
 		for (int i = canvasAnimatedImageOverlayKeys.Count - 1; i >= 0; i--)
 		{
 			var key = canvasAnimatedImageOverlayKeys[i];
@@ -1077,7 +1122,8 @@ public partial class EmueraContent
 			text = uEmuera.Utils.StripZeroWidth(text) ?? "";
 			if (string.IsNullOrEmpty(text))
 				return;
-			float baseline = GetTextBaseline(owner.mainFont, owner.FontSize, owner.EffectiveLineHeight);
+			float fontHeight = owner.mainFont.GetHeight(owner.FontSize);
+			float baseline = GetTextBaseline(owner.mainFont, owner.FontSize, owner.EffectiveLineHeight, fontHeight);
 			if (!ShouldUseGridDrawing(text))
 			{
 				DrawString(owner.mainFont, new Vector2(x, lineY + baseline), text, HorizontalAlignment.Left,
@@ -1099,14 +1145,19 @@ public partial class EmueraContent
 				// 逐字符绘制只负责保持 emuera 的半角/全角格点起点，裁剪仍由整段宽度决定。
 				// 若按单元格宽度裁剪，Godot 字体 fallback 下的箱线/空白敏感字符会出现缺笔或整字丢失。
 				float drawWidth = Mathf.Max(cellWidth, x + width - drawX);
-				DrawGridChar(text[i], drawX, lineY + baseline, drawWidth, color, bold);
+				DrawGridChar(text[i], drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
 		}
 
-		void DrawGridChar(char value, float x, float baseline, float cellWidth, Color color, bool bold)
+		void DrawGridChar(char value, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
 		{
+			if (TryGetSolidBlockElementRect(value, cellWidth, owner.EffectiveLineHeight, fontHeight, out var blockRect))
+			{
+				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), color);
+				return;
+			}
 			string glyph = value.ToString();
 			float drawWidth = Mathf.Max(1.0f, cellWidth);
 			DrawString(owner.mainFont, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, owner.FontSize, color);
@@ -1139,9 +1190,10 @@ public partial class EmueraContent
 				DrawSetTransform(Vector2.Zero, 0, Vector2.One);
 		}
 
-		static float GetTextBaseline(Font font, int fontSize, float height)
+		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f)
 		{
-			float fontHeight = font.GetHeight(fontSize);
+			if (fontHeight < 0.0f)
+				fontHeight = font.GetHeight(fontSize);
 			float ascent = font.GetAscent(fontSize);
 			return Mathf.Round((height - fontHeight) * 0.5f + ascent);
 		}

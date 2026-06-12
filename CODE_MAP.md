@@ -1,6 +1,6 @@
 # CODE_MAP
 
-更新时间：2026-06-05
+更新时间：2026-06-07
 
 用途：这是给 AI 和维护者快速定位代码用的地图。优先读本文件，再按路径进入源码。地图只记录结构、职责、主要接口和关键函数，不复制源码实现。
 
@@ -47,6 +47,15 @@ project.godot
        -> EmueraConsole / GenericUtils / EmueraContent
           输出文本、按钮、图片、音频和输入交互
 ```
+
+## 2026-06-07 移动端性能补充
+
+- `QuickButtons`：快捷按钮面板复用按颜色缓存的 `StyleBoxFlat`，并缓存内容最小尺寸；按钮增删、换行、字体/尺寸变化时才重新计算，避免大量按钮惯性滚动时每帧触发布局测量。
+- `EmueraContent.Canvas`：Canvas 图片资源名 fallback 会缓存成功解析路径，减少 Android 外部存储重复探测和递归查找；`SpriteAnime` overlay 在移动端节流刷新，静态文字、按钮、颜色与 fallback 语义不变。
+- `SpriteManager`：纹理缓存清理只在超预算时排序，并限制单轮释放数量；仍严格遵守 `pinCount/refcount`，不会回收正在显示的 CBG、Canvas overlay 或行内图片。
+- `EraStreamReader` / `StringStream`：ERB/CSV 热路径减少 `Trim/TrimStart/Substring` 分配；行连接 `{}` / `}` 校验语义保持原核心行为。
+- `LabelDictionary` / `ErbLoader`：ERB label 字典在加载前按文件数量预估容量，降低大量 ERB 建表时的 rehash，不改变 `setLabelsArg`、`checkScript` 和 lazy 命中后的完整解析流程。
+- `ConstantData` / `Preload`：角色模板列表和姓名映射按已知文件/角色数量预分配；移动端预读并行度限制为 2，避免老手机外部存储 I/O 与内存峰值。
 
 线程模型：
 - Godot 主线程：UI、输入、`EmueraContent`、`SpriteManager.UpdateOtherThreads()`（接收异步图片解码结果并主线程上传纹理）、GPU ColorMatrix 队列。
@@ -139,7 +148,7 @@ project.godot
 | `uEmuera/Drawing.cs` | `Bitmap`, `BitmapTexture`, `Graphics`, `Color`, `Font`, `Rectangle`, `Point`, `Size` | `System.Drawing` 替代层；包装 Godot Image/Texture、颜色、字体、几何类型。 | `Bitmap.Save`, `BitmapTexture`, `Color.FromArgb`, `Color.ToGodotColor`, `Rectangle.Intersect` |
 | `uEmuera/Forms.cs` | `Timer`, `MessageBox`, `ScrollBar`, `ToolTip`, `PictureBox`, `TextBox` | `System.Windows.Forms` 替代层；Timer 由 Godot loop 手动 Update。 | `Timer.Update`, `MessageBox.Show`, `ToolTip.SetToolTip` |
 | `uEmuera/Window.cs` | `MainWindow`, `DebugDialog` | 原主窗体兼容桩，桥接 `EmueraConsole` 和 `Process`。 | `MainWindow.Init`, `Update`, `Refresh`, `WaitForRefreshProcessed`, `Reboot` |
-| `uEmuera/Utils.cs` | `Logger`, `Utils` | 文件系统、编码、资源扫描、显示宽度、路径规范化工具；Godot 文件 API 下的通配符枚举在单次目录扫描内复用 Regex 匹配，保持原通配符语义并避免按文件重复构造匹配器。 | `SHIFTJIS_to_UTF8`, `NormalizePath`, `FileExists`, `GetFilePaths`, `GetDisplayLength`, `ResourcePrepare` |
+| `uEmuera/Utils.cs` | `Logger`, `Utils` | 文件系统、编码、资源扫描、显示宽度、路径规范化工具；Godot 文件 API 下的通配符枚举在单次目录扫描内复用 Regex 匹配，保持原通配符语义并避免按文件重复构造匹配器；`ResourcePrepare` 读取资源 CSV 时只扫描头部字段，避免为每行创建完整 `string[]`。 | `SHIFTJIS_to_UTF8`, `NormalizePath`, `FileExists`, `GetFilePaths`, `GetDisplayLength`, `ResourcePrepare` |
 | `uEmuera/Properties.cs` | `ResourceManager`, `Resources` | 原资源访问兼容。 | `GetString` |
 | `uEmuera/VisualBasic.cs` | `Strings`, `VbStrConv` | VB 字符串转换兼容。 | `StrConv` |
 | `uEmuera/Media.cs` | `Hand`, `Asterisk` | 系统声音兼容桩。 | `Play` |
@@ -183,7 +192,7 @@ project.godot
 | `ConstantData.cs` | `ConstantData`, `CharacterTemplate`, `LazyErdNameData` | CSV 常量、角色模板、ERD 名称数据；维护整数/字符串/小数 1D 变量默认长度，`LOCALF/ARGF` 使用小数长度表；`VariableSize.CSV`、角色 CSV、名称 CSV、别名 CSV 和 `VarExt*.csv` 热路径使用轻量裸逗号字段读取，避免整行 `Split(',')` 分配；读取 `VarExt*.csv` 中 MAP/XML/DT 的 `SAVE/GLOBAL/STATIC` 保存域声明。 | 常量读取、角色模板访问 |
 | `DefineMacro.cs` | `DefineMacro` | `#DEFINE` 宏数据。 | 构造和字段 |
 | `EraType.cs` | `EraType`, `EraTypeHelper` | Era 值类型枚举和 CLR `Type` 过渡转换 helper；迁移期用于把旧 `long/string/double` 签名统一映射到整数/字符串/小数语义。 | `FromClrType`, `ToClrType`, 枚举定义 |
-| `GameBase.cs` | `GameBase` | 游戏基础信息、版本、标题、更新检查 URL/版本名等。 | `Load`, `Save`, 基础字段访问 |
+| `GameBase.cs` | `GameBase` | 游戏基础信息、版本、标题、更新检查 URL/版本名等；`GAMEBASE.CSV` 保留原核心裸逗号语义，但只扫描前两个字段以减少启动期分配。 | `LoadGameBaseCsv`, 基础字段访问 |
 | `IdentifierDictionary.cs` | `IdentifierDictionary` | 变量/函数/宏名解析字典，保留 `REF/REFF` 等关键字并管理局部变量默认尺寸/禁用状态。 | `GetIdentifier`, `Add`, defined-name 管理 |
 | `ParserMediator.cs` | `ParserMediator` | 表达式、变量、函数解析的中介和 warning 管理。 | `Initialize`, `GetWarningList`, parse helper |
 | `StrForm.cs` | `StrForm`, `FormattedStringMethod` 系列 | 格式化字符串表达式。 | `GetString`, format 方法 |
@@ -229,7 +238,7 @@ project.godot
 | `VariableEvaluator.cs` | `VariableEvaluator : IDisposable` | 变量求值、读写、角色变量访问、局部变量栈；`RESULT_ARRAY`、`RESULTS_ARRAY`、`RESULTF`、`SELECTCOM_ARRAY`、`ITEMSALES`、`RANDDATA` 等结果/工作变量兼容小数和 1D 稀疏存储，`VARSET/CVARSET` 批量赋值按 `EraType` 分派整数/字符串/小数路径，数组求和、匹配计数、最大/最小、区间统计 helper 覆盖小数数组；读档/全局读档按 VarExt 声明域处理 RuntimeDataStore，保留非保存域运行期缓存。 | `GetValue`, `SetValue`, `GetNextRand`, `SetValueAll`, `LoadFrom`, `LoadGlobal`, local/reference 管理 |
 | `ElementRefInfo.cs` | `ElementRefInfo` | Snake 兼容的元素级 REF 信息；捕获变量 token、索引和非角色数组实体，供标量 REF 参数读写数组单个元素。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `SetValue`, `PlusValue` |
 | `NullRefTerm.cs` | `NullRefTerm` | `OUT REF` 参数省略时的空引用占位；读零/空串、写入无操作。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `SetValue`, `GetArray` |
-| `VariableToken.cs` | `VariableToken` 及大量派生 token | 变量实际存取实现；静态/私有/局部/引用/角色/常量/伪变量，基础类型/维度/保存属性由 `VariableDescriptor` 驱动并公开 `EraType`；`REFF/REFF2D/REFF3D` 使用小数引用类型；`ReferenceToken` 保存数组引用、标量引用、元素引用和空引用状态，1D REF 路径同时支持 CLR 数组和 `SparseArray<T>`。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetEraType`, `SetValue`, `SetValueAll`, `PlusValue`, `In`, `Out`, `SetRef`, `SetNullRef`, `MatchType` |
+| `VariableToken.cs` | `VariableToken` 及大量派生 token | 变量实际存取实现；静态/私有/局部/引用/角色/常量/伪变量，基础类型/维度/保存属性由 `VariableDescriptor` 驱动并公开 `EraType`；`LOCAL/LOCALS/LOCALF/ARG/ARGS/ARGF` 运行期数组按当前 `ExecutionContext` 读取，带 `@FUNCNAME` 的局部变量会在调用栈中查找匹配函数上下文；`REFF/REFF2D/REFF3D` 使用小数引用类型；`ReferenceToken` 保存数组引用、标量引用、元素引用和空引用状态，1D REF 路径同时支持 CLR 数组和 `SparseArray<T>`。 | `GetIntValue`, `GetStrValue`, `GetFloatValue`, `GetEraType`, `SetValue`, `SetValueAll`, `PlusValue`, `In`, `Out`, `SetRef`, `SetNullRef`, `MatchType` |
 | `VariableTerm.cs` | `VariableTerm`, `FixedVariableTerm`, `VariableNoArgTerm` | 表达式中的变量访问项；暴露变量 `EraType` 和参数个数供函数参数转换、可变参数和元素级 REF 捕获索引。 | `GetIntValue`, `SetValue`, `GetEraType`, `Restructure`, `ArgumentCount` |
 | `VariableStrArgTerm.cs` | `VariableStrArgTerm` | 字符串索引变量表达式项。 | `GetStrValue`, `Restructure` |
 | `VariableLocal.cs` | `VariableLocal` | 局部变量 token 注册表；仍负责按函数标签尺寸创建 `LOCAL/LOCALS/LOCALF/ARG/ARGS/ARGF` token，但实际运行期数组已改由 `ExecutionContext` 持有。 | local token 创建、尺寸调整、默认值重置 |
@@ -243,10 +252,10 @@ project.godot
 | `Process.cs` | partial `Process` | 脚本处理器主类；初始化、输入结果、开始执行、异常处理；脚本错误终止时清理函数栈与 `ExecutionContext`，表达式函数异常路径防止局部上下文残留，并在 `BEFORE_THROW` 内部异常时跳过二次 `BEFORE_ERROR`。 | `Initialize`, `InitializeAsync`, `DoScript`, `BeginTitle`, `InputInteger`, `InputString`, `ReloadErb`, `ReloadErbAsync`, `ReloadPartialErb`, `ReloadPartialErbAsync`, `GetRunningPosition` |
 | `Process.ScriptProc.cs` | partial `Process` | 内层脚本执行循环和 debug 执行；`THROW` 会记录 pending throw、进入 `BEFORE_THROW`，并在 `BEFORE_THROW/BEFORE_ERROR` 内部只打印消息避免递归错误事件。 | `runScriptProc`, `DoDebugNormalFunction`, `saveCurrentState`, `loadPrevState` |
 | `ExecutionContext.cs` | `ExecutionContext` | 函数执行上下文；持有当前调用帧的 `LOCAL/LOCALS/LOCALF/ARG/ARGS/ARGF` 运行期数组和父子关系，用于替代旧的共享局部数组存储。 | 构造函数、`Dispose`, `Parent`, `Local*`, `Arg*` |
-| `Process.State.cs` | `ProcessState`, `SystemStateCode`, `BeginType` | CALL/JUMP/RETURN、BEGIN、函数栈、返回值、状态克隆；维护 `ExecutionContext` 栈，进入函数时绑定数组 REF、元素级 REF、OUT 空引用并创建局部执行上下文；`BEFORE_ERROR/BEFORE_THROW` 事件返回时绕过 `#FUNCTION` 快速 `ReturnF` 路径以保留错误重抛语义。 | `JumpTo`, `SetBegin`, `Begin`, `Return`, `IntoFunction`, `ReturnF`, `CurrentContext`, `Clone` |
+| `Process.State.cs` | `ProcessState`, `SystemStateCode`, `BeginType` | CALL/JUMP/RETURN、BEGIN、函数栈、返回值、状态克隆；维护 `ExecutionContext` 栈，进入函数时绑定数组 REF、元素级 REF、OUT 空引用并创建局部执行上下文；调试/表达式求值可通过 `CaptureCallState`/`RollbackToState` 恢复函数栈、上下文栈和 `CurrentLine`，克隆状态保留原上下文栈供监视表达式读取 `LOCAL@FUNCNAME`；`ClearFunctionListPreserveTrace` 用于错误/THROW 后保留调试调用栈显示。 | `JumpTo`, `SetBegin`, `Begin`, `Return`, `IntoFunction`, `ReturnF`, `CurrentContext`, `FindContextByLabel`, `CaptureCallState`, `RollbackToState`, `ClearFunctionListPreserveTrace`, `Clone` |
 | `Process.SystemProc.cs` | partial `Process` | 系统流程处理。 | 系统状态执行 helper |
 | `Process.CalledFunction.cs` | `CalledFunction`, `UserDefinedFunctionArgument` | 调用栈条目和用户函数实参；转换并暂存普通参数、数组 REF、元素级 REF 和 OUT 空引用；用户函数参数按 `EraType` 处理整数到小数的兼容扩展和可变参数类型，`VariadicArgTerm` 不进入普通 transporter，统一由 `ProcessState.IntoFunction` 展开。 | `ConvertArg`, `SetTransporter`, 参数暂存数组 |
-| `Process.LazyLoading.cs` | partial `Process`, `LazyStatus` | ERB lazy loading 表、索引、按需加载、缓存；Android 索引缺失/失效时优先用标签扫描建表，非 Android 保持 BuildTable/full-load 建表路径；首次真实命中仍执行完整 ERB 解析与检查；索引构建和局部更新会排除事件函数与 `#FUNCTION/#FUNCTIONS/#FUNCTIONF` 方法文件，避免预解析依赖的方法被延迟加载；运行期 lazy ERB 补加载带慢调用诊断；EVENTLOAD 保持命中时按需加载，`PreloadEventLoadLazyErbs` 仅保留为诊断/实验入口，不在系统读档流程调用。 | `TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`, `SavePartialLazyLoadingList`, `PreloadEventLoadLazyErbs` |
+| `Process.LazyLoading.cs` | partial `Process`, `LazyStatus` | ERB lazy loading 表、索引、按需加载、缓存；Android 索引缺失/失效时优先用轻量标签扫描建表，预扫描只抽取 `@label` 与 `#FUNCTION/#FUNCTIONS/#FUNCTIONF`，非 Android 保持 BuildTable/full-load 建表路径；首次真实命中仍执行完整 ERB 解析与检查；索引构建和局部更新会排除事件函数与方法文件，避免预解析依赖的方法被延迟加载；运行期维护 file -> functions 反向索引，按需加载后只移除相关映射，避免扫描整张 lazy 表；运行期 lazy ERB 补加载带慢调用诊断；EVENTLOAD 保持命中时按需加载，`PreloadEventLoadLazyErbs` 仅保留为诊断/实验入口，不在系统读档流程调用。 | `TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`, `SavePartialLazyLoadingList`, `PreloadEventLoadLazyErbs` |
 | `ErbLoader.cs` | `ErbLoader`, `PPState` | 读取/预处理 ERB/ERH 文件，生成 logical lines/labels；提供 `LoadErbFilesAsync` / `LoadErbsAsync` 作为主入口，旧同步方法仅做兼容包装。 | `LoadErbFiles`, `LoadErbFilesAsync`, `loadErbs`, `LoadErbsAsync`, `warningDic` |
 | `HeaderFileLoader.cs` | `HeaderFileLoader` | 读取头文件/定义。 | header 加载入口 |
 | `SelectCaseJumpTable.cs` | `SelectCaseJumpTable` | Snake 兼容的 `SELECTCASE` 常量分支跳转表；对整数/字符串/小数常量 `CASE` 建表，范围、比较和运行期表达式回退顺序扫描。 | `TryBuild`, `Lookup` |
@@ -378,7 +387,7 @@ project.godot
 
 | 任务 | 优先看 |
 |---|---|
-| 资源 CSV 到 sprite | `AppContents`, `SpriteManager.GetSprite`, `uEmuera.Utils.ResourcePrepare`；资源 CSV 路径解析缓存、lazy sprite 原始行索引、命中后实体化和慢实体化诊断在 `AppContents` |
+| 资源 CSV 到 sprite | `AppContents`, `SpriteManager.GetSprite`, `uEmuera.Utils.ResourcePrepare`；资源 CSV 路径解析缓存、lazy sprite 原始行索引、命中后实体化和慢实体化诊断在 `AppContents`；`ResourcePrepare` 对 CSV 只读头部字段，避免整行 `Split(',')` 分配。 |
 | 纹理缓存/异步解码/主线程纹理上传 | `SpriteManager.TryGetTextureInfoCached`, `SpriteManager.RequestTextureInfoAsync`, `SpriteManager.UpdateOtherThreads`, `SpriteManager.TextureLoadVersion`, `TextureInfo.RecreateTexture` |
 | Graphics surface 绘制 | `GraphicsImage.GCreate`, `GDrawCImg`, `GDrawG`, `GDrawString`, `GDrawLine` |
 | GPU ColorMatrix | `ColorMatrixGPU.GetSharedMaterial`, `ColorMatrixGPU.SetMatrixUniforms`, `GraphicsImage.ApplyColorMatrixGPU` |
@@ -389,7 +398,7 @@ project.godot
 | 任务 | 优先看 |
 |---|---|
 | ERB 文件加载 | `ErbLoader.LoadErbFiles`, `ErbLoader.loadErbs` |
-| lazy loading | `Process.TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`；Android 索引缺失/失效优先走标签扫描建表，非 Android 回到 BuildTable/full-load 建表，慢补加载诊断在 `Process.LazyLoading.cs` |
+| lazy loading | `Process.TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`；Android 索引缺失/失效优先走轻量标签扫描建表，非 Android 回到 BuildTable/full-load 建表；运行时用反向索引删除已加载文件映射，慢补加载诊断在 `Process.LazyLoading.cs` |
 | 行解析 | `LogicalLineParser.ParseLine`, `ParseLabelLine`, `ParseSharpLine` |
 | label 查找 | `LabelDictionary.GetEventLabels`, `GetNonEventLabel`, `GetLabelDollar` |
 | 指令名映射 | `FunctionIdentifier.GetInstructionNameDic`, `FunctionIdentifier.IsPrint/IsInput/IsJump/IsMethod` |

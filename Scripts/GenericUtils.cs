@@ -56,6 +56,8 @@ internal static class GenericUtils
     static readonly object snakeAudioLock = new object();
     static readonly SnakeAudioState[] snakeSounds = CreateSnakeAudioStates();
     static readonly SnakeAudioState snakeBgm = new SnakeAudioState();
+    static readonly object soundFallbackResolveCacheLock = new object();
+    static readonly Dictionary<string, string> soundFallbackResolveCache = new Dictionary<string, string>();
     static readonly object inputStateLock = new object();
     static uEmuera.Drawing.Point pointerPosition = uEmuera.Drawing.Point.Empty;
     static string pointingButtonInput = "";
@@ -2109,17 +2111,58 @@ internal static class GenericUtils
         string soundDir = System.IO.Path.Combine(exeDir, "sound");
         if (uEmuera.Utils.DirectoryExists(soundDir))
         {
+            string cacheKey = BuildSoundFallbackResolveCacheKey(soundDir, name);
+            if (TryGetSoundFallbackResolveCache(cacheKey, out string cached))
+            {
+                if (!string.IsNullOrEmpty(cached) && uEmuera.Utils.FileExists(cached))
+                    return cached;
+                return System.IO.Path.GetFullPath(candidates[0]);
+            }
+
             string found = uEmuera.Utils.FindFileRecursive(soundDir, name);
             if (!string.IsNullOrEmpty(found) && uEmuera.Utils.FileExists(found))
+            {
+                SetSoundFallbackResolveCache(cacheKey, found);
                 return found;
+            }
             found = FindSimilarSoundFile(soundDir, name);
             if (!string.IsNullOrEmpty(found) && uEmuera.Utils.FileExists(found))
             {
+                SetSoundFallbackResolveCache(cacheKey, found);
                 Info(EmueraLogCategory.Audio, () => $"[AUDIO] Resolved similar sound \"{name}\" -> \"{found}\"");
                 return found;
             }
+            SetSoundFallbackResolveCache(cacheKey, "");
         }
         return System.IO.Path.GetFullPath(candidates[0]);
+    }
+
+    static string BuildSoundFallbackResolveCacheKey(string soundDir, string requestedName)
+    {
+        string root = "";
+        try
+        {
+            root = System.IO.Path.GetFullPath(soundDir ?? "");
+        }
+        catch
+        {
+            root = soundDir ?? "";
+        }
+        return root + "\n" + (requestedName ?? "");
+    }
+
+    static bool TryGetSoundFallbackResolveCache(string key, out string resolved)
+    {
+        lock (soundFallbackResolveCacheLock)
+            return soundFallbackResolveCache.TryGetValue(key, out resolved);
+    }
+
+    static void SetSoundFallbackResolveCache(string key, string resolved)
+    {
+        // fallback 只处理直接候选路径未命中的音频。缓存未命中结果可以避免脚本循环播放缺失音效时
+        // 反复递归扫描 Android 外部存储；直接候选路径仍会在缓存前检查，因此新增同名文件后仍可命中。
+        lock (soundFallbackResolveCacheLock)
+            soundFallbackResolveCache[key] = resolved ?? "";
     }
 
     static string FindSimilarSoundFile(string soundDir, string requestedName)

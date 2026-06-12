@@ -363,7 +363,7 @@ namespace MinorShift.Emuera.GameProc
 							handleExceptionInSystemProc(ec, errorLine, true);
 						else
 							handleException(ec, errorLine, true);
-						state.ClearFunctionList();
+						state.ClearFunctionListPreserveTrace();
 						return;
 					}
 					if (state.SkipBeforeError)
@@ -375,7 +375,7 @@ namespace MinorShift.Emuera.GameProc
 							handleExceptionInSystemProc(ec, throwLine, true);
 						else
 							handleException(ec, throwLine, true);
-						state.ClearFunctionList();
+						state.ClearFunctionListPreserveTrace();
 						return;
 					}
 					if (state.InBeforeThrow)
@@ -390,7 +390,7 @@ namespace MinorShift.Emuera.GameProc
 							handleExceptionInSystemProc(throwException, throwLine, true);
 						else
 							handleException(throwException, throwLine, true);
-						state.ClearFunctionList();
+						state.ClearFunctionListPreserveTrace();
 						return;
 					}
 					state.InBeforeError = true;
@@ -410,7 +410,6 @@ namespace MinorShift.Emuera.GameProc
 						handleExceptionInSystemProc(ec, currentLine, true);
 					else
 						handleException(ec, currentLine, true);
-					state.ClearFunctionList();
 					return;
 				}
 			}
@@ -476,11 +475,12 @@ namespace MinorShift.Emuera.GameProc
                 //環境によっては100以前にStackOverflowExceptionがでるかも？
                 throw new CodeEE("関数の呼び出しスタックが溢れました(無限に再帰呼び出しされていませんか？)");
             }
-            SingleTerm ret = null;
+			SingleTerm ret = null;
             int temp_current = state.currentMin;
-			ExecutionContext parentContext = state.CurrentContext;
             state.currentMin = state.functionCount;
             udmt.Call.updateRetAddress(state.CurrentLine);
+			bool success = false;
+			var savedState = state.CaptureCallState();
             try
             {
 				state.IntoFunction(udmt.Call, udmt.Argument, exm);
@@ -488,18 +488,21 @@ namespace MinorShift.Emuera.GameProc
 				//#functionを全て抜けてDoScriptでキャッチされる。
     			runScriptProc();
                 ret = state.MethodReturnValue;
+				success = true;
 			}
 			finally
 			{
-				if (udmt.Call.TopLabel.hasPrivDynamicVar)
-					udmt.Call.TopLabel.Out();
-				// 异常路径不会经过 RETURNF。必须同时校验父上下文，递归调用同一 label 时不能误弹父调用帧。
-				if (state.CurrentContext != null &&
-					ReferenceEquals(state.CurrentContext.Function, udmt.Call.TopLabel) &&
-					ReferenceEquals(state.CurrentContext.Parent, parentContext))
+				if (success)
 				{
-					ExecutionContext context = state.PopContext();
-					context?.Dispose();
+					if (udmt.Call.TopLabel.hasPrivDynamicVar)
+						udmt.Call.TopLabel.Out();
+					// RETURNF 已在 ProcessState.ReturnF() 中移除当前函数帧。
+					// 这里不能再 PopContext，否则会误弹父调用栈，导致后续 LOCAL/ARG 和返回流程错乱。
+					state.CurrentLine = savedState.currentLine;
+				}
+				else
+				{
+					state.RollbackToState(savedState.funcCount, savedState.ctxCount, savedState.currentLine);
 				}
                 //1756beta2+v3:こいつらはここにないとデバッグコンソールで式中関数が事故った時に大事故になる
                 state.currentMin = temp_current;
