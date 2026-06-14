@@ -1,0 +1,1200 @@
+using System;
+using System.Collections.Generic;
+using System.Text;
+//using System.Windows.Forms;
+using MinorShift.Emuera.Sub;
+using MinorShift.Emuera.GameData.Function;
+using MinorShift.Emuera.GameData.Variable;
+
+namespace MinorShift.Emuera.GameData.Expression
+{
+	/// <summary>
+	/// 引数のチェック、戻り値の型チェック等は全て呼び出し元が責任を負うこと。
+	/// </summary>
+	internal abstract class OperatorMethod : FunctionMethod
+	{
+		public OperatorMethod()
+		{
+			argumentTypeArray = null;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments) { throw new ExeEE("型チェックは呼び出し元が行うこと"); }
+	}
+
+	internal static class OperatorMethodManager
+	{
+		readonly static Dictionary<OperatorCode, OperatorMethod> unaryDic = new Dictionary<OperatorCode, OperatorMethod>();
+		readonly static Dictionary<OperatorCode, OperatorMethod> unaryAfterDic = new Dictionary<OperatorCode, OperatorMethod>();
+		readonly static Dictionary<OperatorCode, OperatorMethod> binaryIntIntDic = new Dictionary<OperatorCode, OperatorMethod>();
+		readonly static Dictionary<OperatorCode, OperatorMethod> binaryStrStrDic = new Dictionary<OperatorCode, OperatorMethod>();
+		readonly static Dictionary<OperatorCode, OperatorMethod> binaryFloatFloatDic = new Dictionary<OperatorCode, OperatorMethod>();
+		readonly static Dictionary<OperatorCode, OperatorMethod> binaryMixedFloatDic = new Dictionary<OperatorCode, OperatorMethod>();
+		readonly static OperatorMethod binaryMultIntStr = null;
+		readonly static OperatorMethod ternaryIntIntInt = null;
+		readonly static OperatorMethod ternaryIntStrStr = null;
+		readonly static OperatorMethod ternaryIntFloatFloat = null;
+
+		static OperatorMethodManager()
+		{
+			unaryDic[OperatorCode.Plus] = new PlusInt();
+			unaryDic[OperatorCode.Minus] = new MinusInt();
+			unaryDic[OperatorCode.Not] = new NotInt();
+			unaryDic[OperatorCode.BitNot] = new BitNotInt();
+			unaryDic[OperatorCode.Increment] = new IncrementInt();
+			unaryDic[OperatorCode.Decrement] = new DecrementInt();
+
+			unaryAfterDic[OperatorCode.Increment] = new IncrementAfterInt();
+			unaryAfterDic[OperatorCode.Decrement] = new DecrementAfterInt();
+
+			binaryIntIntDic[OperatorCode.Plus] = new PlusIntInt();
+			binaryIntIntDic[OperatorCode.Minus] = new MinusIntInt();
+			binaryIntIntDic[OperatorCode.Mult] = new MultIntInt();
+			binaryIntIntDic[OperatorCode.Div] = new DivIntInt();
+			binaryIntIntDic[OperatorCode.Mod] = new ModIntInt();
+			binaryIntIntDic[OperatorCode.Equal] = new EqualIntInt();
+			binaryIntIntDic[OperatorCode.Greater] = new GreaterIntInt();
+			binaryIntIntDic[OperatorCode.Less] = new LessIntInt();
+			binaryIntIntDic[OperatorCode.GreaterEqual] = new GreaterEqualIntInt();
+			binaryIntIntDic[OperatorCode.LessEqual] = new LessEqualIntInt();
+			binaryIntIntDic[OperatorCode.NotEqual] = new NotEqualIntInt();
+			binaryIntIntDic[OperatorCode.And] = new AndIntInt();
+			binaryIntIntDic[OperatorCode.Or] = new OrIntInt();
+			binaryIntIntDic[OperatorCode.Xor] = new XorIntInt();
+			binaryIntIntDic[OperatorCode.Nand] = new NandIntInt();
+			binaryIntIntDic[OperatorCode.Nor] = new NorIntInt();
+			binaryIntIntDic[OperatorCode.BitAnd] = new BitAndIntInt();
+			binaryIntIntDic[OperatorCode.BitOr] = new BitOrIntInt();
+			binaryIntIntDic[OperatorCode.BitXor] = new BitXorIntInt();
+			binaryIntIntDic[OperatorCode.RightShift] = new RightShiftIntInt();
+			binaryIntIntDic[OperatorCode.LeftShift] = new LeftShiftIntInt();
+
+			binaryStrStrDic[OperatorCode.Plus] = new PlusStrStr();
+			binaryStrStrDic[OperatorCode.Equal] = new EqualStrStr();
+			binaryStrStrDic[OperatorCode.Greater] = new GreaterStrStr();
+			binaryStrStrDic[OperatorCode.Less] = new LessStrStr();
+			binaryStrStrDic[OperatorCode.GreaterEqual] = new GreaterEqualStrStr();
+			binaryStrStrDic[OperatorCode.LessEqual] = new LessEqualStrStr();
+			binaryStrStrDic[OperatorCode.NotEqual] = new NotEqualStrStr();
+
+			binaryFloatFloatDic[OperatorCode.Plus] = new PlusFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Minus] = new MinusFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Mult] = new MultFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Div] = new DivFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Equal] = new EqualFloatFloat();
+			binaryFloatFloatDic[OperatorCode.NotEqual] = new NotEqualFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Less] = new LessFloatFloat();
+			binaryFloatFloatDic[OperatorCode.Greater] = new GreaterFloatFloat();
+			binaryFloatFloatDic[OperatorCode.LessEqual] = new LessEqualFloatFloat();
+			binaryFloatFloatDic[OperatorCode.GreaterEqual] = new GreaterEqualFloatFloat();
+
+			binaryMixedFloatDic[OperatorCode.Plus] = new PlusMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Minus] = new MinusMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Mult] = new MultMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Div] = new DivMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Equal] = new EqualMixedFloat();
+			binaryMixedFloatDic[OperatorCode.NotEqual] = new NotEqualMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Less] = new LessMixedFloat();
+			binaryMixedFloatDic[OperatorCode.Greater] = new GreaterMixedFloat();
+			binaryMixedFloatDic[OperatorCode.LessEqual] = new LessEqualMixedFloat();
+			binaryMixedFloatDic[OperatorCode.GreaterEqual] = new GreaterEqualMixedFloat();
+
+			binaryMultIntStr = new MultStrInt();
+			ternaryIntIntInt = new TernaryIntIntInt();
+			ternaryIntStrStr = new TernaryIntStrStr();
+			ternaryIntFloatFloat = new TernaryIntFloatFloat();
+		}
+		
+		
+		
+		public static IOperandTerm ReduceUnaryTerm(OperatorCode op, IOperandTerm o1)
+		{
+            OperatorMethod method = null;
+			if (op == OperatorCode.Increment || op == OperatorCode.Decrement)
+			{
+				VariableTerm var = o1 as VariableTerm;
+				if (var == null)
+					throw new CodeEE("変数以外をインクリメントすることはできません");
+				if (var.Identifier.IsConst)
+					throw new CodeEE("変更できない変数をインクリメントすることはできません");
+			}
+			if (o1.GetEraType() == EraType.Integer)
+			{
+				if (op == OperatorCode.Plus)
+					return o1;
+                OperatorMethod operator_method = null;
+				if (unaryDic.TryGetValue(op, out operator_method))
+					method = operator_method;
+			}
+			else if (o1.GetEraType() == EraType.Float)
+			{
+				if (op == OperatorCode.Plus)
+					return o1;
+				if (op == OperatorCode.Minus)
+					method = new MinusFloat();
+			}
+			if(method != null)
+				return new FunctionMethodTerm(method, new IOperandTerm[] { o1 });
+            string errMes = "";
+            if (o1.GetEraType() == EraType.Integer)
+                errMes += "数値型";
+            else if (o1.GetEraType() == EraType.String)
+                errMes += "文字列型";
+            else if (o1.GetEraType() == EraType.Float)
+                errMes += "実数型";
+            else
+                errMes += "不定型";
+            errMes += "に単項演算子\'" + OperatorManager.ToOperatorString(op) + "\'は適用できません";
+            throw new CodeEE(errMes);
+		}
+		
+		public static IOperandTerm ReduceUnaryAfterTerm(OperatorCode op, IOperandTerm o1)
+		{
+            OperatorMethod method = null;
+			if (op == OperatorCode.Increment || op == OperatorCode.Decrement)
+			{
+				VariableTerm var = o1 as VariableTerm;
+				if (var == null)
+					throw new CodeEE("変数以外をインクリメントすることはできません");
+				if (var.Identifier.IsConst)
+					throw new CodeEE("変更できない変数をインクリメントすることはできません");
+			}
+			if (o1.GetEraType() == EraType.Integer)
+			{
+                OperatorMethod operator_method = null;
+                if (unaryAfterDic.TryGetValue(op, out operator_method))
+					method = operator_method;
+			}
+			if (method != null)
+				return new FunctionMethodTerm(method, new IOperandTerm[] { o1 });
+            string errMes = "";
+            if (o1.GetEraType() == EraType.Integer)
+                errMes += "数値型";
+            else if (o1.GetEraType() == EraType.String)
+                errMes += "文字列型";
+            else
+                errMes += "不定型";
+            errMes += "に後置単項演算子\'" + OperatorManager.ToOperatorString(op) + "\'は適用できません";
+            throw new CodeEE(errMes);
+		}
+		
+		public static IOperandTerm ReduceBinaryTerm(OperatorCode op, IOperandTerm left, IOperandTerm right)
+		{
+            OperatorMethod method = null;
+			if ((left.GetEraType() == EraType.Integer) && (right.GetEraType() == EraType.Integer))
+			{
+                OperatorMethod operator_method = null;
+                if (binaryIntIntDic.TryGetValue(op, out operator_method))
+					method = operator_method;
+			}
+			else if ((left.GetEraType() == EraType.String) && (right.GetEraType() == EraType.String))
+			{
+                OperatorMethod operator_method = null;
+                if (binaryStrStrDic.TryGetValue(op, out operator_method))
+					method = operator_method;
+			}
+			else if (((left.GetEraType() == EraType.Integer) && (right.GetEraType() == EraType.String))
+				 || ((left.GetEraType() == EraType.String) && (right.GetEraType() == EraType.Integer)))
+			{
+				if (op == OperatorCode.Mult)
+					method = binaryMultIntStr;
+			}
+			else if ((left.GetEraType() == EraType.Float) && (right.GetEraType() == EraType.Float))
+			{
+                OperatorMethod operator_method = null;
+                if (binaryFloatFloatDic.TryGetValue(op, out operator_method))
+					method = operator_method;
+			}
+			else if (((left.GetEraType() == EraType.Integer) && (right.GetEraType() == EraType.Float))
+				 || ((left.GetEraType() == EraType.Float) && (right.GetEraType() == EraType.Integer)))
+			{
+                OperatorMethod operator_method = null;
+                if (binaryMixedFloatDic.TryGetValue(op, out operator_method))
+					method = operator_method;
+			}
+			if (method != null)
+				return new FunctionMethodTerm(method, new IOperandTerm[] { left, right });
+			string errMes = "";
+                if (left.GetEraType() == EraType.Integer)
+                    errMes += "数値型と";
+                else if (left.GetEraType() == EraType.String)
+                    errMes += "文字列型と";
+                else if (left.GetEraType() == EraType.Float)
+                    errMes += "実数型と";
+                else
+                    errMes += "不定型と";
+                if (right.GetEraType() == EraType.Integer)
+                    errMes += "数値型の";
+                else if (right.GetEraType() == EraType.String)
+                    errMes += "文字列型の";
+                else if (right.GetEraType() == EraType.Float)
+                    errMes += "実数型の";
+                else
+                    errMes += "不定型の";
+                errMes += "演算に二項演算子\'" + OperatorManager.ToOperatorString(op) + "\'は適用できません";
+                throw new CodeEE(errMes);
+		}
+		
+		public static IOperandTerm ReduceTernaryTerm(IOperandTerm o1, IOperandTerm o2, IOperandTerm o3)
+		{
+            OperatorMethod method = null;
+			if ((o1.GetEraType() == EraType.Integer) && (o2.GetEraType() == EraType.Integer) && (o3.GetEraType() == EraType.Integer))
+				method = ternaryIntIntInt;
+			else if ((o1.GetEraType() == EraType.Integer) && (o2.GetEraType() == EraType.String) && (o3.GetEraType() == EraType.String))
+				method = ternaryIntStrStr;
+			else if ((o1.GetEraType() == EraType.Integer) && (o2.GetEraType() == EraType.Float) && (o3.GetEraType() == EraType.Float))
+				method = ternaryIntFloatFloat;
+			if (method != null)
+				return new FunctionMethodTerm(method, new IOperandTerm[] { o1, o2, o3 });
+			throw new CodeEE("三項演算子の使用法が不正です");
+			
+		}
+
+
+
+
+
+
+
+
+
+
+		#region OperatorMethod SubClasses
+
+		private sealed class PlusIntInt : OperatorMethod
+		{
+			public PlusIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return SafeArithmetic.SafeAdd(arguments[0].GetIntValue(exm), arguments[1].GetIntValue(exm));
+			}
+		}
+
+		private sealed class PlusStrStr : OperatorMethod
+		{
+			public PlusStrStr()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String };
+			}
+
+			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetStrValue(exm) + arguments[1].GetStrValue(exm);
+			}
+		}
+
+		private sealed class MinusIntInt : OperatorMethod
+		{
+			public MinusIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return SafeArithmetic.SafeSubtract(arguments[0].GetIntValue(exm), arguments[1].GetIntValue(exm));
+			}
+		}
+
+		private sealed class MultIntInt : OperatorMethod
+		{
+			public MultIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return SafeArithmetic.SafeMultiply(arguments[0].GetIntValue(exm), arguments[1].GetIntValue(exm));
+			}
+		}
+
+		private sealed class MultStrInt : OperatorMethod
+		{
+			public MultStrInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.String;
+			}
+			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				Int64 value = 0;
+				string str = null;
+				if (arguments[0].GetEraType() == EraType.Integer)
+				{
+					value = arguments[0].GetIntValue(exm);
+					str = arguments[1].GetStrValue(exm);
+				}
+				else
+				{
+					str = arguments[0].GetStrValue(exm);
+					value = arguments[1].GetIntValue(exm);
+				}
+				if (value < 0)
+					throw new CodeEE("文字列に負の値(" + value.ToString() + ")を乗算しようとしました");
+				if (value >= 10000)
+					throw new CodeEE("文字列に10000以上の値(" + value.ToString() + ")を乗算しようとしました");
+				if ((str == "") || (value == 0))
+					return "";
+                StringBuilder builder = new StringBuilder
+                {
+                    Capacity = str.Length * (int)value
+                };
+                for (int i = 0; i < value; i++)
+				{
+					builder.Append(str);
+				}
+				return builder.ToString();
+			}
+		}
+
+		private sealed class DivIntInt : OperatorMethod
+		{
+			public DivIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+	        {
+				Int64 right = arguments[1].GetIntValue(exm);
+				return SafeArithmetic.SafeDivide(arguments[0].GetIntValue(exm), right);
+			}
+		}
+
+		private sealed class ModIntInt : OperatorMethod
+		{
+			public ModIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+	        {
+				Int64 right = arguments[1].GetIntValue(exm);
+				return SafeArithmetic.SafeModulo(arguments[0].GetIntValue(exm), right);
+			}
+		}
+
+
+		private sealed class EqualIntInt : OperatorMethod
+		{
+			public EqualIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetIntValue(exm) == arguments[1].GetIntValue(exm))
+					return 1L;
+				return 0L;
+			}
+
+		}
+
+		private sealed class EqualStrStr : OperatorMethod
+		{
+			public EqualStrStr()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetStrValue(exm) == arguments[1].GetStrValue(exm))
+					return 1L;
+				return 0L;
+			}
+		}
+
+		private sealed class NotEqualIntInt : OperatorMethod
+		{
+			public NotEqualIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetIntValue(exm) != arguments[1].GetIntValue(exm))
+					return 1L;
+				return 0L;
+			}
+		}
+
+		private sealed class NotEqualStrStr : OperatorMethod
+		{
+			public NotEqualStrStr()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetStrValue(exm) != arguments[1].GetStrValue(exm))
+					return 1L;
+				return 0L;
+			}
+
+		}
+
+		private sealed class GreaterIntInt : OperatorMethod
+		{
+			public GreaterIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetIntValue(exm) > arguments[1].GetIntValue(exm))
+					return 1L;
+				return 0L;
+			}
+		}
+
+		private sealed class GreaterStrStr : OperatorMethod
+		{
+			public GreaterStrStr()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				int c = string.Compare(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), Config.SCExpression);
+				if (c > 0)
+					return 1L;
+				return 0L;
+			}
+		}
+		private sealed class LessIntInt : OperatorMethod
+		{
+			public LessIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetIntValue(exm) < arguments[1].GetIntValue(exm))
+					return 1L;
+				return 0L;
+			}
+		}
+		private sealed class LessStrStr : OperatorMethod
+		{
+			public LessStrStr()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				int c = string.Compare(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), Config.SCExpression);
+				if (c < 0)
+					return 1L;
+				return 0L;
+			}
+
+		}
+
+		private sealed class GreaterEqualIntInt : OperatorMethod
+		{
+			public GreaterEqualIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetIntValue(exm) >= arguments[1].GetIntValue(exm))
+					return 1L;
+				return 0L;
+			}
+		}
+
+		private sealed class GreaterEqualStrStr : OperatorMethod
+		{
+			public GreaterEqualStrStr()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				int c = string.Compare(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), Config.SCExpression);
+				if (c < 0)
+					return 1L;
+				return 0L;
+			}
+		}
+		private sealed class LessEqualIntInt : OperatorMethod
+		{
+			public LessEqualIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetIntValue(exm) <= arguments[1].GetIntValue(exm))
+					return 1L;
+				return 0L;
+			}
+
+		}
+		private sealed class LessEqualStrStr : OperatorMethod
+		{
+			public LessEqualStrStr()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				int c = string.Compare(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), Config.SCExpression);
+				if (c < 0)
+					return 1L;
+				return 0L;
+			}
+		}
+
+		private sealed class AndIntInt : OperatorMethod
+		{
+			public AndIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if ((arguments[0].GetIntValue(exm) != 0) && (arguments[1].GetIntValue(exm) != 0))
+					return 1L;
+				return 0L;
+			}
+
+		}
+
+		private sealed class OrIntInt : OperatorMethod
+		{
+			public OrIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if ((arguments[0].GetIntValue(exm) != 0) || (arguments[1].GetIntValue(exm) != 0))
+					return 1L;
+				return 0L;
+			}
+		}
+
+		private sealed class XorIntInt : OperatorMethod
+		{
+			public XorIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				Int64 i1 = arguments[0].GetIntValue(exm);
+				Int64 i2 = arguments[1].GetIntValue(exm);
+				if (((i1 == 0) && (i2 != 0)) || ((i1 != 0) && (i2 == 0)))
+					return 1L;
+				return 0L;
+			}
+
+		}
+
+		private sealed class NandIntInt : OperatorMethod
+		{
+			public NandIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if ((arguments[0].GetIntValue(exm) == 0) || (arguments[1].GetIntValue(exm) == 0))
+					return 1L;
+				return 0L;
+			}
+
+		}
+
+		private sealed class NorIntInt : OperatorMethod
+		{
+			public NorIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if ((arguments[0].GetIntValue(exm) == 0) && (arguments[1].GetIntValue(exm) == 0))
+					return 1L;
+				return 0L;
+			}
+		}
+
+		private sealed class BitAndIntInt : OperatorMethod
+		{
+			public BitAndIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetIntValue(exm) & arguments[1].GetIntValue(exm);
+			}
+		}
+
+		private sealed class BitOrIntInt : OperatorMethod
+		{
+			public BitOrIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetIntValue(exm) | arguments[1].GetIntValue(exm);
+			}
+		}
+
+		private sealed class BitXorIntInt : OperatorMethod
+		{
+			public BitXorIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetIntValue(exm) ^ arguments[1].GetIntValue(exm);
+			}
+		}
+
+		private sealed class RightShiftIntInt : OperatorMethod
+		{
+			public RightShiftIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetIntValue(exm) >> (Int32)(arguments[1].GetIntValue(exm));
+			}
+		}
+
+		private sealed class LeftShiftIntInt : OperatorMethod
+		{
+			public LeftShiftIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetIntValue(exm) << (Int32)(arguments[1].GetIntValue(exm));
+			}
+		}
+
+		private sealed class PlusInt : OperatorMethod
+		{
+			public PlusInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetIntValue(exm);
+			}
+		}
+
+		private sealed class MinusInt : OperatorMethod
+		{
+			public MinusInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return SafeArithmetic.SafeNegate(arguments[0].GetIntValue(exm));
+			}
+		}
+
+		private sealed class NotInt : OperatorMethod
+		{
+			public NotInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetIntValue(exm) == 0)
+					return 1L;
+				return 0L;
+			}
+		}
+		private sealed class BitNotInt : OperatorMethod
+		{
+			public BitNotInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ~arguments[0].GetIntValue(exm);
+			}
+		}
+
+		private sealed class IncrementInt : OperatorMethod
+		{
+			public IncrementInt()
+			{
+				CanRestructure = false;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableTerm var = (VariableTerm)arguments[0];
+				return var.PlusValue(1L, exm);
+			}
+		}
+		private sealed class DecrementInt : OperatorMethod
+		{
+			public DecrementInt()
+			{
+				CanRestructure = false;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableTerm var = (VariableTerm)arguments[0];
+				return var.PlusValue(-1L, exm);
+			}
+		}
+		private sealed class IncrementAfterInt : OperatorMethod
+		{
+			public IncrementAfterInt()
+			{
+				CanRestructure = false;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableTerm var = (VariableTerm)arguments[0];
+				return SafeArithmetic.SafeSubtract(var.PlusValue(1L, exm), 1);
+			}
+		}
+
+		private sealed class DecrementAfterInt : OperatorMethod
+		{
+			public DecrementAfterInt()
+			{
+				CanRestructure = false;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableTerm var = (VariableTerm)arguments[0];
+				return SafeArithmetic.SafeAdd(var.PlusValue(-1L, exm), 1);
+			}
+		}
+
+
+		private sealed class TernaryIntIntInt : OperatorMethod
+		{
+			public TernaryIntIntInt()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return (arguments[0].GetIntValue(exm) != 0) ? arguments[1].GetIntValue(exm) : arguments[2].GetIntValue(exm);
+			}
+		}
+
+		private sealed class TernaryIntStrStr : OperatorMethod
+		{
+			public TernaryIntStrStr()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.String;
+			}
+
+			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return (arguments[0].GetIntValue(exm) != 0) ? arguments[1].GetStrValue(exm) : arguments[2].GetStrValue(exm);
+			}
+		}
+
+		private sealed class TernaryIntFloatFloat : OperatorMethod
+		{
+			public TernaryIntFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return (arguments[0].GetIntValue(exm) != 0) ? arguments[1].GetFloatValue(exm) : arguments[2].GetFloatValue(exm);
+			}
+		}
+
+		private static double ToDouble(IOperandTerm term, ExpressionMediator exm)
+		{
+			return term.GetEraType() == EraType.Integer ? term.GetIntValue(exm) : term.GetFloatValue(exm);
+		}
+
+		private sealed class PlusFloatFloat : OperatorMethod
+		{
+			public PlusFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) + arguments[1].GetFloatValue(exm);
+			}
+		}
+
+		private sealed class MinusFloatFloat : OperatorMethod
+		{
+			public MinusFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) - arguments[1].GetFloatValue(exm);
+			}
+		}
+
+		private sealed class MultFloatFloat : OperatorMethod
+		{
+			public MultFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) * arguments[1].GetFloatValue(exm);
+			}
+		}
+
+		private sealed class DivFloatFloat : OperatorMethod
+		{
+			public DivFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				double right = arguments[1].GetFloatValue(exm);
+				if (right == 0.0)
+					throw new CodeEE("ゼロによる除算が行われました");
+				return arguments[0].GetFloatValue(exm) / right;
+			}
+		}
+
+		private sealed class EqualFloatFloat : OperatorMethod
+		{
+			public EqualFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) == arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class NotEqualFloatFloat : OperatorMethod
+		{
+			public NotEqualFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) != arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class LessFloatFloat : OperatorMethod
+		{
+			public LessFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) < arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class GreaterFloatFloat : OperatorMethod
+		{
+			public GreaterFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) > arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class LessEqualFloatFloat : OperatorMethod
+		{
+			public LessEqualFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) <= arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class GreaterEqualFloatFloat : OperatorMethod
+		{
+			public GreaterEqualFloatFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return arguments[0].GetFloatValue(exm) >= arguments[1].GetFloatValue(exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class PlusMixedFloat : OperatorMethod
+		{
+			public PlusMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) + ToDouble(arguments[1], exm);
+			}
+		}
+
+		private sealed class MinusMixedFloat : OperatorMethod
+		{
+			public MinusMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) - ToDouble(arguments[1], exm);
+			}
+		}
+
+		private sealed class MultMixedFloat : OperatorMethod
+		{
+			public MultMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) * ToDouble(arguments[1], exm);
+			}
+		}
+
+		private sealed class DivMixedFloat : OperatorMethod
+		{
+			public DivMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				double right = ToDouble(arguments[1], exm);
+				if (right == 0.0)
+					throw new CodeEE("ゼロによる除算が行われました");
+				return ToDouble(arguments[0], exm) / right;
+			}
+		}
+
+		private sealed class EqualMixedFloat : OperatorMethod
+		{
+			public EqualMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) == ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class NotEqualMixedFloat : OperatorMethod
+		{
+			public NotEqualMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) != ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class LessMixedFloat : OperatorMethod
+		{
+			public LessMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) < ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class GreaterMixedFloat : OperatorMethod
+		{
+			public GreaterMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) > ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class LessEqualMixedFloat : OperatorMethod
+		{
+			public LessEqualMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) <= ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class GreaterEqualMixedFloat : OperatorMethod
+		{
+			public GreaterEqualMixedFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Integer;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return ToDouble(arguments[0], exm) >= ToDouble(arguments[1], exm) ? 1L : 0L;
+			}
+		}
+
+		private sealed class MinusFloat : OperatorMethod
+		{
+			public MinusFloat()
+			{
+				CanRestructure = true;
+				ReturnType = EraType.Float;
+			}
+
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				return -arguments[0].GetFloatValue(exm);
+			}
+		}
+
+		#endregion
+	}
+}

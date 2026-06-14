@@ -1,0 +1,211 @@
+using Godot;
+using MinorShift.Emuera.GameProc;
+
+// Mobile-first input overlay for emuera prompts. It follows virtual keyboard
+// geometry instead of relying on desktop-style fixed placement.
+public partial class Inputpad : Control
+{
+	PanelContainer panel;
+	HBoxContainer hbox;
+	LineEdit inputField;
+	Button confirmBtn;
+	Button repeatBtn;
+	string lastInput;
+	int lastKeyboardHeight = -1;
+	// Controls are sized for touch operation in exported APKs. Keep these values
+	// coordinated with EmueraContent system-button minimums when changing UI scale.
+	const int PanelHeight = 64;
+	const int SideMargin = 10;
+	const int BottomMargin = 12;
+
+	public override void _Ready()
+	{
+		Visible = false;
+		ZIndex = 96;
+		SetAnchorsPreset(LayoutPreset.FullRect);
+		MouseFilter = MouseFilterEnum.Ignore;
+		SetProcess(false);
+
+		panel = new PanelContainer();
+		panel.SetAnchorsPreset(LayoutPreset.TopLeft);
+		panel.MouseFilter = Control.MouseFilterEnum.Stop;
+		AddChild(panel);
+
+		var style = new StyleBoxFlat();
+		style.BgColor = new Color(0.03f, 0.03f, 0.035f, 0.88f);
+		style.CornerRadiusTopLeft = style.CornerRadiusTopRight = 6;
+		style.CornerRadiusBottomLeft = style.CornerRadiusBottomRight = 6;
+		style.ContentMarginLeft = style.ContentMarginRight = 8;
+		style.ContentMarginTop = style.ContentMarginBottom = 7;
+		panel.AddThemeStyleboxOverride("panel", style);
+
+		hbox = new HBoxContainer();
+		hbox.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		hbox.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+		hbox.AddThemeConstantOverride("separation", 6);
+		panel.AddChild(hbox);
+
+		inputField = new LineEdit();
+		inputField.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+		inputField.CustomMinimumSize = new Vector2(0, 48);
+		inputField.TextSubmitted += OnTextSubmitted;
+		hbox.AddChild(inputField);
+
+		confirmBtn = new Button();
+		confirmBtn.Text = MultiLanguage.Get("Inputpad.Confirm", "OK");
+		confirmBtn.CustomMinimumSize = new Vector2(64, 48);
+		EmueraContent.StyleButton(confirmBtn);
+		confirmBtn.Pressed += OnConfirm;
+		hbox.AddChild(confirmBtn);
+
+		repeatBtn = new Button();
+		repeatBtn.Text = MultiLanguage.Get("Inputpad.Repeat", "Repeat");
+		repeatBtn.CustomMinimumSize = new Vector2(82, 48);
+		EmueraContent.StyleButton(repeatBtn);
+		repeatBtn.Pressed += OnRepeat;
+		hbox.AddChild(repeatBtn);
+
+		ApplyPanelLayout();
+	}
+
+	public override void _Notification(int what)
+	{
+		if (what == NotificationResized)
+			ApplyPanelLayout();
+	}
+
+	public override void _Process(double delta)
+	{
+		if (!Visible)
+			return;
+		// Android reports virtual keyboard height asynchronously after focus. Poll
+		// only while visible so the panel tracks IME animation without adding idle
+		// work during normal console rendering.
+		int keyboardHeight = GetVirtualKeyboardHeight();
+		if (keyboardHeight != lastKeyboardHeight)
+			ApplyPanelLayout();
+	}
+
+	void ApplyPanelLayout()
+	{
+		// Position the prompt above the virtual keyboard without adding display
+		// cutout/notch margins. Era coordinates remain mapped to the full viewport.
+		if (panel == null)
+			return;
+
+		var viewportSize = GetViewport().GetVisibleRect().Size;
+		int keyboardHeight = GetVirtualKeyboardHeight();
+		lastKeyboardHeight = keyboardHeight;
+		Position = Vector2.Zero;
+		Size = viewportSize;
+		float left = SideMargin;
+		float right = SideMargin;
+		float bottomInset = BottomMargin + keyboardHeight;
+		var width = Mathf.Max(1, viewportSize.X - left - right);
+		panel.Position = new Vector2(left, Mathf.Max(0, viewportSize.Y - bottomInset - PanelHeight));
+		panel.Size = new Vector2(width, PanelHeight);
+		panel.CustomMinimumSize = panel.Size;
+	}
+
+	static int GetVirtualKeyboardHeight()
+	{
+		// Desktop/editor returns zero to preserve the existing testing workflow.
+		// Android values can briefly be negative or stale, so clamp at the boundary.
+		if (!OS.HasFeature("mobile"))
+			return 0;
+		return System.Math.Max(0, DisplayServer.VirtualKeyboardGetHeight());
+	}
+
+	internal void UpdateInputType(InputType type)
+	{
+		// Godot 4 LineEdit does not expose VirtualKeyboardType in this version.
+		// Mobile keyboard type switching is skipped.
+		var console = MinorShift.Emuera.GlobalStatic.Console;
+		if (console != null && console.IsWaitingOnePhrase)
+		{
+			inputField.MaxLength = 1;
+		}
+		else
+		{
+			inputField.MaxLength = 0;
+		}
+	}
+
+	void OnTextSubmitted(string text)
+	{
+		lastInput = text;
+		EmueraThread.instance.Input(text, true);
+		inputField.Text = "";
+	}
+
+	void OnConfirm()
+	{
+		if (inputField.Visible)
+		{
+			lastInput = inputField.Text;
+			EmueraThread.instance.Input(lastInput, true);
+		}
+		else
+		{
+			EmueraThread.instance.Input("", true);
+		}
+		inputField.Text = "";
+	}
+
+	void OnRepeat()
+	{
+		if (string.IsNullOrEmpty(lastInput))
+			return;
+
+		if (inputField.Visible)
+		{
+			inputField.Text = lastInput;
+			inputField.CaretColumn = inputField.Text.Length;
+		}
+		else
+		{
+			EmueraThread.instance.Input(lastInput, true);
+		}
+	}
+
+	public void ShowPad()
+	{
+		ApplyPanelLayout();
+		Visible = true;
+		SetProcess(true);
+		GetParent()?.MoveChild(this, GetParent().GetChildCount() - 1);
+		inputField.Text = "";
+		inputField.GrabFocus();
+	}
+
+	public void HidePad()
+	{
+		Visible = false;
+		SetProcess(false);
+		lastKeyboardHeight = -1;
+		inputField.Text = "";
+		inputField.ReleaseFocus();
+	}
+
+	public bool IsShow => Visible;
+
+	public bool HasInputFocus()
+	{
+		return inputField != null && inputField.HasFocus();
+	}
+
+	public void ApplyFont(Font font, int fontSize)
+	{
+		if (inputField == null || confirmBtn == null || repeatBtn == null)
+			return;
+		if (font != null)
+		{
+			inputField.AddThemeFontOverride("font", font);
+			confirmBtn.AddThemeFontOverride("font", font);
+			repeatBtn.AddThemeFontOverride("font", font);
+		}
+		inputField.AddThemeFontSizeOverride("font_size", fontSize);
+		confirmBtn.AddThemeFontSizeOverride("font_size", fontSize);
+		repeatBtn.AddThemeFontSizeOverride("font_size", fontSize);
+	}
+}
