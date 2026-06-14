@@ -37,14 +37,8 @@ internal static class ModernSqlManager
 	{
 		if (string.IsNullOrWhiteSpace(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.Contains(".."))
 			throw new InvalidOperationException($"SQL_CONNECTION_OPEN: invalid database name: {name}");
-
-		GenericUtils.Info($"Opening database connection: {name}", EmueraLogCategory.SQL);
-		GenericUtils.Debug($"Storage directory: {StorageDirectory}", EmueraLogCategory.SQL);
-
 		Directory.CreateDirectory(StorageDirectory);
 		string path = Path.Combine(StorageDirectory, name + ".db");
-		GenericUtils.Debug($"Database file path: {path}", EmueraLogCategory.SQL);
-
 		var builder = new SqliteConnectionStringBuilder { DataSource = path };
 		return Connect(name, builder.ConnectionString, true);
 	}
@@ -53,18 +47,10 @@ internal static class ModernSqlManager
 	{
 		if (string.IsNullOrWhiteSpace(name))
 			throw new InvalidOperationException("SQL_CONNECT: database name is empty.");
-
-		GenericUtils.Info($"Connecting to database: {name}", EmueraLogCategory.SQL);
-		GenericUtils.Debug($"Connection string: {connectionString}", EmueraLogCategory.SQL);
-
 		if (connections.ContainsKey(name))
 		{
 			if (!replaceExisting)
-			{
-				GenericUtils.Debug($"Database '{name}' already connected, replaceExisting=false, returning 1", EmueraLogCategory.SQL);
 				return 1;
-			}
-			GenericUtils.Info($"Database '{name}' already connected, disconnecting and reconnecting", EmueraLogCategory.SQL);
 			Disconnect(name);
 		}
 
@@ -73,25 +59,19 @@ internal static class ModernSqlManager
 		{
 			SqliteRuntime.EnsureInitialized();
 			connectionString = SqliteRuntime.NormalizeConnectionString(connectionString, MinorShift.Emuera.Program.ExeDir);
-			GenericUtils.Debug($"Normalized connection string: {connectionString}", EmueraLogCategory.SQL);
-
 			connection = new SqliteConnection(connectionString);
 			connection.Open();
-			GenericUtils.Info($"Database connection opened: {name}", EmueraLogCategory.SQL);
-
 			using (var command = connection.CreateCommand())
 			{
 				command.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
 				command.ExecuteNonQuery();
 			}
 			connections[name] = connection;
-			GenericUtils.Info($"Database '{name}' connected successfully", EmueraLogCategory.SQL);
 			return 1;
 		}
 		catch (Exception ex)
 		{
 			connection?.Dispose();
-			GenericUtils.Error($"Failed to connect database '{name}': {SqliteRuntime.FormatException(ex)}", EmueraLogCategory.SQL);
 			throw new InvalidOperationException("SQL_CONNECT failed: " + SqliteRuntime.FormatException(ex), ex);
 		}
 	}
@@ -117,21 +97,17 @@ internal static class ModernSqlManager
 
 	public static long ExecuteReader(string dbName, string sql, object[] parameters = null)
 	{
-		GenericUtils.Debug($"ExecuteReader on '{dbName}': {sql?.Substring(0, Math.Min(100, sql?.Length ?? 0))}...", EmueraLogCategory.SQL);
-
 		var command = CreateCommand(dbName, sql, parameters);
 		try
 		{
 			var reader = command.ExecuteReader();
 			long id = nextReaderId++;
 			readers[id] = new ReaderContext { DatabaseName = dbName ?? "", Command = command, Reader = reader };
-			GenericUtils.Debug($"ExecuteReader returned reader ID: {id}", EmueraLogCategory.SQL);
 			return id;
 		}
-		catch (Exception ex)
+		catch
 		{
 			command.Dispose();
-			GenericUtils.Error($"ExecuteReader failed on '{dbName}': {SqliteRuntime.FormatException(ex)}", EmueraLogCategory.SQL);
 			throw;
 		}
 	}

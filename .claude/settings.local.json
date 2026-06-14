@@ -7,14 +7,7 @@
       "Bash(where gh *)",
       "Bash(git init *)",
       "Bash(git remote *)",
-      "Bash(git add *)",
-      "Bash(dotnet build *)",
-      "Bash(adb devices *)",
-      "Bash(pip install *)",
-      "Bash(dotnet --version)",
-      "Bash(grep -E '\\\\.md$|\\\\.txt$')",
-      "Bash(git -C \"E:\\\\MyCode\\\\gEmuera-future\" branch --show-current)",
-      "Bash(git -C \"E:\\\\MyCode\\\\gEmuera-future\" status --short)"
+      "Bash(git add *)"
     ]
   }
 }

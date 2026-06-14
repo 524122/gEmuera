@@ -530,9 +530,6 @@ public partial class QuickButtons : CanvasLayer
 				long generation = 0;
 				TryGetInt64Meta(activeButton, "input_generation", out generation);
 				EmueraContent.instance?.SubmitQuickButtonInput(inputCode, generation);
-				// 提交输入后立即清空按钮面板，避免旧按钮残留直到新按钮加载。
-				// 用户点击后应看到面板清空，明确表示输入已被接收和处理。
-				Clear();
 			}
 		}
 		else if (dragMoved)

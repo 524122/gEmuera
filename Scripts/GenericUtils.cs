@@ -38,7 +38,6 @@ public enum EmueraLogCategory
     Performance = 1 << 10,
     Touch = 1 << 11,
     StatementRecognition = 1 << 12,
-    SQL = 1 << 13,
     All = int.MaxValue
 }
 

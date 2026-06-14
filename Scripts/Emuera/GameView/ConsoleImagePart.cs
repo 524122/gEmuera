@@ -35,10 +35,7 @@ namespace MinorShift.Emuera.GameView
 			ResourceName = resName ?? "";
 			ButtonResourceName = resNameb;
 			Display = display;
-			// 百分比计算使用浮点数再四舍五入，避免整数除法精度丢失。
-			// 例如：xpos=51%, FontSize=18 → 18*51/100.0=9.18 → Round(9.18)=9
-			// 之前的整数除法：18*51/100=918/100=9，看似相同但累积多个图片时误差放大。
-			PositionX = raw_xpos.isPx ? raw_xpos.num : (int)System.Math.Round(raw_xpos.num * Config.FontSize / 100.0);
+			PositionX = raw_xpos.isPx ? raw_xpos.num : (raw_xpos.num * Config.FontSize / 100);
 			ColorMatrixVariableName = colorMatrixVariableName;
 			ColorMatrix = ResolveColorMatrix(colorMatrixVariableName);
 
@@ -48,7 +45,7 @@ namespace MinorShift.Emuera.GameView
 			if (raw_height.num == 0)
 				height = Config.FontSize;
 			else
-				height = raw_height.isPx ? raw_height.num : (int)System.Math.Round(Config.FontSize * raw_height.num / 100.0);
+				height = raw_height.isPx ? raw_height.num : (Config.FontSize * raw_height.num / 100);
 			// 防御性：百分比高度在字体较小时可能因整数除法变为0（如 height='1%' 且 FontSize=18 时 18*1/100=0）。
 			// destRect.Height 为0 会导致 AddPartToContainer 与 GetRelativeImagePartBottom 产生不一致，
 			// 表现为图片自然尺寸渲染但行高只有 EffectiveLineHeight，最终图片被覆盖或溢出。
@@ -59,9 +56,9 @@ namespace MinorShift.Emuera.GameView
 			if (raw_width.num == 0)
 				width = 0; // will use natural size when sprite is loaded dynamically
 			else
-				width = raw_width.isPx ? raw_width.num : (int)System.Math.Round(Config.FontSize * raw_width.num / 100.0);
+				width = raw_width.isPx ? raw_width.num : (Config.FontSize * raw_width.num / 100);
 
-			top = raw_ypos.isPx ? raw_ypos.num : (int)System.Math.Round(raw_ypos.num * Config.FontSize / 100.0);
+			top = raw_ypos.isPx ? raw_ypos.num : (raw_ypos.num * Config.FontSize / 100);
 			int rectX = 0;
 			int rectY = top;
 			int rectW = width;

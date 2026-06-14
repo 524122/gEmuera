@@ -749,8 +749,7 @@ namespace uEmuera
             '◮', '♮', '❮',
             '⟮', '⠮','⡮','⢮', '⣮',
             '▤','▥','▦', '▧', '▨', '▩',
-            '▪', '▫','~', 'ﾄ', '｡', '･',
-            // 注意：移除了 '´' (U+00B4)，因为它已在 fullsize 中
+            '▪', '▫','~', '´', 'ﾄ', '｡', '･',
         };
         public static bool CheckHalfSize(char c)
         {
@@ -806,9 +805,30 @@ namespace uEmuera
 
         public static string StripZeroWidth(string s)
         {
-            // 简化：现代字体会正确处理零宽字符，不需要移除
-            // 直接返回原字符串
-            return s ?? string.Empty;
+            if (string.IsNullOrEmpty(s))
+                return s;
+
+            int first = -1;
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (CheckZeroWidth(s[i]))
+                {
+                    first = i;
+                    break;
+                }
+            }
+            if (first < 0)
+                return s;
+
+            var builder = new System.Text.StringBuilder(s.Length);
+            if (first > 0)
+                builder.Append(s, 0, first);
+            for (int i = first + 1; i < s.Length; i++)
+            {
+                if (!CheckZeroWidth(s[i]))
+                    builder.Append(s[i]);
+            }
+            return builder.ToString();
         }
         /// <summary>
         /// 获取文本长
@@ -818,37 +838,20 @@ namespace uEmuera
         /// <returns></returns>
         public static int GetDisplayLength(string s, float fontsize)
         {
-            // 简化版本：移除复杂的字符分类
-            // 基础规则：ASCII (< 0x7F) 和半角片假名 = 半角，其他 = 全角
-            // 避免字符分类冲突和维护成本
-
-            if (string.IsNullOrEmpty(s))
-                return 0;
-
             float xsize = 0;
-            for (int i = 0; i < s.Length; ++i)
+            char c = '\x0';
+            for(int i = 0; i < s.Length; ++i)
             {
-                char c = s[i];
-
-                // ASCII 范围（基本拉丁字母、数字、标点）
-                if (c < 0x7F)
-                {
+                c = s[i];
+                if(CheckZeroWidth(c))
+                    continue;
+                if(CheckHalfSize(c))
                     xsize += fontsize / 2;
-                }
-                // 半角片假名范围 (U+FF65 - U+FF9F)
-                else if (c >= 0xFF65 && c <= 0xFF9F)
-                {
-                    xsize += fontsize / 2;
-                }
-                // 其他所有字符默认全角
                 else
-                {
                     xsize += fontsize;
-                }
             }
 
-            // 使用四舍五入而非截断，避免半角字符累积时的亚像素丢失
-            return (int)System.Math.Round(xsize);
+            return (int)xsize;
         }
 
         public static string GetStBar(char c, uEmuera.Drawing.Font font)
@@ -858,31 +861,28 @@ namespace uEmuera
 
         public static string GetStBar(char c, float fontsize)
         {
-            // 简化：只检查 ASCII 和半角片假名
             float s = fontsize;
-            if (c < 0x7F || (c >= 0xFF65 && c <= 0xFF9F))
+            if(CheckHalfSize(c))
                 s /= 2;
-
             var w = MinorShift.Emuera.Config.DrawableWidth;
             var count = (int)System.Math.Floor(w / s);
             var build = new System.Text.StringBuilder(count);
-            for (int i = 0; i < count; ++i)
+            for(int i = 0; i < count; ++i)
                 build.Append(c);
             return build.ToString();
         }
 
         public static int GetByteCount(string str)
         {
-            // 简化：ASCII = 1 字节，其他 = 2 字节
-            if (string.IsNullOrEmpty(str))
+            if(string.IsNullOrEmpty(str))
                 return 0;
-
             var count = 0;
             var length = str.Length;
-            for (int i = 0; i < length; ++i)
+            for(int i = 0; i < length; ++i)
             {
-                char c = str[i];
-                if (c < 0x7F || (c >= 0xFF65 && c <= 0xFF9F))
+                if(CheckZeroWidth(str[i]))
+                    continue;
+                if(CheckHalfSize(str[i]))
                     count += 1;
                 else
                     count += 2;

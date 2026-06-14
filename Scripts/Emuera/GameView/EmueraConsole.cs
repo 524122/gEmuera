@@ -69,12 +69,8 @@ namespace MinorShift.Emuera.GameView
 
 	internal class DisplayLineList : IList<ConsoleDisplayLine>
 	{
-		// PERFORMANCE: 需要访问外部 EmueraConsole 来检查批量模式
-		private readonly EmueraConsole parent;
-
-        public DisplayLineList(EmueraConsole parent)
+        public DisplayLineList()
         {
-			this.parent = parent;
             list = new List<ConsoleDisplayLine>();
         }
 
@@ -100,22 +96,8 @@ namespace MinorShift.Emuera.GameView
 
 		public void Add(ConsoleDisplayLine item)
 		{
-			// PERFORMANCE: 批量模式下不要直接 return，而是添加到 parent 的 pendingBatchLines
-			if (parent != null && parent.IsInBatchMode())
-			{
-				// 批量模式下，直接添加到 parent 的待处理列表
-				parent.AddToPendingBatch(item);
-				return;
-			}
-
 			list.Add(item);
 			OnChanged(new ChangedEventArgs(item));
-		}
-
-		// PERFORMANCE: 批量添加方法，绕过事件机制
-		internal void AddDirect(ConsoleDisplayLine item)
-		{
-			list.Add(item);
 		}
 
         public void Clear() { list.Clear(); }
@@ -139,10 +121,6 @@ namespace MinorShift.Emuera.GameView
 
 	internal sealed partial class EmueraConsole :IDisposable
 	{
-		// PERFORMANCE: 批量渲染模式，减少 UI 刷新频率
-		private bool batchRenderMode = false;
-		private List<ConsoleDisplayLine> pendingBatchLines = null;
-
 		public EmueraConsole(MainWindow parent)
 		{
 			window = parent;
@@ -159,7 +137,7 @@ namespace MinorShift.Emuera.GameView
 				msPerFrame = 1000 / (uint)effectiveFps;
 			}
 			//displayLineList = new List<ConsoleDisplayLine>();
-            displayLineList = new DisplayLineList(this); // PERFORMANCE: 传递 this 以支持批量模式检查
+            displayLineList = new DisplayLineList();
             //if (Program.DebugMode)
             //{
             //    debuglog = new StreamWriter(Program.DebugDir + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log", true, Encoding.UTF8)
@@ -188,70 +166,6 @@ namespace MinorShift.Emuera.GameView
 			redrawTimer.Tick += new EventHandler(tickRedrawTimer);
 			redrawTimer.Interval = 10;
         }
-
-		/// <summary>
-		/// PERFORMANCE: 开始批量渲染模式
-		/// 在此模式下，Print() 调用会被缓存，直到 EndBatch() 时统一处理
-		/// 用于 PRINT_PALAM 等需要打印大量内容的场景
-		/// </summary>
-		public void BeginBatch()
-		{
-			if (batchRenderMode)
-				return; // 已经在批量模式中
-
-			batchRenderMode = true;
-			if (pendingBatchLines == null)
-				pendingBatchLines = new List<ConsoleDisplayLine>(128);
-			else
-				pendingBatchLines.Clear();
-		}
-
-		/// <summary>
-		/// PERFORMANCE: 结束批量渲染模式
-		/// 将缓存的所有行一次性添加到 displayLineList，然后统一刷新 UI
-		/// </summary>
-		public void EndBatch()
-		{
-			if (!batchRenderMode)
-				return;
-
-			batchRenderMode = false;
-
-			if (pendingBatchLines == null || pendingBatchLines.Count == 0)
-				return;
-
-			// 批量添加到 displayLineList，使用内部方法避免重复触发事件
-			lock (displayLineLock)
-			{
-				foreach (var line in pendingBatchLines)
-				{
-					if (line != null)
-						displayLineList.AddDirect(line);
-				}
-			}
-
-			pendingBatchLines.Clear();
-
-			// 一次性刷新 UI
-			RefreshStrings(false);
-		}
-
-		/// <summary>
-		/// PERFORMANCE: 检查是否在批量渲染模式
-		/// </summary>
-		public bool IsInBatchMode()
-		{
-			return batchRenderMode;
-		}
-
-		/// <summary>
-		/// PERFORMANCE: 添加到批量待处理列表（由 DisplayLineList 调用）
-		/// </summary>
-		internal void AddToPendingBatch(ConsoleDisplayLine line)
-		{
-			if (pendingBatchLines != null && line != null)
-				pendingBatchLines.Add(line);
-		}
 #region 1823 cbg関連
 		private readonly object displayLineLock = new object();
 		private readonly object cbgLock = new object();

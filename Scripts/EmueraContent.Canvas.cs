@@ -1138,10 +1138,7 @@ public partial class EmueraContent
 			float drawX = x;
 			for (int i = 0; i < text.Length; i++)
 			{
-				// 简化：ASCII 和半角片假名为半角，其他为全角
-				char c = text[i];
-				bool half = (c < 0x7F) || (c >= 0xFF65 && c <= 0xFF9F);
-
+				bool half = uEmuera.Utils.CheckHalfSize(text[i]);
 				float nextExactX = exactX + (half ? owner.FontSize / 2.0f : owner.FontSize);
 				float nextDrawX = x + (int)nextExactX;
 				float cellWidth = nextDrawX - drawX;
@@ -1206,7 +1203,8 @@ public partial class EmueraContent
 			for (int i = 0; i < value.Length; i++)
 			{
 				char c = value[i];
-				// 简化：移除零宽检查，直接检查敏感字符
+				if (uEmuera.Utils.CheckZeroWidth(c))
+					continue;
 				if (char.IsWhiteSpace(c) || IsGridSensitiveChar(c))
 					return true;
 			}

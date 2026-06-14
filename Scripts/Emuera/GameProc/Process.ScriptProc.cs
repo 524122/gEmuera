@@ -233,10 +233,6 @@ namespace MinorShift.Emuera.GameProc
 						ExpressionArgument intExpArg = (ExpressionArgument)func.Argument;
 						Int64 target = intExpArg.Term.GetIntValue(exm);
 						int count = 0;
-
-						// PERFORMANCE: 批量渲染模式，减少 UI 刷新
-						exm.Console.BeginBatch();
-
 						///100以降は否定の珠とかなので表示しない
 						for (int i = 0; i < 100; i++)
 						{
@@ -249,9 +245,6 @@ namespace MinorShift.Emuera.GameProc
 									exm.Console.PrintFlush(false);
 							}
 						}
-
-						// PERFORMANCE: 结束批量模式，统一刷新
-						exm.Console.EndBatch();
 						exm.Console.PrintFlush(false);
 						exm.Console.RefreshStrings(false);
 					}
@@ -270,10 +263,6 @@ namespace MinorShift.Emuera.GameProc
 						if (length > vEvaluator.ITEMPRICE.Length)
 							length = vEvaluator.ITEMPRICE.Length;
 						int count = 0;
-
-						// PERFORMANCE: 批量渲染模式，减少 UI 刷新
-						exm.Console.BeginBatch();
-
 						for (int i = 0; i < length; i++)
 						{
 							if (vEvaluator.ItemSales(i))
@@ -292,9 +281,6 @@ namespace MinorShift.Emuera.GameProc
 									exm.Console.PrintFlush(false);
 							}
 						}
-
-						// PERFORMANCE: 结束批量模式，统一刷新
-						exm.Console.EndBatch();
 						exm.Console.PrintFlush(false);
 						exm.Console.RefreshStrings(false);
 					}

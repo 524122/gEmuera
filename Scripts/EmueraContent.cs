@@ -2530,7 +2530,6 @@ public partial class EmueraContent : Control
 		desiredContentScrollHorizontal = horizontal;
 		desiredContentScrollVertical = vertical;
 		desiredContentScrollValid = true;
-		needsScrollCorrection = true; // PERFORMANCE: 设置标志位
 	}
 
 	// Protect divisions and scroll math from zero scale.
@@ -3582,7 +3581,6 @@ public partial class EmueraContent : Control
 			emuImg.SetColorMatrix(entry.Layer.colorMatrix);
 			emuImg.Visible = true;
 			renderedCbgLayers.Add(entry.Layer);
-			hasCbgAnimations = true; // PERFORMANCE: 设置标志位，表示有 CBG 需要处理
 		}
 		cbgTexturePins = newCbgTexturePins;
 		lastCbgScrollVertical = currentScrollY;
@@ -3591,9 +3589,6 @@ public partial class EmueraContent : Control
 
 	// Convert emuera CBG z-depth rules into a Godot position. Positive z-depth
 	// layers follow content scroll, while other depths remain screen-relative.
-	// CBG coordinates from script are in unscaled pixel space; divide by contentScale
-	// to compensate for cbgContainer's Scale transform, ensuring positions remain
-	// visually correct at all zoom levels.
 	Vector2 GetCbgLayerPosition(MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage cbg, int currentScrollY)
 	{
 		int y = cbg.y;
@@ -3603,10 +3598,7 @@ public partial class EmueraContent : Control
 				cbg.initialScrollY = currentScrollY;
 			y -= currentScrollY - cbg.initialScrollY;
 		}
-		// Apply inverse scale compensation: cbgContainer is scaled by contentScale,
-		// so divide position by scale to maintain correct screen-space location.
-		float scale = contentScale > 0 ? contentScale : 1.0f;
-		return new Vector2(cbg.x / scale, y / scale);
+		return new Vector2(cbg.x, y);
 	}
 
 	// Current vertical scroll used by CBG positioning and animation culling.
@@ -4520,58 +4512,36 @@ public partial class EmueraContent : Control
 		ApplyFont(msgBoxCancelBtn);
 	}
 
-	// PERFORMANCE: 性能优化状态标志，减少无操作方法调用
-	bool hasPendingPinchZoom = false;
-	bool hasContentInertia = false;
-	bool needsScrollCorrection = false;
-	bool hasCbgAnimations = false;
-	bool hasCanvasImageAnimations = false;
-	int processFrameCounter = 0;
-
 	// Per-frame maintenance. The expensive parts are guarded by flags, and the
 	// always-on pieces are O(1) so Android frame time remains predictable.
-	// PERFORMANCE OPTIMIZED: 使用标志位门控，减少 40-60% 的无操作调用
 	public override void _Process(double delta)
 	{
-		// 条件调用：仅在有实际工作时执行
-		if (hasPendingPinchZoom)
-			ProcessPendingContentPinchZoom();
-
-		if (hasContentInertia)
-			ProcessContentInertia((float)delta);
-
-		if (needsScrollCorrection)
-			ProcessContentScrollCorrection();
-
-		// 始终需要的操作
+		ProcessPendingContentPinchZoom();
+		ProcessContentInertia((float)delta);
+		ProcessContentScrollCorrection();
 		SyncContentVerticalScrollRange();
 		consoleRenderSurface?.SyncScrollRedraw();
-
-		// 音频和动画更新降频到 30 FPS（每 2 帧一次）
-		// PERFORMANCE: 人眼难以察觉 30 FPS 的音频位置更新
-		processFrameCounter++;
-		if (processFrameCounter % 2 == 0)
-		{
-			PublishAudioPlaybackPositions();
-
-			if (hasCbgAnimations)
-			{
-				RefreshCbgFollowScrollPositions();
-				RefreshCbgAnimationPauseState();
-			}
-
-			if (hasCanvasImageAnimations)
-				RefreshCanvasImageAnimations();
-		}
-
+		PublishAudioPlaybackPositions();
+		RefreshCbgFollowScrollPositions();
+		RefreshCbgAnimationPauseState();
+		RefreshCanvasImageAnimations();
 		RefreshQuickInputGate();
 		RefreshUiDiagnosticOverlay();
 		ProcessAsyncTextureRefreshes();
+		if (quickInputGateActive && Time.GetTicksMsec() - quickInputGateTick >= QuickInputGateFallbackMs && !EmueraThread.instance.Running())
+		{
+			RestoreQuickInputGate();
+		}
+		else if (!quickInputGateActive
+			&& quickAutoHiddenUntilNextButtons
+			&& quickAutoHiddenWasVisible
+			&& quickAutoHiddenTick > 0
+			&& Time.GetTicksMsec() - quickAutoHiddenTick >= QuickInputGateFallbackMs
+			&& !EmueraThread.instance.Running())
+		{
+			RestoreAutoHiddenQuickButtonsIfCurrent();
+		}
 
-		// 合并超时检测逻辑，减少 Time.GetTicksMsec() 调用
-		CheckTimeoutLogic();
-
-		// 自动点击跳过
 		if (!autoClickSkipEnabled)
 			return;
 		var console = GlobalStatic.Console;
@@ -4584,32 +4554,6 @@ public partial class EmueraContent : Control
 		TraceScroll("auto_skip_input");
 		GenericUtils.StartScrollTraceCoreWindow("auto_skip");
 		EmueraThread.instance.Input("", false, true);
-	}
-
-	// PERFORMANCE: 合并超时检测，避免重复调用 Time.GetTicksMsec() 和 EmueraThread.Running()
-	void CheckTimeoutLogic()
-	{
-		if (!quickInputGateActive && !quickAutoHiddenUntilNextButtons)
-			return;
-
-		ulong now = Time.GetTicksMsec();
-		bool threadRunning = EmueraThread.instance.Running();
-
-		if (quickInputGateActive
-			&& now - quickInputGateTick >= QuickInputGateFallbackMs
-			&& !threadRunning)
-		{
-			RestoreQuickInputGate();
-		}
-		else if (!quickInputGateActive
-			&& quickAutoHiddenUntilNextButtons
-			&& quickAutoHiddenWasVisible
-			&& quickAutoHiddenTick > 0
-			&& now - quickAutoHiddenTick >= QuickInputGateFallbackMs
-			&& !threadRunning)
-		{
-			RestoreAutoHiddenQuickButtonsIfCurrent();
-		}
 	}
 
 	// Pause animated CBG sprites when outside the visible viewport to save mobile
@@ -5072,10 +5016,7 @@ public partial class EmueraContent : Control
 		else if (!contentPinchActive || contentTouchPositions.Count != contentPinchTouchCount)
 			BeginContentPinch();
 		else
-		{
 			contentPinchDirty = true;
-			hasPendingPinchZoom = true; // PERFORMANCE: 设置标志位
-		}
 
 		ConsumeContentPointerEvent(acceptEvent);
 		CaptureInputReplayEvent("screen_drag", "", drag.Position, true);
@@ -5106,7 +5047,6 @@ public partial class EmueraContent : Control
 	{
 		contentPinchActive = false;
 		contentPinchDirty = false;
-		hasPendingPinchZoom = false; // PERFORMANCE: 清除标志位
 		contentPinchTouchCount = contentTouchPositions.Count;
 		if (!ContentPinchZoomEnabled)
 			return;
@@ -5126,12 +5066,8 @@ public partial class EmueraContent : Control
 	void ProcessPendingContentPinchZoom()
 	{
 		if (!contentPinchDirty)
-		{
-			hasPendingPinchZoom = false; // PERFORMANCE: 清除标志位
 			return;
-		}
 		contentPinchDirty = false;
-		hasPendingPinchZoom = false; // PERFORMANCE: 清除标志位
 		UpdateContentPinchZoom();
 	}
 
@@ -5412,24 +5348,15 @@ public partial class EmueraContent : Control
 	void ProcessContentScrollCorrection()
 	{
 		if (scrollContainer == null || !desiredContentScrollValid || pendingScroll || contentDragActive || contentInertiaActive)
-		{
-			needsScrollCorrection = false; // PERFORMANCE: 清除标志位
 			return;
-		}
 		if (scrollContainer.ScrollHorizontal == desiredContentScrollHorizontal && scrollContainer.ScrollVertical == desiredContentScrollVertical)
-		{
-			needsScrollCorrection = false; // PERFORMANCE: 清除标志位
 			return;
-		}
 
 		var limit = GetContentScrollLimit();
 		int targetHorizontal = Mathf.Clamp(desiredContentScrollHorizontal, 0, limit.X);
 		int targetVertical = Mathf.Clamp(desiredContentScrollVertical, 0, limit.Y);
 		if (targetHorizontal == scrollContainer.ScrollHorizontal && targetVertical == scrollContainer.ScrollVertical)
-		{
-			needsScrollCorrection = false; // PERFORMANCE: 清除标志位
 			return;
-		}
 
 		int oldHorizontal = scrollContainer.ScrollHorizontal;
 		int oldVertical = scrollContainer.ScrollVertical;
@@ -5485,7 +5412,6 @@ public partial class EmueraContent : Control
 		if (contentScrollVelocity.Length() >= ContentInertiaMinVelocity)
 		{
 			contentInertiaActive = true;
-			hasContentInertia = true; // PERFORMANCE: 设置标志位
 			if (GenericUtils.IsScrollTraceActive)
 				TraceScroll("inertia_start", () => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())} decel={Mathf.RoundToInt(contentInertiaDeceleration)}");
 			if (GenericUtils.IsTouchTraceEnabled("inertia"))
@@ -5509,7 +5435,6 @@ public partial class EmueraContent : Control
 					() => $"speed={Mathf.RoundToInt(contentScrollVelocity.Length())}");
 		}
 		contentInertiaActive = false;
-		hasContentInertia = false; // PERFORMANCE: 清除标志位
 		contentScrollVelocity = Vector2.Zero;
 		contentInertiaRemainder = Vector2.Zero;
 		contentLastDragTick = 0;
@@ -5782,8 +5707,7 @@ public partial class EmueraContent : Control
 		float glyphBodyHeight = Mathf.Max(1.0f, glyphBottom - glyphTop);
 
 		// TW 的体力/气力/精力、快C/快V 等条形图用 U+2585/U+2584 这类实体块。
-		// 宽度计算已简化为统一规则：ASCII + 半角片假名 = 半角，其他 = 全角
-		// 这里只把字形限制在当前行网格内，避免字形溢出到下一行。
+		// 宽度仍由 Utils.CheckHalfSize 决定以保证横向相连；这里只把字形限制在当前行网格内，
 		// 避免 Godot 字体 fallback 把块字形画到相邻行，造成竖向黏连。
 		if (value >= '\u2581' && value <= '\u2588')
 		{
@@ -5879,10 +5803,7 @@ public partial class EmueraContent : Control
 			float drawX = 0.0f;
 			for (int i = 0; i < text.Length; i++)
 			{
-				// 简化：ASCII 和半角片假名为半角，其他为全角
-				char c = text[i];
-				bool half = (c < 0x7F) || (c >= 0xFF65 && c <= 0xFF9F);
-
+				bool half = uEmuera.Utils.CheckHalfSize(text[i]);
 				// 布局宽度由 Utils.GetDisplayLength 决定，奇数字号下半角字符会按累计整数截断。
 				// 绘制也用同一格点推进，避免 Button 和 Label 之间出现 0.5px 累计偏移。
 				float nextExactX = exactX + GetCellWidth(half);
@@ -5922,7 +5843,8 @@ public partial class EmueraContent : Control
 			for (int i = 0; i < value.Length; i++)
 			{
 				char c = value[i];
-				// 简化：移除零宽检查，直接检查敏感字符
+				if (uEmuera.Utils.CheckZeroWidth(c))
+					continue;
 				if (char.IsWhiteSpace(c) || IsGridSensitiveChar(c))
 					return true;
 			}

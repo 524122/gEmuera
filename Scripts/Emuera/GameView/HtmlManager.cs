@@ -537,43 +537,13 @@ namespace MinorShift.Emuera.GameView
 				}
 				else//タグ解析
 				{
-					// 检查 '<' 后面是否真的是有效的 HTML 标签
-					// 如果不是（例如是 Block Elements 字符），将 '<' 作为普通文本处理
-					int savedPos = st.CurrentPosition;
 					st.ShiftNext();
-					bool isValidTag = false;
-
-					// 检查是否是结束标签 '</' 或有效的标签名开头
-					if (!st.EOS)
-					{
-						char nextChar = st.Current;
-						// 有效的标签：'/'（结束标签）或字母（标签名）
-						if (nextChar == '/' ||
-							(nextChar >= 'a' && nextChar <= 'z') ||
-							(nextChar >= 'A' && nextChar <= 'Z'))
-						{
-							isValidTag = true;
-						}
-					}
-
-					if (isValidTag)
-					{
-						// 正常的 HTML 标签解析
-						AConsoleDisplayPart part = tagAnalyze(state, st);
-						if (st.Current != '>')
-							throw new CodeEE("タグ終端'>'が見つかりません");
-						if (part != null)
-							cssList.Add(part);
-						st.ShiftNext();
-					}
-					else
-					{
-						// '<' 不是标签的开始，作为普通文本处理
-						st.CurrentPosition = savedPos;
-						cssList.Add(new ConsoleStyledString("<", state.GetSS()));
-						st.ShiftNext();
-						state.LineHead = false;
-					}
+					AConsoleDisplayPart part = tagAnalyze(state, st);
+					if (st.Current != '>')
+						throw new CodeEE("タグ終端'>'が見つかりません");
+					if (part != null)
+						cssList.Add(part);
+					st.ShiftNext();
 					if (state.PendingDivTag != null)
 					{
 						HtmlDivTag divTag = state.PendingDivTag;

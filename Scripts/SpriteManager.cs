@@ -505,21 +505,8 @@ internal static class SpriteManager
 
 	static Image CreatePlaceholderImage()
 	{
-		// 创建可见的占位图（8x8浅灰色棋盘格），用于指示图片加载中或加载失败。
-		// 透明占位图会导致控件显示为白色背景，造成闪烁；可见占位图提供明确的
-		// 视觉反馈，并且在移动端纹理异步加载窗口期间保持一致的渲染状态。
-		Image img = Image.CreateEmpty(8, 8, false, Image.Format.Rgba8);
-		var lightGray = new Godot.Color(0.75f, 0.75f, 0.75f, 1.0f);
-		var darkGray = new Godot.Color(0.65f, 0.65f, 0.65f, 1.0f);
-		for (int y = 0; y < 8; y++)
-		{
-			for (int x = 0; x < 8; x++)
-			{
-				// 棋盘格图案：每2x2像素块交替颜色
-				bool useLightColor = ((x / 2) + (y / 2)) % 2 == 0;
-				img.SetPixel(x, y, useLightColor ? lightGray : darkGray);
-			}
-		}
+		Image img = Image.CreateEmpty(1, 1, false, Image.Format.Rgba8);
+		img.SetPixel(0, 0, new Godot.Color(0, 0, 0, 0));
 		return img;
 	}
 

@@ -6,7 +6,6 @@ using Godot;
 public partial class EmueraImage : Control
 {
 	private Texture2D _sourceTexture;
-	private Texture2D _lastValidTexture; // 保留上一个有效纹理，防止切换时闪烁
 	private Rect2 _sourceRegion;
 	private Vector2 _drawOffset;
 	private Vector2 _drawSize;
@@ -23,10 +22,6 @@ public partial class EmueraImage : Control
 		set
 		{
 			_sourceTexture = value;
-			// 只有在新纹理有效时才更新 lastValidTexture，这样在异步加载期间
-			// 可以继续显示旧纹理，避免白屏闪烁
-			if (_sourceTexture != null)
-				_lastValidTexture = _sourceTexture;
 			QueueRedraw();
 		}
 	}
@@ -117,10 +112,7 @@ public partial class EmueraImage : Control
 
 	public override void _Draw()
 	{
-		// 优先使用当前纹理，如果为 null 则回退到上一个有效纹理。
-		// 这样在异步加载期间或纹理切换时，控件仍能显示内容而不是白屏。
-		Texture2D textureToUse = SourceTexture ?? _lastValidTexture;
-		if (textureToUse == null) return;
+		if (SourceTexture == null) return;
 
 		var drawSize = DrawSize.X > 0 && DrawSize.Y > 0 ? DrawSize : Size;
 		var destRect = new Rect2(DrawOffset.X, DrawOffset.Y, drawSize.X, drawSize.Y);
@@ -135,11 +127,11 @@ public partial class EmueraImage : Control
 
 		if (SourceRegion.Size.X > 0 && SourceRegion.Size.Y > 0)
 		{
-			DrawTextureRectRegion(textureToUse, destRect, SourceRegion);
+			DrawTextureRectRegion(SourceTexture, destRect, SourceRegion);
 		}
 		else
 		{
-			DrawTextureRect(textureToUse, destRect, false);
+			DrawTextureRect(SourceTexture, destRect, false);
 		}
 
 		if (flip)

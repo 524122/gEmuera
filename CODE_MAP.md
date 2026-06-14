@@ -1,6 +1,6 @@
 # CODE_MAP
 
-更新时间：2026-06-14
+更新时间：2026-06-07
 
 用途：这是给 AI 和维护者快速定位代码用的地图。优先读本文件，再按路径进入源码。地图只记录结构、职责、主要接口和关键函数，不复制源码实现。
 
@@ -22,7 +22,7 @@ rg -n "interface|abstract class|class .*:|enum " Scripts -g '*.cs' -g '!addons/*
 
 本次扫描范围：
 - 项目 C#：`Scripts/**/*.cs`
-- C# 文件数：164
+- C# 文件数：156
 - C# 代码行数约：85256
 - 忽略：`addons/**`、`*.uid`、资源导入文件
 
@@ -35,7 +35,7 @@ project.godot
        扫描 era* 游戏目录，选择游戏
     -> main.tscn
        -> EmueraMain._Ready()
-          装配 GodotHost 组件、初始化 GPU/文本渲染队列、创建 EmueraContent
+          初始化路径、配置映射、GPU 队列、EmueraContent
        -> EmueraThread.Start()
           后台 Thread 执行 Program.Main()
        -> Program.Main()
@@ -81,7 +81,6 @@ project.godot
 |-- Scripts/
 |   |-- *.cs                      Godot UI、线程桥、渲染、精灵管理
 |   |-- Diagnostics/              运行期诊断、日志、导出、面板
-|   |-- GodotHost/                Godot 宿主组件；启动路径/配置映射、平台生命周期、启动遮罩视图
 |   |-- Emuera/
 |   |   |-- Config/               Emuera 配置系统
 |   |   |-- Content/              图片、精灵、Graphics surface
@@ -106,7 +105,7 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `Scripts/EmueraMain.cs` | `EmueraMain : Node`, `GpuWorkItem`, `TextRenderItem` | 主场景宿主编排器；装配 `GodotHost` 组件，创建 UI 根节点，驱动后台线程，并保留 GPU ColorMatrix / 文本渲染的静态兼容门面。具体队列和离屏节点由 `EmueraGpuRenderComponent`、`EmueraTextRenderComponent` 拥有。 | `_Ready`, `_Process`, `_ExitTree`, `Run`, `Clear`, `Restart`, `GpuSubmitColorMatrix`, `SubmitTextRender` |
+| `Scripts/EmueraMain.cs` | `EmueraMain : Node`, `GpuWorkItem`, `TextRenderItem` | 主场景入口；初始化配置映射、UI 根节点、线程和 GPU/文本渲染队列。 | `_Ready`, `_Process`, `_ExitTree`, `Run`, `Clear`, `Restart`, `GpuSubmitColorMatrix`, `SubmitTextRender` |
 | `Scripts/EmueraThread.cs` | `EmueraThread` | 后台执行 Emuera 核心；把 Godot 输入转成阻塞式 console 输入。 | `Start`, `End`, `Running`, `Input` |
 | `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退。 | `_Ready`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
 | `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制，并复刻原核心按钮选中/焦点背景/BackLog 普通文字颜色语义；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表并用 `hitRectBuckets` 缩小扫描范围，未命中时再回退 overlay/旧控件树；移动端未写入用户配置时默认保留 240 行，桌面端默认 360 行；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
@@ -124,16 +123,6 @@ project.godot
 | `Scripts/FrameRateHelper.cs` | `FrameRateHelper` | 应用帧率配置。 | `Apply`, `ApplyConfigFps` |
 | `Scripts/ResolutionHelper.cs` | `ResolutionHelper` | 解析/应用窗口分辨率配置。 | `Apply`, `RefreshResolutions` |
 | `Scripts/MultiLanguage.cs` | `MultiLanguage` | 读取 `Lang/*.txt`，提供 UI 文案。 | `Load`, `Get`, `CurrentLanguage` |
-
-### Scripts/GodotHost
-
-| 文件 | 主要类型 | 职责 | 关键入口/函数 |
-|---|---|---|---|
-| `Scripts/GodotHost/EmueraStartupComponent.cs` | `EmueraStartupComponent : Node` | Godot 宿主启动组件；解析启动器选择和 fallback 游戏目录，设置 `Sys.ExeDir`，加载 SHIFT-JIS/UTF-8 配置映射并缓存，启动后台线程前重置核心全局状态。 | `PrepareAsync`, `StatusChanged` |
-| `Scripts/GodotHost/EmueraLifecycleComponent.cs` | `EmueraLifecycleComponent : Node` | 移动端/Android 生命周期组件；处理后台/恢复通知，临时降低 FPS，并委托 `EmueraContent` 暂停或恢复音频状态。 | `HandleNotification` |
-| `Scripts/GodotHost/EmueraGpuRenderComponent.cs` | `EmueraGpuRenderComponent : Node` | Godot 宿主 GPU ColorMatrix 离屏渲染组件；拥有跨线程任务队列、SubViewport/TextureRect 节点和 CPU fallback，供 `EmueraMain.GpuSubmitColorMatrix` 静态门面调用。 | `Submit`, `MarkFrameReady`, `ProcessQueue`, `_ExitTree`, `QueuedWorkCount`, `GpuReady` |
-| `Scripts/GodotHost/EmueraTextRenderComponent.cs` | `EmueraTextRenderComponent : Node` | Godot 宿主文字离屏渲染组件；拥有后台线程 GDrawString 请求队列、SubViewport/Label 节点和退出唤醒逻辑，供 `EmueraMain.SubmitTextRender` 静态门面调用。 | `Submit`, `ProcessQueue`, `_ExitTree`, `QueuedWorkCount` |
-| `Scripts/GodotHost/EmueraStartupOverlayView.cs` | `EmueraStartupOverlayView : Control` | 启动遮罩视图；只显示启动状态，不操作路径、核心状态或后台线程。 | `Build`, `SetStatus` |
 
 ### Scripts/Diagnostics
 
@@ -315,13 +304,13 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `Runtime/Utils/SqliteRuntime.cs` | `SqliteRuntime` | SQLite 初始化、连接路径、运行时可用性；Android 平台使用扩展的 native library 搜索路径（APK 内部 `/data/app/<package>/lib`、应用私有目录、系统库 `/system/lib64`）；提供诊断日志记录初始化和库加载过程，配合 `config.toml` 的 `[logging]` 开关。 | `EnsureInitialized`, `GetNativeSearchDirectories`, `ResolveSqliteNativeLibrary`, `NormalizeConnectionString`, `FormatException` |
+| `Runtime/Utils/SqliteRuntime.cs` | `SqliteRuntime` | SQLite 初始化、连接路径、运行时可用性。 | `Initialize`, `OpenConnection`, `Shutdown` |
 | `Runtime/Utils/SnakeSqlManager.cs` | `SnakeSqlManager`, `ReaderContext` | Snake profile SQL 兼容层。 | `Connect`, `ExecuteNonQuery`, `ExecuteReader`, `ReaderGet*`, `Disconnect` |
 | `Runtime/Utils/PluginSystem/IPluginMethod.cs` | `IPluginMethod` | 插件方法接口。 | `Name`, `Description`, `Execute(PluginMethodParameter[] args)` |
 | `Runtime/Utils/PluginSystem/PluginManager.cs` | `PluginManager`, `ReflectionPluginMethod` | 插件 manifest 加载、DLL 存在检测、方法注册和反射调用。 | `LoadPlugins`, `ExecuteMethod`, method registry |
 | `Runtime/Utils/PluginSystem/PluginManifestAbstract.cs` | `PluginManifestAbstract` | 插件 manifest 抽象基类。 | manifest 字段/属性 |
 | `Runtime/Utils/PluginSystem/PluginMethodParameter.cs` | `PluginMethodParameter`, `PluginMethodParameterBuilder` | 插件方法参数对象和 builder，支持整数、字符串和小数参数。 | `ConvertTerm`, 参数字段 |
-| `Modern/Script/Functions/ModernSqlManager.cs` | `ModernSqlManager`, `ReaderContext` | 现代 SQL 扩展函数运行时；提供诊断日志记录连接、查询执行和错误状态，配合 `config.toml` 的 `[logging]` 开关；桌面端数据库默认存储在 `LocalApplicationData/gemuera-modern/sql/`，Android 需要验证权限。 | `Connect`, `ExecuteReader`, `ReaderGet*`, `Disconnect`, `ConnectionOpen`, `ExecuteNonQuery`, `ExecuteScalar*`, `ImportMapXml`, `ExportMapXml` |
+| `Modern/Script/Functions/ModernSqlManager.cs` | `ModernSqlManager`, `ReaderContext` | 现代 SQL 扩展函数运行时。 | `Connect`, `ExecuteReader`, `ReaderGet*`, `Disconnect` |
 
 ### Scripts/Emuera/Sub
 
@@ -375,8 +364,7 @@ project.godot
 | 任务 | 优先看 |
 |---|---|
 | 修改启动器扫描、游戏目录选择 | `FirstWindow._Ready`, `FirstWindow.ResolveStartupGamePath` |
-| 修改主场景初始化 | `EmueraMain._Ready`, `EmueraStartupComponent.PrepareAsync`, `EmueraMain.Run`, `EmueraMain.Restart` |
-| 修改 Android 后台/恢复行为 | `EmueraLifecycleComponent.HandleNotification`, `EmueraContent.SetApplicationPaused`, `FrameRateHelper.ApplyConfigFps` |
+| 修改主场景初始化 | `EmueraMain._Ready`, `EmueraMain.Run`, `EmueraMain.Restart` |
 | 修改后台线程和输入唤醒 | `EmueraThread.Start`, `EmueraThread.Input`, `EmueraConsole.PressEnterKey` |
 | 修改核心入口或 profile 选择 | `Program.Main`, `Program.DetectCoreProfile` |
 | 修改退出/重启 | `EmueraMain._ExitTree`, `EmueraConsole.QuitAndRestart`, `GenericUtils.RestartGame` |

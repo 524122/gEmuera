@@ -141,23 +141,6 @@ namespace MinorShift.Emuera.GameView
 				this.Quit();
 				return;
 			}
-
-			// PERFORMANCE: 批量模式下，直接缓存到 pendingBatchLines
-			if (batchRenderMode && pendingBatchLines != null)
-			{
-				if (force_LEFT)
-					line.SetAlignment(DisplayLineAlignment.LEFT);
-				else
-					line.SetAlignment(alignment);
-				line.LineNo = lineNo;
-				// 注意：IsLogicalLine 是只读字段，在 ConsoleDisplayLine 构造时已设置
-				pendingBatchLines.Add(line);
-				lineNo++;
-				if (line.IsLogicalLine && line.IsLineEnd)
-					logicalLineCount++;
-				return;
-			}
-
 			lock (displayLineLock)
 			{
 				if (LastLineIsTemporary)

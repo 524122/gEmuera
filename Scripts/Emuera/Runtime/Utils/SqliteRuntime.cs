@@ -22,22 +22,9 @@ namespace MinorShift.Emuera.Runtime.Utils
 			{
 				if (initialized)
 					return;
-
-				GenericUtils.Info("Initializing SQLite runtime...", EmueraLogCategory.SQL);
-				GenericUtils.Info($"Platform: {Godot.OS.GetName()}, BaseDirectory: {AppContext.BaseDirectory}", EmueraLogCategory.SQL);
-
-				try
-				{
-					InstallNativeResolver();
-					SQLitePCL.Batteries_V2.Init();
-					initialized = true;
-					GenericUtils.Info("SQLite runtime initialized successfully", EmueraLogCategory.SQL);
-				}
-				catch (Exception ex)
-				{
-					GenericUtils.Error($"Failed to initialize SQLite runtime: {FormatException(ex)}", EmueraLogCategory.SQL);
-					throw;
-				}
+				InstallNativeResolver();
+				SQLitePCL.Batteries_V2.Init();
+				initialized = true;
 			}
 		}
 
@@ -67,24 +54,14 @@ namespace MinorShift.Emuera.Runtime.Utils
 			if (!IsSqliteNativeName(libraryName))
 				return IntPtr.Zero;
 
-			GenericUtils.Debug($"Resolving SQLite native library: {libraryName}", EmueraLogCategory.SQL);
-
 			foreach (string candidate in GetNativeLibraryCandidates())
 			{
-				GenericUtils.Debug($"Trying candidate: {candidate}", EmueraLogCategory.SQL);
 				if (NativeLibrary.TryLoad(candidate, assembly, searchPath, out IntPtr handle))
-				{
-					GenericUtils.Info($"Successfully loaded SQLite native library from: {candidate}", EmueraLogCategory.SQL);
 					return handle;
-				}
 				if (NativeLibrary.TryLoad(candidate, out handle))
-				{
-					GenericUtils.Info($"Successfully loaded SQLite native library from: {candidate}", EmueraLogCategory.SQL);
 					return handle;
-				}
 			}
 
-			GenericUtils.Error($"Failed to load SQLite native library: {libraryName}", EmueraLogCategory.SQL);
 			return IntPtr.Zero;
 		}
 
@@ -111,51 +88,15 @@ namespace MinorShift.Emuera.Runtime.Utils
 
 		static IEnumerable<string> GetNativeSearchDirectories()
 		{
-			// 标准路径
 			yield return AppContext.BaseDirectory;
 			yield return Path.GetDirectoryName(typeof(SqliteRuntime).Assembly.Location);
 			yield return Directory.GetCurrentDirectory();
 
-			// Android 特定路径
-			if (Godot.OS.GetName() == "Android")
-			{
-				// 尝试从可执行路径推断应用目录
-				string execPath = Godot.OS.GetExecutablePath();
-				if (!string.IsNullOrEmpty(execPath))
-				{
-					// APK 路径通常是 /data/app/<package>/base.apk
-					string appDir = Path.GetDirectoryName(execPath);
-					if (!string.IsNullOrEmpty(appDir))
-					{
-						// lib 目录在 /data/app/<package>/lib/arm64
-						yield return Path.Combine(appDir, "lib", "arm64");
-						yield return Path.Combine(appDir, "lib");
-					}
-				}
-
-				// 标准 Android native library 路径
-				yield return "/data/data/com.godot.game/lib"; // Godot 默认包名
-				yield return "/data/data/com.godotengine.gemuera/lib"; // 可能的自定义包名
-
-				// APK 内部路径
-				yield return Path.Combine(AppContext.BaseDirectory, "lib", "arm64-v8a");
-				yield return Path.Combine(AppContext.BaseDirectory, "lib");
-
-				// 系统库路径
-				yield return "/system/lib64";
-				yield return "/system/lib";
-				yield return "/data/local/tmp";
-			}
-
-			// Linux LD_LIBRARY_PATH
 			string ldPath = Environment.GetEnvironmentVariable("LD_LIBRARY_PATH");
 			if (!string.IsNullOrWhiteSpace(ldPath))
 			{
 				foreach (string dir in ldPath.Split(':'))
-				{
-					if (!string.IsNullOrWhiteSpace(dir))
-						yield return dir;
-				}
+					yield return dir;
 			}
 		}
 

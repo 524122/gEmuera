@@ -1,6 +1,10 @@
 using Godot;
+using MinorShift._Library;
 using MinorShift.Emuera;
+using MinorShift.Emuera.GameView;
+using System.Collections.Concurrent;
 using System.Threading;
+using MinorShift.Emuera.Content;
 using gEmuera.Diagnostics;
 
 public partial class EmueraMain : Node
@@ -34,29 +38,269 @@ public partial class EmueraMain : Node
         public ManualResetEventSlim Completed = new ManualResetEventSlim(false);
     }
 
+    static ConcurrentQueue<GpuWorkItem> gpuQueue = new ConcurrentQueue<GpuWorkItem>();
+    static ConcurrentQueue<TextRenderItem> textRenderQueue = new ConcurrentQueue<TextRenderItem>();
+    static int gpuWorkIdCounter = 0;
+    static int textRenderIdCounter = 0;
+    static readonly object configMapCacheLock = new object();
+    static System.Collections.Generic.Dictionary<string, string> cachedShiftJisToUtf8Map;
+    static System.Collections.Generic.Dictionary<string, string> cachedUtf8ZhCnToUtf8Map;
+
     /// <summary>
     /// True once _Process has been called at least once, indicating the main loop is running
     /// and the SubViewport render pipeline is ready to process GPU work.
     /// </summary>
-    public static bool GpuReady => EmueraGpuRenderComponent.GpuReady;
+    public static bool GpuReady { get; private set; } = false;
 
     /// Submit ColorMatrix work from any thread. Returns the GpuWorkItem for direct wait.
     public static GpuWorkItem GpuSubmitColorMatrix(Godot.Image src, Godot.Rect2I region, float[][] cm)
     {
-        return EmueraGpuRenderComponent.Submit(src, region, cm);
+        var item = new GpuWorkItem
+        {
+            Id = Interlocked.Increment(ref gpuWorkIdCounter),
+            SrcImage = src,
+            SrcRegion = region,
+            ColorMatrix = cm
+        };
+        gpuQueue.Enqueue(item);
+        return item;
     }
 
     public static TextRenderItem SubmitTextRender(string text, string fontName, int fontSize, int fontStyle, uEmuera.Drawing.Color color, int width, int height)
     {
-        return EmueraTextRenderComponent.Submit(text, fontName, fontSize, fontStyle, color, width, height);
+        if (GenericUtils.IsOnMainThread())
+            return null;
+        var item = new TextRenderItem
+        {
+            Id = Interlocked.Increment(ref textRenderIdCounter),
+            Text = text ?? "",
+            FontName = fontName,
+            FontSize = System.Math.Max(1, fontSize),
+            FontStyle = fontStyle,
+            Color = color,
+            Width = System.Math.Max(1, width),
+            Height = System.Math.Max(1, height)
+        };
+        textRenderQueue.Enqueue(item);
+        return item;
     }
 
+    // SubViewport-based GPU rendering for ColorMatrix
+    SubViewport gpuViewport;
+    TextureRect gpuTextureRect;
+    ShaderMaterial gpuShaderMaterial;
+    GpuWorkItem pendingGpuItem;
+    int gpuRenderFrameCount = 0;
+    bool gpuWaitingForRender = false;
+    SubViewport textViewport;
+    Label textRenderLabel;
+    FontFile textRenderFont;
+    TextRenderItem pendingTextRenderItem;
+    int textRenderFrameCount = 0;
+    bool textWaitingForRender = false;
     bool startupStarted = false;
-    EmueraGpuRenderComponent gpuRenderComponent;
-    EmueraTextRenderComponent textRenderComponent;
-    EmueraStartupComponent startupComponent;
-    EmueraLifecycleComponent lifecycleComponent;
-    EmueraStartupOverlayView startupOverlay;
+    Control startupOverlay;
+    Label startupStatusLabel;
+    // Root-level Android lifecycle state. The main node owns frame-rate throttling
+    // while EmueraContent owns reversible audio pause state for script channels.
+    bool applicationPauseActive = false;
+    int maxFpsBeforeApplicationPause = -1;
+
+    void SetupGpuRenderer()
+    {
+        if (!ShouldUseGpuRenderer() || gpuViewport != null)
+            return;
+
+        gpuViewport = new SubViewport();
+        gpuViewport.TransparentBg = true;
+        gpuViewport.Size = new Vector2I(16, 16);
+        gpuViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+        gpuViewport.Name = "GpuRenderViewport";
+
+        gpuTextureRect = new TextureRect();
+        gpuTextureRect.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize;
+        gpuTextureRect.Name = "GpuTextureRect";
+
+        gpuShaderMaterial = ColorMatrixGPU.CreateCompositMaterial();
+        gpuTextureRect.Material = gpuShaderMaterial;
+
+        gpuViewport.AddChild(gpuTextureRect);
+        AddChild(gpuViewport);
+    }
+
+    static bool ShouldUseGpuRenderer()
+    {
+        return !OS.HasFeature("mobile");
+    }
+
+    void SetupTextRenderer()
+    {
+        if (textViewport != null)
+            return;
+
+        textRenderFont = ResourceLoader.Load<FontFile>("res://Fonts/MS Gothic.ttf");
+        textViewport = new SubViewport();
+        textViewport.TransparentBg = true;
+        textViewport.Size = new Vector2I(16, 16);
+        textViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+        textViewport.Name = "TextRenderViewport";
+
+        textRenderLabel = new Label();
+        textRenderLabel.Name = "TextRenderLabel";
+        textRenderLabel.Position = Vector2.Zero;
+        textRenderLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+        textRenderLabel.VerticalAlignment = VerticalAlignment.Top;
+        textRenderLabel.HorizontalAlignment = HorizontalAlignment.Left;
+        textRenderLabel.AutowrapMode = TextServer.AutowrapMode.Off;
+        textRenderLabel.ClipText = true;
+        if (textRenderFont != null)
+            textRenderLabel.AddThemeFontOverride("font", textRenderFont);
+
+        textViewport.AddChild(textRenderLabel);
+        AddChild(textViewport);
+    }
+
+    void ProcessTextRenderQueue()
+    {
+        if (textViewport == null)
+            SetupTextRenderer();
+        if (textViewport == null)
+            return;
+
+        if (textWaitingForRender)
+        {
+            textRenderFrameCount++;
+            if (textRenderFrameCount >= 2)
+            {
+                var vpTex = textViewport.GetTexture();
+                var resultImg = vpTex?.GetImage();
+                if (resultImg != null && resultImg.GetWidth() > 0 && resultImg.GetHeight() > 0)
+                {
+                    if (resultImg.GetFormat() != Godot.Image.Format.Rgba8)
+                        resultImg.Convert(Godot.Image.Format.Rgba8);
+                    pendingTextRenderItem.ResultImage = resultImg;
+                }
+                else
+                {
+                    pendingTextRenderItem.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
+                }
+                pendingTextRenderItem.Completed.Set();
+                pendingTextRenderItem = null;
+                textWaitingForRender = false;
+                textViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+            }
+        }
+
+        if (!textWaitingForRender && textRenderQueue.TryDequeue(out var item))
+        {
+            textViewport.Size = new Vector2I(item.Width, item.Height);
+            textRenderLabel.Text = item.Text ?? "";
+            textRenderLabel.Size = new Vector2(item.Width, item.Height);
+            textRenderLabel.CustomMinimumSize = textRenderLabel.Size;
+            textRenderLabel.AddThemeFontSizeOverride("font_size", item.FontSize);
+            textRenderLabel.AddThemeColorOverride("font_color", new Color(item.Color.r, item.Color.g, item.Color.b, item.Color.a));
+            textRenderLabel.Position = Vector2.Zero;
+
+            textViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+            textRenderFrameCount = 0;
+            textWaitingForRender = true;
+            pendingTextRenderItem = item;
+        }
+    }
+
+    /// Process pending GPU work. Called from _Process on the main thread.
+    /// Frame-counted cycle: setup render → wait 2 frames → retrieve result.
+    /// Falls back to CPU processing if GPU render produces no output.
+    void ProcessGpuQueue()
+    {
+        if (!ShouldUseGpuRenderer())
+        {
+            while (gpuQueue.TryDequeue(out var queuedItem))
+            {
+                queuedItem.ResultImage = MinorShift.Emuera.Content.GraphicsImage.ApplyColorMatrixGPU(
+                    queuedItem.SrcImage, queuedItem.SrcRegion, queuedItem.ColorMatrix);
+                queuedItem.Completed.Set();
+            }
+            return;
+        }
+
+        if (gpuViewport == null)
+            SetupGpuRenderer();
+        if (gpuViewport == null)
+            return;
+
+        // Phase 1: Wait for render to complete (2 frames after setup)
+        if (gpuWaitingForRender)
+        {
+            gpuRenderFrameCount++;
+            if (gpuRenderFrameCount >= 2)
+            {
+                var vpTex = gpuViewport.GetTexture();
+                if (vpTex != null)
+                {
+                    var resultImg = vpTex.GetImage();
+                    if (resultImg != null && resultImg.GetWidth() > 0 && resultImg.GetHeight() > 0)
+                    {
+                        if (resultImg.GetFormat() != Godot.Image.Format.Rgba8)
+                            resultImg.Convert(Godot.Image.Format.Rgba8);
+                        pendingGpuItem.ResultImage = resultImg;
+                    }
+                    else
+                    {
+                        pendingGpuItem.ResultImage = MinorShift.Emuera.Content.GraphicsImage.ApplyColorMatrixGPU(
+                            pendingGpuItem.SrcImage, pendingGpuItem.SrcRegion, pendingGpuItem.ColorMatrix);
+                    }
+                }
+                else
+                {
+                    pendingGpuItem.ResultImage = MinorShift.Emuera.Content.GraphicsImage.ApplyColorMatrixGPU(
+                        pendingGpuItem.SrcImage, pendingGpuItem.SrcRegion, pendingGpuItem.ColorMatrix);
+                }
+                pendingGpuItem.Completed.Set();
+                pendingGpuItem = null;
+                gpuWaitingForRender = false;
+                gpuViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+            }
+        }
+
+        // Phase 2: Set up next render if idle
+        if (!gpuWaitingForRender && gpuQueue.TryDequeue(out var item))
+        {
+            var srcW = item.SrcRegion.Size.X;
+            var srcH = item.SrcRegion.Size.Y;
+            if (srcW > 0 && srcH > 0)
+            {
+                var subImg = item.SrcImage.GetRegion(item.SrcRegion);
+                if (subImg != null)
+                {
+                    var imgTex = ImageTexture.CreateFromImage(subImg);
+                    gpuTextureRect.Texture = imgTex;
+                    gpuTextureRect.Size = new Vector2(srcW, srcH);
+                    gpuTextureRect.Position = Vector2.Zero;
+                    gpuViewport.Size = item.SrcRegion.Size;
+
+                    ColorMatrixGPU.SetMatrixUniforms(gpuShaderMaterial, item.ColorMatrix);
+
+                    gpuViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+                    gpuRenderFrameCount = 0;
+                    gpuWaitingForRender = true;
+                    pendingGpuItem = item;
+                }
+                else
+                {
+                    // GetRegion failed, use CPU fallback
+                    item.ResultImage = MinorShift.Emuera.Content.GraphicsImage.ApplyColorMatrixGPU(
+                        item.SrcImage, item.SrcRegion, item.ColorMatrix);
+                    item.Completed.Set();
+                }
+            }
+            else
+            {
+                item.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
+                item.Completed.Set();
+            }
+        }
+    }
 
     public override void _Ready()
     {
@@ -71,13 +315,51 @@ public partial class EmueraMain : Node
         uEmuera.Logger.warn = content => GenericUtils.Warn(content);
         uEmuera.Logger.error = content => GenericUtils.Error(content);
 
-        InstallHostComponents();
+        CreateStartupOverlay();
         CallDeferred(nameof(StartGameDeferred));
     }
 
     public override void _Notification(int what)
     {
-        lifecycleComponent?.HandleNotification(what);
+        // Godot delivers these notifications for APK background/foreground
+        // transitions. Handle them centrally so the emulator core does not need to
+        // know about platform lifecycle details.
+        if (what == NotificationApplicationPaused)
+        {
+            SetApplicationPaused(true);
+            GenericUtils.NotifyLifecycleState("android_pause");
+        }
+        else if (what == NotificationApplicationResumed)
+        {
+            SetApplicationPaused(false);
+            GenericUtils.NotifyLifecycleState("android_resume");
+        }
+    }
+
+    void SetApplicationPaused(bool paused)
+    {
+        if (applicationPauseActive == paused)
+            return;
+        applicationPauseActive = paused;
+        if (paused)
+        {
+            // Keep the main loop alive at a low cadence instead of stopping it.
+            // This avoids a burst of queued work on resume while reducing battery
+            // use when Android backgrounds the APK.
+            maxFpsBeforeApplicationPause = Engine.MaxFps;
+            Engine.MaxFps = 5;
+            EmueraContent.instance?.SetApplicationPaused(true);
+            return;
+        }
+
+        // Restore the user's configured frame-rate policy after the temporary
+        // lifecycle cap; FrameRateHelper re-applies config in case it changed
+        // while the app was backgrounded.
+        Engine.MaxFps = maxFpsBeforeApplicationPause > 0
+            ? maxFpsBeforeApplicationPause
+            : FrameRateHelper.CurrentFrameRate;
+        FrameRateHelper.ApplyConfigFps();
+        EmueraContent.instance?.SetApplicationPaused(false);
     }
 
     async void StartGameDeferred()
@@ -86,10 +368,44 @@ public partial class EmueraMain : Node
             return;
         startupStarted = true;
 
-        if (startupComponent == null || !await startupComponent.PrepareAsync())
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (!IsInsideTree())
             return;
 
-        startupOverlay?.SetStatus("Creating interface...");
+        UpdateStartupStatus("正在准备游戏目录...");
+
+        // Setup path resolution
+        string eraPath = FirstWindow.ResolveStartupGamePath();
+        if (string.IsNullOrEmpty(eraPath) || !uEmuera.Utils.DirectoryExists(eraPath))
+        {
+            eraPath = ProjectSettings.GlobalizePath("res://eraAkumaMaid0.305-CH-正式版");
+        }
+        if (!string.IsNullOrEmpty(eraPath) && uEmuera.Utils.DirectoryExists(eraPath))
+        {
+            Sys.ExeDir = uEmuera.Utils.NormalizePath(eraPath + "/");
+        }
+        else
+        {
+            Sys.ExeDir = uEmuera.Utils.NormalizePath(OS.GetExecutablePath().GetBaseDir() + "/");
+        }
+        GenericUtils.NotifyGamePathSelected(Sys.ExeDir, FirstWindow.SelectedCoreProfileName);
+
+        // Load SHIFT-JIS / UTF-8 config maps
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (!IsInsideTree())
+            return;
+
+        UpdateStartupStatus("Loading config...");
+        LoadConfigMaps();
+
+        // Reset global state for clean restart
+        GlobalStatic.Reset();
+
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (!IsInsideTree())
+            return;
+
+        UpdateStartupStatus("Creating interface...");
 
         // Sprite debug viewer — press F3 to toggle
         if (enable_sprite_debug_viewer && OS.GetName() != "Android")
@@ -108,7 +424,7 @@ public partial class EmueraMain : Node
         if (!IsInsideTree())
             return;
 
-        startupOverlay?.SetStatus("Starting game...");
+        UpdateStartupStatus("Starting game...");
         // Start the engine
         EmueraThread.instance.Start(debug, use_coroutine);
         working = true;
@@ -119,16 +435,13 @@ public partial class EmueraMain : Node
 
     public override void _Process(double delta)
     {
-        gpuRenderComponent?.MarkFrameReady();
+        if (ShouldUseGpuRenderer())
+            GpuReady = true;
         GenericUtils.FlushLogs();
         GenericUtils.FlushUI();
-        textRenderComponent?.ProcessQueue();
+        ProcessTextRenderQueue();
         if (GenericUtils.IsPerformanceSamplingEnabled)
-        {
-            GenericUtils.SamplePerformanceFrame(
-                delta,
-                EmueraGpuRenderComponent.QueuedWorkCount + EmueraTextRenderComponent.QueuedWorkCount);
-        }
+            GenericUtils.SamplePerformanceFrame(delta, gpuQueue.Count + textRenderQueue.Count);
 
         if (!working)
             return;
@@ -149,7 +462,7 @@ public partial class EmueraMain : Node
         if (GlobalStatic.MainWindow != null)
             GlobalStatic.MainWindow.Update();
 
-        gpuRenderComponent?.ProcessQueue();
+        ProcessGpuQueue();
 
         SpriteManager.UpdateCleanup();
         SpriteManager.UpdateOtherThreads();
@@ -201,33 +514,43 @@ public partial class EmueraMain : Node
     bool clearRequested = false;
     bool restartRequested = false;
 
-    void InstallHostComponents()
+    void CreateStartupOverlay()
     {
-        lifecycleComponent = new EmueraLifecycleComponent();
-        lifecycleComponent.Name = "LifecycleComponent";
-        AddChild(lifecycleComponent);
+        startupOverlay = new Control();
+        startupOverlay.Name = "StartupOverlay";
+        startupOverlay.AnchorLeft = 0;
+        startupOverlay.AnchorTop = 0;
+        startupOverlay.AnchorRight = 1;
+        startupOverlay.AnchorBottom = 1;
+        startupOverlay.MouseFilter = Control.MouseFilterEnum.Stop;
 
-        gpuRenderComponent = new EmueraGpuRenderComponent();
-        gpuRenderComponent.Name = "GpuRenderComponent";
-        AddChild(gpuRenderComponent);
+        var bg = new ColorRect();
+        bg.AnchorLeft = 0;
+        bg.AnchorTop = 0;
+        bg.AnchorRight = 1;
+        bg.AnchorBottom = 1;
+        bg.Color = Colors.Black;
+        startupOverlay.AddChild(bg);
 
-        textRenderComponent = new EmueraTextRenderComponent();
-        textRenderComponent.Name = "TextRenderComponent";
-        AddChild(textRenderComponent);
+        startupStatusLabel = new Label();
+        startupStatusLabel.AnchorLeft = 0;
+        startupStatusLabel.AnchorTop = 0;
+        startupStatusLabel.AnchorRight = 1;
+        startupStatusLabel.AnchorBottom = 1;
+        startupStatusLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        startupStatusLabel.VerticalAlignment = VerticalAlignment.Center;
+        startupStatusLabel.Text = "Loading game...";
+        startupStatusLabel.AddThemeFontSizeOverride("font_size", 20);
+        startupStatusLabel.AddThemeColorOverride("font_color", Colors.White);
+        startupOverlay.AddChild(startupStatusLabel);
 
-        startupComponent = new EmueraStartupComponent();
-        startupComponent.Name = "StartupComponent";
-        startupComponent.StatusChanged += OnStartupStatusChanged;
-        AddChild(startupComponent);
-
-        startupOverlay = new EmueraStartupOverlayView();
-        startupOverlay.Build();
         AddChild(startupOverlay);
     }
 
-    void OnStartupStatusChanged(string status)
+    void UpdateStartupStatus(string status)
     {
-        startupOverlay?.SetStatus(status);
+        if (startupStatusLabel != null)
+            startupStatusLabel.Text = status;
     }
 
     void HideStartupOverlay()
@@ -237,5 +560,77 @@ public partial class EmueraMain : Node
 
         startupOverlay.QueueFree();
         startupOverlay = null;
+        startupStatusLabel = null;
+    }
+
+    void LoadConfigMaps()
+    {
+        lock (configMapCacheLock)
+        {
+            if (cachedShiftJisToUtf8Map != null && cachedUtf8ZhCnToUtf8Map != null)
+            {
+                uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(cachedShiftJisToUtf8Map);
+                uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(cachedUtf8ZhCnToUtf8Map);
+                return;
+            }
+        }
+
+        char[] split = new char[] { '\r', '\n' };
+        var shiftjisPath = "res://Text/emuera_config_shiftjis.bytes";
+        var utf8Path = "res://Text/emuera_config_utf8.txt";
+        var utf8CnPath = "res://Text/emuera_config_utf8_zhcn.txt";
+
+        if (!Godot.FileAccess.FileExists(shiftjisPath) ||
+            !Godot.FileAccess.FileExists(utf8Path) ||
+            !Godot.FileAccess.FileExists(utf8CnPath))
+            return;
+
+        var shiftjisBytes = Godot.FileAccess.GetFileAsBytes(shiftjisPath);
+        var utf8Text = Godot.FileAccess.GetFileAsString(utf8Path);
+        var utf8CnText = Godot.FileAccess.GetFileAsString(utf8CnPath);
+
+        var jis_md5_strs = GenericUtils.CalcMd5List(shiftjisBytes);
+
+        var utf8_strs = utf8Text.Split(split, System.StringSplitOptions.RemoveEmptyEntries);
+        var utf8_str_list = new System.Collections.Generic.List<string>();
+        foreach (var str in utf8_strs)
+        {
+            if (string.IsNullOrWhiteSpace(str))
+                continue;
+            utf8_str_list.Add(str);
+        }
+
+        var utf8cn_strs = utf8CnText.Split(split, System.StringSplitOptions.RemoveEmptyEntries);
+        var utf8cn_str_list = new System.Collections.Generic.List<string>();
+        foreach (var str in utf8cn_strs)
+        {
+            if (string.IsNullOrWhiteSpace(str))
+                continue;
+            utf8cn_str_list.Add(str);
+        }
+
+        if (jis_md5_strs.Count == 0 || utf8_str_list.Count == 0)
+            return;
+
+        var jis_map = new System.Collections.Generic.Dictionary<string, string>();
+        int jisCount = System.Math.Min(jis_md5_strs.Count, utf8_str_list.Count);
+        for (int i = 0; i < jisCount; ++i)
+        {
+            jis_map[jis_md5_strs[i]] = utf8_str_list[i];
+        }
+        var utf8cn_map = new System.Collections.Generic.Dictionary<string, string>();
+        int utf8CnCount = System.Math.Min(utf8cn_str_list.Count, utf8_str_list.Count);
+        for (int i = 0; i < utf8CnCount; ++i)
+        {
+            utf8cn_map[utf8cn_str_list[i]] = utf8_str_list[i];
+        }
+        lock (configMapCacheLock)
+        {
+            // res://Text 配置映射在进程内不变化，缓存后重启游戏不再重复读盘和构建字典。
+            cachedShiftJisToUtf8Map ??= jis_map;
+            cachedUtf8ZhCnToUtf8Map ??= utf8cn_map;
+            uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(cachedShiftJisToUtf8Map);
+            uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(cachedUtf8ZhCnToUtf8Map);
+        }
     }
 }
