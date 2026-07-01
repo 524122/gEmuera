@@ -2,7 +2,7 @@
 
 # gEmuera
 
-A cross-platform Emuera text game engine port built with Godot 4.6 + .NET 8.0.
+A cross-platform Emuera text game engine port built with Godot 4.7 + .NET 8.0.
 
 Emuera is the execution engine for Japanese eramaker-series text games, parsing `.ERB` script files and `.CSV` data files to run games. This project replaces the original Windows Forms / GDI+ rendering stack with Godot's node system, enabling cross-platform support for desktop and Android.
 
@@ -41,7 +41,7 @@ Emuera is the execution engine for Japanese eramaker-series text games, parsing 
 
 ### Requirements
 
-- Godot 4.6 (.NET edition)
+- Godot 4.7 (.NET edition)
 - .NET 8.0 SDK
 - (Android builds) .NET 9.0 SDK
 
@@ -64,7 +64,7 @@ eraGameName/
 
 ### Running
 
-1. Open the project with Godot 4.6 (.NET)
+1. Open the project with Godot 4.7 (.NET)
 2. Place game folders in the correct location
 3. Run the project and select a game from the launcher
 

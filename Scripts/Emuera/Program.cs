@@ -257,10 +257,23 @@ namespace MinorShift.Emuera
 			if (Godot.OS.GetName() != "Android")
 				return;
 
+			int safeWidth = global::EmueraContent.ContentSafeWidth;
 			int viewportWidth = global::EmueraContent.ContentWidth;
-			if (viewportWidth <= 0)
+			if (safeWidth <= 0)
+				safeWidth = viewportWidth;
+			if (safeWidth <= 0)
+			{
 				viewportWidth = Godot.DisplayServer.WindowGetSize().X;
-			GenericUtils.Info($"[LOAD] Android keeps configured window width: {Config.WindowX}, viewport={viewportWidth}");
+				safeWidth = viewportWidth;
+			}
+			if (safeWidth > 0 && System.Math.Abs(Config.WindowX - safeWidth) > 1)
+			{
+				int previousWidth = Config.WindowX;
+				Config.UpdateWindowWidth(System.Math.Max(320, safeWidth));
+				GenericUtils.Info($"[LOAD] Android dynamic window width: {previousWidth} -> {Config.WindowX}, safe={safeWidth}, viewport={viewportWidth}");
+				return;
+			}
+			GenericUtils.Info($"[LOAD] Android keeps configured window width: {Config.WindowX}, safe={safeWidth}, viewport={viewportWidth}");
 		}
 
 		public static void AppendSnakeStartupErrorLog(string text)

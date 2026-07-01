@@ -18,7 +18,7 @@ rg -n "interface|abstract class|class .*:|enum " Scripts -g '*.cs' -g '!addons/*
 
 ## 项目概览
 
-`gEmuera` 是 Godot 4.6 + C# 的 Emuera 文本游戏引擎移植版。项目用 Godot 节点替换原 Windows Forms/GDI 渲染，同时保留大量原 Emuera 核心结构。
+`gEmuera` 是 Godot 4.7 + C# 的 Emuera 文本游戏引擎移植版。项目用 Godot 节点替换原 Windows Forms/GDI 渲染，同时保留大量原 Emuera 核心结构。
 
 本次扫描范围：
 - 项目 C#：`Scripts/**/*.cs`
@@ -66,7 +66,7 @@ project.godot
 
 ```text
 .
-|-- project.godot                 Godot 项目配置，主场景 first_window.tscn
+|-- project.godot                 Godot 项目配置，主场景 first_window.tscn；`canvas_items + expand` 让 Android 宽屏不产生左右黑边
 |-- first_window.tscn             启动器场景
 |-- main.tscn                     主游戏场景
 |-- config.toml                   精简运行期诊断配置；默认开启轻量日志以支持保存 `gemuera_*.log`，`[logging].enabled=false` 时日志/诊断系统完全关闭
@@ -107,11 +107,11 @@ project.godot
 |---|---|---|---|
 | `Scripts/EmueraMain.cs` | `EmueraMain : Node`, `GpuWorkItem`, `TextRenderItem` | 主场景入口；初始化配置映射、UI 根节点、线程和 GPU/文本渲染队列。 | `_Ready`, `_Process`, `_ExitTree`, `Run`, `Clear`, `Restart`, `GpuSubmitColorMatrix`, `SubmitTextRender` |
 | `Scripts/EmueraThread.cs` | `EmueraThread` | 后台执行 Emuera 核心；把 Godot 输入转成阻塞式 console 输入。 | `Start`, `End`, `Running`, `Input` |
-| `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退。 | `_Ready`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
+| `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退；在移动端读取 Godot display safe area，将主内容、CBG、系统菜单和浮层限制到安全区，并按安全宽度动态更新 Android `WindowX/DrawableWidth`；主控制台缩放时按实际溢出动态启用横向滚动，缩回推荐/安全宽度后清除多余横向偏移。 | `_Ready`, `GetSafeViewportRect`, `ApplySafeAreaLayout`, `ConfigureContentScrollContainer`, `NormalizeContentHorizontalScroll`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
 | `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制，并复刻原核心按钮选中/焦点背景/BackLog 普通文字颜色语义；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表并用 `hitRectBuckets` 缩小扫描范围，未命中时再回退 overlay/旧控件树；移动端未写入用户配置时默认保留 240 行，桌面端默认 360 行；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
 | `Scripts/EmueraImage.cs` | `EmueraImage : Control` | 绘制 `Texture2D` / `AtlasTexture` 的控件，支持 ColorMatrix material。 | `SetColorMatrix`, `_Draw` |
 | `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放；在 `[debug.performance_sampling]` 开启时低频聚合普通帧与 Canvas 控制台渲染采样。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `SamplePerformanceFrame`, `SampleConsoleRenderFrame`, `ExportDiagnosticPackage`, `RestartGame` |
-| `Scripts/FirstWindow.cs` | `FirstWindow : Control` | 启动器；扫描 `era*` 游戏目录，切换语言/核心 profile，进入主场景。 | `_Ready`, `_ExitTree`, `_Notification`, `ResolveStartupGamePath` |
+| `Scripts/FirstWindow.cs` | `FirstWindow : Control` | 启动器；扫描 `era*` 游戏目录，切换语言/核心 profile，进入主场景；启动器外边距跟随 display safe area，避免横屏前摄/挖孔遮挡。 | `_Ready`, `ApplyLauncherSafeArea`, `_ExitTree`, `_Notification`, `ResolveStartupGamePath` |
 | `Scripts/SpriteManager.cs` | `SpriteManager`, `TextureInfo`, `SpriteInfo` | 图片/精灵纹理缓存；AtlasTexture 管理；文件图片后台 I/O/解码请求；主线程限流接收解码结果并创建纹理。 | `Init`, `GetSprite`, `GetTextureInfo`, `TryGetTextureInfoCached`, `RequestTextureInfoAsync`, `GetTextureInfoOtherThread`, `UpdateOtherThreads`, `TextureLoadVersion`, `UpdateCleanup`, `ForceClear` |
 | `Scripts/ColorMatrixGPU.cs` | `ColorMatrixGPU` | ColorMatrix shader material 创建、缓存、LRU、uniform 设置。 | `CreateMaterial`, `GetSharedMaterial`, `GetMatrixKey`, `SetMatrixUniforms`, `CreateCompositMaterial` |
 | `Scripts/QuickButtons.cs` | `QuickButtons : CanvasLayer` | 快捷按钮浮层；显示当前可选输入，处理点击/触摸。 | `_Ready`, `_Process`, `_Input`, `AddButton`, `Clear`, `ShiftLine`, `SetInputEnabled` |
@@ -121,7 +121,7 @@ project.godot
 | `Scripts/SpriteDebugViewer.cs` | `SpriteDebugViewer : Control` | 精灵调试查看器，配合 `SpriteDebugNotifier` 查看加载图片。 | `_Ready`, `_Process`, `_Input`, `_ExitTree` |
 | `Scripts/SpriteDebugNotifier.cs` | `SpriteDebugNotifier` | 精灵加载事件通知。 | `Notify`, `ImageLoadedHandler` |
 | `Scripts/FrameRateHelper.cs` | `FrameRateHelper` | 应用帧率配置。 | `Apply`, `ApplyConfigFps` |
-| `Scripts/ResolutionHelper.cs` | `ResolutionHelper` | 解析/应用窗口分辨率配置。 | `Apply`, `RefreshResolutions` |
+| `Scripts/ResolutionHelper.cs` | `ResolutionHelper` | 解析/应用窗口分辨率配置；Android 上不调用 `WindowSetSize`，避免横屏宽机型被缩成固定比例画布产生左右黑边。 | `Apply`, `RefreshResolutions` |
 | `Scripts/MultiLanguage.cs` | `MultiLanguage` | 读取 `Lang/*.txt`，提供 UI 文案。 | `Load`, `Get`, `CurrentLanguage` |
 
 ### Scripts/Diagnostics
@@ -380,7 +380,7 @@ project.godot
 | CBG/背景/图片层 | `EmueraConsole.CBG_*`, `SetImageLayer`, `EmueraContent.RefreshCBG` |
 | 快捷按钮 | `QuickButtons.AddButton`, `QuickButtons.SetInputEnabled`, `EmueraContent.SubmitQuickButtonInput` |
 | 屏幕输入面板 | `Inputpad.UpdateInputType`, `ShowPad`, `HidePad` |
-| 缩放 | `Scalepad.SetScale`, `EmueraContent.SetContentScale`, `ResolutionHelper.Apply` |
+| 缩放 | `Scalepad.SetScale`, `EmueraContent.SetContentScale`, `EmueraContent.NormalizeContentHorizontalScroll`, `ResolutionHelper.Apply` |
 | Canvas 性能采样 | `ConsoleRenderSurface._Draw`, `ConsoleRenderSurface.RebuildHitRectsOnly`, `GenericUtils.SampleConsoleRenderFrame`；开启 `[debug.performance_sampling]` 后输出 `PERF.CONSOLE_RENDER`，包含 `draw_ms_avg/p95/max`、可视行、Canvas 行、overlay 行、part、hit rect 和节点规模快照；普通绘制窗口与点击前 hit-only 重建窗口分开统计，命中重建使用行级按钮矩形缓存与垂直桶索引，`PERF.*` 在 Godot/logcat 镜像中保留 `data` 字段 |
 
 ### 图片/精灵/ColorMatrix
@@ -434,7 +434,7 @@ project.godot
 
 | 要改什么 | 从这里开始 |
 |---|---|
-| Android 游戏目录、屏幕宽度策略 | `FirstWindow`, `Program.ApplyAndroidWindowWidthPolicy`, `Config.UpdateWindowWidth` |
+| Android 游戏目录、屏幕宽度策略 | `FirstWindow`, `EmueraContent.GetSafeViewportRect`, `EmueraContent.ApplySafeAreaLayout`, `Program.ApplyAndroidWindowWidthPolicy`, `Config.UpdateWindowWidth` |
 | 输入后脚本不继续 | `EmueraThread.Input`, `EmueraConsole.PressEnterKey`, `Process.InputInteger/InputString` |
 | 文本没有刷新或顺序错 | `GenericUtils.FlushUI`, `EmueraContent.ApplyTextChanges`, `EmueraConsole.PopDisplayingLines` |
 | 图片/立绘不显示 | `AppContents`, `SpriteManager`, `ConsoleImagePart`, `EmueraImage`, `GraphicsImage` |

@@ -12,12 +12,12 @@ config_version=5
 
 config/name="gemuera-c#"
 run/main_scene="res://first_window.tscn"
-config/features=PackedStringArray("4.6", "C#", "Mobile")
+config/features=PackedStringArray("4.7", "C#", "Mobile")
 
 [display]
 
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep_width"
+window/stretch/aspect="expand"
 
 [dotnet]
 

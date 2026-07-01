@@ -274,6 +274,9 @@ public partial class EmueraContent : Control
 	const float ContentInertiaFastDeceleration = 520.0f;
 	const float ContentInertiaStopVelocity = 6.0f;
 	const int SystemButtonTouchSize = 48;
+	const int MinDynamicContentWidth = 320;
+	const float SafeAreaEpsilon = 0.5f;
+	const int ContentHorizontalScrollTolerancePx = 1;
 	const string SettingsPath = "user://settings.cfg";
 	const string SettingsSection = "Display";
 	const string ContentDragSensitivityKey = "ContentDragSensitivity";
@@ -318,6 +321,9 @@ public partial class EmueraContent : Control
 
 	public static int ContentWidth { get; private set; }
 	public static int ContentHeight { get; private set; }
+	public static int ContentSafeWidth { get; private set; }
+	public static int ContentSafeHeight { get; private set; }
+	public static Rect2 ContentSafeRect { get; private set; } = new Rect2(Vector2.Zero, Vector2.Zero);
 
 	// User-configurable cap for rendered console rows. The value is persisted in
 	// user:// so exported APK builds can keep device-specific settings.
@@ -364,6 +370,134 @@ public partial class EmueraContent : Control
 	static int GetContentViewportHeight()
 	{
 		return Config.WindowY;
+	}
+
+	public static Rect2 GetSafeViewportRect(Viewport viewport)
+	{
+		Vector2 viewportSize = viewport?.GetVisibleRect().Size ?? Vector2.Zero;
+		if (viewportSize.X <= 0 || viewportSize.Y <= 0)
+		{
+			Vector2I windowSize = DisplayServer.WindowGetSize();
+			viewportSize = new Vector2(System.Math.Max(1, windowSize.X), System.Math.Max(1, windowSize.Y));
+		}
+
+		var fullRect = new Rect2(Vector2.Zero, viewportSize);
+		if (!OS.HasFeature("mobile"))
+			return fullRect;
+
+		Rect2I displaySafeArea;
+		try
+		{
+			displaySafeArea = DisplayServer.GetDisplaySafeArea();
+		}
+		catch
+		{
+			return fullRect;
+		}
+
+		if (displaySafeArea.Size.X <= 0 || displaySafeArea.Size.Y <= 0)
+			return fullRect;
+
+		Vector2I window = DisplayServer.WindowGetSize();
+		Vector2 sourceSize = new Vector2(window.X, window.Y);
+		if (sourceSize.X <= 0 || sourceSize.Y <= 0)
+			sourceSize = viewportSize;
+
+		float scaleX = viewportSize.X / sourceSize.X;
+		float scaleY = viewportSize.Y / sourceSize.Y;
+		var safe = new Rect2(
+			new Vector2(displaySafeArea.Position.X * scaleX, displaySafeArea.Position.Y * scaleY),
+			new Vector2(displaySafeArea.Size.X * scaleX, displaySafeArea.Size.Y * scaleY));
+		return ClampRectToViewport(safe, viewportSize, fullRect);
+	}
+
+	static Rect2 ClampRectToViewport(Rect2 rect, Vector2 viewportSize, Rect2 fallback)
+	{
+		float left = Mathf.Clamp(rect.Position.X, 0, viewportSize.X);
+		float top = Mathf.Clamp(rect.Position.Y, 0, viewportSize.Y);
+		float right = Mathf.Clamp(rect.Position.X + rect.Size.X, left, viewportSize.X);
+		float bottom = Mathf.Clamp(rect.Position.Y + rect.Size.Y, top, viewportSize.Y);
+		if (right - left < 1 || bottom - top < 1)
+			return fallback;
+		return new Rect2(left, top, right - left, bottom - top);
+	}
+
+	static bool RectAlmostEqual(Rect2 a, Rect2 b)
+	{
+		return Mathf.Abs(a.Position.X - b.Position.X) <= SafeAreaEpsilon
+			&& Mathf.Abs(a.Position.Y - b.Position.Y) <= SafeAreaEpsilon
+			&& Mathf.Abs(a.Size.X - b.Size.X) <= SafeAreaEpsilon
+			&& Mathf.Abs(a.Size.Y - b.Size.Y) <= SafeAreaEpsilon;
+	}
+
+	bool RefreshViewportMetrics()
+	{
+		Size = GetViewportRect().Size;
+		ContentWidth = Mathf.RoundToInt(Size.X);
+		ContentHeight = Mathf.RoundToInt(Size.Y);
+		Rect2 nextSafeRect = GetSafeViewportRect(GetViewport());
+		bool changed = !RectAlmostEqual(ContentSafeRect, nextSafeRect);
+		ContentSafeRect = nextSafeRect;
+		ContentSafeWidth = Mathf.RoundToInt(nextSafeRect.Size.X);
+		ContentSafeHeight = Mathf.RoundToInt(nextSafeRect.Size.Y);
+		return changed;
+	}
+
+	static void ApplySafeRect(Control control, Rect2 rect)
+	{
+		if (control == null)
+			return;
+		control.SetAnchorsPreset(LayoutPreset.TopLeft);
+		control.Position = rect.Position;
+		control.Size = rect.Size;
+		control.CustomMinimumSize = rect.Size;
+	}
+
+	bool ApplySafeAreaLayout(bool forceCoreWidthRefresh = false)
+	{
+		bool safeChanged = RefreshViewportMetrics();
+		Rect2 safeRect = ContentSafeRect;
+
+		ApplySafeRect(rootContent, safeRect);
+		ApplySafeRect(cbgContainer, safeRect);
+		ApplySystemMenuSafeArea(safeRect);
+		inputpad?.RefreshSafeAreaLayout();
+		scalepad?.RefreshSafeAreaLayout();
+		quickButtons?.RefreshSafeAreaLayout();
+
+		bool widthChanged = ApplyAndroidDynamicWindowWidth(forceCoreWidthRefresh || safeChanged);
+		if (safeChanged || widthChanged)
+			QueueScaleBoundsUpdate();
+		return safeChanged || widthChanged;
+	}
+
+	void ApplySystemMenuSafeArea(Rect2 safeRect)
+	{
+		if (menuRoot == null)
+			return;
+
+		Vector2 viewportSize = GetViewportRect().Size;
+		float rightInset = Mathf.Max(0, viewportSize.X - (safeRect.Position.X + safeRect.Size.X));
+		float topInset = Mathf.Max(0, safeRect.Position.Y);
+		menuRoot.OffsetRight = -4 - rightInset;
+		menuRoot.OffsetTop = 4 + topInset;
+	}
+
+	bool ApplyAndroidDynamicWindowWidth(bool requestRefresh)
+	{
+		if (OS.GetName() != "Android" || Config.WindowX <= 0 || ContentSafeWidth <= 0)
+			return false;
+
+		int targetWidth = System.Math.Max(MinDynamicContentWidth, ContentSafeWidth);
+		if (System.Math.Abs(Config.WindowX - targetWidth) <= 1)
+			return false;
+
+		int previousWidth = Config.WindowX;
+		Config.UpdateWindowWidth(targetWidth);
+		GenericUtils.Info($"[UI] Android dynamic content width: {previousWidth} -> {targetWidth}, safe={ContentSafeWidth}x{ContentSafeHeight}, viewport={ContentWidth}x{ContentHeight}");
+		if (requestRefresh)
+			GlobalStatic.MainWindow?.Refresh();
+		return true;
 	}
 
 	// Drag sensitivity shared by the main console and quick-button panel. It is
@@ -453,9 +587,7 @@ public partial class EmueraContent : Control
 	public override void _Ready()
 	{
 		instance = this;
-		Size = GetViewportRect().Size;
-		ContentWidth = (int)Size.X;
-		ContentHeight = (int)Size.Y;
+		RefreshViewportMetrics();
 		GetViewport().SizeChanged += OnViewportSizeChanged;
 
 		mainFont = LoadConfiguredFont();
@@ -549,9 +681,9 @@ public partial class EmueraContent : Control
 		optionWindow = new OptionWindow();
 		AddChild(optionWindow);
 
-		// Main console viewport. The scrollbars are left in Auto mode so Godot
-		// owns the internal range, but their visual nodes are hidden because this
-		// emulator uses direct touch drag instead of visible scrollbars on mobile.
+		// Main console viewport. Horizontal scrolling is enabled only while the
+		// scaled content is wider than the safe viewport; vertical range remains
+		// Godot-owned.
 		scrollContainer = new ScrollContainer();
 		scrollContainer.AnchorLeft = 0;
 		scrollContainer.AnchorTop = 0;
@@ -676,9 +808,11 @@ public partial class EmueraContent : Control
 		cbgContainer.AnchorRight = 1;
 		cbgContainer.AnchorBottom = 1;
 		cbgContainer.MouseFilter = MouseFilterEnum.Ignore;
+		cbgContainer.ClipContents = true;
 		cbgContainer.ZIndex = 10;
 		AddChild(cbgContainer);
 
+		ApplySafeAreaLayout(true);
 	}
 
 	// Clear all generated console state. This is used for title changes/reloads
@@ -2363,6 +2497,7 @@ public partial class EmueraContent : Control
 				}
 
 				scrollContainer.ScrollVertical = maxScroll;
+				ClampContentHorizontalScroll();
 				RememberDesiredContentScroll(scrollContainer.ScrollHorizontal, maxScroll);
 				bool atBottom = scrollContainer.ScrollVertical >= maxScroll - ScrollToBottomTolerancePx;
 				bool maxStable = pendingScrollStableSinceTick > 0 && now - pendingScrollStableSinceTick >= ScrollToBottomStableMs;
@@ -2418,10 +2553,11 @@ public partial class EmueraContent : Control
 		if (scrollContainer == null)
 			return;
 
-		scrollContainer.HorizontalScrollMode = ScrollContainer.ScrollMode.ShowNever;
+		UpdateContentHorizontalScrollMode();
 		scrollContainer.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
 		HideContentScrollBar(scrollContainer.GetHScrollBar());
 		HideContentScrollBar(scrollContainer.GetVScrollBar());
+		ClampContentHorizontalScroll();
 	}
 
 	// Defense in depth for themes/platform defaults: ShowNever is the authoritative
@@ -2485,7 +2621,7 @@ public partial class EmueraContent : Control
 		if (scrollContainer != null)
 		{
 			var limit = GetContentScrollLimit();
-			int targetHorizontal = Mathf.Clamp(previousHorizontal, 0, limit.X);
+			int targetHorizontal = NormalizeContentHorizontalScroll(Mathf.Clamp(previousHorizontal, 0, limit.X));
 			int targetVertical = pendingScroll ? limit.Y : Mathf.Clamp(previousVertical, 0, limit.Y);
 			int oldHorizontal = scrollContainer.ScrollHorizontal;
 			int oldVertical = scrollContainer.ScrollVertical;
@@ -2512,6 +2648,41 @@ public partial class EmueraContent : Control
 		// Godot's internal layout pass and temporarily snap the viewport.
 		HideContentScrollBar(scrollContainer.GetHScrollBar());
 		HideContentScrollBar(scrollContainer.GetVScrollBar());
+		UpdateContentHorizontalScrollMode();
+		ClampContentHorizontalScroll();
+	}
+
+	int NormalizeContentHorizontalScroll(int horizontal)
+	{
+		int maxScroll = GetMaxContentHorizontalScroll();
+		if (maxScroll <= 0)
+			return 0;
+		return Mathf.Clamp(horizontal, 0, maxScroll);
+	}
+
+	void ClampContentHorizontalScroll()
+	{
+		if (scrollContainer == null)
+			return;
+
+		int targetHorizontal = NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal);
+		if (scrollContainer.ScrollHorizontal != targetHorizontal)
+			scrollContainer.ScrollHorizontal = targetHorizontal;
+	}
+
+	bool IsContentHorizontalScrollAvailable()
+	{
+		return GetContentScrollLimit().X > 0;
+	}
+
+	void UpdateContentHorizontalScrollMode()
+	{
+		if (scrollContainer == null)
+			return;
+
+		scrollContainer.HorizontalScrollMode = IsContentHorizontalScrollAvailable()
+			? ScrollContainer.ScrollMode.ShowNever
+			: ScrollContainer.ScrollMode.Disabled;
 	}
 
 	// Capture the live viewport as the desired scroll target before sending input
@@ -2520,14 +2691,14 @@ public partial class EmueraContent : Control
 	{
 		if (scrollContainer == null)
 			return;
-		RememberDesiredContentScroll(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+		RememberDesiredContentScroll(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 	}
 
 	// Store the scroll target that ProcessContentScrollCorrection will preserve
 	// across Godot layout passes.
 	void RememberDesiredContentScroll(int horizontal, int vertical)
 	{
-		desiredContentScrollHorizontal = horizontal;
+		desiredContentScrollHorizontal = NormalizeContentHorizontalScroll(horizontal);
 		desiredContentScrollVertical = vertical;
 		desiredContentScrollValid = true;
 	}
@@ -4425,9 +4596,7 @@ public partial class EmueraContent : Control
 	// system UI or rotation changes.
 	void OnViewportSizeChanged()
 	{
-		Size = GetViewportRect().Size;
-		ContentWidth = (int)Size.X;
-		ContentHeight = (int)Size.Y;
+		ApplySafeAreaLayout();
 		QueueScaleBoundsUpdate();
 	}
 
@@ -4436,7 +4605,7 @@ public partial class EmueraContent : Control
 	public void SetContentScale(float scale)
 	{
 		if (scrollContainer != null)
-			SetContentScaleKeepingFocus(scale, scrollContainer.GetGlobalRect().GetCenter(), false);
+			SetContentScaleKeepingFocus(scale, scrollContainer.GetGlobalRect().GetCenter(), false, true);
 		else
 			SetContentScale(scale, false, true);
 	}
@@ -5147,7 +5316,7 @@ public partial class EmueraContent : Control
 	}
 
 	// Change scale while preserving the content point under focusGlobalPosition.
-	void SetContentScaleKeepingFocus(float scale, Vector2 focusGlobalPosition, bool trackGestureFocus = true)
+	void SetContentScaleKeepingFocus(float scale, Vector2 focusGlobalPosition, bool trackGestureFocus = true, bool allowShrink = false)
 	{
 		if (scrollContainer == null)
 		{
@@ -5163,13 +5332,13 @@ public partial class EmueraContent : Control
 		float previousScale = Mathf.Max(contentScale, 0.001f);
 		var previousScroll = desiredContentScrollValid
 			? new Vector2(desiredContentScrollHorizontal, desiredContentScrollVertical)
-			: new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+			: new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 		var contentFocus = (previousScroll + localFocus) / previousScale;
 		if (GenericUtils.IsScrollTraceActive)
 			TraceScroll("scale_focus_begin", () => $"from={contentScale:0.###} to={ClampContentScale(scale):0.###} focus=({Mathf.RoundToInt(localFocus.X)},{Mathf.RoundToInt(localFocus.Y)})");
 
 		ApplyContentScaleValue(scale);
-		UpdateScaleBounds(false);
+		UpdateScaleBounds(allowShrink);
 		ApplyContentScaleTransform();
 		RestoreContentScaleFocus(contentFocus, localFocus);
 		if (trackGestureFocus)
@@ -5188,7 +5357,7 @@ public partial class EmueraContent : Control
 			return;
 
 		var nextScroll = contentFocus * contentScale - localFocus;
-		int targetHorizontal = Mathf.Clamp(Mathf.RoundToInt(nextScroll.X), 0, GetMaxContentHorizontalScroll());
+		int targetHorizontal = NormalizeContentHorizontalScroll(Mathf.Clamp(Mathf.RoundToInt(nextScroll.X), 0, GetMaxContentHorizontalScroll()));
 		int targetVertical = Mathf.Clamp(Mathf.RoundToInt(nextScroll.Y), 0, GetMaxContentVerticalScroll());
 		scrollContainer.ScrollHorizontal = targetHorizontal;
 		scrollContainer.ScrollVertical = targetVertical;
@@ -5249,7 +5418,7 @@ public partial class EmueraContent : Control
 			return globalPosition;
 		var rect = scrollContainer.GetGlobalRect();
 		var contentPosition = globalPosition - rect.Position;
-		contentPosition += new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+		contentPosition += new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 		if (contentScale > 0.001f)
 			contentPosition /= contentScale;
 		return contentPosition;
@@ -5277,7 +5446,7 @@ public partial class EmueraContent : Control
 
 		var rect = scrollContainer.GetGlobalRect();
 		var contentPosition = globalPosition - rect.Position;
-		contentPosition += new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+		contentPosition += new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 		if (contentScale > 0.001f)
 			contentPosition /= contentScale;
 		GenericUtils.SetPointerPosition(contentPosition.X, contentPosition.Y);
@@ -5329,9 +5498,11 @@ public partial class EmueraContent : Control
 		if (scrollContainer == null)
 			return Vector2.Zero;
 
+		if (!IsContentHorizontalScrollAvailable())
+			delta.X = 0;
 		int oldHorizontal = scrollContainer.ScrollHorizontal;
 		int oldVertical = scrollContainer.ScrollVertical;
-		int nextHorizontal = Mathf.Clamp(oldHorizontal + Mathf.RoundToInt(delta.X), 0, GetMaxContentHorizontalScroll());
+		int nextHorizontal = NormalizeContentHorizontalScroll(Mathf.Clamp(oldHorizontal + Mathf.RoundToInt(delta.X), 0, GetMaxContentHorizontalScroll()));
 		int nextVertical = Mathf.Clamp(oldVertical + Mathf.RoundToInt(delta.Y), 0, GetMaxContentVerticalScroll());
 		scrollContainer.ScrollHorizontal = nextHorizontal;
 		scrollContainer.ScrollVertical = nextVertical;
@@ -5353,7 +5524,7 @@ public partial class EmueraContent : Control
 			return;
 
 		var limit = GetContentScrollLimit();
-		int targetHorizontal = Mathf.Clamp(desiredContentScrollHorizontal, 0, limit.X);
+		int targetHorizontal = NormalizeContentHorizontalScroll(Mathf.Clamp(desiredContentScrollHorizontal, 0, limit.X));
 		int targetVertical = Mathf.Clamp(desiredContentScrollVertical, 0, limit.Y);
 		if (targetHorizontal == scrollContainer.ScrollHorizontal && targetVertical == scrollContainer.ScrollVertical)
 			return;
@@ -5370,6 +5541,14 @@ public partial class EmueraContent : Control
 	// Estimate drag velocity for inertial scrolling.
 	void UpdateContentScrollVelocity(Vector2 rawScrollDelta, Vector2 appliedDelta)
 	{
+		if (!IsContentHorizontalScrollAvailable())
+		{
+			rawScrollDelta.X = 0;
+			appliedDelta.X = 0;
+			contentScrollVelocity.X = 0;
+			contentInertiaRemainder.X = 0;
+		}
+
 		ulong now = Time.GetTicksMsec();
 		if (contentLastDragTick == 0)
 		{
@@ -5399,6 +5578,12 @@ public partial class EmueraContent : Control
 	// Start inertial scrolling using a speed-dependent boost/deceleration curve.
 	void StartContentInertia()
 	{
+		if (!IsContentHorizontalScrollAvailable())
+		{
+			contentScrollVelocity.X = 0;
+			contentInertiaRemainder.X = 0;
+		}
+
 		float releaseSpeed = contentScrollVelocity.Length();
 		float fastRatio = Mathf.Clamp(
 			(releaseSpeed - ContentInertiaMinVelocity) / (ContentInertiaFastVelocity - ContentInertiaMinVelocity),
@@ -5445,6 +5630,12 @@ public partial class EmueraContent : Control
 	{
 		if (!contentInertiaActive || contentDragActive || scrollContainer == null)
 			return;
+
+		if (!IsContentHorizontalScrollAvailable())
+		{
+			contentScrollVelocity.X = 0;
+			contentInertiaRemainder.X = 0;
+		}
 
 		var desiredDelta = contentScrollVelocity * delta + contentInertiaRemainder;
 		var roundedDelta = new Vector2(Mathf.Round(desiredDelta.X), Mathf.Round(desiredDelta.Y));
@@ -5503,8 +5694,16 @@ public partial class EmueraContent : Control
 			scaledSize.Y = Mathf.Max(scaledSize.Y, Mathf.Max(scaledContentRoot.CustomMinimumSize.Y, scaledContentRoot.Size.Y));
 		}
 		return new Vector2I(
-			Mathf.CeilToInt(Mathf.Max(0.0f, scaledSize.X - scrollSize.X)),
+			GetHorizontalScrollLimit(scaledSize, scrollSize),
 			Mathf.CeilToInt(Mathf.Max(0.0f, scaledSize.Y - scrollSize.Y)));
+	}
+
+	int GetHorizontalScrollLimit(Vector2 scaledSize, Vector2 scrollSize)
+	{
+		float overflow = scaledSize.X - scrollSize.X;
+		if (overflow <= ContentHorizontalScrollTolerancePx)
+			return 0;
+		return Mathf.CeilToInt(overflow);
 	}
 
 	// Submit an empty input when the console is waiting for enter/any key.

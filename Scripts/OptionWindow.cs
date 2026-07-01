@@ -199,6 +199,35 @@ public partial class OptionWindow : Control
 	public void ShowPopup()
 	{
 		popup.PopupCentered();
+		CallDeferred(nameof(ClampPopupToSafeArea));
+	}
+
+	void ClampPopupToSafeArea()
+	{
+		if (popup == null)
+			return;
+
+		Rect2 safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
+		Vector2I size = popup.Size;
+		int maxWidth = Mathf.Max(1, Mathf.RoundToInt(safeRect.Size.X - 20));
+		int maxHeight = Mathf.Max(1, Mathf.RoundToInt(safeRect.Size.Y - 20));
+		if (size.X > maxWidth || size.Y > maxHeight)
+		{
+			size = new Vector2I(System.Math.Min(size.X, maxWidth), System.Math.Min(size.Y, maxHeight));
+			popup.Size = size;
+		}
+
+		int left = Mathf.RoundToInt(safeRect.Position.X + 10);
+		int top = Mathf.RoundToInt(safeRect.Position.Y + 10);
+		int right = Mathf.RoundToInt(safeRect.Position.X + safeRect.Size.X - size.X - 10);
+		int bottom = Mathf.RoundToInt(safeRect.Position.Y + safeRect.Size.Y - size.Y - 10);
+		if (right < left)
+			right = left;
+		if (bottom < top)
+			bottom = top;
+		popup.Position = new Vector2I(
+			Mathf.Clamp(popup.Position.X, left, right),
+			Mathf.Clamp(popup.Position.Y, top, bottom));
 	}
 
 	void OnFontSizeChanged(double value)

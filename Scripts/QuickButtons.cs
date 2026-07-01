@@ -198,6 +198,23 @@ public partial class QuickButtons : CanvasLayer
 		scrollBar.CustomMinimumSize = Vector2.Zero;
 	}
 
+	Rect2 GetSafeRect()
+	{
+		return EmueraContent.GetSafeViewportRect(GetViewport());
+	}
+
+	float GetSafeRightInset(Rect2 safeRect)
+	{
+		var viewportSize = GetViewport().GetVisibleRect().Size;
+		return Mathf.Max(0, viewportSize.X - (safeRect.Position.X + safeRect.Size.X));
+	}
+
+	float GetSafeBottomInset(Rect2 safeRect)
+	{
+		var viewportSize = GetViewport().GetVisibleRect().Size;
+		return Mathf.Max(0, viewportSize.Y - (safeRect.Position.Y + safeRect.Size.Y));
+	}
+
 	public override void _Process(double delta)
 	{
 		ProcessQuickInertia((float)delta);
@@ -216,9 +233,9 @@ public partial class QuickButtons : CanvasLayer
 
 		if (@event is InputEventMouseMotion mouseMotion)
 		{
-			var viewportWidth = GetViewport().GetVisibleRect().Size.X;
+			var safeWidth = GetSafeRect().Size.X;
 			var minWidth = EffectiveButtonWidth + ResizeHandleWidth;
-			var maxWidth = Mathf.Max(minWidth, viewportWidth - 40);
+			var maxWidth = Mathf.Max(minWidth, safeWidth - 40);
 			userWidth = Mathf.Clamp(resizeStartWidth + resizeStartMouseX - mouseMotion.GlobalPosition.X, minWidth, maxWidth);
 			ApplyPanelSize();
 			GetViewport().SetInputAsHandled();
@@ -648,9 +665,17 @@ public partial class QuickButtons : CanvasLayer
 			ApplyButtonMetrics(btn);
 		}
 		if (userWidth > 0)
-			userWidth = Mathf.Clamp(userWidth, EffectiveButtonWidth + ResizeHandleWidth, GetViewport().GetVisibleRect().Size.X - 40);
+		{
+			float minWidth = EffectiveButtonWidth + ResizeHandleWidth;
+			userWidth = Mathf.Clamp(userWidth, minWidth, Mathf.Max(minWidth, GetSafeRect().Size.X - 40));
+		}
 		MarkQuickContentSizeDirty();
 		RequestPanelSizeUpdate(ShouldStickToBottom());
+	}
+
+	public void RefreshSafeAreaLayout()
+	{
+		RefreshSizing();
 	}
 
 	public void SetInputEnabled(bool enabled)
@@ -786,14 +811,14 @@ public partial class QuickButtons : CanvasLayer
 			return;
 		}
 		layoutUpdateQueued = false;
-		var viewportSize = GetViewport().GetVisibleRect().Size;
+		var safeSize = GetSafeRect().Size;
 		var contentSize = GetQuickContentSize();
-		float maxWidth = viewportSize.X * 0.6f;
-		float maxHeight = Mathf.Max(QuickButtonHeight, viewportSize.Y - 66);
 		float minWidth = EffectiveButtonWidth;
+		float maxWidth = Mathf.Max(minWidth, safeSize.X * 0.6f);
+		float maxHeight = Mathf.Max(QuickButtonHeight, safeSize.Y - 66);
 		float autoWidth = Mathf.Min(Mathf.Max(contentSize.X, minWidth), maxWidth);
 		float width = userWidth > 0
-			? Mathf.Clamp(userWidth, minWidth, Mathf.Max(minWidth, viewportSize.X - 40))
+			? Mathf.Clamp(userWidth, minWidth, Mathf.Max(minWidth, safeSize.X - 40))
 			: autoWidth;
 		float height = Mathf.Min(contentSize.Y, maxHeight);
 		ApplyPanelSize(width, height);
@@ -807,13 +832,14 @@ public partial class QuickButtons : CanvasLayer
 		if (panel == null || rowsContainer == null)
 			return;
 
-		var viewportSize = GetViewport().GetVisibleRect().Size;
+		var safeSize = GetSafeRect().Size;
 		var contentSize = GetQuickContentSize();
-		float maxHeight = Mathf.Max(QuickButtonHeight, viewportSize.Y - 66);
+		float maxHeight = Mathf.Max(QuickButtonHeight, safeSize.Y - 66);
 		float minWidth = EffectiveButtonWidth;
+		float maxWidth = Mathf.Max(minWidth, safeSize.X * 0.6f);
 		float width = userWidth > 0
-			? Mathf.Clamp(userWidth, minWidth, Mathf.Max(minWidth, viewportSize.X - 40))
-			: Mathf.Min(Mathf.Max(contentSize.X, minWidth), viewportSize.X * 0.6f);
+			? Mathf.Clamp(userWidth, minWidth, Mathf.Max(minWidth, safeSize.X - 40))
+			: Mathf.Min(Mathf.Max(contentSize.X, minWidth), maxWidth);
 		float height = Mathf.Min(contentSize.Y, maxHeight);
 		ApplyPanelSize(width, height);
 	}
@@ -822,14 +848,17 @@ public partial class QuickButtons : CanvasLayer
 	{
 		if (!IsControlAlive(panel) || !IsControlAlive(resizeHandle))
 			return;
-		panel.OffsetLeft = -20 - width;
-		panel.OffsetRight = -20;
-		panel.OffsetTop = -20 - height;
-		panel.OffsetBottom = -20;
-		resizeHandle.OffsetLeft = -20 - width - ResizeHandleWidth;
-		resizeHandle.OffsetRight = -20 - width;
-		resizeHandle.OffsetTop = -20 - height;
-		resizeHandle.OffsetBottom = -20;
+		var safeRect = GetSafeRect();
+		float rightMargin = 20 + GetSafeRightInset(safeRect);
+		float bottomMargin = 20 + GetSafeBottomInset(safeRect);
+		panel.OffsetLeft = -rightMargin - width;
+		panel.OffsetRight = -rightMargin;
+		panel.OffsetTop = -bottomMargin - height;
+		panel.OffsetBottom = -bottomMargin;
+		resizeHandle.OffsetLeft = -rightMargin - width - ResizeHandleWidth;
+		resizeHandle.OffsetRight = -rightMargin - width;
+		resizeHandle.OffsetTop = -bottomMargin - height;
+		resizeHandle.OffsetBottom = -bottomMargin;
 	}
 
 	Vector2 ScrollQuickBy(Vector2 delta)

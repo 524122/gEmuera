@@ -88,15 +88,16 @@ public partial class Inputpad : Control
 
 	void ApplyPanelLayout()
 	{
-		// Position the prompt above the virtual keyboard without adding display
-		// cutout/notch margins. Era coordinates remain mapped to the full viewport.
+		// 输入栏是交互控件，必须落在系统安全区内；正文坐标仍由 EmueraContent
+		// 统一映射，避免前摄/挖孔遮住确认按钮或输入框。
 		if (panel == null)
 			return;
 
-		var viewportSize = GetViewport().GetVisibleRect().Size;
+		var safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
+		var viewportSize = safeRect.Size;
 		int keyboardHeight = GetVirtualKeyboardHeight();
 		lastKeyboardHeight = keyboardHeight;
-		Position = Vector2.Zero;
+		Position = safeRect.Position;
 		Size = viewportSize;
 		float left = SideMargin;
 		float right = SideMargin;
@@ -188,6 +189,11 @@ public partial class Inputpad : Control
 	}
 
 	public bool IsShow => Visible;
+
+	public void RefreshSafeAreaLayout()
+	{
+		ApplyPanelLayout();
+	}
 
 	public bool HasInputFocus()
 	{
