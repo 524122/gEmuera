@@ -66,6 +66,7 @@ internal static class GenericUtils
     static int scrollTraceEnabled = 0;
     static int scrollTraceSequence = 0;
     static int scrollTraceCoreLinesRemaining = 0;
+    static long dynamicMapLastContextTickMs = long.MinValue;
     const string ScrollTracePrefix = "[SCROLL_TRACE]";
     const int ScrollTraceCoreBurstLineCount = 120;
     const int MaxLogMessageChars = 8192;
@@ -446,6 +447,7 @@ internal static class GenericUtils
         if (cfg.StatementRecognitionEnabled) parts.Add("statement_recognition");
         if (cfg.ImageDebugEnabled) parts.Add("image");
         if (cfg.UiLayoutEnabled) parts.Add("ui_layout");
+        if (cfg.DynamicMapDebugEnabled) parts.Add("dynamic_map");
         if (cfg.RuntimePanelEnabled) parts.Add("runtime_panel");
         if (cfg.InputReplayEnabled) parts.Add("input_replay");
         if (cfg.AndroidStorageEnabled) parts.Add("android_storage");
@@ -1162,7 +1164,255 @@ internal static class GenericUtils
     public static bool UiOverlayButtonRectEnabled => _runtimeConfig?.UiOverlayButtonRect ?? true;
     public static int UiOverlayMaxDrawnRects => _runtimeConfig?.UiOverlayMaxDrawnRects ?? 128;
 
+    /// <summary>
+    /// 动态地图诊断只记录证据，不改变滚动、按钮或渲染行为。
+    /// 调用方需要先判断此开关，避免在 Android 刷新路径中无意义地构造行快照字符串。
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsDynamicMapTraceEnabled(string subSwitch = "")
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.LoggingEnabled || !cfg.DynamicMapDebugEnabled)
+            return false;
+        if (!DiagnosticLogRouter.IsCategoryEnabled(EmueraLogCategory.UI))
+            return false;
+
+        if (string.IsNullOrEmpty(subSwitch))
+            return true;
+        return subSwitch switch
+        {
+            "line_snapshot" => cfg.DynamicMapLogLineSnapshot,
+            "scroll" => cfg.DynamicMapLogScroll,
+            "buttons" => cfg.DynamicMapLogButtons,
+            _ => false,
+        };
+    }
+
+    public static bool IsDynamicMapLineSnapshotTraceEnabled => IsDynamicMapTraceEnabled("line_snapshot");
+    public static bool IsDynamicMapScrollTraceEnabled => IsDynamicMapTraceEnabled("scroll");
+    public static bool IsDynamicMapButtonTraceEnabled => IsDynamicMapTraceEnabled("buttons");
+
+    public static bool ShouldTraceDynamicMap(bool hasBitmapContext)
+    {
+        var cfg = _runtimeConfig;
+        if (!IsDynamicMapTraceEnabled())
+            return false;
+
+        long now = DiagnosticLogRouter.GetMonotonicMilliseconds();
+        if (hasBitmapContext)
+            Volatile.Write(ref dynamicMapLastContextTickMs, now);
+
+        if (!cfg.DynamicMapOnlyBitmapContext)
+            return true;
+        if (hasBitmapContext)
+            return true;
+
+        long last = Volatile.Read(ref dynamicMapLastContextTickMs);
+        int windowMs = Math.Max(0, cfg.DynamicMapContextWindowMs);
+        return last != long.MinValue && now - last <= windowMs;
+    }
+
+    public static void DynamicMapTrace(string eventId, Func<string> messageFactory, Func<string> dataFactory = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsDynamicMapTraceEnabled())
+            return;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.UI, eventId, dataFactory,
+            messageFactory, member, file, line);
+    }
+
+    public static bool ContainsDynamicMapBitmapContext(IReadOnlyList<ConsoleDisplayLine> lines)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapBitmapContext(lines[i]))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool ContainsDynamicMapBitmapContext(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapBitmapContext(lines[i].Line))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool ContainsDynamicMapBitmapContextTail(IReadOnlyList<ConsoleDisplayLine> lines)
+    {
+        if (lines == null || lines.Count == 0)
+            return false;
+        int maxLines = GetDynamicMapMaxLines();
+        int start = Math.Max(0, lines.Count - maxLines);
+        for (int i = start; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapBitmapContext(lines[i]))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line)
+    {
+        return LineHasDynamicMapBitmapContext(line, 0);
+    }
+
+    static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line, int depth)
+    {
+        if (line == null || depth > 4)
+            return false;
+        if (line.BitmapCacheEnabled)
+            return true;
+        var buttons = line.Buttons;
+        if (buttons == null)
+            return false;
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            var parts = buttons[i]?.StrArray;
+            if (parts == null)
+                continue;
+            for (int j = 0; j < parts.Length; j++)
+            {
+                if (parts[j] is ConsoleDivPart div && div.Children != null)
+                {
+                    for (int k = 0; k < div.Children.Length; k++)
+                    {
+                        if (LineHasDynamicMapBitmapContext(div.Children[k], depth + 1))
+                            return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public static string BuildDynamicMapLineTailSummary(IReadOnlyList<ConsoleDisplayLine> lines)
+    {
+        if (lines == null || lines.Count == 0)
+            return "none";
+        int maxLines = GetDynamicMapMaxLines();
+        int start = Math.Max(0, lines.Count - maxLines);
+        var sb = new StringBuilder(maxLines * 96);
+        for (int i = start; i < lines.Count; i++)
+        {
+            if (sb.Length > 0)
+                sb.Append('|');
+            sb.Append(i).Append(':').Append(BuildDynamicMapLineSummary(lines[i], false, false));
+        }
+        return sb.ToString();
+    }
+
+    public static string BuildDynamicMapDeltaLineSummary(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
+    {
+        if (lines == null || lines.Count == 0)
+            return "none";
+        int maxLines = GetDynamicMapMaxLines();
+        int start = Math.Max(0, lines.Count - maxLines);
+        var sb = new StringBuilder(maxLines * 96);
+        for (int i = start; i < lines.Count; i++)
+        {
+            if (sb.Length > 0)
+                sb.Append('|');
+            sb.Append(i).Append(':').Append(BuildDynamicMapLineSummary(lines[i].Line, true, lines[i].Update));
+        }
+        return sb.ToString();
+    }
+
+    static string BuildDynamicMapLineSummary(ConsoleDisplayLine line, bool includeUpdate, bool update)
+    {
+        if (line == null)
+            return "{null}";
+
+        int commandCount = 0;
+        int commandWritten = 0;
+        var commands = new StringBuilder(64);
+        AccumulateDynamicMapCommandSummary(line, commands, ref commandCount, ref commandWritten, 0);
+
+        int maxTextChars = GetDynamicMapMaxTextChars();
+        var sb = new StringBuilder(160);
+        sb.Append("{no=").Append(line.LineNo)
+            .Append(",bmp=").Append(line.BitmapCacheEnabled ? 1 : 0)
+            .Append(",logic=").Append(line.IsLogicalLine ? 1 : 0)
+            .Append(",tmp=").Append(line.IsTemporary ? 1 : 0)
+            .Append(",end=").Append(line.IsLineEnd ? 1 : 0)
+            .Append(",seg=").Append(line.Buttons?.Length ?? 0)
+            .Append(",cmd=").Append(commandCount);
+        if (includeUpdate)
+            sb.Append(",upd=").Append(update ? 1 : 0);
+        if (commands.Length > 0)
+            sb.Append(",cmds=").Append(commands);
+        sb.Append(",text=").Append(CompactTraceValue(line.ToString(), maxTextChars)).Append('}');
+        return sb.ToString();
+    }
+
+    static void AccumulateDynamicMapCommandSummary(ConsoleDisplayLine line, StringBuilder commands, ref int commandCount, ref int commandWritten, int depth)
+    {
+        if (line?.Buttons == null || depth > 4)
+            return;
+        for (int i = 0; i < line.Buttons.Length; i++)
+        {
+            var button = line.Buttons[i];
+            if (button == null)
+                continue;
+            if (button.IsButton)
+            {
+                commandCount++;
+                if (commandWritten < 4)
+                {
+                    if (commands.Length > 0)
+                        commands.Append(',');
+                    commands.Append(CompactTraceValue(button.Inputs, 24))
+                        .Append(':')
+                        .Append(CompactTraceValue(button.ToString(), 24))
+                        .Append("@g")
+                        .Append(button.Generation);
+                    commandWritten++;
+                }
+            }
+
+            var parts = button.StrArray;
+            if (parts == null)
+                continue;
+            for (int j = 0; j < parts.Length; j++)
+            {
+                if (parts[j] is ConsoleDivPart div && div.Children != null)
+                {
+                    for (int k = 0; k < div.Children.Length; k++)
+                        AccumulateDynamicMapCommandSummary(div.Children[k], commands, ref commandCount, ref commandWritten, depth + 1);
+                }
+            }
+        }
+    }
+
+    static int GetDynamicMapMaxLines()
+    {
+        return Math.Min(64, Math.Max(1, _runtimeConfig?.DynamicMapMaxLines ?? 12));
+    }
+
+    static int GetDynamicMapMaxTextChars()
+    {
+        return Math.Min(240, Math.Max(8, _runtimeConfig?.DynamicMapMaxTextChars ?? 48));
+    }
+
+    static string CompactTraceValue(string value, int maxLength)
+    {
+        return ClipTrace(value, maxLength)
+            .Replace(' ', '_')
+            .Replace('|', '/')
+            .Replace(';', ',');
+    }
+
     public static string RedactTracePath(string path) => DiagnosticLogRouter.RedactPath(path);
+
 
     /// <summary>
     /// 企业级说明：输出结构化触摸诊断日志，event_id 与 data 原样写入结构化记录。
@@ -1642,9 +1892,10 @@ internal static class GenericUtils
         EnqueueUI(() => EmueraContent.instance?.AddLines(lines), true);
     }
 
-    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update, int lastButtonGeneration)
+    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
+        int lastButtonGeneration, bool scrollToBottom = true, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
     {
-        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration), true);
+        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration, scrollToBottom, dataOnlyLines), true);
     }
 
     public static void SetLastButtonGeneration(int generation)

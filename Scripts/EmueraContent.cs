@@ -130,6 +130,7 @@ public partial class EmueraContent : Control
 	bool renderingCbgTextures = false;
 	bool renderingHtmlIslandTextures = false;
 	bool pendingCbgAsyncTextureRefresh = false;
+	bool cbgTextureUnavailableDuringRender = false;
 	bool pendingHtmlIslandAsyncTextureRefresh = false;
 
 	// Texture lookup failures are memoized to avoid repeated recursive file scans
@@ -147,6 +148,13 @@ public partial class EmueraContent : Control
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> renderedCbgLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> lastCbgSourceLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	ConsoleDisplayLine[] lastHtmlIslandLines = null;
+	struct GraphicsImageTextureCacheEntry
+	{
+		public long Revision;
+		public Texture2D Texture;
+	}
+	Dictionary<int, GraphicsImageTextureCacheEntry> graphicsImageTextureCache = new Dictionary<int, GraphicsImageTextureCacheEntry>();
+	const ulong GraphicsImageDisplayStableDelayMs = 24;
 
 	struct CbgRenderEntry
 	{
@@ -172,7 +180,9 @@ public partial class EmueraContent : Control
 	// old Controls are trimmed in batches instead of letting the scene tree grow
 	// without bound.
 	public const int DefaultMaxVisibleLines = 360;
+	const int DefaultSnakeDesktopMaxVisibleLines = 1500;
 	const int DefaultMobileMaxVisibleLines = 240;
+	const int DefaultSnakeMobileMaxVisibleLines = 600;
 	public const int MinMaxVisibleLines = 120;
 	public const int MaxMaxVisibleLines = 3000;
 	static int MaxVisibleLines => ConfiguredMaxVisibleLines;
@@ -186,6 +196,7 @@ public partial class EmueraContent : Control
 	int displayRevision = 0;
 	int quickRenderedGeneration = int.MinValue;
 	int quickRenderedRevision = -1;
+	string quickRenderedSignature = "";
 	bool quickInputGateActive = false;
 	bool quickAutoHiddenUntilNextButtons = false;
 	bool quickAutoHiddenWasVisible = false;
@@ -274,6 +285,9 @@ public partial class EmueraContent : Control
 	const float ContentInertiaFastDeceleration = 520.0f;
 	const float ContentInertiaStopVelocity = 6.0f;
 	const int SystemButtonTouchSize = 48;
+	const int MinDynamicContentWidth = 320;
+	const float SafeAreaEpsilon = 0.5f;
+	const int ContentHorizontalScrollTolerancePx = 1;
 	const string SettingsPath = "user://settings.cfg";
 	const string SettingsSection = "Display";
 	const string ContentDragSensitivityKey = "ContentDragSensitivity";
@@ -318,6 +332,9 @@ public partial class EmueraContent : Control
 
 	public static int ContentWidth { get; private set; }
 	public static int ContentHeight { get; private set; }
+	public static int ContentSafeWidth { get; private set; }
+	public static int ContentSafeHeight { get; private set; }
+	public static Rect2 ContentSafeRect { get; private set; } = new Rect2(Vector2.Zero, Vector2.Zero);
 
 	// User-configurable cap for rendered console rows. The value is persisted in
 	// user:// so exported APK builds can keep device-specific settings.
@@ -332,8 +349,8 @@ public partial class EmueraContent : Control
 				// Android 上 Canvas 后端已经避免了“每行一个节点”的主要成本，但保留行越多，
 				// lineObjects、纹理 pin、按钮快照和 overlay 索引仍会增加内存压力。默认值按手机端更保守，
 				// 用户显式写入 user://settings.cfg 后仍完全尊重用户设置。
-				configuredMaxVisibleLines = ClampMaxVisibleLines(
-					(int)cfg.GetValue(SettingsSection, MaxVisibleLinesKey, GetDefaultMaxVisibleLines()));
+				int rawValue = (int)cfg.GetValue(SettingsSection, MaxVisibleLinesKey, GetDefaultMaxVisibleLines());
+				configuredMaxVisibleLines = ClampMaxVisibleLines(MigrateDefaultMaxVisibleLines(rawValue));
 			}
 			return configuredMaxVisibleLines;
 		}
@@ -355,7 +372,31 @@ public partial class EmueraContent : Control
 
 	static int GetDefaultMaxVisibleLines()
 	{
-		return OS.HasFeature("mobile") ? DefaultMobileMaxVisibleLines : DefaultMaxVisibleLines;
+		if (OS.HasFeature("mobile"))
+			return IsSnakeDisplayProfile() ? DefaultSnakeMobileMaxVisibleLines : DefaultMobileMaxVisibleLines;
+		if (IsSnakeDisplayProfile())
+			return DefaultSnakeDesktopMaxVisibleLines;
+		return DefaultMaxVisibleLines;
+	}
+
+	static int MigrateDefaultMaxVisibleLines(int value)
+	{
+		// TW/Snake 就寝后会一次输出大量角色信息。旧默认会直接裁掉上方内容，
+		// 因此把旧默认视为未显式调过；Android 只做保守提升，避免手机端内存压力过大。
+		if (!IsSnakeDisplayProfile())
+			return value;
+		if (OS.HasFeature("mobile") && value == DefaultMobileMaxVisibleLines)
+			return DefaultSnakeMobileMaxVisibleLines;
+		if (!OS.HasFeature("mobile") && value == DefaultMaxVisibleLines)
+			return DefaultSnakeDesktopMaxVisibleLines;
+		return value;
+	}
+
+	static bool IsSnakeDisplayProfile()
+	{
+		if (Program.IsSnakeProfile)
+			return true;
+		return string.Equals(FirstWindow.SelectedCoreProfileName, FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase);
 	}
 
 	// emuera still exposes the console viewport through Config.WindowY. Keeping
@@ -364,6 +405,134 @@ public partial class EmueraContent : Control
 	static int GetContentViewportHeight()
 	{
 		return Config.WindowY;
+	}
+
+	public static Rect2 GetSafeViewportRect(Viewport viewport)
+	{
+		Vector2 viewportSize = viewport?.GetVisibleRect().Size ?? Vector2.Zero;
+		if (viewportSize.X <= 0 || viewportSize.Y <= 0)
+		{
+			Vector2I windowSize = DisplayServer.WindowGetSize();
+			viewportSize = new Vector2(System.Math.Max(1, windowSize.X), System.Math.Max(1, windowSize.Y));
+		}
+
+		var fullRect = new Rect2(Vector2.Zero, viewportSize);
+		if (!OS.HasFeature("mobile"))
+			return fullRect;
+
+		Rect2I displaySafeArea;
+		try
+		{
+			displaySafeArea = DisplayServer.GetDisplaySafeArea();
+		}
+		catch
+		{
+			return fullRect;
+		}
+
+		if (displaySafeArea.Size.X <= 0 || displaySafeArea.Size.Y <= 0)
+			return fullRect;
+
+		Vector2I window = DisplayServer.WindowGetSize();
+		Vector2 sourceSize = new Vector2(window.X, window.Y);
+		if (sourceSize.X <= 0 || sourceSize.Y <= 0)
+			sourceSize = viewportSize;
+
+		float scaleX = viewportSize.X / sourceSize.X;
+		float scaleY = viewportSize.Y / sourceSize.Y;
+		var safe = new Rect2(
+			new Vector2(displaySafeArea.Position.X * scaleX, displaySafeArea.Position.Y * scaleY),
+			new Vector2(displaySafeArea.Size.X * scaleX, displaySafeArea.Size.Y * scaleY));
+		return ClampRectToViewport(safe, viewportSize, fullRect);
+	}
+
+	static Rect2 ClampRectToViewport(Rect2 rect, Vector2 viewportSize, Rect2 fallback)
+	{
+		float left = Mathf.Clamp(rect.Position.X, 0, viewportSize.X);
+		float top = Mathf.Clamp(rect.Position.Y, 0, viewportSize.Y);
+		float right = Mathf.Clamp(rect.Position.X + rect.Size.X, left, viewportSize.X);
+		float bottom = Mathf.Clamp(rect.Position.Y + rect.Size.Y, top, viewportSize.Y);
+		if (right - left < 1 || bottom - top < 1)
+			return fallback;
+		return new Rect2(left, top, right - left, bottom - top);
+	}
+
+	static bool RectAlmostEqual(Rect2 a, Rect2 b)
+	{
+		return Mathf.Abs(a.Position.X - b.Position.X) <= SafeAreaEpsilon
+			&& Mathf.Abs(a.Position.Y - b.Position.Y) <= SafeAreaEpsilon
+			&& Mathf.Abs(a.Size.X - b.Size.X) <= SafeAreaEpsilon
+			&& Mathf.Abs(a.Size.Y - b.Size.Y) <= SafeAreaEpsilon;
+	}
+
+	bool RefreshViewportMetrics()
+	{
+		Size = GetViewportRect().Size;
+		ContentWidth = Mathf.RoundToInt(Size.X);
+		ContentHeight = Mathf.RoundToInt(Size.Y);
+		Rect2 nextSafeRect = GetSafeViewportRect(GetViewport());
+		bool changed = !RectAlmostEqual(ContentSafeRect, nextSafeRect);
+		ContentSafeRect = nextSafeRect;
+		ContentSafeWidth = Mathf.RoundToInt(nextSafeRect.Size.X);
+		ContentSafeHeight = Mathf.RoundToInt(nextSafeRect.Size.Y);
+		return changed;
+	}
+
+	static void ApplySafeRect(Control control, Rect2 rect)
+	{
+		if (control == null)
+			return;
+		control.SetAnchorsPreset(LayoutPreset.TopLeft);
+		control.Position = rect.Position;
+		control.Size = rect.Size;
+		control.CustomMinimumSize = rect.Size;
+	}
+
+	bool ApplySafeAreaLayout(bool forceCoreWidthRefresh = false)
+	{
+		bool safeChanged = RefreshViewportMetrics();
+		Rect2 safeRect = ContentSafeRect;
+
+		ApplySafeRect(rootContent, safeRect);
+		ApplySafeRect(cbgContainer, safeRect);
+		ApplySystemMenuSafeArea(safeRect);
+		inputpad?.RefreshSafeAreaLayout();
+		scalepad?.RefreshSafeAreaLayout();
+		quickButtons?.RefreshSafeAreaLayout();
+
+		bool widthChanged = ApplyAndroidDynamicWindowWidth(forceCoreWidthRefresh || safeChanged);
+		if (safeChanged || widthChanged)
+			QueueScaleBoundsUpdate();
+		return safeChanged || widthChanged;
+	}
+
+	void ApplySystemMenuSafeArea(Rect2 safeRect)
+	{
+		if (menuRoot == null)
+			return;
+
+		Vector2 viewportSize = GetViewportRect().Size;
+		float rightInset = Mathf.Max(0, viewportSize.X - (safeRect.Position.X + safeRect.Size.X));
+		float topInset = Mathf.Max(0, safeRect.Position.Y);
+		menuRoot.OffsetRight = -4 - rightInset;
+		menuRoot.OffsetTop = 4 + topInset;
+	}
+
+	bool ApplyAndroidDynamicWindowWidth(bool requestRefresh)
+	{
+		if (OS.GetName() != "Android" || Config.WindowX <= 0 || ContentSafeWidth <= 0)
+			return false;
+
+		int targetWidth = System.Math.Max(MinDynamicContentWidth, ContentSafeWidth);
+		if (System.Math.Abs(Config.WindowX - targetWidth) <= 1)
+			return false;
+
+		int previousWidth = Config.WindowX;
+		Config.UpdateWindowWidth(targetWidth);
+		GenericUtils.Info($"[UI] Android dynamic content width: {previousWidth} -> {targetWidth}, safe={ContentSafeWidth}x{ContentSafeHeight}, viewport={ContentWidth}x{ContentHeight}");
+		if (requestRefresh)
+			GlobalStatic.MainWindow?.Refresh();
+		return true;
 	}
 
 	// Drag sensitivity shared by the main console and quick-button panel. It is
@@ -453,9 +622,7 @@ public partial class EmueraContent : Control
 	public override void _Ready()
 	{
 		instance = this;
-		Size = GetViewportRect().Size;
-		ContentWidth = (int)Size.X;
-		ContentHeight = (int)Size.Y;
+		RefreshViewportMetrics();
 		GetViewport().SizeChanged += OnViewportSizeChanged;
 
 		mainFont = LoadConfiguredFont();
@@ -549,9 +716,9 @@ public partial class EmueraContent : Control
 		optionWindow = new OptionWindow();
 		AddChild(optionWindow);
 
-		// Main console viewport. The scrollbars are left in Auto mode so Godot
-		// owns the internal range, but their visual nodes are hidden because this
-		// emulator uses direct touch drag instead of visible scrollbars on mobile.
+		// Main console viewport. Horizontal scrolling is enabled only while the
+		// scaled content is wider than the safe viewport; vertical range remains
+		// Godot-owned.
 		scrollContainer = new ScrollContainer();
 		scrollContainer.AnchorLeft = 0;
 		scrollContainer.AnchorTop = 0;
@@ -676,9 +843,11 @@ public partial class EmueraContent : Control
 		cbgContainer.AnchorRight = 1;
 		cbgContainer.AnchorBottom = 1;
 		cbgContainer.MouseFilter = MouseFilterEnum.Ignore;
+		cbgContainer.ClipContents = true;
 		cbgContainer.ZIndex = 10;
 		AddChild(cbgContainer);
 
+		ApplySafeAreaLayout(true);
 	}
 
 	// Clear all generated console state. This is used for title changes/reloads
@@ -704,6 +873,7 @@ public partial class EmueraContent : Control
 		displayRevision++;
 		RefreshQuickInputGate();
 		quickRenderedRevision = -1;
+		quickRenderedSignature = "";
 		if (quickButtons != null && quickButtons.IsShow)
 			quickButtons.Clear();
 	}
@@ -1109,6 +1279,10 @@ public partial class EmueraContent : Control
 			if (existingControl != null)
 				SafeQueueFree(existingControl);
 		}
+		else if (lineObjects.ContainsKey(line.LineNo))
+		{
+			UnregisterLine(line.LineNo);
+		}
 
 		lineContainer.AddChild(lineControl);
 		if (insertIndex >= 0)
@@ -1137,6 +1311,82 @@ public partial class EmueraContent : Control
 			else
 				QueueDisplayFollowUp();
 		}
+	}
+
+	bool RefreshRenderedLineDataOnly(ConsoleDisplayLine line)
+	{
+		if (line == null || !lineObjects.ContainsKey(line.LineNo))
+			return false;
+
+		// 动态地图独立刷新时，底部选项的视觉内容通常不变，只是按钮 generation 前进。
+		// 这里只替换行数据和命中信息，不重建 Control/Canvas 节点，避免选项闪烁。
+		lineObjects[line.LineNo] = line;
+		if (UseCanvasRenderBackend)
+		{
+			var hits = BuildCanvasLineButtonHits(line);
+			if (hits != null && hits.Length > 0)
+				canvasLineButtonHits[line.LineNo] = hits;
+			else
+				canvasLineButtonHits.Remove(line.LineNo);
+			consoleRenderSurface?.MarkHitRectsDirtyOnly();
+		}
+
+		if (lineControls.TryGetValue(line.LineNo, out var control) && control != null && GodotObject.IsInstanceValid(control))
+			UpdateRenderedButtonMetadata(control, line);
+		return true;
+	}
+
+	void UpdateRenderedButtonMetadata(Control root, ConsoleDisplayLine line)
+	{
+		var buttonData = new List<(string input, long generation)>();
+		CollectRenderedButtonData(line, buttonData);
+		if (buttonData.Count == 0)
+			return;
+
+		var renderedButtons = new List<Control>();
+		CollectRenderedButtonControls(root, renderedButtons);
+		int count = System.Math.Min(buttonData.Count, renderedButtons.Count);
+		for (int i = 0; i < count; i++)
+		{
+			var control = renderedButtons[i];
+			if (control == null || !GodotObject.IsInstanceValid(control))
+				continue;
+			control.SetMeta("button_input", buttonData[i].input ?? "");
+			control.SetMeta("generation", buttonData[i].generation);
+		}
+	}
+
+	void CollectRenderedButtonData(ConsoleDisplayLine line, List<(string input, long generation)> output)
+	{
+		if (line?.Buttons == null || output == null)
+			return;
+		foreach (var button in line.Buttons)
+		{
+			if (button == null)
+				continue;
+			if (button.IsButton)
+				output.Add((button.Inputs, button.Generation));
+			if (button.StrArray == null)
+				continue;
+			foreach (var part in button.StrArray)
+			{
+				if (part is ConsoleDivPart div && div.Children != null)
+				{
+					foreach (var childLine in div.Children)
+						CollectRenderedButtonData(childLine, output);
+				}
+			}
+		}
+	}
+
+	void CollectRenderedButtonControls(Node node, List<Control> output)
+	{
+		if (node == null || output == null)
+			return;
+		if (node is Control control && control.HasMeta("button_input"))
+			output.Add(control);
+		foreach (var child in node.GetChildren())
+			CollectRenderedButtonControls(child, output);
 	}
 
 	bool ShouldDeferLineReplacementForAsyncTexture(ConsoleDisplayLine line, bool isUpdate, bool hasExistingLine, bool asyncTexturePending)
@@ -1280,9 +1530,9 @@ public partial class EmueraContent : Control
 		btn.AddThemeStyleboxOverride("panel", _btnNormalStyle);
 		string inputs = button.Inputs;
 		long generation = button.Generation;
-		btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, inputs, generation);
-		btn.MouseEntered += () => GenericUtils.SetPointingButton(inputs, generation);
-		btn.MouseExited += () => GenericUtils.ClearPointingButton(generation);
+		btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, GetRenderedButtonInput(btn), GetRenderedButtonGeneration(btn));
+		btn.MouseEntered += () => GenericUtils.SetPointingButton(GetRenderedButtonInput(btn), GetRenderedButtonGeneration(btn));
+		btn.MouseExited += () => GenericUtils.ClearPointingButton(GetRenderedButtonGeneration(btn));
 		btn.SetMeta("button_input", inputs);
 		btn.SetMeta("generation", generation);
 
@@ -1306,6 +1556,34 @@ public partial class EmueraContent : Control
 		btn.Position = hitRect.Position;
 		btn.Size = hitRect.Size;
 		return btn;
+	}
+
+	static string GetRenderedButtonInput(Control button)
+	{
+		if (button == null || !button.HasMeta("button_input"))
+			return "";
+		try
+		{
+			return button.GetMeta("button_input").As<string>() ?? "";
+		}
+		catch
+		{
+			return "";
+		}
+	}
+
+	static long GetRenderedButtonGeneration(Control button)
+	{
+		if (button == null || !button.HasMeta("generation"))
+			return 0;
+		try
+		{
+			return button.GetMeta("generation").AsInt64();
+		}
+		catch
+		{
+			return 0;
+		}
 	}
 
 	Rect2 GetButtonVisualBounds(ConsoleButtonString button, int buttonTop, int buttonHeight, int renderRelX, int renderOriginX)
@@ -1655,9 +1933,34 @@ public partial class EmueraContent : Control
 
 	// Apply a core display delta: remove from bottom, add/update lines, trim old
 	// top rows, then schedule one layout/scroll follow-up for the whole batch.
-	internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update, int lastButtonGeneration)
+	internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines,
+		bool update, int lastButtonGeneration, bool scrollToBottom = true, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
 	{
 		bool changed = false;
+		bool traceDynamicMap = false;
+		bool dynamicMapBitmapContext = false;
+		if (GenericUtils.IsDynamicMapLineSnapshotTraceEnabled)
+		{
+			dynamicMapBitmapContext = GenericUtils.ContainsDynamicMapBitmapContext(lines);
+			traceDynamicMap = GenericUtils.ShouldTraceDynamicMap(dynamicMapBitmapContext);
+			if (traceDynamicMap)
+			{
+				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.APPLY",
+					() => "dynamic map ui apply start",
+					() => "remove_bottom=" + removeBottomCount
+						+ " add=" + (lines?.Count ?? 0)
+						+ " data_only=" + (dataOnlyLines?.Count ?? 0)
+						+ " update=" + update
+						+ " auto_scroll=" + scrollToBottom
+						+ " last_button_generation=" + lastButtonGeneration
+						+ " before_min=" + GetMinLineNo()
+						+ " before_max=" + GetMaxLineNo()
+						+ " before_count=" + GetRetainedLineCount()
+						+ " before_scroll=" + BuildDynamicMapScrollState()
+						+ " has_bitmap_context=" + dynamicMapBitmapContext
+						+ " incoming=" + GenericUtils.BuildDynamicMapDeltaLineSummary(lines));
+			}
+		}
 		batchingDisplayLines = true;
 		try
 		{
@@ -1678,6 +1981,12 @@ public partial class EmueraContent : Control
 					changed = true;
 				}
 			}
+
+			if (dataOnlyLines != null && dataOnlyLines.Count > 0)
+			{
+				for (int i = 0; i < dataOnlyLines.Count; i++)
+					RefreshRenderedLineDataOnly(dataOnlyLines[i]);
+			}
 		}
 		finally
 		{
@@ -1695,18 +2004,47 @@ public partial class EmueraContent : Control
 		{
 			FlushCanvasOverlayRowsIfNeeded();
 			RefreshQuickInputGate();
-			QueueDisplayFollowUp();
+			if (traceDynamicMap && GenericUtils.IsDynamicMapScrollTraceEnabled)
+			{
+				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.FOLLOW_UP",
+					() => "dynamic map display follow-up queued",
+					() => "changed=" + changed
+						+ " update=" + update
+						+ " auto_scroll=" + scrollToBottom
+						+ " scroll_before_request=" + BuildDynamicMapScrollState());
+			}
+			QueueDisplayFollowUp(scrollToBottom);
 		}
 
 		if (GenericUtils.IsScrollTraceActive)
-			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} changed={changed} update={update} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
+			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} dataOnly={dataOnlyLines?.Count ?? 0} changed={changed} update={update} autoScroll={scrollToBottom} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
 		SetLastButtonGeneration(lastButtonGeneration);
+		if (traceDynamicMap)
+		{
+			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.APPLIED",
+				() => "dynamic map ui apply end",
+				() => "changed=" + changed
+					+ " update=" + update
+					+ " auto_scroll=" + scrollToBottom
+					+ " data_only=" + (dataOnlyLines?.Count ?? 0)
+					+ " after_min=" + GetMinLineNo()
+					+ " after_max=" + GetMaxLineNo()
+					+ " after_count=" + GetRetainedLineCount()
+					+ " display_revision=" + displayRevision
+					+ " scroll=" + BuildDynamicMapScrollState());
+		}
 	}
 
-	void QueueDisplayFollowUp()
+	void QueueDisplayFollowUp(bool scrollToBottom = true)
 	{
+		if (!scrollToBottom)
+		{
+			CancelPendingScrollToBottom();
+			RememberCurrentContentScroll();
+		}
 		QueueScaleBoundsUpdate();
-		RequestScrollToBottom();
+		if (scrollToBottom)
+			RequestScrollToBottom();
 	}
 
 	// Background color rectangles are attached per line so PRINT background color
@@ -2269,6 +2607,26 @@ public partial class EmueraContent : Control
 		return $"scroll=({scrollContainer.ScrollHorizontal},{scrollContainer.ScrollVertical}) max=({limit.X},{vMax}) pageY={vPage} barY={vRangeMax} calcY={limit.Y} desired=({desiredContentScrollHorizontal},{desiredContentScrollVertical},valid={desiredContentScrollValid}) pending={pendingScroll} serial={pendingScrollInteractionSerial}/{contentScrollInteractionSerial} drag={contentDragActive}/{contentDragMoved}/btn={contentDragStartedOnButton} inertia={contentInertiaActive} lines={lineCount} totalH={Mathf.RoundToInt(totalLineHeight)} view=({Mathf.RoundToInt(scrollSize.X)},{Mathf.RoundToInt(scrollSize.Y)}) root=({Mathf.RoundToInt(rootSize.X)},{Mathf.RoundToInt(rootSize.Y)}) scale={contentScale:0.###}";
 	}
 
+	string BuildDynamicMapScrollState()
+	{
+		if (scrollContainer == null)
+			return "scroll=null";
+		var limit = GetContentScrollLimit();
+		var scrollSize = scrollContainer.Size;
+		var rootSize = scaledContentRoot != null ? scaledContentRoot.Size : Vector2.Zero;
+		return "x=" + scrollContainer.ScrollHorizontal
+			+ ",y=" + scrollContainer.ScrollVertical
+			+ ",maxY=" + GetMaxContentVerticalScroll()
+			+ ",limitY=" + limit.Y
+			+ ",pending=" + pendingScroll
+			+ ",desiredY=" + desiredContentScrollVertical
+			+ ",desiredValid=" + desiredContentScrollValid
+			+ ",drag=" + contentDragActive
+			+ ",inertia=" + contentInertiaActive
+			+ ",view=" + Mathf.RoundToInt(scrollSize.X) + "x" + Mathf.RoundToInt(scrollSize.Y)
+			+ ",root=" + Mathf.RoundToInt(rootSize.X) + "x" + Mathf.RoundToInt(rootSize.Y);
+	}
+
 	// Schedule a deferred scroll-to-bottom. We wait across frames because Godot
 	// updates ScrollContainer range after child minimum sizes settle.
 	void RequestScrollToBottom()
@@ -2278,16 +2636,44 @@ public partial class EmueraContent : Control
 		pendingScrollLastMax = int.MinValue;
 		pendingScrollStableSinceTick = 0;
 		pendingScrollDeadlineTick = now + ScrollToBottomRetryMs;
+		bool traceDynamicScroll = GenericUtils.IsDynamicMapScrollTraceEnabled
+			&& GenericUtils.ShouldTraceDynamicMap(false);
 		if (pendingScroll)
 		{
+			if (traceDynamicScroll)
+			{
+				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_REQUEST_MERGE",
+					() => "dynamic map scroll-to-bottom request merged",
+					() => "deadline=" + pendingScrollDeadlineTick
+						+ " state=" + BuildDynamicMapScrollState());
+			}
 			if (GenericUtils.IsScrollTraceActive)
 				TraceScroll("scroll_bottom_request_merge", () => $"deadline={pendingScrollDeadlineTick}");
 			return;
 		}
 		pendingScroll = true;
+		if (traceDynamicScroll)
+		{
+			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_REQUEST",
+				() => "dynamic map scroll-to-bottom requested",
+				() => "deadline=" + pendingScrollDeadlineTick
+					+ " state=" + BuildDynamicMapScrollState());
+		}
 		if (GenericUtils.IsScrollTraceActive)
 			TraceScroll("scroll_bottom_request", () => $"deadline={pendingScrollDeadlineTick}");
 		CallDeferred(nameof(DeferredScrollToBottom));
+	}
+
+	void CancelPendingScrollToBottom()
+	{
+		if (!pendingScroll)
+			return;
+		pendingScroll = false;
+		pendingScrollLastMax = int.MinValue;
+		pendingScrollStableSinceTick = 0;
+		pendingScrollDeadlineTick = 0;
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("scroll_bottom_cancel");
 	}
 
 	// Retry bottom scrolling until content height has remained stable long enough
@@ -2297,6 +2683,14 @@ public partial class EmueraContent : Control
 	{
 		string endReason = "loop_end";
 		bool loggedDragWait = false;
+		bool traceDynamicScroll = GenericUtils.IsDynamicMapScrollTraceEnabled
+			&& GenericUtils.ShouldTraceDynamicMap(false);
+		if (traceDynamicScroll)
+		{
+			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_START",
+				() => "dynamic map deferred scroll start",
+				() => "state=" + BuildDynamicMapScrollState());
+		}
 		TraceScroll("scroll_bottom_start");
 		try
 		{
@@ -2360,9 +2754,18 @@ public partial class EmueraContent : Control
 						pendingScrollDeadlineTick = stableDeadline;
 					if (GenericUtils.IsScrollTraceActive)
 						TraceScroll("scroll_bottom_max", () => $"max={maxScroll} stableDeadline={stableDeadline}");
+					if (traceDynamicScroll)
+					{
+						GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_MAX",
+							() => "dynamic map scroll max changed",
+							() => "max=" + maxScroll
+								+ " stable_deadline=" + stableDeadline
+								+ " state=" + BuildDynamicMapScrollState());
+					}
 				}
 
 				scrollContainer.ScrollVertical = maxScroll;
+				ClampContentHorizontalScroll();
 				RememberDesiredContentScroll(scrollContainer.ScrollHorizontal, maxScroll);
 				bool atBottom = scrollContainer.ScrollVertical >= maxScroll - ScrollToBottomTolerancePx;
 				bool maxStable = pendingScrollStableSinceTick > 0 && now - pendingScrollStableSinceTick >= ScrollToBottomStableMs;
@@ -2382,6 +2785,13 @@ public partial class EmueraContent : Control
 		{
 			if (GenericUtils.IsScrollTraceActive)
 				TraceScroll("scroll_bottom_end", () => $"reason={endReason}");
+			if (traceDynamicScroll)
+			{
+				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_END",
+					() => "dynamic map deferred scroll end",
+					() => "reason=" + endReason
+						+ " state=" + BuildDynamicMapScrollState());
+			}
 			pendingScroll = false;
 			pendingScrollLastMax = int.MinValue;
 			pendingScrollStableSinceTick = 0;
@@ -2418,10 +2828,11 @@ public partial class EmueraContent : Control
 		if (scrollContainer == null)
 			return;
 
-		scrollContainer.HorizontalScrollMode = ScrollContainer.ScrollMode.ShowNever;
+		UpdateContentHorizontalScrollMode();
 		scrollContainer.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
 		HideContentScrollBar(scrollContainer.GetHScrollBar());
 		HideContentScrollBar(scrollContainer.GetVScrollBar());
+		ClampContentHorizontalScroll();
 	}
 
 	// Defense in depth for themes/platform defaults: ShowNever is the authoritative
@@ -2485,7 +2896,7 @@ public partial class EmueraContent : Control
 		if (scrollContainer != null)
 		{
 			var limit = GetContentScrollLimit();
-			int targetHorizontal = Mathf.Clamp(previousHorizontal, 0, limit.X);
+			int targetHorizontal = NormalizeContentHorizontalScroll(Mathf.Clamp(previousHorizontal, 0, limit.X));
 			int targetVertical = pendingScroll ? limit.Y : Mathf.Clamp(previousVertical, 0, limit.Y);
 			int oldHorizontal = scrollContainer.ScrollHorizontal;
 			int oldVertical = scrollContainer.ScrollVertical;
@@ -2512,6 +2923,41 @@ public partial class EmueraContent : Control
 		// Godot's internal layout pass and temporarily snap the viewport.
 		HideContentScrollBar(scrollContainer.GetHScrollBar());
 		HideContentScrollBar(scrollContainer.GetVScrollBar());
+		UpdateContentHorizontalScrollMode();
+		ClampContentHorizontalScroll();
+	}
+
+	int NormalizeContentHorizontalScroll(int horizontal)
+	{
+		int maxScroll = GetMaxContentHorizontalScroll();
+		if (maxScroll <= 0)
+			return 0;
+		return Mathf.Clamp(horizontal, 0, maxScroll);
+	}
+
+	void ClampContentHorizontalScroll()
+	{
+		if (scrollContainer == null)
+			return;
+
+		int targetHorizontal = NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal);
+		if (scrollContainer.ScrollHorizontal != targetHorizontal)
+			scrollContainer.ScrollHorizontal = targetHorizontal;
+	}
+
+	bool IsContentHorizontalScrollAvailable()
+	{
+		return GetContentScrollLimit().X > 0;
+	}
+
+	void UpdateContentHorizontalScrollMode()
+	{
+		if (scrollContainer == null)
+			return;
+
+		scrollContainer.HorizontalScrollMode = IsContentHorizontalScrollAvailable()
+			? ScrollContainer.ScrollMode.ShowNever
+			: ScrollContainer.ScrollMode.Disabled;
 	}
 
 	// Capture the live viewport as the desired scroll target before sending input
@@ -2520,14 +2966,14 @@ public partial class EmueraContent : Control
 	{
 		if (scrollContainer == null)
 			return;
-		RememberDesiredContentScroll(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+		RememberDesiredContentScroll(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 	}
 
 	// Store the scroll target that ProcessContentScrollCorrection will preserve
 	// across Godot layout passes.
 	void RememberDesiredContentScroll(int horizontal, int vertical)
 	{
-		desiredContentScrollHorizontal = horizontal;
+		desiredContentScrollHorizontal = NormalizeContentHorizontalScroll(horizontal);
 		desiredContentScrollVertical = vertical;
 		desiredContentScrollValid = true;
 	}
@@ -3108,8 +3554,20 @@ public partial class EmueraContent : Control
 					TrackAsyncTextureRequestForCurrentRender();
 				return null;
 			}
-			if (ti == null || ti.texture == null)
+			if (ti.IsPlaceholder)
+			{
+				if (bt.RequestTextureInfoAsync())
+					TrackAsyncTextureRequestForCurrentRender();
+				else if (renderingCbgTextures)
+					cbgTextureUnavailableDuringRender = true;
 				return null;
+			}
+			if (ti.texture == null)
+			{
+				if (renderingCbgTextures)
+					cbgTextureUnavailableDuringRender = true;
+				return null;
+			}
 			TrackTexturePin(ti);
 			if (sprite is ASpriteSingle single)
 			{
@@ -3131,22 +3589,22 @@ public partial class EmueraContent : Control
 			if (singleSprite.BaseImage is GraphicsImage gImg && gImg.godotImage != null)
 			{
 				var srcRect = singleSprite.SrcRectangle;
+				var texture = GetGraphicsImageDisplayTexture(gImg);
+				if (texture == null)
+					return null;
 				if (srcRect.X == 0 && srcRect.Y == 0 &&
-					srcRect.Width == gImg.godotImage.GetWidth() &&
-					srcRect.Height == gImg.godotImage.GetHeight())
+					srcRect.Width == texture.GetWidth() &&
+					srcRect.Height == texture.GetHeight())
 				{
-					return Godot.ImageTexture.CreateFromImage(gImg.godotImage);
+					return texture;
 				}
-				var region = gImg.godotImage.GetRegion(new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height));
-				if (region != null)
-					return Godot.ImageTexture.CreateFromImage(region);
-				return Godot.ImageTexture.CreateFromImage(gImg.godotImage);
+				return CreateAtlasTextureForDisplay(sprite, texture, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
 			}
 			if (singleSprite.BaseImage?.Bitmap != null)
 			{
 				var bmp = singleSprite.BaseImage.Bitmap;
 				var ti = GetDisplayTextureInfoForBitmap(bmp);
-				if (ti != null)
+				if (ti != null && !ti.IsPlaceholder && ti.texture != null)
 				{
 					TrackTexturePin(ti);
 					return ti.GetAtlasTexture(
@@ -3167,22 +3625,22 @@ public partial class EmueraContent : Control
 			{
 				if (baseImage is GraphicsImage gImg && gImg.godotImage != null)
 				{
+					var texture = GetGraphicsImageDisplayTexture(gImg);
+					if (texture == null)
+						return null;
 					if (srcRect.X == 0 && srcRect.Y == 0 &&
-						srcRect.Width == gImg.godotImage.GetWidth() &&
-						srcRect.Height == gImg.godotImage.GetHeight())
+						srcRect.Width == texture.GetWidth() &&
+						srcRect.Height == texture.GetHeight())
 					{
-						return Godot.ImageTexture.CreateFromImage(gImg.godotImage);
+						return texture;
 					}
-					var region = gImg.godotImage.GetRegion(new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height));
-					if (region != null)
-						return Godot.ImageTexture.CreateFromImage(region);
-					return Godot.ImageTexture.CreateFromImage(gImg.godotImage);
+					return CreateAtlasTextureForDisplay(sprite, texture, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
 				}
 				if (baseImage?.Bitmap != null)
 				{
 					var bmp = baseImage.Bitmap;
 					var ti = GetDisplayTextureInfoForBitmap(bmp);
-					if (ti != null)
+					if (ti != null && !ti.IsPlaceholder && ti.texture != null)
 					{
 						TrackTexturePin(ti);
 						return ti.GetAtlasTexture(
@@ -3196,6 +3654,55 @@ public partial class EmueraContent : Control
 		return null;
 	}
 
+	Texture2D GetGraphicsImageDisplayTexture(GraphicsImage image)
+	{
+		if (image == null)
+			return null;
+		long revision = image.DisplayRevision;
+		if (graphicsImageTextureCache.TryGetValue(image.ID, out var cached)
+			&& cached.Revision == revision
+			&& cached.Texture != null)
+		{
+			return cached.Texture;
+		}
+
+		// TW/Snake 部分角色会把立绘先清空到 GraphicsImage，再连续绘制差分层。
+		// UI 若在中间态上传贴图，就会看到角色白一下再恢复；因此动态图像需要稳定一个短窗口再提交。
+		if (!image.TryCreateDisplaySnapshot(GraphicsImageDisplayStableDelayMs, out var snapshot, out revision, out bool retrySoon))
+		{
+			if (retrySoon)
+				TrackAsyncTextureRequestForCurrentRender();
+			if (renderingCbgTextures)
+				cbgTextureUnavailableDuringRender = true;
+			return cached.Texture;
+		}
+
+		try
+		{
+			var texture = Godot.ImageTexture.CreateFromImage(snapshot);
+			graphicsImageTextureCache[image.ID] = new GraphicsImageTextureCacheEntry
+			{
+				Revision = revision,
+				Texture = texture,
+			};
+			return texture;
+		}
+		finally
+		{
+			snapshot?.Dispose();
+		}
+	}
+
+	static AtlasTexture CreateAtlasTextureForDisplay(ASprite sprite, Texture2D texture, int x, int y, int width, int height)
+	{
+		if (texture == null)
+			return null;
+		var atlas = new AtlasTexture();
+		atlas.Atlas = texture;
+		atlas.Region = new Rect2(x, y, width, height);
+		return atlas;
+	}
+
 	SpriteManager.TextureInfo GetDisplayTextureInfoForBitmap(uEmuera.Drawing.Bitmap bmp)
 	{
 		if (bmp == null)
@@ -3204,7 +3711,24 @@ public partial class EmueraContent : Control
 		{
 			var ti = bt.CachedTextureInfo;
 			if (ti == null && bt.RequestTextureInfoAsync())
+			{
 				TrackAsyncTextureRequestForCurrentRender();
+				return null;
+			}
+			if (ti != null && ti.IsPlaceholder)
+			{
+				if (bt.RequestTextureInfoAsync())
+					TrackAsyncTextureRequestForCurrentRender();
+				else if (renderingCbgTextures)
+					cbgTextureUnavailableDuringRender = true;
+				return null;
+			}
+			if (ti != null && ti.texture == null)
+			{
+				if (renderingCbgTextures)
+					cbgTextureUnavailableDuringRender = true;
+				return null;
+			}
 			return ti;
 		}
 
@@ -3213,6 +3737,18 @@ public partial class EmueraContent : Control
 		var sync = SpriteManager.GetTextureInfo(bmp.path, bmp.path);
 		if (sync == null && !string.IsNullOrEmpty(bmp.filename))
 			sync = SpriteManager.GetTextureInfo(bmp.filename, bmp.path);
+		if (sync != null && sync.IsPlaceholder)
+		{
+			if (renderingCbgTextures)
+				cbgTextureUnavailableDuringRender = true;
+			return null;
+		}
+		if (sync != null && sync.texture == null)
+		{
+			if (renderingCbgTextures)
+				cbgTextureUnavailableDuringRender = true;
+			return null;
+		}
 		return sync;
 	}
 
@@ -3220,6 +3756,11 @@ public partial class EmueraContent : Control
 	{
 		if (SpriteManager.TryGetTextureInfoCached(name, filename, out ti))
 		{
+			if (ti.IsPlaceholder || ti.texture == null)
+			{
+				ti = null;
+				return false;
+			}
 			TrackTexturePin(ti);
 			return true;
 		}
@@ -3502,7 +4043,9 @@ public partial class EmueraContent : Control
 		var entries = new List<CbgRenderEntry>();
 		activeTexturePinCollector = newCbgTexturePins;
 		bool previousCbgRender = renderingCbgTextures;
+		bool previousCbgUnavailable = cbgTextureUnavailableDuringRender;
 		renderingCbgTextures = true;
+		cbgTextureUnavailableDuringRender = false;
 		try
 		{
 			foreach (var cbg in list)
@@ -3546,6 +4089,7 @@ public partial class EmueraContent : Control
 		}
 		catch
 		{
+			cbgTextureUnavailableDuringRender = previousCbgUnavailable;
 			ReleaseTexturePinList(newCbgTexturePins);
 			throw;
 		}
@@ -3555,7 +4099,9 @@ public partial class EmueraContent : Control
 			activeTexturePinCollector = previousTexturePinCollector;
 		}
 
-		if (pendingCbgAsyncTextureRefresh)
+		bool preservePreviousCbgForUnavailableTexture = cbgTextureUnavailableDuringRender;
+		cbgTextureUnavailableDuringRender = previousCbgUnavailable;
+		if (pendingCbgAsyncTextureRefresh || preservePreviousCbgForUnavailableTexture)
 		{
 			// 刷新背景层时如果新纹理还没就绪，保留旧 CBG 节点和旧 pin。
 			// 初次显示时也不提交半成品图层，等异步完成后再一次性提交，避免标题/差分图白块闪烁。
@@ -3913,6 +4459,21 @@ public partial class EmueraContent : Control
 			&& quickAutoHiddenWasVisible
 			&& generation >= 0
 			&& generation != quickAutoHiddenGeneration;
+		bool traceDynamicButtons = GenericUtils.IsDynamicMapButtonTraceEnabled
+			&& GenericUtils.ShouldTraceDynamicMap(false);
+		if (traceDynamicButtons)
+		{
+			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.REQUEST",
+				() => "dynamic map quick-button generation requested",
+				() => "previous_generation=" + lastButtonGeneration
+					+ " next_generation=" + generation
+					+ " quick_exists=" + (quickButtons != null)
+					+ " quick_show=" + (quickButtons != null && quickButtons.IsShow)
+					+ " auto_show=" + shouldAutoShowQuick
+					+ " rendered_generation=" + quickRenderedGeneration
+					+ " rendered_revision=" + quickRenderedRevision
+					+ " display_revision=" + displayRevision);
+		}
 		lastButtonGeneration = generation;
 		RefreshQuickInputGate();
 
@@ -3920,10 +4481,105 @@ public partial class EmueraContent : Control
 		{
 			if (quickRenderedGeneration == lastButtonGeneration && quickRenderedRevision == displayRevision)
 			{
+				if (traceDynamicButtons)
+				{
+					GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.CACHED",
+						() => "dynamic map quick buttons reused",
+						() => "generation=" + lastButtonGeneration
+							+ " display_revision=" + displayRevision);
+				}
 				if (shouldAutoShowQuick)
 				{
 					ClearQuickAutoHiddenState();
 					quickButtons.ShowPad();
+					UpdateSystemButtonVisuals();
+				}
+				return;
+			}
+
+			if (lastButtonGeneration < 0)
+			{
+				quickButtons.BeginBatch();
+				try
+				{
+					quickButtons.Clear();
+					quickRenderedGeneration = lastButtonGeneration;
+					quickRenderedRevision = displayRevision;
+					quickRenderedSignature = "";
+					if (traceDynamicButtons)
+					{
+						GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.SKIP",
+							() => "dynamic map quick buttons skipped",
+							() => "reason=negative_generation generation=" + lastButtonGeneration
+								+ " display_revision=" + displayRevision);
+					}
+				}
+				finally
+				{
+					quickButtons.EndBatch();
+				}
+				return;
+			}
+
+			var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
+			foreach (var kvp in lineObjects)
+			{
+				var line = kvp.Value;
+				var lineButtons = new List<(string text, Godot.Color color, string code)>();
+				CollectQuickButtons(line, lineButtons);
+				if (lineButtons.Count > 0)
+					lineGroups.Add((kvp.Key, lineButtons));
+			}
+
+			lineGroups.Sort((a, b) => a.lineNo.CompareTo(b.lineNo));
+
+			if (lineGroups.Count == 0)
+			{
+				quickButtons.BeginBatch();
+				try
+				{
+					quickButtons.Clear();
+					quickRenderedGeneration = lastButtonGeneration;
+					quickRenderedRevision = displayRevision;
+					quickRenderedSignature = "";
+					if (traceDynamicButtons)
+					{
+						GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.EMPTY",
+							() => "dynamic map quick buttons empty",
+							() => "generation=" + lastButtonGeneration
+								+ " display_revision=" + displayRevision
+								+ " retained_lines=" + GetRetainedLineCount());
+					}
+				}
+				finally
+				{
+					quickButtons.EndBatch();
+				}
+				return;
+			}
+
+			string nextSignature = BuildQuickButtonGroupsSignature(lineGroups);
+			if (quickRenderedSignature == nextSignature)
+			{
+				bool generationChanged = quickRenderedGeneration != lastButtonGeneration;
+				if (generationChanged)
+					quickButtons.UpdateButtonGeneration(lastButtonGeneration);
+				quickRenderedGeneration = lastButtonGeneration;
+				quickRenderedRevision = displayRevision;
+				if (traceDynamicButtons)
+				{
+					GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.CACHED_SIGNATURE",
+						() => "dynamic map quick buttons reused by signature",
+						() => "generation=" + lastButtonGeneration
+							+ " display_revision=" + displayRevision
+							+ " groups=" + lineGroups.Count
+							+ " generation_updated=" + generationChanged);
+				}
+				if (shouldAutoShowQuick)
+				{
+					ClearQuickAutoHiddenState();
+					quickButtons.ShowPad();
+					quickButtons.SetInputEnabled(true);
 					UpdateSystemButtonVisuals();
 				}
 				return;
@@ -3935,31 +4591,23 @@ public partial class EmueraContent : Control
 				quickButtons.Clear();
 				quickRenderedGeneration = lastButtonGeneration;
 				quickRenderedRevision = displayRevision;
-
-				if (lastButtonGeneration < 0)
-					return;
-
-				var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
-				foreach (var kvp in lineObjects)
-				{
-					var line = kvp.Value;
-					var lineButtons = new List<(string text, Godot.Color color, string code)>();
-					CollectQuickButtons(line, lineButtons);
-					if (lineButtons.Count > 0)
-						lineGroups.Add((kvp.Key, lineButtons));
-				}
-
-				lineGroups.Sort((a, b) => a.lineNo.CompareTo(b.lineNo));
-
-				if (lineGroups.Count == 0)
-					return;
-
+				quickRenderedSignature = nextSignature;
 				if (shouldAutoShowQuick)
 				{
 					ClearQuickAutoHiddenState();
 					quickButtons.ShowPad();
 					quickButtons.SetInputEnabled(true);
 					UpdateSystemButtonVisuals();
+				}
+
+				if (traceDynamicButtons)
+				{
+					GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.REBUILD",
+						() => "dynamic map quick buttons rebuilt",
+						() => "generation=" + lastButtonGeneration
+							+ " display_revision=" + displayRevision
+							+ " groups=" + lineGroups.Count
+							+ " buttons=" + BuildDynamicMapQuickGroupsSummary(lineGroups));
 				}
 
 				for (int i = 0; i < lineGroups.Count; i++)
@@ -3977,6 +4625,64 @@ public partial class EmueraContent : Control
 				quickButtons.EndBatch();
 			}
 		}
+	}
+
+	string BuildQuickButtonGroupsSignature(List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> lineGroups)
+	{
+		if (lineGroups == null || lineGroups.Count == 0)
+			return "";
+		var sb = new System.Text.StringBuilder(lineGroups.Count * 48);
+		for (int i = 0; i < lineGroups.Count; i++)
+		{
+			var group = lineGroups[i];
+			// 动态地图刷新可能删除尾部再重绘，绝对行号会变化；快捷按钮是否需要重建只取决于可见按钮组的顺序和内容。
+			sb.Append(i).Append(':');
+			if (group.buttons != null)
+			{
+				for (int j = 0; j < group.buttons.Count; j++)
+				{
+					var button = group.buttons[j];
+					sb.Append(button.code ?? "")
+						.Append('=')
+						.Append(button.text ?? "")
+						.Append('#')
+						.Append(button.color.ToString())
+						.Append(';');
+				}
+			}
+			sb.Append('|');
+		}
+		return sb.ToString();
+	}
+
+	string BuildDynamicMapQuickGroupsSummary(List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> lineGroups)
+	{
+		if (lineGroups == null || lineGroups.Count == 0)
+			return "none";
+		int maxGroups = Math.Min(12, lineGroups.Count);
+		var sb = new System.Text.StringBuilder(maxGroups * 64);
+		for (int i = 0; i < maxGroups; i++)
+		{
+			if (sb.Length > 0)
+				sb.Append('|');
+			var group = lineGroups[i];
+			sb.Append(group.lineNo).Append(':');
+			int maxButtons = Math.Min(4, group.buttons?.Count ?? 0);
+			for (int j = 0; j < maxButtons; j++)
+			{
+				if (j > 0)
+					sb.Append(',');
+				var button = group.buttons[j];
+				sb.Append(GenericUtils.ClipTrace(button.code, 24).Replace(' ', '_'))
+					.Append('=')
+					.Append(GenericUtils.ClipTrace(button.text, 24).Replace(' ', '_'));
+			}
+			if ((group.buttons?.Count ?? 0) > maxButtons)
+				sb.Append(",...");
+		}
+		if (lineGroups.Count > maxGroups)
+			sb.Append("|...");
+		return sb.ToString();
 	}
 
 	// Recursively collect command buttons from visible console lines and nested
@@ -4425,9 +5131,7 @@ public partial class EmueraContent : Control
 	// system UI or rotation changes.
 	void OnViewportSizeChanged()
 	{
-		Size = GetViewportRect().Size;
-		ContentWidth = (int)Size.X;
-		ContentHeight = (int)Size.Y;
+		ApplySafeAreaLayout();
 		QueueScaleBoundsUpdate();
 	}
 
@@ -4436,7 +5140,7 @@ public partial class EmueraContent : Control
 	public void SetContentScale(float scale)
 	{
 		if (scrollContainer != null)
-			SetContentScaleKeepingFocus(scale, scrollContainer.GetGlobalRect().GetCenter(), false);
+			SetContentScaleKeepingFocus(scale, scrollContainer.GetGlobalRect().GetCenter(), false, true);
 		else
 			SetContentScale(scale, false, true);
 	}
@@ -5147,7 +5851,7 @@ public partial class EmueraContent : Control
 	}
 
 	// Change scale while preserving the content point under focusGlobalPosition.
-	void SetContentScaleKeepingFocus(float scale, Vector2 focusGlobalPosition, bool trackGestureFocus = true)
+	void SetContentScaleKeepingFocus(float scale, Vector2 focusGlobalPosition, bool trackGestureFocus = true, bool allowShrink = false)
 	{
 		if (scrollContainer == null)
 		{
@@ -5163,13 +5867,13 @@ public partial class EmueraContent : Control
 		float previousScale = Mathf.Max(contentScale, 0.001f);
 		var previousScroll = desiredContentScrollValid
 			? new Vector2(desiredContentScrollHorizontal, desiredContentScrollVertical)
-			: new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+			: new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 		var contentFocus = (previousScroll + localFocus) / previousScale;
 		if (GenericUtils.IsScrollTraceActive)
 			TraceScroll("scale_focus_begin", () => $"from={contentScale:0.###} to={ClampContentScale(scale):0.###} focus=({Mathf.RoundToInt(localFocus.X)},{Mathf.RoundToInt(localFocus.Y)})");
 
 		ApplyContentScaleValue(scale);
-		UpdateScaleBounds(false);
+		UpdateScaleBounds(allowShrink);
 		ApplyContentScaleTransform();
 		RestoreContentScaleFocus(contentFocus, localFocus);
 		if (trackGestureFocus)
@@ -5188,7 +5892,7 @@ public partial class EmueraContent : Control
 			return;
 
 		var nextScroll = contentFocus * contentScale - localFocus;
-		int targetHorizontal = Mathf.Clamp(Mathf.RoundToInt(nextScroll.X), 0, GetMaxContentHorizontalScroll());
+		int targetHorizontal = NormalizeContentHorizontalScroll(Mathf.Clamp(Mathf.RoundToInt(nextScroll.X), 0, GetMaxContentHorizontalScroll()));
 		int targetVertical = Mathf.Clamp(Mathf.RoundToInt(nextScroll.Y), 0, GetMaxContentVerticalScroll());
 		scrollContainer.ScrollHorizontal = targetHorizontal;
 		scrollContainer.ScrollVertical = targetVertical;
@@ -5249,7 +5953,7 @@ public partial class EmueraContent : Control
 			return globalPosition;
 		var rect = scrollContainer.GetGlobalRect();
 		var contentPosition = globalPosition - rect.Position;
-		contentPosition += new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+		contentPosition += new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 		if (contentScale > 0.001f)
 			contentPosition /= contentScale;
 		return contentPosition;
@@ -5277,7 +5981,7 @@ public partial class EmueraContent : Control
 
 		var rect = scrollContainer.GetGlobalRect();
 		var contentPosition = globalPosition - rect.Position;
-		contentPosition += new Vector2(scrollContainer.ScrollHorizontal, scrollContainer.ScrollVertical);
+		contentPosition += new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 		if (contentScale > 0.001f)
 			contentPosition /= contentScale;
 		GenericUtils.SetPointerPosition(contentPosition.X, contentPosition.Y);
@@ -5329,9 +6033,11 @@ public partial class EmueraContent : Control
 		if (scrollContainer == null)
 			return Vector2.Zero;
 
+		if (!IsContentHorizontalScrollAvailable())
+			delta.X = 0;
 		int oldHorizontal = scrollContainer.ScrollHorizontal;
 		int oldVertical = scrollContainer.ScrollVertical;
-		int nextHorizontal = Mathf.Clamp(oldHorizontal + Mathf.RoundToInt(delta.X), 0, GetMaxContentHorizontalScroll());
+		int nextHorizontal = NormalizeContentHorizontalScroll(Mathf.Clamp(oldHorizontal + Mathf.RoundToInt(delta.X), 0, GetMaxContentHorizontalScroll()));
 		int nextVertical = Mathf.Clamp(oldVertical + Mathf.RoundToInt(delta.Y), 0, GetMaxContentVerticalScroll());
 		scrollContainer.ScrollHorizontal = nextHorizontal;
 		scrollContainer.ScrollVertical = nextVertical;
@@ -5353,7 +6059,7 @@ public partial class EmueraContent : Control
 			return;
 
 		var limit = GetContentScrollLimit();
-		int targetHorizontal = Mathf.Clamp(desiredContentScrollHorizontal, 0, limit.X);
+		int targetHorizontal = NormalizeContentHorizontalScroll(Mathf.Clamp(desiredContentScrollHorizontal, 0, limit.X));
 		int targetVertical = Mathf.Clamp(desiredContentScrollVertical, 0, limit.Y);
 		if (targetHorizontal == scrollContainer.ScrollHorizontal && targetVertical == scrollContainer.ScrollVertical)
 			return;
@@ -5370,6 +6076,14 @@ public partial class EmueraContent : Control
 	// Estimate drag velocity for inertial scrolling.
 	void UpdateContentScrollVelocity(Vector2 rawScrollDelta, Vector2 appliedDelta)
 	{
+		if (!IsContentHorizontalScrollAvailable())
+		{
+			rawScrollDelta.X = 0;
+			appliedDelta.X = 0;
+			contentScrollVelocity.X = 0;
+			contentInertiaRemainder.X = 0;
+		}
+
 		ulong now = Time.GetTicksMsec();
 		if (contentLastDragTick == 0)
 		{
@@ -5399,6 +6113,12 @@ public partial class EmueraContent : Control
 	// Start inertial scrolling using a speed-dependent boost/deceleration curve.
 	void StartContentInertia()
 	{
+		if (!IsContentHorizontalScrollAvailable())
+		{
+			contentScrollVelocity.X = 0;
+			contentInertiaRemainder.X = 0;
+		}
+
 		float releaseSpeed = contentScrollVelocity.Length();
 		float fastRatio = Mathf.Clamp(
 			(releaseSpeed - ContentInertiaMinVelocity) / (ContentInertiaFastVelocity - ContentInertiaMinVelocity),
@@ -5445,6 +6165,12 @@ public partial class EmueraContent : Control
 	{
 		if (!contentInertiaActive || contentDragActive || scrollContainer == null)
 			return;
+
+		if (!IsContentHorizontalScrollAvailable())
+		{
+			contentScrollVelocity.X = 0;
+			contentInertiaRemainder.X = 0;
+		}
 
 		var desiredDelta = contentScrollVelocity * delta + contentInertiaRemainder;
 		var roundedDelta = new Vector2(Mathf.Round(desiredDelta.X), Mathf.Round(desiredDelta.Y));
@@ -5503,8 +6229,16 @@ public partial class EmueraContent : Control
 			scaledSize.Y = Mathf.Max(scaledSize.Y, Mathf.Max(scaledContentRoot.CustomMinimumSize.Y, scaledContentRoot.Size.Y));
 		}
 		return new Vector2I(
-			Mathf.CeilToInt(Mathf.Max(0.0f, scaledSize.X - scrollSize.X)),
+			GetHorizontalScrollLimit(scaledSize, scrollSize),
 			Mathf.CeilToInt(Mathf.Max(0.0f, scaledSize.Y - scrollSize.Y)));
+	}
+
+	int GetHorizontalScrollLimit(Vector2 scaledSize, Vector2 scrollSize)
+	{
+		float overflow = scaledSize.X - scrollSize.X;
+		if (overflow <= ContentHorizontalScrollTolerancePx)
+			return 0;
+		return Mathf.CeilToInt(overflow);
 	}
 
 	// Submit an empty input when the console is waiting for enter/any key.

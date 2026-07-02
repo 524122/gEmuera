@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-`gEmuera` 是基于 Godot 4.6 + C# 的 Emuera 文字游戏引擎跨平台移植版。
+`gEmuera` 是基于 Godot 4.7 + C# 的 Emuera 文字游戏引擎跨平台移植版。
 
 Emuera 是日本 eramaker 系列文字游戏的执行引擎，通过解析 `.ERB` 脚本文件和 `.CSV` 数据文件来运行游戏。本项目将原版 Windows Forms / GDI+ 渲染架构替换为 Godot 节点系统，实现了桌面端（Windows/Linux）和 Android 移动端的跨平台支持。
 
@@ -18,10 +18,10 @@ Emuera 是日本 eramaker 系列文字游戏的执行引擎，通过解析 `.ERB
 
 | 层级 | 技术 |
 |------|------|
-| 游戏引擎 | Godot 4.6（.NET / Mono 版本） |
+| 游戏引擎 | Godot 4.7（.NET / Mono 版本） |
 | 编程语言 | C# |
 | 目标框架 | .NET 9.0（桌面端 .NET 8.0 亦可，Android 构建需要 .NET 9.0） |
-| NuGet 依赖 | `GodotSharp` 4.6.2、`Godot.SourceGenerators` 4.6.2、`Microsoft.Data.Sqlite` 8.0.0、`SQLitePCLRaw.bundle_e_sqlite3` 2.1.6 |
+| NuGet 依赖 | `Godot.NET.Sdk` 4.7.0、`Microsoft.Data.Sqlite` 8.0.0、`SkiaSharp` 2.88.8、`SQLitePCLRaw.bundle_e_sqlite3` 2.1.6 |
 | 着色器 | Godot GDShader（`canvas_item` 类型，用于 ColorMatrix 颜色变换） |
 | 物理引擎 | Jolt Physics 3D（项目以 2D UI 为主，使用默认配置） |
 | 版本控制 | Git |
@@ -42,7 +42,7 @@ Emuera 是日本 eramaker 系列文字游戏的执行引擎，通过解析 `.ERB
 
 ### 环境要求
 
-- Godot 4.6（.NET 版本）
+- Godot 4.7（.NET 版本）
 - .NET 8.0 SDK（桌面端）
 - .NET 9.0 SDK（Android 构建必需）
 
@@ -60,7 +60,7 @@ dotnet build -p:GodotTargetPlatform=android
 
 ### 运行方式
 
-1. 用 Godot 4.6 (.NET) 打开项目
+1. 用 Godot 4.7 (.NET) 打开项目
 2. 将游戏文件夹（文件夹名必须以 `era` 开头）放到正确位置：
    - **桌面端**：与可执行文件同目录，或 Godot 项目 `res://` 目录下
    - **Android**：`/storage/emulated/0/emuera/`

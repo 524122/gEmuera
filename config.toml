@@ -8,6 +8,7 @@ touch = false
 input = false
 image = false
 ui_layout = false
+dynamic_map = false
 resource = false
 load_save = false
 android_storage = false

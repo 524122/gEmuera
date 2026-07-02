@@ -1023,7 +1023,8 @@ namespace MinorShift.Emuera.GameView
 		{
 			state = req.NoFocus ? ConsoleState.WaitInputNoFocus : ConsoleState.WaitInput;
 			inputReq = req;
-			if (req.NoFocus)
+			bool flushDeferredRewrite = ConsumeDisplayRewriteRefresh();
+			if (req.NoFocus || flushDeferredRewrite)
 				RefreshStrings(true);
 			if (req.Timelimit > 0)
 			{
@@ -1052,6 +1053,8 @@ namespace MinorShift.Emuera.GameView
 			inputReq = req;
 			state = ConsoleState.WaitInput;
 			emuera.NeedWaitToEventComEnd = false;
+			if (ConsumeDisplayRewriteRefresh())
+				RefreshStrings(true);
 		}
 
 
@@ -1727,6 +1730,8 @@ namespace MinorShift.Emuera.GameView
 		#region 描画系
 		uint lastUpdate = 0;
 		uint msPerFrame = 1000 / 60;//60FPS
+		bool deferDisplayRewriteRefresh = false;
+		bool displayRewriteRefreshDeferred = false;
 		ConsoleRedraw redraw = ConsoleRedraw.Normal;
         public ConsoleRedraw Redraw { get { return redraw; } }
 		public void SetRedraw(Int64 i)
@@ -1737,6 +1742,28 @@ namespace MinorShift.Emuera.GameView
 				redraw = ConsoleRedraw.Normal;
 			if ((i & 2) != 0)
 				RefreshStrings(true);
+		}
+
+		internal void MarkDisplayRewriteInProgress()
+		{
+			// Godot 版 UI 通过异步队列提交。动态地图这类 CLEARLINE 后逐行重画的内容，
+			// 如果在 Running 中途提交普通刷新，Android 会看见旧菜单、半张地图等中间态。
+			// 这里只合并非强制刷新，等 INPUT/TINPUT/WAIT 或显式强制刷新时提交完整画面。
+			if (state == ConsoleState.Running)
+				deferDisplayRewriteRefresh = true;
+		}
+
+		bool ShouldDeferDisplayRewriteRefresh(bool forcePaint)
+		{
+			return !forcePaint && deferDisplayRewriteRefresh && state == ConsoleState.Running;
+		}
+
+		bool ConsumeDisplayRewriteRefresh()
+		{
+			bool hadDeferredRefresh = deferDisplayRewriteRefresh || displayRewriteRefreshDeferred;
+			deferDisplayRewriteRefresh = false;
+			displayRewriteRefreshDeferred = false;
+			return hadDeferredRefresh;
 		}
 
 		string debugTitle = null;
@@ -1807,6 +1834,13 @@ namespace MinorShift.Emuera.GameView
 				else if (selectingButton.Generation != lastButtonGeneration)
 					selectingButton = null;
 			}
+			if (ShouldDeferDisplayRewriteRefresh(force_Paint))
+			{
+				displayRewriteRefreshDeferred = true;
+				return;
+			}
+			if (force_Paint)
+				ConsumeDisplayRewriteRefresh();
 			if (!force_Paint)
 			{//forceならば確実に再描画。
 				//履歴表示中でなく、最終行を表示済みであり、選択中ボタンが変更されていないなら更新不要
@@ -1833,6 +1867,11 @@ namespace MinorShift.Emuera.GameView
 			}
 			verticalScrollBarUpdate();
 			window.Refresh();//OnPaint発行
+			lastUpdate = WinmmTimer.TickCount;
+			lastDrawnLineNo = lineNo;
+			lastSelectingButton = selectingButton;
+			if (state != ConsoleState.Running)
+				ConsumeDisplayRewriteRefresh();
 
 		}
 
@@ -1939,7 +1978,17 @@ namespace MinorShift.Emuera.GameView
         }
 
 		public uEmuera.Drawing.Color? TextBackgroundColor { get; set; }
-		public bool BitmapCacheEnabledForNextLine { get; set; }
+		bool bitmapCacheEnabledForNextLine = false;
+		public bool BitmapCacheEnabledForNextLine
+		{
+			get { return bitmapCacheEnabledForNextLine; }
+			set
+			{
+				bitmapCacheEnabledForNextLine = value;
+				if (value)
+					MarkDisplayRewriteInProgress();
+			}
+		}
 		public bool StrictFontFallback { get; set; }
 		readonly HotkeyState hotkeyState;
 		// Godot 版不使用 SkiaSharp，但 v24 脚本会通过这些 API 探测渲染后端。

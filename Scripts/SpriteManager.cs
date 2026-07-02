@@ -24,6 +24,7 @@ internal static class SpriteManager
 	const int DesktopAsyncTextureCompletionBudget = 6;
 	const int MobileCleanupDisposeBudget = 24;
 	const int DesktopCleanupDisposeBudget = 96;
+	const ulong PlaceholderRetryIntervalMs = 1000;
 
 	internal class SpriteInfo : IDisposable
 	{
@@ -47,11 +48,14 @@ internal static class SpriteManager
 	// object identity before disposing.
 	internal class TextureInfo : IDisposable
 	{
-		internal TextureInfo(string b, Image img)
+		internal TextureInfo(string b, Image img, bool isPlaceholder = false)
 		{
 			imagename = b;
 			image = img;
+			IsPlaceholder = isPlaceholder;
 			estimatedBytes = EstimateImageBytes(img);
+			if (isPlaceholder)
+				placeholderRetryAfterMs = Time.GetTicksMsec() + PlaceholderRetryIntervalMs;
 			Touch();
 		}
 
@@ -154,9 +158,11 @@ internal static class SpriteManager
 		internal double pasttime = 0;
 		internal long estimatedBytes = 0;
 		internal bool IsDisposed { get; private set; }
+		internal bool IsPlaceholder { get; private set; }
 		internal int width { get { return image?.GetWidth() ?? 0; } }
 		internal int height { get { return image?.GetHeight() ?? 0; } }
 		internal Image image = null;
+		ulong placeholderRetryAfterMs = 0;
 		private ImageTexture _texture = null;
 		internal ImageTexture texture
 		{
@@ -219,6 +225,19 @@ internal static class SpriteManager
 			if (newW < 1) newW = 1;
 			if (newH < 1) newH = 1;
 			img.Resize(newW, newH, Image.Interpolation.Bilinear);
+		}
+
+		internal bool CanRetryPlaceholderLoad(ulong nowMs)
+		{
+			return IsPlaceholder && nowMs >= placeholderRetryAfterMs;
+		}
+
+		internal void MarkPlaceholderRetryScheduled(ulong nowMs)
+		{
+			if (!IsPlaceholder)
+				return;
+			placeholderRetryAfterMs = nowMs + PlaceholderRetryIntervalMs;
+			Touch();
 		}
 
 		Dictionary<string, SpriteInfo> sprites = new Dictionary<string, SpriteInfo>();
@@ -302,9 +321,9 @@ internal static class SpriteManager
 			return ti;
 		}
 
-		Image img = LoadImageOrPlaceholder(filename, name);
-		ti = new TextureInfo(name, img);
-		if (GenericUtils.IsImageDebugEnabled("log_success"))
+		Image img = LoadImageOrPlaceholder(filename, name, out bool isPlaceholder);
+		ti = new TextureInfo(name, img, isPlaceholder);
+		if (!isPlaceholder && GenericUtils.IsImageDebugEnabled("log_success"))
 			GenericUtils.ImageTrace("IMAGE.TEXTURE.LOAD_OK", () => "texture loaded",
 				() => $"name={name} filename={GenericUtils.RedactTracePath(filename)} size={img.GetWidth()}x{img.GetHeight()}");
 		return CacheTextureInfo(name, filename, ti);
@@ -331,8 +350,16 @@ internal static class SpriteManager
 
 		lock(dictLock)
 		{
-			if(GetTextureInfoCachedLocked(name, filename) != null)
-				return false;
+			var cached = GetTextureInfoCachedLocked(name, filename);
+			if(cached != null)
+			{
+				if(!cached.IsPlaceholder)
+					return false;
+				ulong nowMs = Time.GetTicksMsec();
+				if(!cached.CanRetryPlaceholderLoad(nowMs))
+					return false;
+				cached.MarkPlaceholderRetryScheduled(nowMs);
+			}
 
 			// 仅用于 UI 显示的图片先把 Android 外部存储 I/O 和图片解码移出 Godot 主线程。
 			// ImageTexture 仍在 TextureInfo.texture 中按旧路径创建，避免后台线程触碰 RenderingServer/GPU 资源。
@@ -397,6 +424,7 @@ internal static class SpriteManager
 		public string Key;
 		public long Epoch;
 		public Image Image;
+		public bool IsPlaceholder;
 	}
 
 	static List<TextureInfoOtherThread> texture_other_threads = new List<TextureInfoOtherThread>();
@@ -406,8 +434,8 @@ internal static class SpriteManager
 		TextureInfo ti = null;
 		if(uEmuera.Utils.FileExists(baseimage.path))
 		{
-			Image img = LoadImageOrPlaceholder(baseimage.path, baseimage.filename);
-			ti = new TextureInfo(baseimage.filename, img);
+			Image img = LoadImageOrPlaceholder(baseimage.path, baseimage.filename, out bool isPlaceholder);
+			ti = new TextureInfo(baseimage.filename, img, isPlaceholder);
 			baseimage.size.Width = img.GetWidth();
 			baseimage.size.Height = img.GetHeight();
 		}
@@ -447,8 +475,9 @@ internal static class SpriteManager
 		}
 	}
 
-	static Image LoadImageOrPlaceholder(string filename, string name)
+	static Image LoadImageOrPlaceholder(string filename, string name, out bool isPlaceholder)
 	{
+		isPlaceholder = false;
 		try
 		{
 			byte[] content = uEmuera.Utils.ReadAllBytes(filename);
@@ -484,13 +513,14 @@ internal static class SpriteManager
 		{
 			LogSpriteWarning(() => $"[SpriteManager] image load exception, using transparent placeholder: {filename}, error={ex.Message}");
 		}
+		isPlaceholder = true;
 		return CreatePlaceholderImage();
 	}
 
 	static TextureInfo CreatePlaceholderTextureInfo(string name, string filename, string reason)
 	{
 		LogSpriteWarning(() => $"[SpriteManager] using transparent placeholder for {filename}: {reason}");
-		return new TextureInfo(name, CreatePlaceholderImage());
+		return new TextureInfo(name, CreatePlaceholderImage(), true);
 	}
 
 	[System.Diagnostics.Conditional("DEBUG")]
@@ -512,20 +542,32 @@ internal static class SpriteManager
 
 	static TextureInfo CacheTextureInfo(string name, string filename, TextureInfo ti)
 	{
+		TextureInfo replacedPlaceholder = null;
 		lock(dictLock)
 		{
 			var fileOnly = System.IO.Path.GetFileName(filename);
 			var existing = GetTextureInfoCachedLocked(name, filename);
 			if(existing != null)
 			{
-				// 同一文件可能先被同步路径按 path 命中，又被异步 UI 路径按资源名完成。
-				// 任一别名已存在时都复用同一个 TextureInfo，避免移动端重复持有大图像素。
-				ti.Dispose();
-				existing.Touch();
-				SetTextureInfoAliasLocked(name, existing);
-				SetTextureInfoAliasLocked(filename, existing);
-				SetTextureInfoAliasLocked(fileOnly, existing);
-				return existing;
+				if(existing.IsPlaceholder && !ti.IsPlaceholder)
+				{
+					// Android 外部存储偶发读失败时会先得到占位纹理。后续真实纹理完成后必须覆盖占位，
+					// 否则角色层会长期拿到 1x1 占位图，在 ColorMatrix 或白底下表现成闪白。
+					RemoveTextureInfoAliasesLocked(existing);
+					if(CanEvict(existing))
+						replacedPlaceholder = existing;
+				}
+				else
+				{
+					// 同一文件可能先被同步路径按 path 命中，又被异步 UI 路径按资源名完成。
+					// 任一别名已存在时都复用同一个 TextureInfo，避免移动端重复持有大图像素；也不要用占位降级真实纹理。
+					ti.Dispose();
+					existing.Touch();
+					SetTextureInfoAliasLocked(name, existing);
+					SetTextureInfoAliasLocked(filename, existing);
+					SetTextureInfoAliasLocked(fileOnly, existing);
+					return existing;
+				}
 			}
 
 			// Index by the requested name, full path, and file name. Era scripts use
@@ -535,6 +577,7 @@ internal static class SpriteManager
 			SetTextureInfoAliasLocked(filename, ti);
 			SetTextureInfoAliasLocked(fileOnly, ti);
 		}
+		replacedPlaceholder?.Dispose();
 		return ti;
 	}
 
@@ -696,9 +739,9 @@ internal static class SpriteManager
 				}
 
 				Image img = result.Image ?? CreatePlaceholderImage();
-				var ti = new TextureInfo(result.Name, img);
+				var ti = new TextureInfo(result.Name, img, result.IsPlaceholder || result.Image == null);
 				var cached = CacheTextureInfo(result.Name, result.Filename, ti);
-				if(GenericUtils.IsImageDebugEnabled("log_success"))
+				if(!cached.IsPlaceholder && GenericUtils.IsImageDebugEnabled("log_success"))
 					GenericUtils.ImageTrace("IMAGE.TEXTURE.ASYNC_READY", () => "async texture decoded",
 						() => $"name={result.Name} filename={GenericUtils.RedactTracePath(result.Filename)} size={cached.width}x{cached.height}");
 				Interlocked.Increment(ref texture_load_version);
@@ -727,6 +770,7 @@ internal static class SpriteManager
 	static void RunAsyncTextureLoad(AsyncTextureLoadRequest request)
 	{
 		Image img = null;
+		bool isPlaceholder = false;
 		try
 		{
 			if(request.Epoch != Volatile.Read(ref async_texture_load_epoch))
@@ -735,10 +779,11 @@ internal static class SpriteManager
 			{
 				GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager.AsyncTexture] file not found: {request.Filename}");
 				img = CreatePlaceholderImage();
+				isPlaceholder = true;
 			}
 			else
 			{
-				img = LoadImageOrPlaceholder(request.Filename, request.Name);
+				img = LoadImageOrPlaceholder(request.Filename, request.Name, out isPlaceholder);
 			}
 			completed_async_texture_loads.Enqueue(new AsyncTextureLoadResult
 			{
@@ -747,6 +792,7 @@ internal static class SpriteManager
 				Key = request.Key,
 				Epoch = request.Epoch,
 				Image = img,
+				IsPlaceholder = isPlaceholder,
 			});
 			img = null;
 		}
@@ -760,6 +806,7 @@ internal static class SpriteManager
 				Key = request.Key,
 				Epoch = request.Epoch,
 				Image = CreatePlaceholderImage(),
+				IsPlaceholder = true,
 			});
 		}
 		finally

@@ -2938,45 +2938,29 @@ namespace MinorShift.Emuera.GameData.Variable
 		public bool SaveGlobal()
 		{
 			string filepath = getSaveDataPathG();
+			bool isAndroid = IsAndroidRuntime();
 			try
 			{
 				Config.CreateSavDir();
-				using (FileStream fs = new FileStream(filepath, FileMode.Create, FileAccess.Write))
+				if (isAndroid)
+					WriteGlobalSaveFile(filepath);
+				else
+					WriteGlobalSaveFileWithDesktopLock(filepath);
+			}
+			catch (SystemException ex)
+			{
+				if (!isAndroid)
 				{
-					if (Config.SystemSaveInBinary)
+					GenericUtils.Error(EmueraLogCategory.Save, () =>
+						"[SAVEGLOBAL] Failed to save global data to \"" + filepath + "\": "
+						+ ex.GetType().Name + ": " + ex.Message + Environment.NewLine + ex.StackTrace);
+					if (IsSaveFileLockException(ex))
 					{
-
-						using (EraBinaryDataWriter bWriter = new EraBinaryDataWriter(fs))
-						{
-							bWriter.WriteHeader();
-							bWriter.WriteFileType(EraSaveFileType.Global);
-							bWriter.WriteInt64(gamebase.ScriptUniqueCode);
-							bWriter.WriteInt64(gamebase.ScriptVersion);
-							bWriter.WriteString("");//saveMes
-							varData.SaveGlobalToStreamBinary(bWriter);
-							bWriter.WriteEOF();
-							SaveRuntimeDataStore(bWriter, true);
-							bWriter.WriteEOF();
-							bWriter.Close();
-						}
-					}
-					else
-					{
-						using (EraDataWriter writer = new EraDataWriter(fs))
-						{
-							writer.Write(gamebase.ScriptUniqueCode);
-							writer.Write(gamebase.ScriptVersion);
-							varData.SaveGlobalToStream(writer);
-							writer.EmuStart();
-							varData.SaveGlobalToStream1808(writer);
-							SaveRuntimeDataStoreText(writer, true);
-							writer.Close();
-						}
+						GenericUtils.Warn(EmueraLogCategory.Save, () =>
+							"[SAVEGLOBAL] Skipped global save because global.sav is locked by another process: \"" + filepath + "\"");
+						return false;
 					}
 				}
-			}
-			catch (SystemException)
-			{
 				throw new CodeEE("グローバルデータの保存中にエラーが発生しました");
 				//console.PrintError(
 				//console.NewLine();
@@ -2992,6 +2976,142 @@ namespace MinorShift.Emuera.GameData.Variable
 			//		fs.Close();
 			//}
 			return true;
+		}
+
+		private void WriteGlobalSaveFile(string filepath)
+		{
+			using (FileStream fs = new FileStream(filepath, FileMode.Create, FileAccess.Write))
+				WriteGlobalSaveStream(fs);
+		}
+
+		private void WriteGlobalSaveFileWithDesktopLock(string filepath)
+		{
+			string lockFilePath = filepath + ".lock";
+			using (FileStream lockFile = OpenDesktopSaveLock(lockFilePath))
+				WriteGlobalSaveFileAtomically(filepath);
+		}
+
+		private static FileStream OpenDesktopSaveLock(string lockFilePath)
+		{
+			const int timeoutMs = 15000;
+			int delayMs = 40;
+			DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+			while (true)
+			{
+				try
+				{
+					return new FileStream(lockFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+				}
+				catch (IOException) when (DateTime.UtcNow < deadline)
+				{
+					System.Threading.Thread.Sleep(delayMs);
+					if (delayMs < 250)
+						delayMs *= 2;
+				}
+			}
+		}
+
+		private void WriteGlobalSaveFileAtomically(string filepath)
+		{
+			string tempFilePath = filepath + ".tmp." + Guid.NewGuid().ToString("N");
+			bool committed = false;
+			try
+			{
+				using (FileStream fs = new FileStream(tempFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+					WriteGlobalSaveStream(fs);
+				CommitSaveFileWithRetry(tempFilePath, filepath);
+				committed = true;
+			}
+			finally
+			{
+				if (!committed)
+					TryDeleteTempSaveFile(tempFilePath);
+			}
+		}
+
+		private void WriteGlobalSaveStream(FileStream fs)
+		{
+			if (Config.SystemSaveInBinary)
+			{
+
+				using (EraBinaryDataWriter bWriter = new EraBinaryDataWriter(fs))
+				{
+					bWriter.WriteHeader();
+					bWriter.WriteFileType(EraSaveFileType.Global);
+					bWriter.WriteInt64(gamebase.ScriptUniqueCode);
+					bWriter.WriteInt64(gamebase.ScriptVersion);
+					bWriter.WriteString("");//saveMes
+					varData.SaveGlobalToStreamBinary(bWriter);
+					bWriter.WriteEOF();
+					SaveRuntimeDataStore(bWriter, true);
+					bWriter.WriteEOF();
+					bWriter.Close();
+				}
+			}
+			else
+			{
+				using (EraDataWriter writer = new EraDataWriter(fs))
+				{
+					writer.Write(gamebase.ScriptUniqueCode);
+					writer.Write(gamebase.ScriptVersion);
+					varData.SaveGlobalToStream(writer);
+					writer.EmuStart();
+					varData.SaveGlobalToStream1808(writer);
+					SaveRuntimeDataStoreText(writer, true);
+					writer.Close();
+				}
+			}
+		}
+
+		private static void CommitSaveFileWithRetry(string tempFilePath, string filepath)
+		{
+			int delayMs = 40;
+			for (int attempt = 0; ; attempt++)
+			{
+				try
+				{
+					CommitSaveFile(tempFilePath, filepath);
+					return;
+				}
+				catch (IOException) when (attempt < 5)
+				{
+					System.Threading.Thread.Sleep(delayMs);
+					delayMs *= 2;
+				}
+			}
+		}
+
+		private static void CommitSaveFile(string tempFilePath, string filepath)
+		{
+			if (File.Exists(filepath))
+				File.Replace(tempFilePath, filepath, null);
+			else
+				File.Move(tempFilePath, filepath);
+		}
+
+		private static void TryDeleteTempSaveFile(string tempFilePath)
+		{
+			try
+			{
+				if (File.Exists(tempFilePath))
+					File.Delete(tempFilePath);
+			}
+			catch (SystemException)
+			{
+			}
+		}
+
+		private static bool IsSaveFileLockException(SystemException ex)
+		{
+			if (!(ex is IOException))
+				return false;
+			int errorCode = ex.HResult & 0xFFFF;
+			return errorCode == 32 || errorCode == 33;
+		}
+
+		private static bool IsAndroidRuntime()
+		{
+			return string.Equals(global::Godot.OS.GetName(), "Android", StringComparison.OrdinalIgnoreCase);
 		}
 
 		public bool LoadGlobal()

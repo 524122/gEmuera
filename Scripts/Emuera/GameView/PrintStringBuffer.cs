@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 //using System.Drawing;
@@ -37,11 +37,11 @@ namespace MinorShift.Emuera.GameView
 			{
 				int length = 0;
 
-                var count = m_stringList.Count;
-                AConsoleDisplayPart css = null;
-                for(var i=0; i<count; ++i)
+				var count = m_stringList.Count;
+				AConsoleDisplayPart css = null;
+				for(var i=0; i<count; ++i)
 				{
-                    css = m_stringList[i];
+					css = m_stringList[i];
 					if (css is ConsoleStyledString)
 						length += css.Str.Length;
 					else
@@ -189,7 +189,6 @@ namespace MinorShift.Emuera.GameView
 			ConsoleDisplayLine line = new ConsoleDisplayLine(dispLineButtonArray, true, temporary);
 			line.TextBackgroundColor = parent.TextBackgroundColor;
 			line.BitmapCacheEnabled = parent.BitmapCacheEnabledForNextLine;
-			parent.BitmapCacheEnabledForNextLine = false;
 			this.clearBuffer();
 			return line;
 		}
@@ -206,7 +205,6 @@ namespace MinorShift.Emuera.GameView
 					line.TextBackgroundColor = parent.TextBackgroundColor;
 					line.BitmapCacheEnabled = parent.BitmapCacheEnabledForNextLine;
 				}
-				parent.BitmapCacheEnabledForNextLine = false;
 			}
 			this.clearBuffer();
 			return ret;
@@ -534,11 +532,11 @@ namespace MinorShift.Emuera.GameView
 			int strLength = 0;
 			int index = 0;
 
-            int count = button.StrArray.Length;
-            AConsoleDisplayPart css = null;
-            for(var i=0; i<count; ++i)
+			int count = button.StrArray.Length;
+			AConsoleDisplayPart css = null;
+			for(var i=0; i<count; ++i)
 			{
-                css = button.StrArray[i];
+				css = button.StrArray[i];
 				if (pointX + css.Width > windowWidth)
 				{
 					if (index == 0 && !css.CanDivide)
@@ -576,7 +574,7 @@ namespace MinorShift.Emuera.GameView
 			Font font = css.Font;
 			if (widthLimit <= 0)
 				return 0;
-            int highLength = str.Length;//widthLimitを超える最低の文字index(文字数-1)。
+			int highLength = str.Length;//widthLimitを超える最低の文字index(文字数-1)。
 			int lowLength = 0;//超えない最大の文字index。
 
 			int point;
