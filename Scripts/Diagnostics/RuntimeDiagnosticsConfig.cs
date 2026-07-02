@@ -32,6 +32,7 @@ namespace gEmuera.Diagnostics
             public bool Input { get; set; } = false;
             public bool Image { get; set; } = false;
             public bool UiLayout { get; set; } = false;
+            public bool DynamicMap { get; set; } = false;
             public bool Resource { get; set; } = false;
             public bool LoadSave { get; set; } = false;
             public bool AndroidStorage { get; set; } = true;
@@ -184,6 +185,16 @@ namespace gEmuera.Diagnostics
         public bool UiLayoutIncludeText { get; set; } = false;
         public int UiLayoutMaxTextChars { get; set; } = 32;
         public int UiLayoutMaxRecordsPerFrame { get; set; } = 32;
+
+        // ---------- debug.dynamic_map ----------
+        public bool DynamicMapDebugEnabled { get; set; } = false;
+        public bool DynamicMapLogLineSnapshot { get; set; } = true;
+        public bool DynamicMapLogScroll { get; set; } = true;
+        public bool DynamicMapLogButtons { get; set; } = true;
+        public bool DynamicMapOnlyBitmapContext { get; set; } = true;
+        public int DynamicMapMaxLines { get; set; } = 12;
+        public int DynamicMapMaxTextChars { get; set; } = 48;
+        public int DynamicMapContextWindowMs { get; set; } = 5000;
 
         // ---------- debug.lifecycle ----------
         public bool LifecycleEnabled { get; set; } = false;
@@ -371,6 +382,10 @@ namespace gEmuera.Diagnostics
             UiLayoutTargetRect = false;
             UiLayoutActualRect = false;
             UiLayoutText = false;
+            DynamicMapDebugEnabled = false;
+            DynamicMapLogLineSnapshot = false;
+            DynamicMapLogScroll = false;
+            DynamicMapLogButtons = false;
             LifecycleEnabled = false;
             LifecycleAndroidPauseResume = false;
             RuntimePanelEnabled = false;
@@ -396,6 +411,7 @@ namespace gEmuera.Diagnostics
             bool input,
             bool image,
             bool uiLayout,
+            bool dynamicMap,
             bool resource,
             bool loadSave,
             bool androidStorage,
@@ -433,6 +449,7 @@ namespace gEmuera.Diagnostics
             if (input) EnableQuickInput();
             if (image) EnableQuickImage();
             if (uiLayout) EnableQuickUiLayout();
+            if (dynamicMap) EnableQuickDynamicMap();
             if (resource) EnableQuickResource();
             if (loadSave) EnableQuickLoadSave();
             if (androidStorage)
@@ -624,6 +641,7 @@ namespace gEmuera.Diagnostics
             InputDebugEnabled = false;
             ImageDebugEnabled = false;
             UiLayoutEnabled = false;
+            DynamicMapDebugEnabled = false;
             ResourceDebugEnabled = false;
             LoadDebugEnabled = false;
             SaveDebugEnabled = false;
@@ -653,6 +671,7 @@ namespace gEmuera.Diagnostics
             if (modules.Input) EnableQuickInput();
             if (modules.Image) EnableQuickImage();
             if (modules.UiLayout) EnableQuickUiLayout();
+            if (modules.DynamicMap) EnableQuickDynamicMap();
             if (modules.Resource) EnableQuickResource();
             if (modules.LoadSave) EnableQuickLoadSave();
             if (modules.AndroidStorage) EnableQuickAndroidStorage();
@@ -716,6 +735,21 @@ namespace gEmuera.Diagnostics
             UiLayoutHtmlImg = true;
             UiLayoutCbg = true;
             UiLayoutIncludeText = false;
+        }
+
+        void EnableQuickDynamicMap()
+        {
+            EnsureQuickDebugModel();
+            Categories.UI = true;
+            Categories.Script = true;
+            DynamicMapDebugEnabled = true;
+            DynamicMapLogLineSnapshot = true;
+            DynamicMapLogScroll = true;
+            DynamicMapLogButtons = true;
+            DynamicMapOnlyBitmapContext = true;
+            DynamicMapMaxLines = Math.Max(4, DynamicMapMaxLines);
+            DynamicMapMaxTextChars = Math.Max(24, DynamicMapMaxTextChars);
+            DynamicMapContextWindowMs = Math.Max(1000, DynamicMapContextWindowMs);
         }
 
         void EnableQuickResource()

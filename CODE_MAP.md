@@ -1,5 +1,11 @@
 # CODE_MAP
 
+## 2026-07-02 动态地图刷新合并补充
+
+- `EmueraConsole.RefreshStrings` / `deleteLine` / `BitmapCacheEnabledForNextLine`：动态地图或状态面板进入 `CLEARLINE`、`BITMAP_CACHE_ENABLE 1...0` 区域重画时，Running 中的普通 `RefreshStrings(false)` 会先合并，不向 Godot UI 提交半成品；进入 `INPUT/TINPUT/WAIT` 或显式 `RefreshStrings(true)` 时一次提交完整显示列表，避免 Android 看到“旧菜单 -> 半张地图 -> 地图主体”的循环中间帧。
+- `PrintStringBuffer` / `EmueraConsole.PrintHtml`：`BITMAP_CACHE_ENABLE` 改为区域上下文，开启后直到脚本关闭前产生的普通文本行与 `HTML_PRINT` 行都会带 `BitmapCacheEnabled` 标记；这与 TW 动态地图脚本的成对使用方式一致，也让 UI 侧动态地图诊断和复用判断有连续块依据。
+- `EmueraContent.QueueDisplayFollowUp`：当显示差异明确传入 `scrollToBottom=false` 时，会取消尚未完成的滚到底任务并记录当前视口位置，再执行布局边界更新；避免动态地图刷新被上一轮普通输出残留的 pending scroll 拉到底部。
+
 更新时间：2026-06-07
 
 用途：这是给 AI 和维护者快速定位代码用的地图。优先读本文件，再按路径进入源码。地图只记录结构、职责、主要接口和关键函数，不复制源码实现。
@@ -47,6 +53,16 @@ project.godot
        -> EmueraConsole / GenericUtils / EmueraContent
           输出文本、按钮、图片、音频和输入交互
 ```
+
+## 2026-07-02 动态地图模拟器侧适配
+
+- `config.toml` / `RuntimeDiagnosticsConfig`：新增 `[logging].dynamic_map` 简短开关和 `[debug.dynamic_map]` 专项参数，默认关闭；开启后记录动态地图刷新证据，不影响默认性能。
+- `GenericUtils`：新增 `DYNAMIC_MAP.*` 结构化日志入口，按 `BitmapCacheEnabled` 与短时间上下文窗口筛选动态地图刷新，输出尾部行、按钮 generation、BitmapCache 标记和截断文本。
+- `uEmuera/Window.Update`：在核心显示列表提交到 Godot UI 前判断本次差异是否为纯追加；删除尾部、更新已有行或重绘当前屏幕时传入 `scrollToBottom=false`，避免动态地图/状态面板刷新被当作普通文本追加而自动滚到底。显示差异不再只依赖 `ConsoleDisplayLine` 对象引用相等，而是按 `LineNo` 与视觉内容结构比较；视觉未变的纯显示行会复用既有节点，视觉未变但包含命令按钮的行会进入 data-only 刷新，只更新按钮输入数据与 Canvas 命中区。
+- `uEmuera/Window.Update`：动态地图尾部出现连续多行 `BitmapCacheEnabled` 地图块时，会进入 UI 侧动态地图窗口，只向 Godot 显示层提交最后一段地图块及其后续选项行；这不会修改 Emuera 核心 `displayLineList`，用于避免命令菜单、地图追加和地图主体在 Android 上循环切换。
+- `GenericUtils.ApplyTextChanges` / `EmueraContent.ApplyTextChanges`：显示差异新增 `scrollToBottom` 与 `dataOnlyLines` 契约；普通追加仍滚到底，重绘/替换批次只刷新布局和缩放边界并保留当前视口；data-only 行不重建 Control/Canvas 节点，用于先把动态地图变化与选项行刷新拆开。
+- `EmueraContent.AddLine` / `EmueraContent.Canvas.AddCanvasLine`：按行替换已有内容时会先注销旧行资源；Canvas 行更新会释放旧 overlay 与纹理 pin 后再注册新行，避免从“整段删除重建”改为“单行更新”后留下旧节点。
+- `EmueraContent.SetLastButtonGeneration` / `QuickButtons.UpdateButtonGeneration`：快捷按钮先收集完整按钮组，再按按钮顺序与内容生成签名；内容签名未变时复用现有按钮节点，只更新快捷按钮输入 generation，减少 Android 动态地图刷新时的底部按钮闪烁。
 
 ## 2026-06-07 移动端性能补充
 

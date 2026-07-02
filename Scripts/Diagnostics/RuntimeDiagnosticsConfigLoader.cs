@@ -113,6 +113,7 @@ namespace gEmuera.Diagnostics
             if (TryGetBool(sections, "quick_debug.modules", "input", out b)) cfg.QuickModules.Input = b;
             if (TryGetBool(sections, "quick_debug.modules", "image", out b)) cfg.QuickModules.Image = b;
             if (TryGetBool(sections, "quick_debug.modules", "ui_layout", out b)) cfg.QuickModules.UiLayout = b;
+            if (TryGetBool(sections, "quick_debug.modules", "dynamic_map", out b)) cfg.QuickModules.DynamicMap = b;
             if (TryGetBool(sections, "quick_debug.modules", "resource", out b)) cfg.QuickModules.Resource = b;
             if (TryGetBool(sections, "quick_debug.modules", "load_save", out b)) cfg.QuickModules.LoadSave = b;
             if (TryGetBool(sections, "quick_debug.modules", "android_storage", out b)) cfg.QuickModules.AndroidStorage = b;
@@ -251,6 +252,16 @@ namespace gEmuera.Diagnostics
             if (TryGetInt(sections, "debug.ui_layout", "max_text_chars", out i)) cfg.UiLayoutMaxTextChars = i;
             if (TryGetInt(sections, "debug.ui_layout", "max_records_per_frame", out i)) cfg.UiLayoutMaxRecordsPerFrame = i;
 
+            // debug.dynamic_map
+            if (TryGetBool(sections, "debug.dynamic_map", "enabled", out b)) cfg.DynamicMapDebugEnabled = b;
+            if (TryGetBool(sections, "debug.dynamic_map", "line_snapshot", out b)) cfg.DynamicMapLogLineSnapshot = b;
+            if (TryGetBool(sections, "debug.dynamic_map", "scroll", out b)) cfg.DynamicMapLogScroll = b;
+            if (TryGetBool(sections, "debug.dynamic_map", "buttons", out b)) cfg.DynamicMapLogButtons = b;
+            if (TryGetBool(sections, "debug.dynamic_map", "only_bitmap_context", out b)) cfg.DynamicMapOnlyBitmapContext = b;
+            if (TryGetInt(sections, "debug.dynamic_map", "max_lines", out i)) cfg.DynamicMapMaxLines = i;
+            if (TryGetInt(sections, "debug.dynamic_map", "max_text_chars", out i)) cfg.DynamicMapMaxTextChars = i;
+            if (TryGetInt(sections, "debug.dynamic_map", "context_window_ms", out i)) cfg.DynamicMapContextWindowMs = i;
+
             // debug.lifecycle
             if (TryGetBool(sections, "debug.lifecycle", "enabled", out b)) cfg.LifecycleEnabled = b;
             if (TryGetBool(sections, "debug.lifecycle", "android_pause_resume", out b)) cfg.LifecycleAndroidPauseResume = b;
@@ -375,6 +386,7 @@ namespace gEmuera.Diagnostics
                 GetMinimalBool(sections, "input", false),
                 GetMinimalBool(sections, "image", false),
                 GetMinimalBool(sections, "ui_layout", false),
+                GetMinimalBool(sections, "dynamic_map", false),
                 GetMinimalBool(sections, "resource", false),
                 GetMinimalBool(sections, "load_save", false),
                 GetMinimalBool(sections, "android_storage", false),

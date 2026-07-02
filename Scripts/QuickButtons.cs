@@ -299,6 +299,16 @@ public partial class QuickButtons : CanvasLayer
 		RequestPanelSizeUpdate(ShouldStickToBottom());
 	}
 
+	public void UpdateButtonGeneration(long generation)
+	{
+		for (int i = 0; i < buttons.Count; i++)
+		{
+			var btn = buttons[i];
+			if (IsControlAlive(btn))
+				btn.SetMeta("input_generation", generation);
+		}
+	}
+
 	public void BeginBatch()
 	{
 		layoutBatchDepth++;
