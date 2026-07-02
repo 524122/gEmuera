@@ -122,7 +122,8 @@ namespace uEmuera.Drawing
 
 		internal bool RequestTextureInfoAsync()
 		{
-			if (TryResolveCachedTextureInfo() != null)
+			var cached = TryResolveCachedTextureInfo();
+			if (cached != null && !cached.IsPlaceholder)
 				return false;
 			return SpriteManager.RequestTextureInfoAsync(path, path)
 				|| (!string.IsNullOrEmpty(filename) && SpriteManager.RequestTextureInfoAsync(filename, path));
