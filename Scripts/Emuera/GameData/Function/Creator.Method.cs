@@ -5063,6 +5063,89 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 		}
 
+		private sealed class SnakeFallenStateMethod : FunctionMethod
+		{
+			static readonly string[] LoverTalents = { "恋人", "戀人" };
+			static readonly string[] AffectionTalents = { "恋慕", "戀慕", "愛欲", "炮友", "砲友" };
+			static readonly string[] FondnessTalents = { "思慕" };
+			static readonly string[] EstablishedFactFlags = { "既成事実", "既成事实", "既成事實" };
+
+			public SnakeFallenStateMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (!Program.IsSnakeProfile)
+					return name + "関数はSnake互換モード専用です";
+				if (arguments.Length > 1)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+				if (arguments.Length == 1 && (arguments[0] == null || arguments[0].GetEraType() != EraType.Integer))
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
+				return null;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				long target = (arguments.Length == 1 && arguments[0] != null) ? arguments[0].GetIntValue(exm) : exm.VEvaluator.TARGET;
+				if (target < 0 || target >= exm.VEvaluator.CHARANUM)
+					return 0;
+
+				CharacterData chara = exm.VEvaluator.VariableData.CharacterList[(int)target];
+				SparseArray<Int64> talent = chara.DataIntegerArray[(int)(VariableCode.TALENT & VariableCode.__LOWERCASE__)];
+				SparseArray<Int64> cflag = chara.DataIntegerArray[(int)(VariableCode.CFLAG & VariableCode.__LOWERCASE__)];
+				ConstantData constant = exm.VEvaluator.Constant;
+
+				// Snake/eraTW 未修正数据里，部分口上会直接调用禁用块中的私有函数名。
+				// 已由 ERB 定义的同名 #FUNCTION 会优先执行，这里只补共通 TALENT/CFLAG 能推导出的兜底等级。
+				if (HasAnyKeywordValue(constant, talent, VariableCode.TALENT, LoverTalents))
+					return 4;
+				if (HasAnyKeywordValue(constant, talent, VariableCode.TALENT, AffectionTalents))
+					return 3;
+				if (HasEstablishedFact(constant, cflag) || HasAnyKeywordValue(constant, talent, VariableCode.TALENT, FondnessTalents))
+					return 1;
+				return 0;
+			}
+
+			static bool HasAnyKeywordValue(ConstantData constant, SparseArray<Int64> values, VariableCode code, string[] keywords)
+			{
+				for (int i = 0; i < keywords.Length; i++)
+				{
+					if (constant.TryKeywordToInteger(out int index, code, keywords[i], 1) && GetArrayValue(values, index) != 0)
+						return true;
+				}
+				return false;
+			}
+
+			static bool HasEstablishedFact(ConstantData constant, SparseArray<Int64> cflag)
+			{
+				for (int i = 0; i < EstablishedFactFlags.Length; i++)
+				{
+					if (!constant.TryKeywordToInteger(out int index, VariableCode.CFLAG, EstablishedFactFlags[i], 1))
+						continue;
+					long value = GetArrayValue(cflag, index);
+					if (GetBit(value, 0) || GetBit(value, 1))
+						return true;
+				}
+				return false;
+			}
+
+			static long GetArrayValue(SparseArray<Int64> values, int index)
+			{
+				if (values == null || index < 0 || index >= values.Length)
+					return 0;
+				return values[index];
+			}
+
+			static bool GetBit(long value, int bit)
+			{
+				return ((value >> bit) & 1L) != 0;
+			}
+		}
+
 		private sealed class GetPlatformMethod : FunctionMethod
 		{
 			public GetPlatformMethod()

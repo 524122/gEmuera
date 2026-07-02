@@ -130,6 +130,7 @@ public partial class EmueraContent : Control
 	bool renderingCbgTextures = false;
 	bool renderingHtmlIslandTextures = false;
 	bool pendingCbgAsyncTextureRefresh = false;
+	bool cbgTextureUnavailableDuringRender = false;
 	bool pendingHtmlIslandAsyncTextureRefresh = false;
 
 	// Texture lookup failures are memoized to avoid repeated recursive file scans
@@ -147,6 +148,13 @@ public partial class EmueraContent : Control
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> renderedCbgLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> lastCbgSourceLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	ConsoleDisplayLine[] lastHtmlIslandLines = null;
+	struct GraphicsImageTextureCacheEntry
+	{
+		public long Revision;
+		public Texture2D Texture;
+	}
+	Dictionary<int, GraphicsImageTextureCacheEntry> graphicsImageTextureCache = new Dictionary<int, GraphicsImageTextureCacheEntry>();
+	const ulong GraphicsImageDisplayStableDelayMs = 24;
 
 	struct CbgRenderEntry
 	{
@@ -172,7 +180,9 @@ public partial class EmueraContent : Control
 	// old Controls are trimmed in batches instead of letting the scene tree grow
 	// without bound.
 	public const int DefaultMaxVisibleLines = 360;
+	const int DefaultSnakeDesktopMaxVisibleLines = 1500;
 	const int DefaultMobileMaxVisibleLines = 240;
+	const int DefaultSnakeMobileMaxVisibleLines = 600;
 	public const int MinMaxVisibleLines = 120;
 	public const int MaxMaxVisibleLines = 3000;
 	static int MaxVisibleLines => ConfiguredMaxVisibleLines;
@@ -338,8 +348,8 @@ public partial class EmueraContent : Control
 				// Android 上 Canvas 后端已经避免了“每行一个节点”的主要成本，但保留行越多，
 				// lineObjects、纹理 pin、按钮快照和 overlay 索引仍会增加内存压力。默认值按手机端更保守，
 				// 用户显式写入 user://settings.cfg 后仍完全尊重用户设置。
-				configuredMaxVisibleLines = ClampMaxVisibleLines(
-					(int)cfg.GetValue(SettingsSection, MaxVisibleLinesKey, GetDefaultMaxVisibleLines()));
+				int rawValue = (int)cfg.GetValue(SettingsSection, MaxVisibleLinesKey, GetDefaultMaxVisibleLines());
+				configuredMaxVisibleLines = ClampMaxVisibleLines(MigrateDefaultMaxVisibleLines(rawValue));
 			}
 			return configuredMaxVisibleLines;
 		}
@@ -361,7 +371,31 @@ public partial class EmueraContent : Control
 
 	static int GetDefaultMaxVisibleLines()
 	{
-		return OS.HasFeature("mobile") ? DefaultMobileMaxVisibleLines : DefaultMaxVisibleLines;
+		if (OS.HasFeature("mobile"))
+			return IsSnakeDisplayProfile() ? DefaultSnakeMobileMaxVisibleLines : DefaultMobileMaxVisibleLines;
+		if (IsSnakeDisplayProfile())
+			return DefaultSnakeDesktopMaxVisibleLines;
+		return DefaultMaxVisibleLines;
+	}
+
+	static int MigrateDefaultMaxVisibleLines(int value)
+	{
+		// TW/Snake 就寝后会一次输出大量角色信息。旧默认会直接裁掉上方内容，
+		// 因此把旧默认视为未显式调过；Android 只做保守提升，避免手机端内存压力过大。
+		if (!IsSnakeDisplayProfile())
+			return value;
+		if (OS.HasFeature("mobile") && value == DefaultMobileMaxVisibleLines)
+			return DefaultSnakeMobileMaxVisibleLines;
+		if (!OS.HasFeature("mobile") && value == DefaultMaxVisibleLines)
+			return DefaultSnakeDesktopMaxVisibleLines;
+		return value;
+	}
+
+	static bool IsSnakeDisplayProfile()
+	{
+		if (Program.IsSnakeProfile)
+			return true;
+		return string.Equals(FirstWindow.SelectedCoreProfileName, FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase);
 	}
 
 	// emuera still exposes the console viewport through Config.WindowY. Keeping
@@ -3279,8 +3313,20 @@ public partial class EmueraContent : Control
 					TrackAsyncTextureRequestForCurrentRender();
 				return null;
 			}
-			if (ti == null || ti.texture == null)
+			if (ti.IsPlaceholder)
+			{
+				if (bt.RequestTextureInfoAsync())
+					TrackAsyncTextureRequestForCurrentRender();
+				else if (renderingCbgTextures)
+					cbgTextureUnavailableDuringRender = true;
 				return null;
+			}
+			if (ti.texture == null)
+			{
+				if (renderingCbgTextures)
+					cbgTextureUnavailableDuringRender = true;
+				return null;
+			}
 			TrackTexturePin(ti);
 			if (sprite is ASpriteSingle single)
 			{
@@ -3302,22 +3348,22 @@ public partial class EmueraContent : Control
 			if (singleSprite.BaseImage is GraphicsImage gImg && gImg.godotImage != null)
 			{
 				var srcRect = singleSprite.SrcRectangle;
+				var texture = GetGraphicsImageDisplayTexture(gImg);
+				if (texture == null)
+					return null;
 				if (srcRect.X == 0 && srcRect.Y == 0 &&
-					srcRect.Width == gImg.godotImage.GetWidth() &&
-					srcRect.Height == gImg.godotImage.GetHeight())
+					srcRect.Width == texture.GetWidth() &&
+					srcRect.Height == texture.GetHeight())
 				{
-					return Godot.ImageTexture.CreateFromImage(gImg.godotImage);
+					return texture;
 				}
-				var region = gImg.godotImage.GetRegion(new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height));
-				if (region != null)
-					return Godot.ImageTexture.CreateFromImage(region);
-				return Godot.ImageTexture.CreateFromImage(gImg.godotImage);
+				return CreateAtlasTextureForDisplay(sprite, texture, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
 			}
 			if (singleSprite.BaseImage?.Bitmap != null)
 			{
 				var bmp = singleSprite.BaseImage.Bitmap;
 				var ti = GetDisplayTextureInfoForBitmap(bmp);
-				if (ti != null)
+				if (ti != null && !ti.IsPlaceholder && ti.texture != null)
 				{
 					TrackTexturePin(ti);
 					return ti.GetAtlasTexture(
@@ -3338,22 +3384,22 @@ public partial class EmueraContent : Control
 			{
 				if (baseImage is GraphicsImage gImg && gImg.godotImage != null)
 				{
+					var texture = GetGraphicsImageDisplayTexture(gImg);
+					if (texture == null)
+						return null;
 					if (srcRect.X == 0 && srcRect.Y == 0 &&
-						srcRect.Width == gImg.godotImage.GetWidth() &&
-						srcRect.Height == gImg.godotImage.GetHeight())
+						srcRect.Width == texture.GetWidth() &&
+						srcRect.Height == texture.GetHeight())
 					{
-						return Godot.ImageTexture.CreateFromImage(gImg.godotImage);
+						return texture;
 					}
-					var region = gImg.godotImage.GetRegion(new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height));
-					if (region != null)
-						return Godot.ImageTexture.CreateFromImage(region);
-					return Godot.ImageTexture.CreateFromImage(gImg.godotImage);
+					return CreateAtlasTextureForDisplay(sprite, texture, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
 				}
 				if (baseImage?.Bitmap != null)
 				{
 					var bmp = baseImage.Bitmap;
 					var ti = GetDisplayTextureInfoForBitmap(bmp);
-					if (ti != null)
+					if (ti != null && !ti.IsPlaceholder && ti.texture != null)
 					{
 						TrackTexturePin(ti);
 						return ti.GetAtlasTexture(
@@ -3367,6 +3413,55 @@ public partial class EmueraContent : Control
 		return null;
 	}
 
+	Texture2D GetGraphicsImageDisplayTexture(GraphicsImage image)
+	{
+		if (image == null)
+			return null;
+		long revision = image.DisplayRevision;
+		if (graphicsImageTextureCache.TryGetValue(image.ID, out var cached)
+			&& cached.Revision == revision
+			&& cached.Texture != null)
+		{
+			return cached.Texture;
+		}
+
+		// TW/Snake 部分角色会把立绘先清空到 GraphicsImage，再连续绘制差分层。
+		// UI 若在中间态上传贴图，就会看到角色白一下再恢复；因此动态图像需要稳定一个短窗口再提交。
+		if (!image.TryCreateDisplaySnapshot(GraphicsImageDisplayStableDelayMs, out var snapshot, out revision, out bool retrySoon))
+		{
+			if (retrySoon)
+				TrackAsyncTextureRequestForCurrentRender();
+			if (renderingCbgTextures)
+				cbgTextureUnavailableDuringRender = true;
+			return cached.Texture;
+		}
+
+		try
+		{
+			var texture = Godot.ImageTexture.CreateFromImage(snapshot);
+			graphicsImageTextureCache[image.ID] = new GraphicsImageTextureCacheEntry
+			{
+				Revision = revision,
+				Texture = texture,
+			};
+			return texture;
+		}
+		finally
+		{
+			snapshot?.Dispose();
+		}
+	}
+
+	static AtlasTexture CreateAtlasTextureForDisplay(ASprite sprite, Texture2D texture, int x, int y, int width, int height)
+	{
+		if (texture == null)
+			return null;
+		var atlas = new AtlasTexture();
+		atlas.Atlas = texture;
+		atlas.Region = new Rect2(x, y, width, height);
+		return atlas;
+	}
+
 	SpriteManager.TextureInfo GetDisplayTextureInfoForBitmap(uEmuera.Drawing.Bitmap bmp)
 	{
 		if (bmp == null)
@@ -3375,7 +3470,24 @@ public partial class EmueraContent : Control
 		{
 			var ti = bt.CachedTextureInfo;
 			if (ti == null && bt.RequestTextureInfoAsync())
+			{
 				TrackAsyncTextureRequestForCurrentRender();
+				return null;
+			}
+			if (ti != null && ti.IsPlaceholder)
+			{
+				if (bt.RequestTextureInfoAsync())
+					TrackAsyncTextureRequestForCurrentRender();
+				else if (renderingCbgTextures)
+					cbgTextureUnavailableDuringRender = true;
+				return null;
+			}
+			if (ti != null && ti.texture == null)
+			{
+				if (renderingCbgTextures)
+					cbgTextureUnavailableDuringRender = true;
+				return null;
+			}
 			return ti;
 		}
 
@@ -3384,6 +3496,18 @@ public partial class EmueraContent : Control
 		var sync = SpriteManager.GetTextureInfo(bmp.path, bmp.path);
 		if (sync == null && !string.IsNullOrEmpty(bmp.filename))
 			sync = SpriteManager.GetTextureInfo(bmp.filename, bmp.path);
+		if (sync != null && sync.IsPlaceholder)
+		{
+			if (renderingCbgTextures)
+				cbgTextureUnavailableDuringRender = true;
+			return null;
+		}
+		if (sync != null && sync.texture == null)
+		{
+			if (renderingCbgTextures)
+				cbgTextureUnavailableDuringRender = true;
+			return null;
+		}
 		return sync;
 	}
 
@@ -3391,6 +3515,11 @@ public partial class EmueraContent : Control
 	{
 		if (SpriteManager.TryGetTextureInfoCached(name, filename, out ti))
 		{
+			if (ti.IsPlaceholder || ti.texture == null)
+			{
+				ti = null;
+				return false;
+			}
 			TrackTexturePin(ti);
 			return true;
 		}
@@ -3673,7 +3802,9 @@ public partial class EmueraContent : Control
 		var entries = new List<CbgRenderEntry>();
 		activeTexturePinCollector = newCbgTexturePins;
 		bool previousCbgRender = renderingCbgTextures;
+		bool previousCbgUnavailable = cbgTextureUnavailableDuringRender;
 		renderingCbgTextures = true;
+		cbgTextureUnavailableDuringRender = false;
 		try
 		{
 			foreach (var cbg in list)
@@ -3717,6 +3848,7 @@ public partial class EmueraContent : Control
 		}
 		catch
 		{
+			cbgTextureUnavailableDuringRender = previousCbgUnavailable;
 			ReleaseTexturePinList(newCbgTexturePins);
 			throw;
 		}
@@ -3726,7 +3858,9 @@ public partial class EmueraContent : Control
 			activeTexturePinCollector = previousTexturePinCollector;
 		}
 
-		if (pendingCbgAsyncTextureRefresh)
+		bool preservePreviousCbgForUnavailableTexture = cbgTextureUnavailableDuringRender;
+		cbgTextureUnavailableDuringRender = previousCbgUnavailable;
+		if (pendingCbgAsyncTextureRefresh || preservePreviousCbgForUnavailableTexture)
 		{
 			// 刷新背景层时如果新纹理还没就绪，保留旧 CBG 节点和旧 pin。
 			// 初次显示时也不提交半成品图层，等异步完成后再一次性提交，避免标题/差分图白块闪烁。
