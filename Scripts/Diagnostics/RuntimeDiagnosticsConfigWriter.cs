@@ -47,6 +47,7 @@ namespace gEmuera.Diagnostics
             sb.AppendLine("input = " + Bool(c.InputDebugEnabled));
             sb.AppendLine("image = " + Bool(c.ImageDebugEnabled));
             sb.AppendLine("ui_layout = " + Bool(c.UiLayoutEnabled));
+            sb.AppendLine("dynamic_map = " + Bool(c.DynamicMapDebugEnabled));
             sb.AppendLine("resource = " + Bool(c.ResourceDebugEnabled));
             sb.AppendLine("load_save = " + Bool(c.LoadDebugEnabled || c.SaveDebugEnabled));
             sb.AppendLine("android_storage = " + Bool(c.AndroidStorageEnabled));

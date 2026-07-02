@@ -143,6 +143,10 @@ public partial class EmueraContent
 			if (existingControl != null)
 				SafeQueueFree(existingControl);
 		}
+		else if (lineObjects.ContainsKey(line.LineNo))
+		{
+			UnregisterLine(line.LineNo);
+		}
 
 		RegisterLine(line.LineNo, line, null, lineSize);
 		RegisterCanvasImageOverlays(line.LineNo, newOverlayNodes);
@@ -812,6 +816,11 @@ public partial class EmueraContent
 		{
 			hitRectsDirty = true;
 			QueueRedraw();
+		}
+
+		public void MarkHitRectsDirtyOnly()
+		{
+			hitRectsDirty = true;
 		}
 
 		public void SyncScrollRedraw()

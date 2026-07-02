@@ -196,6 +196,7 @@ public partial class EmueraContent : Control
 	int displayRevision = 0;
 	int quickRenderedGeneration = int.MinValue;
 	int quickRenderedRevision = -1;
+	string quickRenderedSignature = "";
 	bool quickInputGateActive = false;
 	bool quickAutoHiddenUntilNextButtons = false;
 	bool quickAutoHiddenWasVisible = false;
@@ -872,6 +873,7 @@ public partial class EmueraContent : Control
 		displayRevision++;
 		RefreshQuickInputGate();
 		quickRenderedRevision = -1;
+		quickRenderedSignature = "";
 		if (quickButtons != null && quickButtons.IsShow)
 			quickButtons.Clear();
 	}
@@ -1277,6 +1279,10 @@ public partial class EmueraContent : Control
 			if (existingControl != null)
 				SafeQueueFree(existingControl);
 		}
+		else if (lineObjects.ContainsKey(line.LineNo))
+		{
+			UnregisterLine(line.LineNo);
+		}
 
 		lineContainer.AddChild(lineControl);
 		if (insertIndex >= 0)
@@ -1305,6 +1311,82 @@ public partial class EmueraContent : Control
 			else
 				QueueDisplayFollowUp();
 		}
+	}
+
+	bool RefreshRenderedLineDataOnly(ConsoleDisplayLine line)
+	{
+		if (line == null || !lineObjects.ContainsKey(line.LineNo))
+			return false;
+
+		// 动态地图独立刷新时，底部选项的视觉内容通常不变，只是按钮 generation 前进。
+		// 这里只替换行数据和命中信息，不重建 Control/Canvas 节点，避免选项闪烁。
+		lineObjects[line.LineNo] = line;
+		if (UseCanvasRenderBackend)
+		{
+			var hits = BuildCanvasLineButtonHits(line);
+			if (hits != null && hits.Length > 0)
+				canvasLineButtonHits[line.LineNo] = hits;
+			else
+				canvasLineButtonHits.Remove(line.LineNo);
+			consoleRenderSurface?.MarkHitRectsDirtyOnly();
+		}
+
+		if (lineControls.TryGetValue(line.LineNo, out var control) && control != null && GodotObject.IsInstanceValid(control))
+			UpdateRenderedButtonMetadata(control, line);
+		return true;
+	}
+
+	void UpdateRenderedButtonMetadata(Control root, ConsoleDisplayLine line)
+	{
+		var buttonData = new List<(string input, long generation)>();
+		CollectRenderedButtonData(line, buttonData);
+		if (buttonData.Count == 0)
+			return;
+
+		var renderedButtons = new List<Control>();
+		CollectRenderedButtonControls(root, renderedButtons);
+		int count = System.Math.Min(buttonData.Count, renderedButtons.Count);
+		for (int i = 0; i < count; i++)
+		{
+			var control = renderedButtons[i];
+			if (control == null || !GodotObject.IsInstanceValid(control))
+				continue;
+			control.SetMeta("button_input", buttonData[i].input ?? "");
+			control.SetMeta("generation", buttonData[i].generation);
+		}
+	}
+
+	void CollectRenderedButtonData(ConsoleDisplayLine line, List<(string input, long generation)> output)
+	{
+		if (line?.Buttons == null || output == null)
+			return;
+		foreach (var button in line.Buttons)
+		{
+			if (button == null)
+				continue;
+			if (button.IsButton)
+				output.Add((button.Inputs, button.Generation));
+			if (button.StrArray == null)
+				continue;
+			foreach (var part in button.StrArray)
+			{
+				if (part is ConsoleDivPart div && div.Children != null)
+				{
+					foreach (var childLine in div.Children)
+						CollectRenderedButtonData(childLine, output);
+				}
+			}
+		}
+	}
+
+	void CollectRenderedButtonControls(Node node, List<Control> output)
+	{
+		if (node == null || output == null)
+			return;
+		if (node is Control control && control.HasMeta("button_input"))
+			output.Add(control);
+		foreach (var child in node.GetChildren())
+			CollectRenderedButtonControls(child, output);
 	}
 
 	bool ShouldDeferLineReplacementForAsyncTexture(ConsoleDisplayLine line, bool isUpdate, bool hasExistingLine, bool asyncTexturePending)
@@ -1448,9 +1530,9 @@ public partial class EmueraContent : Control
 		btn.AddThemeStyleboxOverride("panel", _btnNormalStyle);
 		string inputs = button.Inputs;
 		long generation = button.Generation;
-		btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, inputs, generation);
-		btn.MouseEntered += () => GenericUtils.SetPointingButton(inputs, generation);
-		btn.MouseExited += () => GenericUtils.ClearPointingButton(generation);
+		btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, GetRenderedButtonInput(btn), GetRenderedButtonGeneration(btn));
+		btn.MouseEntered += () => GenericUtils.SetPointingButton(GetRenderedButtonInput(btn), GetRenderedButtonGeneration(btn));
+		btn.MouseExited += () => GenericUtils.ClearPointingButton(GetRenderedButtonGeneration(btn));
 		btn.SetMeta("button_input", inputs);
 		btn.SetMeta("generation", generation);
 
@@ -1474,6 +1556,34 @@ public partial class EmueraContent : Control
 		btn.Position = hitRect.Position;
 		btn.Size = hitRect.Size;
 		return btn;
+	}
+
+	static string GetRenderedButtonInput(Control button)
+	{
+		if (button == null || !button.HasMeta("button_input"))
+			return "";
+		try
+		{
+			return button.GetMeta("button_input").As<string>() ?? "";
+		}
+		catch
+		{
+			return "";
+		}
+	}
+
+	static long GetRenderedButtonGeneration(Control button)
+	{
+		if (button == null || !button.HasMeta("generation"))
+			return 0;
+		try
+		{
+			return button.GetMeta("generation").AsInt64();
+		}
+		catch
+		{
+			return 0;
+		}
 	}
 
 	Rect2 GetButtonVisualBounds(ConsoleButtonString button, int buttonTop, int buttonHeight, int renderRelX, int renderOriginX)
@@ -1823,9 +1933,34 @@ public partial class EmueraContent : Control
 
 	// Apply a core display delta: remove from bottom, add/update lines, trim old
 	// top rows, then schedule one layout/scroll follow-up for the whole batch.
-	internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update, int lastButtonGeneration)
+	internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines,
+		bool update, int lastButtonGeneration, bool scrollToBottom = true, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
 	{
 		bool changed = false;
+		bool traceDynamicMap = false;
+		bool dynamicMapBitmapContext = false;
+		if (GenericUtils.IsDynamicMapLineSnapshotTraceEnabled)
+		{
+			dynamicMapBitmapContext = GenericUtils.ContainsDynamicMapBitmapContext(lines);
+			traceDynamicMap = GenericUtils.ShouldTraceDynamicMap(dynamicMapBitmapContext);
+			if (traceDynamicMap)
+			{
+				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.APPLY",
+					() => "dynamic map ui apply start",
+					() => "remove_bottom=" + removeBottomCount
+						+ " add=" + (lines?.Count ?? 0)
+						+ " data_only=" + (dataOnlyLines?.Count ?? 0)
+						+ " update=" + update
+						+ " auto_scroll=" + scrollToBottom
+						+ " last_button_generation=" + lastButtonGeneration
+						+ " before_min=" + GetMinLineNo()
+						+ " before_max=" + GetMaxLineNo()
+						+ " before_count=" + GetRetainedLineCount()
+						+ " before_scroll=" + BuildDynamicMapScrollState()
+						+ " has_bitmap_context=" + dynamicMapBitmapContext
+						+ " incoming=" + GenericUtils.BuildDynamicMapDeltaLineSummary(lines));
+			}
+		}
 		batchingDisplayLines = true;
 		try
 		{
@@ -1846,6 +1981,12 @@ public partial class EmueraContent : Control
 					changed = true;
 				}
 			}
+
+			if (dataOnlyLines != null && dataOnlyLines.Count > 0)
+			{
+				for (int i = 0; i < dataOnlyLines.Count; i++)
+					RefreshRenderedLineDataOnly(dataOnlyLines[i]);
+			}
 		}
 		finally
 		{
@@ -1863,18 +2004,47 @@ public partial class EmueraContent : Control
 		{
 			FlushCanvasOverlayRowsIfNeeded();
 			RefreshQuickInputGate();
-			QueueDisplayFollowUp();
+			if (traceDynamicMap && GenericUtils.IsDynamicMapScrollTraceEnabled)
+			{
+				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.FOLLOW_UP",
+					() => "dynamic map display follow-up queued",
+					() => "changed=" + changed
+						+ " update=" + update
+						+ " auto_scroll=" + scrollToBottom
+						+ " scroll_before_request=" + BuildDynamicMapScrollState());
+			}
+			QueueDisplayFollowUp(scrollToBottom);
 		}
 
 		if (GenericUtils.IsScrollTraceActive)
-			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} changed={changed} update={update} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
+			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} dataOnly={dataOnlyLines?.Count ?? 0} changed={changed} update={update} autoScroll={scrollToBottom} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
 		SetLastButtonGeneration(lastButtonGeneration);
+		if (traceDynamicMap)
+		{
+			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.APPLIED",
+				() => "dynamic map ui apply end",
+				() => "changed=" + changed
+					+ " update=" + update
+					+ " auto_scroll=" + scrollToBottom
+					+ " data_only=" + (dataOnlyLines?.Count ?? 0)
+					+ " after_min=" + GetMinLineNo()
+					+ " after_max=" + GetMaxLineNo()
+					+ " after_count=" + GetRetainedLineCount()
+					+ " display_revision=" + displayRevision
+					+ " scroll=" + BuildDynamicMapScrollState());
+		}
 	}
 
-	void QueueDisplayFollowUp()
+	void QueueDisplayFollowUp(bool scrollToBottom = true)
 	{
+		if (!scrollToBottom)
+		{
+			CancelPendingScrollToBottom();
+			RememberCurrentContentScroll();
+		}
 		QueueScaleBoundsUpdate();
-		RequestScrollToBottom();
+		if (scrollToBottom)
+			RequestScrollToBottom();
 	}
 
 	// Background color rectangles are attached per line so PRINT background color
@@ -2437,6 +2607,26 @@ public partial class EmueraContent : Control
 		return $"scroll=({scrollContainer.ScrollHorizontal},{scrollContainer.ScrollVertical}) max=({limit.X},{vMax}) pageY={vPage} barY={vRangeMax} calcY={limit.Y} desired=({desiredContentScrollHorizontal},{desiredContentScrollVertical},valid={desiredContentScrollValid}) pending={pendingScroll} serial={pendingScrollInteractionSerial}/{contentScrollInteractionSerial} drag={contentDragActive}/{contentDragMoved}/btn={contentDragStartedOnButton} inertia={contentInertiaActive} lines={lineCount} totalH={Mathf.RoundToInt(totalLineHeight)} view=({Mathf.RoundToInt(scrollSize.X)},{Mathf.RoundToInt(scrollSize.Y)}) root=({Mathf.RoundToInt(rootSize.X)},{Mathf.RoundToInt(rootSize.Y)}) scale={contentScale:0.###}";
 	}
 
+	string BuildDynamicMapScrollState()
+	{
+		if (scrollContainer == null)
+			return "scroll=null";
+		var limit = GetContentScrollLimit();
+		var scrollSize = scrollContainer.Size;
+		var rootSize = scaledContentRoot != null ? scaledContentRoot.Size : Vector2.Zero;
+		return "x=" + scrollContainer.ScrollHorizontal
+			+ ",y=" + scrollContainer.ScrollVertical
+			+ ",maxY=" + GetMaxContentVerticalScroll()
+			+ ",limitY=" + limit.Y
+			+ ",pending=" + pendingScroll
+			+ ",desiredY=" + desiredContentScrollVertical
+			+ ",desiredValid=" + desiredContentScrollValid
+			+ ",drag=" + contentDragActive
+			+ ",inertia=" + contentInertiaActive
+			+ ",view=" + Mathf.RoundToInt(scrollSize.X) + "x" + Mathf.RoundToInt(scrollSize.Y)
+			+ ",root=" + Mathf.RoundToInt(rootSize.X) + "x" + Mathf.RoundToInt(rootSize.Y);
+	}
+
 	// Schedule a deferred scroll-to-bottom. We wait across frames because Godot
 	// updates ScrollContainer range after child minimum sizes settle.
 	void RequestScrollToBottom()
@@ -2446,16 +2636,44 @@ public partial class EmueraContent : Control
 		pendingScrollLastMax = int.MinValue;
 		pendingScrollStableSinceTick = 0;
 		pendingScrollDeadlineTick = now + ScrollToBottomRetryMs;
+		bool traceDynamicScroll = GenericUtils.IsDynamicMapScrollTraceEnabled
+			&& GenericUtils.ShouldTraceDynamicMap(false);
 		if (pendingScroll)
 		{
+			if (traceDynamicScroll)
+			{
+				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_REQUEST_MERGE",
+					() => "dynamic map scroll-to-bottom request merged",
+					() => "deadline=" + pendingScrollDeadlineTick
+						+ " state=" + BuildDynamicMapScrollState());
+			}
 			if (GenericUtils.IsScrollTraceActive)
 				TraceScroll("scroll_bottom_request_merge", () => $"deadline={pendingScrollDeadlineTick}");
 			return;
 		}
 		pendingScroll = true;
+		if (traceDynamicScroll)
+		{
+			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_REQUEST",
+				() => "dynamic map scroll-to-bottom requested",
+				() => "deadline=" + pendingScrollDeadlineTick
+					+ " state=" + BuildDynamicMapScrollState());
+		}
 		if (GenericUtils.IsScrollTraceActive)
 			TraceScroll("scroll_bottom_request", () => $"deadline={pendingScrollDeadlineTick}");
 		CallDeferred(nameof(DeferredScrollToBottom));
+	}
+
+	void CancelPendingScrollToBottom()
+	{
+		if (!pendingScroll)
+			return;
+		pendingScroll = false;
+		pendingScrollLastMax = int.MinValue;
+		pendingScrollStableSinceTick = 0;
+		pendingScrollDeadlineTick = 0;
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("scroll_bottom_cancel");
 	}
 
 	// Retry bottom scrolling until content height has remained stable long enough
@@ -2465,6 +2683,14 @@ public partial class EmueraContent : Control
 	{
 		string endReason = "loop_end";
 		bool loggedDragWait = false;
+		bool traceDynamicScroll = GenericUtils.IsDynamicMapScrollTraceEnabled
+			&& GenericUtils.ShouldTraceDynamicMap(false);
+		if (traceDynamicScroll)
+		{
+			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_START",
+				() => "dynamic map deferred scroll start",
+				() => "state=" + BuildDynamicMapScrollState());
+		}
 		TraceScroll("scroll_bottom_start");
 		try
 		{
@@ -2528,6 +2754,14 @@ public partial class EmueraContent : Control
 						pendingScrollDeadlineTick = stableDeadline;
 					if (GenericUtils.IsScrollTraceActive)
 						TraceScroll("scroll_bottom_max", () => $"max={maxScroll} stableDeadline={stableDeadline}");
+					if (traceDynamicScroll)
+					{
+						GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_MAX",
+							() => "dynamic map scroll max changed",
+							() => "max=" + maxScroll
+								+ " stable_deadline=" + stableDeadline
+								+ " state=" + BuildDynamicMapScrollState());
+					}
 				}
 
 				scrollContainer.ScrollVertical = maxScroll;
@@ -2551,6 +2785,13 @@ public partial class EmueraContent : Control
 		{
 			if (GenericUtils.IsScrollTraceActive)
 				TraceScroll("scroll_bottom_end", () => $"reason={endReason}");
+			if (traceDynamicScroll)
+			{
+				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.SCROLL_END",
+					() => "dynamic map deferred scroll end",
+					() => "reason=" + endReason
+						+ " state=" + BuildDynamicMapScrollState());
+			}
 			pendingScroll = false;
 			pendingScrollLastMax = int.MinValue;
 			pendingScrollStableSinceTick = 0;
@@ -4218,6 +4459,21 @@ public partial class EmueraContent : Control
 			&& quickAutoHiddenWasVisible
 			&& generation >= 0
 			&& generation != quickAutoHiddenGeneration;
+		bool traceDynamicButtons = GenericUtils.IsDynamicMapButtonTraceEnabled
+			&& GenericUtils.ShouldTraceDynamicMap(false);
+		if (traceDynamicButtons)
+		{
+			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.REQUEST",
+				() => "dynamic map quick-button generation requested",
+				() => "previous_generation=" + lastButtonGeneration
+					+ " next_generation=" + generation
+					+ " quick_exists=" + (quickButtons != null)
+					+ " quick_show=" + (quickButtons != null && quickButtons.IsShow)
+					+ " auto_show=" + shouldAutoShowQuick
+					+ " rendered_generation=" + quickRenderedGeneration
+					+ " rendered_revision=" + quickRenderedRevision
+					+ " display_revision=" + displayRevision);
+		}
 		lastButtonGeneration = generation;
 		RefreshQuickInputGate();
 
@@ -4225,10 +4481,105 @@ public partial class EmueraContent : Control
 		{
 			if (quickRenderedGeneration == lastButtonGeneration && quickRenderedRevision == displayRevision)
 			{
+				if (traceDynamicButtons)
+				{
+					GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.CACHED",
+						() => "dynamic map quick buttons reused",
+						() => "generation=" + lastButtonGeneration
+							+ " display_revision=" + displayRevision);
+				}
 				if (shouldAutoShowQuick)
 				{
 					ClearQuickAutoHiddenState();
 					quickButtons.ShowPad();
+					UpdateSystemButtonVisuals();
+				}
+				return;
+			}
+
+			if (lastButtonGeneration < 0)
+			{
+				quickButtons.BeginBatch();
+				try
+				{
+					quickButtons.Clear();
+					quickRenderedGeneration = lastButtonGeneration;
+					quickRenderedRevision = displayRevision;
+					quickRenderedSignature = "";
+					if (traceDynamicButtons)
+					{
+						GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.SKIP",
+							() => "dynamic map quick buttons skipped",
+							() => "reason=negative_generation generation=" + lastButtonGeneration
+								+ " display_revision=" + displayRevision);
+					}
+				}
+				finally
+				{
+					quickButtons.EndBatch();
+				}
+				return;
+			}
+
+			var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
+			foreach (var kvp in lineObjects)
+			{
+				var line = kvp.Value;
+				var lineButtons = new List<(string text, Godot.Color color, string code)>();
+				CollectQuickButtons(line, lineButtons);
+				if (lineButtons.Count > 0)
+					lineGroups.Add((kvp.Key, lineButtons));
+			}
+
+			lineGroups.Sort((a, b) => a.lineNo.CompareTo(b.lineNo));
+
+			if (lineGroups.Count == 0)
+			{
+				quickButtons.BeginBatch();
+				try
+				{
+					quickButtons.Clear();
+					quickRenderedGeneration = lastButtonGeneration;
+					quickRenderedRevision = displayRevision;
+					quickRenderedSignature = "";
+					if (traceDynamicButtons)
+					{
+						GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.EMPTY",
+							() => "dynamic map quick buttons empty",
+							() => "generation=" + lastButtonGeneration
+								+ " display_revision=" + displayRevision
+								+ " retained_lines=" + GetRetainedLineCount());
+					}
+				}
+				finally
+				{
+					quickButtons.EndBatch();
+				}
+				return;
+			}
+
+			string nextSignature = BuildQuickButtonGroupsSignature(lineGroups);
+			if (quickRenderedSignature == nextSignature)
+			{
+				bool generationChanged = quickRenderedGeneration != lastButtonGeneration;
+				if (generationChanged)
+					quickButtons.UpdateButtonGeneration(lastButtonGeneration);
+				quickRenderedGeneration = lastButtonGeneration;
+				quickRenderedRevision = displayRevision;
+				if (traceDynamicButtons)
+				{
+					GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.CACHED_SIGNATURE",
+						() => "dynamic map quick buttons reused by signature",
+						() => "generation=" + lastButtonGeneration
+							+ " display_revision=" + displayRevision
+							+ " groups=" + lineGroups.Count
+							+ " generation_updated=" + generationChanged);
+				}
+				if (shouldAutoShowQuick)
+				{
+					ClearQuickAutoHiddenState();
+					quickButtons.ShowPad();
+					quickButtons.SetInputEnabled(true);
 					UpdateSystemButtonVisuals();
 				}
 				return;
@@ -4240,31 +4591,23 @@ public partial class EmueraContent : Control
 				quickButtons.Clear();
 				quickRenderedGeneration = lastButtonGeneration;
 				quickRenderedRevision = displayRevision;
-
-				if (lastButtonGeneration < 0)
-					return;
-
-				var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
-				foreach (var kvp in lineObjects)
-				{
-					var line = kvp.Value;
-					var lineButtons = new List<(string text, Godot.Color color, string code)>();
-					CollectQuickButtons(line, lineButtons);
-					if (lineButtons.Count > 0)
-						lineGroups.Add((kvp.Key, lineButtons));
-				}
-
-				lineGroups.Sort((a, b) => a.lineNo.CompareTo(b.lineNo));
-
-				if (lineGroups.Count == 0)
-					return;
-
+				quickRenderedSignature = nextSignature;
 				if (shouldAutoShowQuick)
 				{
 					ClearQuickAutoHiddenState();
 					quickButtons.ShowPad();
 					quickButtons.SetInputEnabled(true);
 					UpdateSystemButtonVisuals();
+				}
+
+				if (traceDynamicButtons)
+				{
+					GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.BUTTONS.REBUILD",
+						() => "dynamic map quick buttons rebuilt",
+						() => "generation=" + lastButtonGeneration
+							+ " display_revision=" + displayRevision
+							+ " groups=" + lineGroups.Count
+							+ " buttons=" + BuildDynamicMapQuickGroupsSummary(lineGroups));
 				}
 
 				for (int i = 0; i < lineGroups.Count; i++)
@@ -4282,6 +4625,64 @@ public partial class EmueraContent : Control
 				quickButtons.EndBatch();
 			}
 		}
+	}
+
+	string BuildQuickButtonGroupsSignature(List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> lineGroups)
+	{
+		if (lineGroups == null || lineGroups.Count == 0)
+			return "";
+		var sb = new System.Text.StringBuilder(lineGroups.Count * 48);
+		for (int i = 0; i < lineGroups.Count; i++)
+		{
+			var group = lineGroups[i];
+			// 动态地图刷新可能删除尾部再重绘，绝对行号会变化；快捷按钮是否需要重建只取决于可见按钮组的顺序和内容。
+			sb.Append(i).Append(':');
+			if (group.buttons != null)
+			{
+				for (int j = 0; j < group.buttons.Count; j++)
+				{
+					var button = group.buttons[j];
+					sb.Append(button.code ?? "")
+						.Append('=')
+						.Append(button.text ?? "")
+						.Append('#')
+						.Append(button.color.ToString())
+						.Append(';');
+				}
+			}
+			sb.Append('|');
+		}
+		return sb.ToString();
+	}
+
+	string BuildDynamicMapQuickGroupsSummary(List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> lineGroups)
+	{
+		if (lineGroups == null || lineGroups.Count == 0)
+			return "none";
+		int maxGroups = Math.Min(12, lineGroups.Count);
+		var sb = new System.Text.StringBuilder(maxGroups * 64);
+		for (int i = 0; i < maxGroups; i++)
+		{
+			if (sb.Length > 0)
+				sb.Append('|');
+			var group = lineGroups[i];
+			sb.Append(group.lineNo).Append(':');
+			int maxButtons = Math.Min(4, group.buttons?.Count ?? 0);
+			for (int j = 0; j < maxButtons; j++)
+			{
+				if (j > 0)
+					sb.Append(',');
+				var button = group.buttons[j];
+				sb.Append(GenericUtils.ClipTrace(button.code, 24).Replace(' ', '_'))
+					.Append('=')
+					.Append(GenericUtils.ClipTrace(button.text, 24).Replace(' ', '_'));
+			}
+			if ((group.buttons?.Count ?? 0) > maxButtons)
+				sb.Append(",...");
+		}
+		if (lineGroups.Count > maxGroups)
+			sb.Append("|...");
+		return sb.ToString();
 	}
 
 	// Recursively collect command buttons from visible console lines and nested

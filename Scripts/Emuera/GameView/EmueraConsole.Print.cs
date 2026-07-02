@@ -31,6 +31,8 @@ namespace MinorShift.Emuera.GameView
 				lineNo = 0;
 				lastDrawnLineNo = -1;
 			}
+			BitmapCacheEnabledForNextLine = false;
+			ConsumeDisplayRewriteRefresh();
 			verticalScrollBarUpdate();
 			window.Refresh();//OnPaint発行
 		}
@@ -110,6 +112,19 @@ namespace MinorShift.Emuera.GameView
 		{
 			for (int i = 0; i < lineList.Length; i++)
 				addDisplayLine(lineList[i], false);
+		}
+
+		private void applyCurrentLineMetadata(ConsoleDisplayLine[] lineList)
+		{
+			if (lineList == null)
+				return;
+			for (int i = 0; i < lineList.Length; i++)
+			{
+				if (lineList[i] == null)
+					continue;
+				lineList[i].TextBackgroundColor = TextBackgroundColor;
+				lineList[i].BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
+			}
 		}
 
 		private void addDisplayLine(ConsoleDisplayLine line, bool force_LEFT)
@@ -200,9 +215,9 @@ namespace MinorShift.Emuera.GameView
 
 		public void deleteLine(int argNum)
 		{
+			int delNum = 0;
 			lock (displayLineLock)
 			{
-				int delNum = 0;
 				int num = argNum;
 				while (delNum < num)
 				{
@@ -222,6 +237,8 @@ namespace MinorShift.Emuera.GameView
 					lineNo += int.MaxValue;
 				lastDrawnLineNo = -1;
 			}
+			if (delNum > 0)
+				MarkDisplayRewriteInProgress();
 			//RefreshStrings(true);
 		}
 
@@ -425,7 +442,9 @@ namespace MinorShift.Emuera.GameView
 					ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
 					addRangeDisplayLine(dispList);
 				}
-				addRangeDisplayLine(HtmlManager.Html2DisplayLine(str, stringMeasure, this));
+				ConsoleDisplayLine[] htmlLines = HtmlManager.Html2DisplayLine(str, stringMeasure, this);
+				applyCurrentLineMetadata(htmlLines);
+				addRangeDisplayLine(htmlLines);
 			}
 			RefreshStrings(false);
 		}
