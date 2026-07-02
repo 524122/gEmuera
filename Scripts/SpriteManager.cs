@@ -26,6 +26,12 @@ internal static class SpriteManager
 	const int DesktopCleanupDisposeBudget = 96;
 	const ulong PlaceholderRetryIntervalMs = 1000;
 
+	// 批量加载优化：队列积压超过此阈值时自动提升并发数
+	const int BulkLoadQueueThreshold = 8;
+	// 批量加载时的最大并发数（Android 限制为 2，避免内存压力）
+	const int MobileBulkLoadMaxConcurrency = 2;
+	const int DesktopBulkLoadMaxConcurrency = 4;
+
 	internal class SpriteInfo : IDisposable
 	{
 		internal SpriteInfo(TextureInfo p, AtlasTexture s)
@@ -722,7 +728,10 @@ internal static class SpriteManager
 
 	static void ProcessAsyncTextureLoadCompletions()
 	{
-		int budget = OS.HasFeature("mobile") ? MobileAsyncTextureCompletionBudget : DesktopAsyncTextureCompletionBudget;
+		int baseBudget = OS.HasFeature("mobile") ? MobileAsyncTextureCompletionBudget : DesktopAsyncTextureCompletionBudget;
+		// 批量加载时提高每帧完成数
+		int pendingCount = completed_async_texture_loads.Count;
+		int budget = pendingCount > BulkLoadQueueThreshold ? Math.Min(baseBudget * 2, 12) : baseBudget;
 		int processed = 0;
 		while(processed < budget && completed_async_texture_loads.TryDequeue(out var result))
 		{
@@ -758,13 +767,32 @@ internal static class SpriteManager
 
 	static void StartPendingAsyncTextureLoadsLocked()
 	{
-		int limit = async_texture_load_concurrency > 0 ? async_texture_load_concurrency : MobileAsyncTextureConcurrency;
+		int limit = GetEffectiveConcurrency();
 		while(active_async_texture_loads < limit && pending_async_texture_loads.Count > 0)
 		{
 			var request = pending_async_texture_loads.Dequeue();
 			active_async_texture_loads++;
 			ThreadPool.QueueUserWorkItem(_ => RunAsyncTextureLoad(request));
 		}
+	}
+
+	/// <summary>
+	/// 根据队列积压情况动态调整并发数。
+	/// 当队列积压超过阈值时（如角色立绘批量加载），临时提高并发数以加速加载。
+	/// </summary>
+	static int GetEffectiveConcurrency()
+	{
+		int baseConcurrency = async_texture_load_concurrency > 0
+			? async_texture_load_concurrency
+			: (OS.HasFeature("mobile") ? MobileAsyncTextureConcurrency : DesktopAsyncTextureConcurrency);
+
+		int pendingCount = pending_async_texture_loads.Count;
+		if(pendingCount <= BulkLoadQueueThreshold)
+			return baseConcurrency;
+
+		// 队列积压超过阈值，临时提升并发数
+		int maxConcurrency = OS.HasFeature("mobile") ? MobileBulkLoadMaxConcurrency : DesktopBulkLoadMaxConcurrency;
+		return Math.Min(baseConcurrency * 2, maxConcurrency);
 	}
 
 	static void RunAsyncTextureLoad(AsyncTextureLoadRequest request)
