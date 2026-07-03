@@ -1978,6 +1978,11 @@ namespace MinorShift.Emuera.GameView
         }
 
 		public uEmuera.Drawing.Color? TextBackgroundColor { get; set; }
+		internal bool IsDynamicMapOutputScopeActive
+		{
+			get { return emuera?.State?.IsInDynamicMapFunctionScope() == true; }
+		}
+
 		bool bitmapCacheEnabledForNextLine = false;
 		public bool BitmapCacheEnabledForNextLine
 		{

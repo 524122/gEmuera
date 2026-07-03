@@ -245,6 +245,9 @@ public partial class EmueraContent : Control
 	ulong pendingScrollDeadlineTick = 0;
 	ulong pendingScrollStableSinceTick = 0;
 	bool pendingScaleBoundsUpdate = false;
+	bool pendingKeepChoicesVisible = false;
+	int pendingKeepChoicesInteractionSerial = 0;
+	const int KeepChoicesVisiblePaddingPx = 12;
 	ulong lastScrollTraceDragTick = 0;
 
 	// Scale and pinch gesture state. Pinch zoom is opt-in because accidental
@@ -1936,6 +1939,15 @@ public partial class EmueraContent : Control
 	internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines,
 		bool update, int lastButtonGeneration, bool scrollToBottom = true, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
 	{
+		ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration,
+			scrollToBottom ? EmueraDisplayScrollMode.FollowBottom : EmueraDisplayScrollMode.PreserveViewport,
+			dataOnlyLines);
+	}
+
+	internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines,
+		bool update, int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
+	{
+		bool scrollToBottom = scrollMode == EmueraDisplayScrollMode.FollowBottom;
 		bool changed = false;
 		bool traceDynamicMap = false;
 		bool dynamicMapBitmapContext = false;
@@ -1951,6 +1963,7 @@ public partial class EmueraContent : Control
 						+ " add=" + (lines?.Count ?? 0)
 						+ " data_only=" + (dataOnlyLines?.Count ?? 0)
 						+ " update=" + update
+						+ " scroll_mode=" + scrollMode
 						+ " auto_scroll=" + scrollToBottom
 						+ " last_button_generation=" + lastButtonGeneration
 						+ " before_min=" + GetMinLineNo()
@@ -2010,14 +2023,15 @@ public partial class EmueraContent : Control
 					() => "dynamic map display follow-up queued",
 					() => "changed=" + changed
 						+ " update=" + update
+						+ " scroll_mode=" + scrollMode
 						+ " auto_scroll=" + scrollToBottom
 						+ " scroll_before_request=" + BuildDynamicMapScrollState());
 			}
-			QueueDisplayFollowUp(scrollToBottom);
+			QueueDisplayFollowUp(scrollMode);
 		}
 
 		if (GenericUtils.IsScrollTraceActive)
-			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} dataOnly={dataOnlyLines?.Count ?? 0} changed={changed} update={update} autoScroll={scrollToBottom} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
+			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} dataOnly={dataOnlyLines?.Count ?? 0} changed={changed} update={update} scrollMode={scrollMode} autoScroll={scrollToBottom} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
 		SetLastButtonGeneration(lastButtonGeneration);
 		if (traceDynamicMap)
 		{
@@ -2025,6 +2039,7 @@ public partial class EmueraContent : Control
 				() => "dynamic map ui apply end",
 				() => "changed=" + changed
 					+ " update=" + update
+					+ " scroll_mode=" + scrollMode
 					+ " auto_scroll=" + scrollToBottom
 					+ " data_only=" + (dataOnlyLines?.Count ?? 0)
 					+ " after_min=" + GetMinLineNo()
@@ -2037,6 +2052,12 @@ public partial class EmueraContent : Control
 
 	void QueueDisplayFollowUp(bool scrollToBottom = true)
 	{
+		QueueDisplayFollowUp(scrollToBottom ? EmueraDisplayScrollMode.FollowBottom : EmueraDisplayScrollMode.PreserveViewport);
+	}
+
+	void QueueDisplayFollowUp(EmueraDisplayScrollMode scrollMode)
+	{
+		bool scrollToBottom = scrollMode == EmueraDisplayScrollMode.FollowBottom;
 		if (!scrollToBottom)
 		{
 			CancelPendingScrollToBottom();
@@ -2045,6 +2066,8 @@ public partial class EmueraContent : Control
 		QueueScaleBoundsUpdate();
 		if (scrollToBottom)
 			RequestScrollToBottom();
+		else if (scrollMode == EmueraDisplayScrollMode.KeepChoicesVisible)
+			RequestKeepChoicesVisible();
 	}
 
 	// Background color rectangles are attached per line so PRINT background color
@@ -2674,6 +2697,120 @@ public partial class EmueraContent : Control
 		pendingScrollDeadlineTick = 0;
 		if (GenericUtils.IsScrollTraceActive)
 			TraceScroll("scroll_bottom_cancel");
+	}
+
+	void RequestKeepChoicesVisible()
+	{
+		if (scrollContainer == null)
+			return;
+		pendingKeepChoicesInteractionSerial = contentScrollInteractionSerial;
+		if (pendingKeepChoicesVisible)
+			return;
+		pendingKeepChoicesVisible = true;
+		CallDeferred(nameof(DeferredKeepChoicesVisible));
+	}
+
+	async void DeferredKeepChoicesVisible()
+	{
+		try
+		{
+			await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			if (scrollContainer == null || contentDragActive || contentInertiaActive)
+				return;
+			if (pendingKeepChoicesInteractionSerial != contentScrollInteractionSerial)
+				return;
+
+			UpdateScaleBounds();
+
+			await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			if (scrollContainer == null || contentDragActive || contentInertiaActive)
+				return;
+			if (pendingKeepChoicesInteractionSerial != contentScrollInteractionSerial)
+				return;
+
+			EnsureCurrentChoicesVisible();
+		}
+		finally
+		{
+			pendingKeepChoicesVisible = false;
+		}
+	}
+
+	void EnsureCurrentChoicesVisible()
+	{
+		if (scrollContainer == null)
+			return;
+		if (!TryGetLastCurrentChoiceLineBounds(out float lineTop, out float lineBottom))
+			return;
+
+		float scale = GetSafeContentScale();
+		int currentY = scrollContainer.ScrollVertical;
+		int viewportHeight = Mathf.RoundToInt(scrollContainer.Size.Y);
+		int choiceTop = Mathf.RoundToInt(lineTop * scale);
+		int choiceBottom = Mathf.RoundToInt(lineBottom * scale) + KeepChoicesVisiblePaddingPx;
+		int visibleBottom = currentY + viewportHeight;
+		if (choiceBottom <= visibleBottom)
+			return;
+
+		var limit = GetContentScrollLimit();
+		int targetY = Mathf.Clamp(choiceBottom - viewportHeight, 0, limit.Y);
+		if (targetY <= currentY)
+			return;
+
+		scrollContainer.ScrollVertical = targetY;
+		RememberDesiredContentScroll(scrollContainer.ScrollHorizontal, targetY);
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("keep_choices_visible", () => $"line=({Mathf.RoundToInt(lineTop)},{Mathf.RoundToInt(lineBottom)}) choice=({choiceTop},{choiceBottom}) from={currentY} to={targetY} limit={limit.Y}");
+	}
+
+	bool TryGetLastCurrentChoiceLineBounds(out float top, out float bottom)
+	{
+		top = 0;
+		bottom = 0;
+		EnsureLineLayout();
+		foreach (int lineNo in lineNumbers.Reverse())
+		{
+			if (!lineObjects.TryGetValue(lineNo, out var line))
+				continue;
+			if (!LineHasCurrentGenerationButton(line, 0))
+				continue;
+			if (!lineLayoutIndexByLineNo.TryGetValue(lineNo, out int index)
+				|| index < 0
+				|| index >= lineLayoutEntries.Count)
+				continue;
+			var entry = lineLayoutEntries[index];
+			top = entry.Top;
+			bottom = entry.Bottom;
+			return true;
+		}
+		return false;
+	}
+
+	bool LineHasCurrentGenerationButton(ConsoleDisplayLine line, int depth)
+	{
+		if (line?.Buttons == null || depth > 4)
+			return false;
+		foreach (var button in line.Buttons)
+		{
+			if (button == null)
+				continue;
+			if (button.IsButton && (lastButtonGeneration < 0 || button.Generation == lastButtonGeneration))
+				return true;
+			if (button.StrArray == null)
+				continue;
+			foreach (var part in button.StrArray)
+			{
+				if (part is ConsoleDivPart div && div.Children != null)
+				{
+					for (int i = 0; i < div.Children.Length; i++)
+					{
+						if (LineHasCurrentGenerationButton(div.Children[i], depth + 1))
+							return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	// Retry bottom scrolling until content height has remained stable long enough

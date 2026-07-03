@@ -187,8 +187,7 @@ namespace MinorShift.Emuera.GameView
 			ConsoleButtonString[] dispLineButtonArray = new ConsoleButtonString[m_buttonList.Count];
 			m_buttonList.CopyTo(dispLineButtonArray);
 			ConsoleDisplayLine line = new ConsoleDisplayLine(dispLineButtonArray, true, temporary);
-			line.TextBackgroundColor = parent.TextBackgroundColor;
-			line.BitmapCacheEnabled = parent.BitmapCacheEnabledForNextLine;
+			parent.ApplyCurrentLineMetadata(line);
 			this.clearBuffer();
 			return line;
 		}
@@ -202,8 +201,7 @@ namespace MinorShift.Emuera.GameView
 				ret[ret.Length - 1].IsLineEnd = isLastLineEnd;
 				foreach (ConsoleDisplayLine line in ret)
 				{
-					line.TextBackgroundColor = parent.TextBackgroundColor;
-					line.BitmapCacheEnabled = parent.BitmapCacheEnabledForNextLine;
+					parent.ApplyCurrentLineMetadata(line);
 				}
 			}
 			this.clearBuffer();

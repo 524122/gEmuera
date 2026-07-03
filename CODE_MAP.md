@@ -1,5 +1,27 @@
 # CODE_MAP
 
+## 2026-07-03 普通输出追加行滚动修正
+
+- `uEmuera.Window.DecideScrollModeForDisplayDelta`：动态地图函数栈或动态地图视图中的重绘仍使用 `PreserveViewport`，避免地图刷新拉回底部；非动态地图输出如果本批 diff 中存在 `LineNo > previousMaxLineNo` 的真实追加行，即使同时刷新了旧行元数据，也改为 `FollowBottom`。这用于修正 TW 会话/泡茶等普通输出在聊完后停在旧历史位置、不自动跟随最新文本的问题。
+
+## 2026-07-03 动态地图函数栈标记
+
+- `ProcessState.IsInDynamicMapFunctionScope` / `EmueraConsole.IsDynamicMapOutputScopeActive`：输出行生成时在 ERB 后台线程读取当前调用栈，只识别 `DRAW_COLOREDMAP`、`DRAW_MAP`、`FIELDMAP` 等地图绘制根函数；`GETMAP`、`MAP_VIEWING` 等子函数不再单独触发地图标记，降低非地图页面误伤。
+- `ConsoleDisplayLine.DynamicMapFunctionScoped` / `PrintStringBuffer` / `EmueraConsole.PrintHtml`：给来自地图根函数的显示行打元数据标记，并递归标到 HTML div 子行；`GenericUtils.LineHasDynamicMapBitmapContext` 仍同时接受 `BITMAP_CACHE_ENABLE` 与函数栈标记作为诊断和地图块识别证据。
+- `uEmuera.Window.DecideScrollModeForDisplayDelta`：滚动策略只用 `DynamicMapFunctionScoped` 或已确认的动态地图视图来判定地图重绘；普通 `BITMAP_CACHE_ENABLE` 页面不再直接触发地图滚动策略，避免颜色滑块、立绘履历等非地图 UI 被误判。
+- `uEmuera.Window.TryFindDynamicMapWindowStart`：只在显示列表尾部有限范围内寻找动态地图上下文，避免历史中的旧地图块长期影响后续普通文本滚动策略。
+
+## 2026-07-03 去除动态地图视图裁剪实验
+
+- `uEmuera.Window.Update`：动态地图检测仍保留，用于 `dynamicMapViewActive`、诊断日志和滚动策略；但不再把 `displayStartIndex` 裁到地图块开始行，也不再在进入/离开动态地图时调用 `GenericUtils.ClearText()` 重建 Godot 显示层。历史文本会继续参与行级 diff，进入地图后理论上可向上查看前文。
+- 风险说明：这会恢复历史内容可见性，但也可能重新暴露 Android 上旧内容、地图块、选项一起刷新时的自动滚动或闪烁问题；本改动用于验证“视图裁剪是否是历史消失主因”。
+
+## 2026-07-03 动态地图滚动事务第一步
+
+- `GenericUtils.ApplyTextChanges` / `EmueraContent.ApplyTextChanges`：在保留旧 `scrollToBottom: bool` 入口的同时新增 `EmueraDisplayScrollMode`，用于把显示刷新后的滚动意图从简单布尔值扩展为“追底部、保留视口、保持当前选项可见”等模式。旧调用方仍按原语义工作，动态地图链路可以逐步迁移到更细的滚动策略。
+- `uEmuera.Window.DecideScrollModeForDisplayDelta`：显示差异提交前根据删除尾行、更新旧行、追加新行和动态地图视图状态决定滚动模式。当前动态地图视图直接使用 `PreserveViewport`，避免刷新时拉回底部；`KeepChoicesVisible` 保留为可扩展模式，但不再用于动态地图。
+- `EmueraContent.RequestKeepChoicesVisible`：保留“保持当前选项可见”的实现入口，等待 Godot 布局帧稳定后按当前按钮 generation 找选项并做最小补偿；当前动态地图链路不会触发该模式。
+
 ## 2026-07-02 动态地图刷新合并补充
 
 - `EmueraConsole.RefreshStrings` / `deleteLine` / `BitmapCacheEnabledForNextLine`：动态地图或状态面板进入 `CLEARLINE`、`BITMAP_CACHE_ENABLE 1...0` 区域重画时，Running 中的普通 `RefreshStrings(false)` 会先合并，不向 Godot UI 提交半成品；进入 `INPUT/TINPUT/WAIT` 或显式 `RefreshStrings(true)` 时一次提交完整显示列表，避免 Android 看到“旧菜单 -> 半张地图 -> 地图主体”的循环中间帧。

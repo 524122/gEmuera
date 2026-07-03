@@ -41,6 +41,15 @@ public enum EmueraLogCategory
     All = int.MaxValue
 }
 
+internal enum EmueraDisplayScrollMode
+{
+    FollowBottom = 0,
+    PreserveViewport = 1,
+    KeepRegionVisible = 2,
+    KeepChoicesVisible = 3,
+    ManualHold = 4
+}
+
 internal static class GenericUtils
 {
     static readonly ConcurrentQueue<Action> uiQueue = new ConcurrentQueue<Action>();
@@ -1223,6 +1232,64 @@ internal static class GenericUtils
             messageFactory, member, file, line);
     }
 
+    public static bool ContainsDynamicMapFunctionScope(IReadOnlyList<ConsoleDisplayLine> lines)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapFunctionScope(lines[i]))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool ContainsDynamicMapFunctionScope(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapFunctionScope(lines[i].Line))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool LineHasDynamicMapFunctionScope(ConsoleDisplayLine line)
+    {
+        return LineHasDynamicMapFunctionScope(line, 0);
+    }
+
+    static bool LineHasDynamicMapFunctionScope(ConsoleDisplayLine line, int depth)
+    {
+        if (line == null || depth > 4)
+            return false;
+        if (line.DynamicMapFunctionScoped)
+            return true;
+        var buttons = line.Buttons;
+        if (buttons == null)
+            return false;
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            var parts = buttons[i]?.StrArray;
+            if (parts == null)
+                continue;
+            for (int j = 0; j < parts.Length; j++)
+            {
+                if (parts[j] is ConsoleDivPart div && div.Children != null)
+                {
+                    for (int k = 0; k < div.Children.Length; k++)
+                    {
+                        if (LineHasDynamicMapFunctionScope(div.Children[k], depth + 1))
+                            return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     public static bool ContainsDynamicMapBitmapContext(IReadOnlyList<ConsoleDisplayLine> lines)
     {
         if (lines == null)
@@ -1270,7 +1337,7 @@ internal static class GenericUtils
     {
         if (line == null || depth > 4)
             return false;
-        if (line.BitmapCacheEnabled)
+        if (line.BitmapCacheEnabled || line.DynamicMapFunctionScoped)
             return true;
         var buttons = line.Buttons;
         if (buttons == null)
@@ -1341,6 +1408,7 @@ internal static class GenericUtils
         var sb = new StringBuilder(160);
         sb.Append("{no=").Append(line.LineNo)
             .Append(",bmp=").Append(line.BitmapCacheEnabled ? 1 : 0)
+            .Append(",mapfn=").Append(line.DynamicMapFunctionScoped ? 1 : 0)
             .Append(",logic=").Append(line.IsLogicalLine ? 1 : 0)
             .Append(",tmp=").Append(line.IsTemporary ? 1 : 0)
             .Append(",end=").Append(line.IsLineEnd ? 1 : 0)
@@ -1895,7 +1963,15 @@ internal static class GenericUtils
     public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
         int lastButtonGeneration, bool scrollToBottom = true, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
     {
-        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration, scrollToBottom, dataOnlyLines), true);
+        ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration,
+            scrollToBottom ? EmueraDisplayScrollMode.FollowBottom : EmueraDisplayScrollMode.PreserveViewport,
+            dataOnlyLines);
+    }
+
+    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
+        int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
+    {
+        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration, scrollMode, dataOnlyLines), true);
     }
 
     public static void SetLastButtonGeneration(int generation)
