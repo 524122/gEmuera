@@ -1,5 +1,9 @@
 # CODE_MAP
 
+## 2026-07-03 同名图片跨目录缓存隔离
+
+- `SpriteManager`：文件纹理缓存改为以完整规范化路径为主要 key，不再把 `Path.GetFileName()` 作为全局别名；`GetSprite` 和旧同步 `Loading` 回调也改用同一套路径级 key。这样不同目录下同名 `webp/png/jpg` 不会复用同一个 `TextureInfo`，避免 TW 角色立绘在同名文件跨文件夹时串图。仅在请求名本身是路径或没有文件路径时才保留 name alias。
+
 ## 2026-07-03 普通输出追加行滚动修正
 
 - `uEmuera.Window.DecideScrollModeForDisplayDelta`：动态地图函数栈或动态地图视图中的重绘仍使用 `PreserveViewport`，避免地图刷新拉回底部；非动态地图输出如果本批 diff 中存在 `LineNo > previousMaxLineNo` 的真实追加行，即使同时刷新了旧行元数据，也改为 `FollowBottom`。这用于修正 TW 会话/泡茶等普通输出在聊完后停在旧历史位置、不自动跟随最新文本的问题。
