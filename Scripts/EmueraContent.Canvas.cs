@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using MinorShift.Emuera;
 using MinorShift.Emuera.Content;
 using MinorShift.Emuera.GameView;
+using EmuFont = uEmuera.Drawing.Font;
 
 public partial class EmueraContent
 {
@@ -1130,7 +1131,7 @@ public partial class EmueraContent
 			}
 			if (part is ConsoleErrorShapePart errShape)
 			{
-				DrawText(errShape.AltText ?? errShape.Str ?? "", Config.ForeColor.ToGodotColor(), false,
+				DrawText(errShape.AltText ?? errShape.Str ?? "", Config.ForeColor.ToGodotColor(), Config.Font, false,
 					part.PointX - relX, lineY, Mathf.Max(part.Width, owner.EffectiveLineHeight));
 			}
 		}
@@ -1163,24 +1164,25 @@ public partial class EmueraContent
 			}
 			else if (isBackLog && !css.pColorChanged)
 				color = Config.LogColor;
-			DrawText(css.Str, color.ToGodotColor(), css.Font?.Bold == true, x, lineY, width);
+			DrawText(css.Str, color.ToGodotColor(), css.Font, css.Font?.Bold == true, x, lineY, width);
 		}
 
-		void DrawText(string text, Color color, bool bold, float x, float lineY, float width)
+		void DrawText(string text, Color color, EmuFont emuFont, bool bold, float x, float lineY, float width)
 		{
-			if (owner.mainFont == null || string.IsNullOrEmpty(text))
+			Font font = owner.ResolveConsoleFont(emuFont);
+			if (font == null || string.IsNullOrEmpty(text))
 				return;
 			text = uEmuera.Utils.StripZeroWidth(text) ?? "";
 			if (string.IsNullOrEmpty(text))
 				return;
-			float fontHeight = owner.mainFont.GetHeight(owner.FontSize);
-			float baseline = GetTextBaseline(owner.mainFont, owner.FontSize, owner.EffectiveLineHeight, fontHeight);
+			float fontHeight = font.GetHeight(owner.FontSize);
+			float baseline = GetTextBaseline(font, owner.FontSize, owner.EffectiveLineHeight, fontHeight);
 			if (!ShouldUseGridDrawing(text))
 			{
-				DrawString(owner.mainFont, new Vector2(x, lineY + baseline), text, HorizontalAlignment.Left,
+				DrawString(font, new Vector2(x, lineY + baseline), text, HorizontalAlignment.Left,
 					Mathf.Max(1.0f, width), owner.FontSize, color);
 				if (bold)
-					DrawString(owner.mainFont, new Vector2(x + 1.0f, lineY + baseline), text, HorizontalAlignment.Left,
+					DrawString(font, new Vector2(x + 1.0f, lineY + baseline), text, HorizontalAlignment.Left,
 						Mathf.Max(1.0f, width - 1.0f), owner.FontSize, color);
 				return;
 			}
@@ -1196,13 +1198,13 @@ public partial class EmueraContent
 				// 逐字符绘制只负责保持 emuera 的半角/全角格点起点，裁剪仍由整段宽度决定。
 				// 若按单元格宽度裁剪，Godot 字体 fallback 下的箱线/空白敏感字符会出现缺笔或整字丢失。
 				float drawWidth = Mathf.Max(cellWidth, x + width - drawX);
-				DrawGridChar(text[i], drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
+				DrawGridChar(font, text[i], drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
 		}
 
-		void DrawGridChar(char value, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
+		void DrawGridChar(Font font, char value, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
 		{
 			if (TryGetSolidBlockElementRect(value, cellWidth, owner.EffectiveLineHeight, fontHeight, out var blockRect))
 			{
@@ -1211,9 +1213,9 @@ public partial class EmueraContent
 			}
 			string glyph = value.ToString();
 			float drawWidth = Mathf.Max(1.0f, cellWidth);
-			DrawString(owner.mainFont, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, owner.FontSize, color);
+			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, owner.FontSize, color);
 			if (bold)
-				DrawString(owner.mainFont, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), owner.FontSize, color);
+				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), owner.FontSize, color);
 		}
 
 		void DrawImagePart(ConsoleImagePart image, float lineY, int relX)

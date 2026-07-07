@@ -115,6 +115,8 @@ public partial class EmueraContent : Control
 	List<SpriteManager.TextureInfo> cbgTexturePins = new List<SpriteManager.TextureInfo>();
 	List<SpriteManager.TextureInfo> htmlIslandTexturePins = new List<SpriteManager.TextureInfo>();
 	List<SpriteManager.TextureInfo> activeTexturePinCollector;
+	readonly Dictionary<string, Font> consoleFontCache = new Dictionary<string, Font>(StringComparer.OrdinalIgnoreCase);
+	readonly HashSet<string> missingConsoleFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 	HashSet<int> asyncTexturePendingLineNos = new HashSet<int>();
 	Dictionary<int, ConsoleDisplayLine> pendingAsyncLineUpdates = new Dictionary<int, ConsoleDisplayLine>();
 	struct PureImageFallbackLine
@@ -921,7 +923,7 @@ public partial class EmueraContent : Control
 	// uses real glyph advance, which makes CJK/box-drawing maps drift on Android.
 	Control CreateTextPart(string text, EmuColor color, EmuFont font, float width)
 	{
-		var textPart = new ConsoleTextPart(mainFont, FontSize, color.ToGodotColor(), font?.Bold == true, text);
+		var textPart = new ConsoleTextPart(ResolveConsoleFont(font), FontSize, color.ToGodotColor(), font?.Bold == true, text);
 		SetFixedControlSize(textPart, new Vector2(width, EffectiveLineHeight));
 		return textPart;
 	}
@@ -960,14 +962,109 @@ public partial class EmueraContent : Control
 	{
 		if (OS.GetName() == "Android")
 			return true;
-		if (string.IsNullOrWhiteSpace(requested))
+		string normalized = NormalizeConsoleFontName(requested);
+		if (string.IsNullOrEmpty(normalized))
 			return true;
+		return IsBundledConsoleFontName(normalized);
+	}
+
+	static bool ShouldUseMainConsoleFont(string requested)
+	{
+		string normalized = NormalizeConsoleFontName(requested);
+		if (string.IsNullOrEmpty(normalized))
+			return true;
+		string configFont = NormalizeConsoleFontName(Config.FontName);
+		return normalized.Equals(configFont, System.StringComparison.OrdinalIgnoreCase)
+			|| IsBundledConsoleFontName(normalized);
+	}
+
+	static string NormalizeConsoleFontName(string requested)
+	{
+		if (string.IsNullOrWhiteSpace(requested))
+			return "";
 		string normalized = requested.Trim();
 		if (normalized.StartsWith("@", System.StringComparison.Ordinal))
 			normalized = normalized.Substring(1);
+		return normalized;
+	}
+
+	static bool IsBundledConsoleFontName(string normalized)
+	{
 		return normalized.Equals("MS Gothic", System.StringComparison.OrdinalIgnoreCase)
 			|| normalized.Equals("MS UI Gothic", System.StringComparison.OrdinalIgnoreCase)
 			|| normalized.Equals("\uFF2D\uFF33 \u30B4\u30B7\u30C3\u30AF", System.StringComparison.OrdinalIgnoreCase);
+	}
+
+	Font ResolveConsoleFont(EmuFont font)
+	{
+		string requested = font?.FontFamily?.Name;
+		// 主控制台字体仍走原本的内置/系统字体策略；HTML 片段字体必须按游戏目录加载，
+		// 否则 eraFL 的 game-icons 私有区码点会被主字体误绘成普通汉字或方块。
+		if (ShouldUseMainConsoleFont(requested))
+			return mainFont;
+
+		string key = NormalizeConsoleFontName(requested);
+		if (consoleFontCache.TryGetValue(key, out var cached))
+			return cached ?? mainFont;
+		if (missingConsoleFonts.Contains(key))
+			return mainFont;
+
+		Font loaded = LoadGameFontByName(key);
+		if (loaded != null)
+		{
+			consoleFontCache[key] = loaded;
+			return loaded;
+		}
+
+		missingConsoleFonts.Add(key);
+		return mainFont;
+	}
+
+	Font LoadGameFontByName(string fontName)
+	{
+		foreach (string path in BuildGameFontPathCandidates(fontName))
+		{
+			string resolved = uEmuera.Utils.ResolveExistingFilePath(path);
+			if (!uEmuera.Utils.FileExists(resolved))
+				continue;
+			var fontFile = new FontFile();
+			var error = fontFile.LoadDynamicFont(resolved);
+			if (error == Error.Ok)
+				return fontFile;
+			GenericUtils.Warn(EmueraLogCategory.UI, () => $"[FONT] Failed to load font \"{fontName}\" from {uEmuera.Utils.GetRelativePathFromGameDir(resolved)}: {error}");
+		}
+		return null;
+	}
+
+	IEnumerable<string> BuildGameFontPathCandidates(string fontName)
+	{
+		if (string.IsNullOrWhiteSpace(fontName))
+			yield break;
+
+		string trimmed = fontName.Trim();
+		string fileName = trimmed;
+		if (!fileName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) && !fileName.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
+		{
+			foreach (string ext in new[] { ".ttf", ".otf" })
+			{
+				foreach (string dir in new[] { "font", "Font", "fonts", "Fonts" })
+				{
+					if (!string.IsNullOrEmpty(Program.ExeDir))
+						yield return System.IO.Path.Combine(Program.ExeDir, dir, trimmed + ext);
+					if (!string.IsNullOrEmpty(Program.ContentDir))
+						yield return System.IO.Path.Combine(Program.ContentDir, dir, trimmed + ext);
+				}
+			}
+			yield break;
+		}
+
+		foreach (string dir in new[] { "font", "Font", "fonts", "Fonts" })
+		{
+			if (!string.IsNullOrEmpty(Program.ExeDir))
+				yield return System.IO.Path.Combine(Program.ExeDir, dir, fileName);
+			if (!string.IsNullOrEmpty(Program.ContentDir))
+				yield return System.IO.Path.Combine(Program.ContentDir, dir, fileName);
+		}
 	}
 
 	const int EscapedConsolePartZIndex = 2;

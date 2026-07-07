@@ -1,5 +1,11 @@
 # CODE_MAP
 
+## 2026-07-07 eraFL game-icons 片段字体渲染适配
+
+- `EmueraContent.ResolveConsoleFont`：HTML/ERB 文本片段不再一律使用主控制台字体；当 `ConsoleStyledString.Font.FontFamily.Name` 指向非主字体时，会从游戏目录 `font/Font/fonts/Fonts` 下按 `*.ttf`/`*.otf` 懒加载对应字体并缓存。该路径用于兼容 eraFL `ICON()` 输出的 `@F:game-icons@...@/F@` 和 `<font face='game-icons'>...`。
+- `EmueraContent.CreateTextPart` 与 `ConsoleRenderSurface.DrawText`：Controls 后端和 Canvas 后端都按片段字体绘制，避免 `0xf347`、`0xf349` 等私有区图标码点被 `MS Gothic`/主字体误绘成“周”“閉”或方块。
+- Android 边界：主控制台字体仍保留 Android 使用内置字体的策略；片段字体不走该短路，会继续尝试加载游戏目录字体。若游戏目录缺少对应字体文件，则回退主字体并记录一次缺失缓存，避免热路径重复 I/O。
+
 ## 2026-07-07 eraFL CSV sprite 生命周期与同名 fallback 修复
 
 - `AppContents`：新增 CSV sprite 名称登记表，`LoadContents()`/懒加载 CSV 索引阶段都会登记资源名；`SpriteDisposeAll(false)` 改为只清动态创建的 sprite，保留 `BG01`、立绘等 CSV 定义资源，`SpriteDisposeAll(true)` 才完整清空。
