@@ -208,6 +208,26 @@ namespace MinorShift.Emuera.GameProc
 			return (int)estimate;
 		}
 
+		private void TryPreRegisterSnakeDynamicVariable(LogicalLine line)
+		{
+			InstructionLine instruction = line as InstructionLine;
+			if (instruction == null || instruction.ParentLabelLine == null)
+				return;
+
+			bool isString;
+			if (instruction.FunctionCode == FunctionCode.VARS)
+				isString = true;
+			else if (instruction.FunctionCode == FunctionCode.VARI)
+				isString = false;
+			else
+				return;
+
+			// v24/snake 系スクリプトでは VARI/VARS 宣言が使用箇所より後に置かれることがある。
+			// 構文チェック前に同じ関数のプライベート変数として登録し、実際の初期化は従来通り命令実行時に行う。
+			if (UserDefinedVariableData.TryCreateSnakeDynamic(instruction.PeekArgumentPrimitive(), isString, out UserDefinedVariableData data, out _, out _))
+				instruction.ParentLabelLine.AddPrivateVariable(data);
+		}
+
 		private sealed class PPState
 		{
 			bool skip = false;
@@ -499,7 +519,7 @@ namespace MinorShift.Emuera.GameProc
                         //        replacedLine = replacedLine.Replace(pair.Key, pair.Value);
                         //    st = new StringStream(replacedLine);
                         //}
-                        nextLine = LogicalLineParser.ParseLine(st, position, output);
+                        nextLine = LogicalLineParser.ParseLine(st, position, output, lastLabelLine);
 						if (nextLine == null)
 							continue;
 						if (nextLine is InstructionLine)
@@ -513,6 +533,7 @@ namespace MinorShift.Emuera.GameProc
 					if (lastLabelLine == null)
 						ParserMediator.Warn("関数が定義されるより前に行があります", position, 1);
 					nextLine.ParentLabelLine = lastLabelLine;
+					TryPreRegisterSnakeDynamicVariable(nextLine);
 					lastLine = addLine(nextLine, lastLine);
 				}
 				addLine(new NullLine(), lastLine);

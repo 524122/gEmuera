@@ -335,6 +335,37 @@ internal static class SpriteManager
 		return CacheTextureInfo(name, filename, ti);
 	}
 
+	internal static TextureInfo GetTextureInfoForScriptComposition(string name, string filename)
+	{
+		if(string.IsNullOrEmpty(filename))
+			return null;
+		string resolved = uEmuera.Utils.ResolveExistingFilePath(filename);
+		if(!string.IsNullOrEmpty(resolved))
+			filename = resolved;
+		if(!uEmuera.Utils.FileExists(filename))
+			return null;
+
+		TextureInfo ti = null;
+		lock(dictLock)
+		{
+			ti = GetTextureInfoCachedLocked(name, filename);
+			if(ti != null && !ti.IsPlaceholder && ti.image != null && !ti.IsDisposed)
+			{
+				ti.Touch();
+				return ti;
+			}
+		}
+
+		Image img = LoadImageOrPlaceholder(filename, name, out bool isPlaceholder);
+		if(isPlaceholder || img == null || img.GetWidth() <= 0 || img.GetHeight() <= 0)
+		{
+			img?.Dispose();
+			return null;
+		}
+		ti = new TextureInfo(name, img, false);
+		return CacheTextureInfo(name, filename, ti);
+	}
+
 	internal static bool TryGetTextureInfoCached(string name, string filename, out TextureInfo ti)
 	{
 		lock(dictLock)

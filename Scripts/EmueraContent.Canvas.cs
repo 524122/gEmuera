@@ -86,6 +86,12 @@ public partial class EmueraContent
 			// 只为该图片创建 EmueraImage overlay，避免把包含文本的整行退回旧节点树。
 			return true;
 		}
+		if (part is ConsoleDivPart)
+		{
+			// eraFL 的底图、立绘、房间/地图框大量依赖 <div><img></div> 的裁剪、depth 和跨行叠放。
+			// Canvas div overlay 在异步补图、负 y 和兄弟 div 层级上仍有边界差异；为可用性优先，div 行整行退回 Control 渲染。
+			return false;
+		}
 		if (part is ConsoleDivPart div)
 		{
 			// div 的盒模型和子按钮仍复用旧 Control 构建逻辑；这里只允许相对定位 div 做局部 overlay。
@@ -181,9 +187,35 @@ public partial class EmueraContent
 			if (button?.StrArray == null)
 				continue;
 			foreach (var part in button.StrArray)
+				PrepareCanvasPartResources(part);
+		}
+	}
+
+	void PrepareCanvasPartResources(AConsoleDisplayPart part)
+	{
+		if (part == null)
+			return;
+		if (part is ConsoleImagePart image)
+		{
+			TryResolveCanvasImage(image, 0, out _);
+			return;
+		}
+		if (part is ConsoleDivPart div && div.Children != null)
+		{
+			// eraFL 的状态栏底图是 div 子树里的 <img src='BG01'>。
+			// Canvas 后端首帧需要递归预热子图，否则只会先构建 spacer，
+			// 在部分刷新路径下看起来像“底图没有输出”。
+			foreach (var childLine in div.Children)
 			{
-				if (part is ConsoleImagePart image)
-					TryResolveCanvasImage(image, 0, out _);
+				if (childLine?.Buttons == null)
+					continue;
+				foreach (var childButton in childLine.Buttons)
+				{
+					if (childButton?.StrArray == null)
+						continue;
+					foreach (var childPart in childButton.StrArray)
+						PrepareCanvasPartResources(childPart);
+				}
 			}
 		}
 	}
@@ -214,6 +246,18 @@ public partial class EmueraContent
 		if (sprite == null && !string.IsNullOrEmpty(image.ResourceName))
 			sprite = AppContents.GetSprite(image.ResourceName);
 		return sprite;
+	}
+
+	bool ShouldUseRawImageResourceFallback(string resourceName, ASprite sprite)
+	{
+		// HTML img 的 src 既可能是 CSV sprite 名，也可能是裸文件路径。CSV sprite 已命中时，
+		// 纹理为空通常只是异步解码/上传尚未完成，不能再递归搜索同名文件，否则 eraFL 的
+		// BG01 会从 SYSTEM/BG.csv 定义的天空图误落到 mapimage/bg01.webp。
+		return sprite == null
+			&& !string.IsNullOrEmpty(resourceName)
+			&& !AppContents.IsCsvSpriteName(resourceName)
+			&& !IsDynamicCutinName(resourceName)
+			&& !failedTextureSearches.Contains(resourceName);
 	}
 
 	void AddCanvasImageOverlay(int lineNo, ConsoleImagePart image, int relX, List<CanvasImageOverlay> overlays)
@@ -358,9 +402,7 @@ public partial class EmueraContent
 
 		var texture = GetSpriteTexture(sprite);
 		if (texture == null
-			&& !string.IsNullOrEmpty(image.ResourceName)
-			&& !IsDynamicCutinName(image.ResourceName)
-			&& !failedTextureSearches.Contains(image.ResourceName))
+			&& ShouldUseRawImageResourceFallback(image.ResourceName, sprite))
 		{
 			texture = ResolveCanvasTextureByResourceName(image.ResourceName);
 		}

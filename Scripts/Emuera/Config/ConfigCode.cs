@@ -148,6 +148,7 @@ namespace MinorShift.Emuera
 		PluginAvailableWarn,
 		DisableBeforeErrorThrow,
 		UseScopedVariableInstruction,
+		LoadTextValidExtensions,
 
 		MoneyLabel = 100,
 		MoneyFirst = 101,

@@ -189,6 +189,29 @@ internal static class GenericUtils
         return IsMainThread();
     }
 
+    public static void ShellOpen(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+            return;
+
+        void OpenTarget()
+        {
+            try
+            {
+                OS.ShellOpen(target);
+            }
+            catch (Exception ex)
+            {
+                Warn(EmueraLogCategory.General, () => $"[SHELL] Open failed: {RedactTracePath(target)} - {ex.Message}");
+            }
+        }
+
+        if (IsMainThread())
+            OpenTarget();
+        else
+            EnqueueUI(OpenTarget);
+    }
+
     public static void SetPointerPosition(float x, float y)
     {
         var point = new uEmuera.Drawing.Point((int)MathF.Round(x), (int)MathF.Round(y));

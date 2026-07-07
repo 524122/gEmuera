@@ -38,6 +38,58 @@ namespace MinorShift.Emuera.GameProc
 			return Create(dimline.WC, dimline.Dims, dimline.IsPrivate, dimline.SC, dimline.IsFloat);
 		}
 
+		public static bool TryCreateSnakeDynamic(string statement, bool isString, out UserDefinedVariableData data, out string initialValueSource, out string errorMessage)
+		{
+			data = null;
+			initialValueSource = "";
+			errorMessage = "";
+
+			if (statement == null)
+				statement = "";
+			int comment = statement.IndexOf(';');
+			if (comment >= 0)
+				statement = statement.Substring(0, comment);
+			int equal = statement.IndexOf('=');
+			string left = equal >= 0 ? statement.Substring(0, equal) : statement;
+			initialValueSource = equal >= 0 ? statement.Substring(equal + 1) : "";
+			string[] leftParts = left.Split(',');
+			string name = leftParts.Length > 0 ? leftParts[0].Trim() : "";
+			if (string.IsNullOrEmpty(name))
+			{
+				errorMessage = "変数名が指定されていません";
+				return false;
+			}
+			if (Config.ICVariable)
+				name = name.ToUpper();
+
+			int[] lengths = new int[Math.Max(1, leftParts.Length - 1)];
+			if (leftParts.Length == 1)
+			{
+				lengths[0] = 1;
+			}
+			else
+			{
+				for (int i = 1; i < leftParts.Length; i++)
+				{
+					if (!int.TryParse(leftParts[i].Trim(), out lengths[i - 1]) || lengths[i - 1] <= 0)
+					{
+						errorMessage = "VARI/VARSの配列長が不正です";
+						return false;
+					}
+				}
+			}
+
+			data = new UserDefinedVariableData
+			{
+				Name = name,
+				Static = false,
+				Lengths = lengths,
+				Dimension = lengths.Length,
+				TypeIsStr = isString
+			};
+			return true;
+		}
+
 		public static UserDefinedVariableData Create(WordCollection wc, bool dims, bool isPrivate, ScriptPosition sc)
 		{
 			return Create(wc, dims, isPrivate, sc, false);

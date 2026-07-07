@@ -62,48 +62,46 @@ namespace MinorShift.Emuera.Content
 			}
 		}
 
-		internal void GCreateFromF(Bitmap bmp, bool useGDI)
+		internal bool GCreateFromF(Bitmap bmp, bool useGDI)
 		{
 			lock (imageSync)
 			{
 				this.GDispose();
+				if (bmp == null)
+					return false;
 				is_created = true;
 				width = bmp.Width;
 				height = bmp.Height;
 				renderBitmap = new BitmapRenderTexture(width, height);
 				Bitmap = renderBitmap;
-				bool sourceUnavailable = false;
 				if (bmp is BitmapRenderTexture rt && rt.image != null)
 				{
 					godotImage = rt.image.Duplicate() as Godot.Image;
 				}
 				else if (bmp is BitmapTexture bt)
 				{
-					var ti = bt.TextureInfo;
+					var ti = bt.EnsureTextureInfoForScriptComposition();
 					if (ti != null && !ti.IsPlaceholder && ti.image != null)
 						godotImage = ti.image.Duplicate() as Godot.Image;
-					else
-					{
-						sourceUnavailable = true;
-						bt.RequestTextureInfoAsync();
-					}
 				}
 				else if (!string.IsNullOrEmpty(bmp.path))
 				{
-					var ti = SpriteManager.GetTextureInfo(bmp.path, bmp.path);
+					var ti = SpriteManager.GetTextureInfoForScriptComposition(bmp.path, bmp.path);
 					if (ti == null && !string.IsNullOrEmpty(bmp.filename))
-						ti = SpriteManager.GetTextureInfo(bmp.filename, bmp.path);
+						ti = SpriteManager.GetTextureInfoForScriptComposition(bmp.filename, bmp.path);
 					if (ti != null && !ti.IsPlaceholder && ti.image != null)
 						godotImage = ti.image.Duplicate() as Godot.Image;
-					else
-						sourceUnavailable = true;
 				}
-				if (godotImage != null && godotImage.GetFormat() != Godot.Image.Format.Rgba8)
+				if (godotImage == null || godotImage.GetWidth() <= 0 || godotImage.GetHeight() <= 0)
+				{
+					this.GDispose();
+					return false;
+				}
+				if (godotImage.GetFormat() != Godot.Image.Format.Rgba8)
 					godotImage.Convert(Godot.Image.Format.Rgba8);
 				renderBitmap.image = godotImage;
 				MarkImageMutated();
-				if (sourceUnavailable || godotImage == null)
-					SuppressCurrentDisplayRevision();
+				return true;
 			}
 		}
 
@@ -151,15 +149,17 @@ namespace MinorShift.Emuera.Content
 		/// GDRAWCIMG(int ID, str imgName, int destX, int destY, int destWidth, int destHeight)
 		/// エラーチェックは呼び出し元でのみ行う
 		/// </summary>
-		public void GDrawCImg(ASprite img, Rectangle destRect)
+		public bool GDrawCImg(ASprite img, Rectangle destRect)
 		{
 			lock (imageSync)
 			{
-				if (godotImage == null || img == null) return;
+				if (godotImage == null || img == null) return false;
 				if (DrawSpriteTo(img, destRect, null))
+				{
 					MarkImageMutated();
-				else
-					SuppressCurrentDisplayRevision();
+					return true;
+				}
+				return false;
 			}
 		}
 
@@ -167,15 +167,17 @@ namespace MinorShift.Emuera.Content
 		/// GDRAWCIMG(int ID, str imgName, int destX, int destY, int destWidth, int destHeight, float[][] cm)
 		/// エラーチェックは呼び出し元でのみ行う
 		/// </summary>
-		public void GDrawCImg(ASprite img, Rectangle destRect, float[][] cm)
+		public bool GDrawCImg(ASprite img, Rectangle destRect, float[][] cm)
 		{
 			lock (imageSync)
 			{
-				if (godotImage == null || img == null) return;
+				if (godotImage == null || img == null) return false;
 				if (DrawSpriteTo(img, destRect, cm))
+				{
 					MarkImageMutated();
-				else
-					SuppressCurrentDisplayRevision();
+					return true;
+				}
+				return false;
 			}
 		}
 
@@ -190,12 +192,9 @@ namespace MinorShift.Emuera.Content
 			{
 				if (single.BaseImage?.Bitmap is BitmapTexture bt && bt.sourceImage != null)
 				{
-					var ti = bt.TextureInfo;
+					var ti = bt.EnsureTextureInfoForScriptComposition();
 					if (ti == null || ti.IsPlaceholder || ti.image == null)
-					{
-						bt.RequestTextureInfoAsync();
 						return false;
-					}
 					srcImage = needsCm ? ti.image.Duplicate() as Godot.Image : ti.image;
 					srcRegion = new Godot.Rect2I(single.SrcRectangle.X, single.SrcRectangle.Y,
 						single.SrcRectangle.Width, single.SrcRectangle.Height);
@@ -210,9 +209,9 @@ namespace MinorShift.Emuera.Content
 				}
 				else if (single.BaseImage?.Bitmap is Bitmap bmp && !string.IsNullOrEmpty(bmp.path))
 				{
-					var ti = SpriteManager.GetTextureInfo(bmp.path, bmp.path);
+					var ti = SpriteManager.GetTextureInfoForScriptComposition(bmp.path, bmp.path);
 					if (ti == null && !string.IsNullOrEmpty(bmp.filename))
-						ti = SpriteManager.GetTextureInfo(bmp.filename, bmp.path);
+						ti = SpriteManager.GetTextureInfoForScriptComposition(bmp.filename, bmp.path);
 					if (ti != null && !ti.IsPlaceholder && ti.image != null)
 					{
 						srcImage = needsCm ? ti.image.Duplicate() as Godot.Image : ti.image;
@@ -241,12 +240,9 @@ namespace MinorShift.Emuera.Content
 
 					if (baseImage?.Bitmap is BitmapTexture bt && bt.sourceImage != null)
 					{
-						var ti = bt.TextureInfo;
+						var ti = bt.EnsureTextureInfoForScriptComposition();
 						if (ti == null || ti.IsPlaceholder || ti.image == null)
-						{
-							bt.RequestTextureInfoAsync();
 							return false;
-						}
 						srcImage = needsCm ? ti.image.Duplicate() as Godot.Image : ti.image;
 						srcRegion = new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
 					}
@@ -259,9 +255,9 @@ namespace MinorShift.Emuera.Content
 					}
 					else if (baseImage?.Bitmap is Bitmap bmp && !string.IsNullOrEmpty(bmp.path))
 					{
-						var ti = SpriteManager.GetTextureInfo(bmp.path, bmp.path);
+						var ti = SpriteManager.GetTextureInfoForScriptComposition(bmp.path, bmp.path);
 						if (ti == null && !string.IsNullOrEmpty(bmp.filename))
-							ti = SpriteManager.GetTextureInfo(bmp.filename, bmp.path);
+							ti = SpriteManager.GetTextureInfoForScriptComposition(bmp.filename, bmp.path);
 						if (ti != null && !ti.IsPlaceholder && ti.image != null)
 						{
 							srcImage = needsCm ? ti.image.Duplicate() as Godot.Image : ti.image;

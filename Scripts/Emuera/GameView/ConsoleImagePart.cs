@@ -269,6 +269,8 @@ namespace MinorShift.Emuera.GameView
 				subPixel = rawWidth - width;
 				return true;
 			}
+			if (AppContents.IsCsvSpriteName(resourceName))
+				return false;
 
 			foreach (string path in BuildImagePathCandidates(resourceName))
 			{

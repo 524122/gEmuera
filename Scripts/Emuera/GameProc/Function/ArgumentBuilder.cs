@@ -986,6 +986,11 @@ namespace MinorShift.Emuera.GameProc.Function
                     ret = new ExpressionArgument(null);
                     return ret;
                 }
+                LexicalAnalyzer.SkipWhiteSpace(st);
+                if (st.EOS)
+                    return new ExpressionArgument(null);
+                if (line.FunctionCode == FunctionCode.ONEINPUTS && !st.EOS && st.Current == ',')
+                    return new ExpressionArgument(null);
                 StrFormWord sfwt = LexicalAnalyzer.AnalyseFormattedString(st, FormStrEndWith.EoL, false);
                 if (!st.EOS)
                 {

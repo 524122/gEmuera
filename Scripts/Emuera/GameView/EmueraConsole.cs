@@ -216,6 +216,7 @@ namespace MinorShift.Emuera.GameView
 		}
 		public void CBG_Clear()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for(var i=0; i<cbgList.Count; ++i)
@@ -228,17 +229,22 @@ namespace MinorShift.Emuera.GameView
 						cimg.Img.Dispose();
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
-				CBG_ClearBMap();
+				changed |= ClearCbgButtonMapState();
 				cbgList.Add(new ClientBackGroundImage(0));
 				cbgList.Sort();
+				changed = true;
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearRange(int zmin, int zmax)
 		{
 			if (zmin > zmax)
 				return;
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count;i++)
@@ -254,12 +260,16 @@ namespace MinorShift.Emuera.GameView
 						cimg.Img.Dispose();
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearButton()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -273,21 +283,42 @@ namespace MinorShift.Emuera.GameView
 						cimg.Img.Dispose();
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
-				CBG_ClearBMap();
+				changed |= ClearCbgButtonMapState();
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearBMap()
 		{
-			cbgButtonMap = null;
-			selectingCBGButtonInt = -1;
-			lastSelectingCBGButtonInt = -1;
+			bool changed;
+			lock (cbgLock)
+				changed = ClearCbgButtonMapState();
+			if (changed)
+				RequestCbgRefresh();
 		}
 		public List<ClientBackGroundImage> GetCBGList()
 		{
 			lock (cbgLock)
 				return new List<ClientBackGroundImage>(cbgList);
+		}
+
+		private bool ClearCbgButtonMapState()
+		{
+			bool changed = cbgButtonMap != null || selectingCBGButtonInt != -1 || lastSelectingCBGButtonInt != -1;
+			cbgButtonMap = null;
+			selectingCBGButtonInt = -1;
+			lastSelectingCBGButtonInt = -1;
+			return changed;
+		}
+
+		private void RequestCbgRefresh()
+		{
+			// CBG/SETIMAGELAYER 只改背景列表时可能没有文本输出触发刷新。
+			// 这里只唤醒 uEmuera 窗口，实际 Godot 节点重建仍由 Window.Update 合并到下一帧执行。
+			window?.Refresh();
 		}
 
 		public bool CBG_SetGraphics(GraphicsImage gra, int x, int y, int zdepth, int width = 0, int height = 0, float opacity = 1.0f, float[][] colorMatrix = null)
@@ -316,6 +347,7 @@ namespace MinorShift.Emuera.GameView
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 			return true;
 		}
 
@@ -334,10 +366,12 @@ namespace MinorShift.Emuera.GameView
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 		}
 
 		public void ClearBackgroundImage()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -349,14 +383,18 @@ namespace MinorShift.Emuera.GameView
 						continue;
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void RemoveBackground(string key)
 		{
 			if (string.IsNullOrEmpty(key))
 				return;
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -369,8 +407,11 @@ namespace MinorShift.Emuera.GameView
 						continue;
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void SetImageLayer(string spriteName, long depth, int x, int y, int width, int height, int opacity, float[][] colorMatrix, bool followScroll)
@@ -379,6 +420,7 @@ namespace MinorShift.Emuera.GameView
 			if (sprite == null || !sprite.IsCreated)
 				return;
 			int zdepth = normalizeSnakeDepth(depth);
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -389,6 +431,7 @@ namespace MinorShift.Emuera.GameView
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 				ClientBackGroundImage cbg = new ClientBackGroundImage(zdepth);
@@ -405,11 +448,15 @@ namespace MinorShift.Emuera.GameView
 				cbg.snakeImageName = spriteName;
 				cbgList.Add(cbg);
 				cbgList.Sort();
+				changed = true;
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void ClearImageLayer(long depth)
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -420,13 +467,17 @@ namespace MinorShift.Emuera.GameView
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void ClearImageLayerAll()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -435,9 +486,12 @@ namespace MinorShift.Emuera.GameView
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public bool ExistsImageLayer(long depth)
@@ -539,6 +593,7 @@ namespace MinorShift.Emuera.GameView
 			cbgButtonMap = gra;
 			selectingCBGButtonInt = -1;
 			lastSelectingCBGButtonInt = -1;
+			RequestCbgRefresh();
 			return true;
 		}
 
@@ -560,6 +615,7 @@ namespace MinorShift.Emuera.GameView
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 			return true;
 		}
 		public int ClientWidth { get { return Config.WindowX; } }

@@ -462,7 +462,7 @@ namespace MinorShift.Emuera.GameProc
 		}
 		
 		
-		public static LogicalLine ParseLine(StringStream stream, ScriptPosition position, EmueraConsole console)
+		public static LogicalLine ParseLine(StringStream stream, ScriptPosition position, EmueraConsole console, FunctionLabelLine currentLabel = null)
 		{
 			//int lineNo = position.LineNo;
 			string errMes;
@@ -502,31 +502,38 @@ namespace MinorShift.Emuera.GameProc
 					//命令文
 					if (func != null)//関数文
 					{
-						if (stream.EOS) //引数の無い関数
-							return new InstructionLine(position, func, stream);
-						if ((stream.Current != ';') && (stream.Current != ' ') && (stream.Current != '\t') && (!Config.SystemAllowFullSpace || (stream.Current != '　')))
-						{
-							if (stream.Current == '　')
-								errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています(この警告はシステムオプション「" + Config.GetConfigName(ConfigCode.SystemAllowFullSpace) + "」により無視できます)";
-							else
-								errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています";
-							goto err;
-						}
-						stream.ShiftNext();
-						// 命令名と同名の変数への代入を優先する
-						// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応
-						// ※PRINTFORM = ... のような正当な命令呼び出しを誤判定しないよう、
-						//   VARS/VARI のみに限定する
-						LexicalAnalyzer.SkipWhiteSpace(stream);
-						if (!stream.EOS && stream.Current == '='
-						    && (func.Code == FunctionCode.VARS || func.Code == FunctionCode.VARI))
+						if (ShouldPreferPrivateVariableAssignment(idCode, currentLabel, stream))
 						{
 							stream.Seek(0, System.IO.SeekOrigin.Begin);
-							// Fall through to assignment parsing below
 						}
 						else
 						{
-							return new InstructionLine(position, func, stream);
+							if (stream.EOS) //引数の無い関数
+								return new InstructionLine(position, func, stream);
+							if ((stream.Current != ';') && (stream.Current != ' ') && (stream.Current != '\t') && (!Config.SystemAllowFullSpace || (stream.Current != '　')))
+							{
+								if (stream.Current == '　')
+									errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています(この警告はシステムオプション「" + Config.GetConfigName(ConfigCode.SystemAllowFullSpace) + "」により無視できます)";
+								else
+									errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています";
+								goto err;
+							}
+							stream.ShiftNext();
+							// 命令名と同名の変数への代入を優先する
+							// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応
+							// ※PRINTFORM = ... のような正当な命令呼び出しを誤判定しないよう、
+							//   VARS/VARI のみに限定する
+							LexicalAnalyzer.SkipWhiteSpace(stream);
+							if (!stream.EOS && stream.Current == '='
+							    && (func.Code == FunctionCode.VARS || func.Code == FunctionCode.VARI))
+							{
+								stream.Seek(0, System.IO.SeekOrigin.Begin);
+								// Fall through to assignment parsing below
+							}
+							else
+							{
+								return new InstructionLine(position, func, stream);
+							}
 						}
 					}
 				}
@@ -577,6 +584,34 @@ namespace MinorShift.Emuera.GameProc
 				uEmuera.Media.SystemSounds.Hand.Play();
 				return new InvalidLine(position, e.Message);
 			}
+		}
+
+		static bool ShouldPreferPrivateVariableAssignment(string idCode, FunctionLabelLine currentLabel, StringStream stream)
+		{
+			if (currentLabel == null || string.IsNullOrEmpty(idCode))
+				return false;
+			string varName = Config.ICVariable ? idCode.ToUpper() : idCode;
+			if (currentLabel.GetPrivateVariable(varName) == null)
+				return false;
+
+			int savedPosition = stream.CurrentPosition;
+			LexicalAnalyzer.SkipWhiteSpace(stream);
+			bool result = IsPrivateVariableAssignmentStart(stream);
+			stream.CurrentPosition = savedPosition;
+			return result;
+		}
+
+		static bool IsPrivateVariableAssignmentStart(StringStream stream)
+		{
+			if (stream.EOS)
+				return false;
+			if (stream.Current == '=')
+				return true;
+			if ((stream.Current == '+' || stream.Current == '-') && stream.Next == stream.Current)
+				return true;
+			if ((stream.Current == '+' || stream.Current == '-' || stream.Current == '*' || stream.Current == '/' || stream.Current == '%' || stream.Current == '&' || stream.Current == '|' || stream.Current == '^') && stream.Next == '=')
+				return true;
+			return false;
 		}
 		
 	}

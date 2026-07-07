@@ -2509,56 +2509,24 @@ namespace MinorShift.Emuera.GameProc.Function
 			{
 				StringStream st = line.PopArgumentPrimitive();
 				string statement = st == null ? "" : st.Substring();
-				int comment = statement.IndexOf(';');
-				if (comment >= 0)
-					statement = statement.Substring(0, comment);
-				int equal = statement.IndexOf('=');
-				string left = equal >= 0 ? statement.Substring(0, equal) : statement;
-				string right = equal >= 0 ? statement.Substring(equal + 1) : "";
-				string[] leftParts = left.Split(',');
-				string name = leftParts[0].Trim();
-				if (string.IsNullOrEmpty(name))
+				if (!UserDefinedVariableData.TryCreateSnakeDynamic(statement, isString, out UserDefinedVariableData varData, out string right, out string errorMessage))
 				{
-					warn("変数名が指定されていません", line, 2, false);
+					warn(errorMessage, line, 2, false);
 					return null;
 				}
-				int[] lengths = new int[Math.Max(1, leftParts.Length - 1)];
-				if (leftParts.Length == 1)
-				{
-					lengths[0] = 1;
-				}
-				else
-				{
-					for (int i = 1; i < leftParts.Length; i++)
-					{
-						if (!int.TryParse(leftParts[i].Trim(), out lengths[i - 1]) || lengths[i - 1] <= 0)
-						{
-							warn("VARI/VARSの配列長が不正です", line, 2, false);
-							return null;
-						}
-					}
-				}
-				UserDefinedVariableData varData = new UserDefinedVariableData
-				{
-					Name = name,
-					Static = false,
-					Lengths = lengths,
-					Dimension = lengths.Length,
-					TypeIsStr = isString
-				};
 				if (line.ParentLabelLine != null)
 					line.ParentLabelLine.AddPrivateVariable(varData);
 				if (isString)
-					return new SnakeVarsArgument(name, parseStringInitialValue(right));
+					return new SnakeVarsArgument(varData.Name, parseStringInitialValue(right));
 				IOperandTerm initial = null;
-				if (!string.IsNullOrWhiteSpace(right) && lengths.Length == 1 && lengths[0] == 1)
+				if (!string.IsNullOrWhiteSpace(right) && varData.Lengths.Length == 1 && varData.Lengths[0] == 1)
 				{
 					WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(right), LexEndWith.EoL, LexAnalyzeFlag.None);
 					initial = ExpressionParser.ReduceIntegerTerm(wc, TermEndWith.EoL);
 					if (initial != null)
 						initial = initial.Restructure(exm);
 				}
-				return new SnakeVariArgument(name, initial ?? new SingleTerm(0));
+				return new SnakeVariArgument(varData.Name, initial ?? new SingleTerm(0));
 			}
 
 			static string parseStringInitialValue(string right)

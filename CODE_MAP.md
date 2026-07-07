@@ -1,5 +1,61 @@
 # CODE_MAP
 
+## 2026-07-07 eraFL CSV sprite 生命周期与同名 fallback 修复
+
+- `AppContents`：新增 CSV sprite 名称登记表，`LoadContents()`/懒加载 CSV 索引阶段都会登记资源名；`SpriteDisposeAll(false)` 改为只清动态创建的 sprite，保留 `BG01`、立绘等 CSV 定义资源，`SpriteDisposeAll(true)` 才完整清空。
+- `AppContents.BuildLazyResourceIndex`：普通 sprite 分支重新写入 `lazyImageDictionary[spriteName] = definition` 并登记 CSV 名称，避免从 snake profile/lazy 模式启动时 `BG01` 未进入懒加载索引。
+- `EmueraContent.ShouldUseRawImageResourceFallback` 与 `ConsoleImagePart.TryResolveDynamicImageWidth`：CSV sprite 名称即使当前纹理未就绪，也禁止递归按裸文件名搜索同名图片或推断宽度，阻断 eraFL `BG01` 从 `resources/SYSTEM/BG.csv` 串到 `resources/mapimage/bg01.webp`。
+- 兼容边界：这只改变 CSV sprite 生命周期和 HTML 图片 fallback 优先级；真实裸文件路径、动态 cutin、`SPRITECREATEFROMFILE` 生成的非 CSV sprite 仍按原路径解析。
+
+## 2026-07-07 eraFL HTML div 行稳定优先渲染
+
+- `EmueraContent.Canvas.CanRenderPartOnCanvas`：所有包含 `ConsoleDivPart` 的行不再进入 Canvas div overlay 优化路径，而是整行退回 Control 渲染；Canvas 仍负责普通文本、形状和简单图片。
+- 根因：eraFL 的状态栏底图、`DRAW_PORTRAIT`/`DRAW_STILL` 立绘、房间/地图框大量依赖 `<div><img></div>` 的裁剪、`depth`、负坐标和跨行叠放。Canvas div overlay 虽能减少节点，但在异步补图、负 y 和兄弟 div 层级上仍存在边界差异。
+- 取舍：这是稳定优先方案，可能增加 HTML/div 密集页面的 Godot Control 节点数；但避免全局切回 Controls，普通文本和简单图片仍走 Canvas 快路径。若后续要恢复性能优化，应先用 eraFL 状态栏、立绘、住房/地图界面做逐项视觉回归。
+
+## 2026-07-07 eraFL HTML 图片 div 异步刷新补强
+
+- `EmueraContent.IsPureImageLine`：纯图片行判定递归识别 `ConsoleDivPart` 子树，兼容 eraFL `DRAW_PORTRAIT`、`DRAW_STILL` 和 `SHOW_STATUS.ERB` 状态栏底图常用的 `<div><img ...></div>` 写法。图片还在异步解码/上传时，这类包装图片会和顶层 `<img>` 一样延后提交，避免先显示空 div/spacer 后表现为“有框没图”。
+- `RegisterCanvasImageOverlays` / `RegisterCanvasDivOverlays` 以及对应释放路径：overlay 节点集合变化后显式标记 `canvasOverlayRowsDirty`，确保批量输出和异步补图后按最新 `lineLayoutEntries` 重新定位 Canvas overlay。
+- 影响范围：仅改变 Canvas 后端对 HTML 图片 div 首帧未就绪与 overlay 重定位的处理；含文字的 div、按钮行和普通文本不进入纯图片延后路径。
+
+## 2026-07-07 eraFL CBG/SETIMAGELAYER 换图刷新触发
+
+- `EmueraConsole.CBG_Clear` / `CBG_ClearRange` / `CBG_SetImage` / `CBG_SetButtonMap` / `CBG_SetButtonImage` 以及 `AddBackgroundImage` / `RemoveBackground` / `SetImageLayer` / `ClearImageLayer*`：背景图层列表或按钮图层状态发生变化后统一调用 `RequestCbgRefresh()`，只唤醒 `uEmuera.Window.MainWindow.Refresh()` 的 dirty 标记，由现有 `Window.Update()` 在下一帧合并拉取 `cbgList` 并调用 `EmueraContent.RefreshCBG`。
+- 根因：eraFL 图像显示库实际使用 `CBGSETG/CBGSETSPRITE/CBGSETBUTTONSPRITE/CBGSETBMAPG/CBGCLEAR/CBGREMOVERANGE` 做背景换图；这些函数已实现，但此前只修改后台 `cbgList`，若脚本本轮没有普通文本刷新，Godot 侧不会立即收到背景图层变化。
+- 兼容边界：不在 CBG 函数里直接排 Godot UI 队列或重建节点，避免多次连续 `CBGSET*` 在移动端造成热路径抖动；刷新仍走原有显示桥和异步纹理重试逻辑。
+
+## 2026-07-07 eraFL 立绘同步合成与 resources 路径回退
+
+- `SpriteManager.GetTextureInfoForScriptComposition` / `BitmapTexture.EnsureTextureInfoForScriptComposition`：为 ERB 图像合成链路提供同步真实像素读取，不把解码失败或未就绪的占位纹理当作可合成源；若已有占位缓存且本次读到真实图，会覆盖占位缓存。
+- `GraphicsImage.GCreateFromF` / `GraphicsImage.GDrawCImg`：`GCREATEFROMFILE`、`GLOAD`、`GDRAWSPRITE` 等脚本合成命令改为按真实绘制成功返回 `1/0`，失败时不再留下 `IsCreated=true` 的空图，避免后续 `SPRITECREATE` 生成空立绘。
+- `Creator.Method.ResolveGraphicsResourceFilePath` / `AppContents.ResolveDynamicSpriteFilePath`：相对图片路径按游戏根目录优先、`resources/` 目录回退解析，并避免显式 `resources/` 前缀被拼成 `resources/resources`。这用于兼容 eraFL 固定立绘路径如 `portrait/prt_FIX/*.webp` 实际位于 `resources/portrait/prt_FIX/` 的脚本写法。
+
+## 2026-07-07 GetSpriteTexture 异步纹理 pending 追踪补全
+
+- `EmueraContent.GetSpriteTexture` line 3704：修复 `ti.texture == null` 分支缺失 `TrackAsyncTextureRequestForCurrentRender()` 调用的问题。
+- 根因：当 BitmapTexture 的 `CachedTextureInfo` 已存在但 `ti.texture` 为 null 时（ImageTexture.CreateFromImage 失败或首次 lazy create 时 image 解码未完成），原代码直接返回 null 且**未追踪 pending**，导致 `ProcessAsyncTextureRefreshes` 永远不会重试该行。
+- 影响：eraFL 状态栏 BG01 底图首次渲染时纹理未就绪 → 画 spacer → 后续异步完成也不重刷 → 底图永久缺失。
+- 修复后：即使 ti.texture 为 null 也追踪 pending，确保 `TextureLoadVersion` 递增后会触发 `AddLine(pendingLine, true)` 重绘。
+
+## 2026-07-07 HtmlManager 支持 div 自闭合语法
+
+- `HtmlManager.tagAnalyze` case "div"：检测 `<div ... />` 自闭合语法（wc 最后一个 token 是 `/` 即 OperatorCode.Div）。自闭合 div 直接返回空子行的 `ConsoleDivPart`，等价于 `<div ...></div>`，不再设置 `PendingDivTag` 等待 `ReadDivInnerHtml`。
+- 根因：eraFL `SYSTEM/UI\CONTAINER/UI_CONTAINER_MAIN.ERB:96` 包含多个 `<div ... />` 自闭合标签，原 HtmlManager 不支持该语法导致解析失败，`SHOW_STATUS.ERB:70` 调用 `UIC_SHOW` 时抛出异常，line 239 的 BG01 状态栏底图输出根本没被执行。2026-07-07 前三次修复（003/004/005）都在修渲染路径，但渲染代码从未被调用过。
+
+## 2026-07-07 eraFL 状态栏背景资源优先级修复
+
+- `EmueraContent.ShouldUseRawImageResourceFallback`：HTML `<img src>` 先按 `AppContents.GetSprite` 解析 CSV sprite。只要 sprite 定义已经命中，即使本帧纹理仍在异步解码/上传中，也不再按裸文件名递归搜索同名图片；只有完全没有 sprite 定义时才走文件 fallback。该规则避免 eraFL `SHOW_STATUS.ERB` 的 `BG01` 从 `resources/SYSTEM/BG.csv` 指向的天空状态栏误落到 `resources/mapimage/bg01.webp`。
+
+## 2026-07-07 eraFL 状态栏 div 子层级修正
+
+- `EmueraContent.BuildConsoleButton` / `AddPartToContainer`：新增 `allowEscapedPartZ` 传递开关。普通控制台行里的大图仍可用 escaped `ZIndex` 跨出行高；但 `BuildDivControl` 渲染 div 子行时会关闭该抬升，避免 div 内背景图在 Godot 相对 `ZIndex` 下越过外层 HTML `depth`，盖住同批次后续文字 div。该规则用于兼容 eraFL `SHOW_STATUS.ERB` 中背景 div 与文字 div 叠放的状态栏。
+
+## 2026-07-07 eraFL HTML div 层级与制表符测量兼容
+
+- `EmueraContent.GetGodotZIndexForHtmlDepth`：HTML `depth` 仍按数值越大越靠后的语义排序，但整体映射到正向 `ZIndex` 基准之上，避免 Canvas 后端把 `depth='1'` 的 eraFL 房间框压到绘制面背后，只剩无 depth 的通路遮罩可见。
+- `StringMeasure.GetDisplayLength`：包含 tab 的字符串不再在 `GRAPHICS` 模式下替换为 8 个空格，而是走固定半角/全角网格测量；这用于兼容 eraFL `TAG_PRINT` 多行字符串把源码缩进带入按钮片段时的底部选项排版。
+
 ## 2026-07-03 同名图片跨目录缓存隔离
 
 - `SpriteManager`：文件纹理缓存改为以完整规范化路径为主要 key，不再把 `Path.GetFileName()` 作为全局别名；`GetSprite` 和旧同步 `Loading` 回调也改用同一套路径级 key。这样不同目录下同名 `webp/png/jpg` 不会复用同一个 `TextureInfo`，避免 TW 角色立绘在同名文件跨文件夹时串图。仅在请求名本身是路径或没有文件路径时才保留 name alias。

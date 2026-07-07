@@ -30,7 +30,7 @@ static ConfigData() { }
 
 		private ConfigData() { setDefault(); }
 
-		private const int ConfigItemCapacity = 79;
+		private const int ConfigItemCapacity = 80;
 		private const int ReplaceItemCapacity = 50;
 		private const int DebugItemCapacity = 20;
 
@@ -133,6 +133,7 @@ static ConfigData() { }
 			{ "DISABLE BEFORE_ERROR/THROW EVENTS", ConfigCode.DisableBeforeErrorThrow },
 			{ "USE SCOPED VARIABLE INSTRUCTION", ConfigCode.UseScopedVariableInstruction },
 			{ "USESCOPEDVARIABLEINSTRUCTION", ConfigCode.UseScopedVariableInstruction },
+			{ "VALID EXTENSIONS FOR LOADTEXT AND SAVETEXT", ConfigCode.LoadTextValidExtensions },
 		};
 
 		private static readonly Dictionary<string, ConfigCode> englishReplaceAliases = new Dictionary<string, ConfigCode>(StringComparer.OrdinalIgnoreCase)
@@ -175,7 +176,6 @@ static ConfigData() { }
 			"SKIASHARP FONT EDGING",
 			"RENDERING BACKEND",
 			"STRING OF REPLACING NEW LINE CODE INSIDE CONTINUATION",
-			"VALID EXTENSIONS FOR LOADTEXT AND SAVETEXT",
 			"OUTPUT ENGLISH ITEMS IN THE CONFIG FILE",
 			"EMUERA INTERFACE LANGUAGE",
 			"PATH TO A CUSTOM WINDOW ICON",
@@ -289,6 +289,7 @@ static ConfigData() { }
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.PluginAvailableWarn, "外部プラグインが有効時に警告を表示する", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.DisableBeforeErrorThrow, "BEFORE_ERROR/THROWイベントを無効化する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseScopedVariableInstruction, "VARI/VARS命令を利用する", true);
+			configArray[i++] = new ConfigItem<string>(ConfigCode.LoadTextValidExtensions, "LOADTEXTとSAVETEXTで使える拡張子", "txt");
 
 			i = 0;
 			debugArray[i++] = new ConfigItem<bool>(ConfigCode.DebugShowWindow, "起動時にデバッグウインドウを表示する", true);

@@ -100,6 +100,19 @@ namespace uEmuera.Drawing
 		{
 			get { return TryResolveCachedTextureInfo(); }
 		}
+		internal SpriteManager.TextureInfo EnsureTextureInfoForScriptComposition()
+		{
+			var ti = SpriteManager.GetTextureInfoForScriptComposition(path, path);
+			if (ti == null && !string.IsNullOrEmpty(filename))
+				ti = SpriteManager.GetTextureInfoForScriptComposition(filename, path);
+			textureinfo = ti;
+			if (textureinfo != null)
+			{
+				size.Width = textureinfo.width;
+				size.Height = textureinfo.height;
+			}
+			return textureinfo;
+		}
 		SpriteManager.TextureInfo textureinfo = null;
 
 		SpriteManager.TextureInfo EnsureTextureInfo()

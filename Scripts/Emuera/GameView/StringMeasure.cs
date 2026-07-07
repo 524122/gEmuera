@@ -67,8 +67,13 @@ namespace MinorShift.Emuera.GameView
 			if (string.IsNullOrEmpty(s))
 				return 0;
 
-			if (textDrawingMode == TextDrawingMode.GRAPHICS && s.Contains("\t"))
-				s = s.Replace("\t", "        ");
+			if (s.IndexOf('\t') >= 0)
+			{
+				// eraFL 的 TAG_PRINT 多行字符串会把源码缩进 tab 带进按钮片段。
+				// 原生绘制不会把这些缩进扩成固定 8 个空格；这里改用固定网格规则，
+				// 让测量宽度与 Godot 侧逐格绘制保持一致，避免按钮被撑宽后换行散开。
+				return GetDisplayLengthByRules(s, font);
+			}
 
 			// 如果字体测量未启用或初始化失败，降级到规则判断
 			if (!useFontMeasurement || !FontModel.IsInitialized)

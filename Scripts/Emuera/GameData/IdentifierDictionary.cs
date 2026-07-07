@@ -412,8 +412,6 @@ namespace MinorShift.Emuera
 					case DefinedNameType.SystemInstrument:
 						if (methodDic.ContainsKey(varName))
 						{
-							errMes = "変数名" + varName + "はEmueraの式中関数名として使われています";
-							warnLevel = 1;
 							break;
 						}
 						else
@@ -426,8 +424,6 @@ namespace MinorShift.Emuera
 							break;
 						}
 					case DefinedNameType.SystemMethod:
-						errMes = "変数名" + varName + "はEmueraの式中関数名として使われています";
-						warnLevel = 1;
 						break;
 					case DefinedNameType.SystemVariable:
 						//システム変数の上書きは不可

@@ -971,6 +971,7 @@ public partial class EmueraContent : Control
 	}
 
 	const int EscapedConsolePartZIndex = 2;
+	const int HtmlDivZIndexBase = 1024;
 
 	// The following helpers compute absolute row bounds from every part in a
 	// ConsoleDisplayLine. Images follow the SkiaSharp core behavior: the display
@@ -1492,9 +1493,16 @@ public partial class EmueraContent : Control
 
 	static bool IsPureImageLine(ConsoleDisplayLine line)
 	{
+		if (!TryClassifyPureImageLine(line, 0, out bool hasImage))
+			return false;
+		return hasImage;
+	}
+
+	static bool TryClassifyPureImageLine(ConsoleDisplayLine line, int depth, out bool hasImage)
+	{
+		hasImage = false;
 		if (line?.Buttons == null || line.Buttons.Length == 0)
 			return false;
-		bool hasImage = false;
 		for (int i = 0; i < line.Buttons.Length; i++)
 		{
 			var button = line.Buttons[i];
@@ -1502,24 +1510,48 @@ public partial class EmueraContent : Control
 				continue;
 			for (int j = 0; j < button.StrArray.Length; j++)
 			{
-				var part = button.StrArray[j];
-				if (part is ConsoleImagePart)
-				{
-					hasImage = true;
-					continue;
-				}
-				if (part is ConsoleSpacePart)
-					continue;
-				if (part is ConsoleStyledString styled && string.IsNullOrWhiteSpace(styled.Str))
-					continue;
-				return false;
+				if (!TryClassifyPureImagePart(button.StrArray[j], depth, out bool partHasImage))
+					return false;
+				hasImage |= partHasImage;
 			}
 		}
-		return hasImage;
+		return true;
+	}
+
+	static bool TryClassifyPureImagePart(AConsoleDisplayPart part, int depth, out bool hasImage)
+	{
+		hasImage = false;
+		if (part == null)
+			return true;
+		if (part is ConsoleImagePart)
+		{
+			hasImage = true;
+			return true;
+		}
+		if (part is ConsoleSpacePart)
+			return true;
+		if (part is ConsoleStyledString styled)
+			return string.IsNullOrWhiteSpace(styled.Str);
+		if (part is ConsoleDivPart div)
+		{
+			// eraFL 的底图/立绘常写成 <div><img ...></div>。
+			// 异步纹理首帧未就绪时，需要把这种包装图片也按纯图片行延后提交，
+			// 否则 Canvas 会先提交空 div/spacer，之后容易表现为“有框没图”。
+			if (depth >= 4 || div.Children == null || div.Children.Length == 0)
+				return true;
+			for (int i = 0; i < div.Children.Length; i++)
+			{
+				if (!TryClassifyPureImageLine(div.Children[i], depth + 1, out bool childHasImage))
+					return false;
+				hasImage |= childHasImage;
+			}
+			return true;
+		}
+		return false;
 	}
 
 	// 企业级说明：普通行与 HTML/Div 子行共用同一按钮构建入口，避免触摸命中、焦点、样式和内容裁剪规则在移动端产生分叉。
-	Panel BuildConsoleButton(ConsoleButtonString button, int buttonTop, int buttonHeight)
+	Panel BuildConsoleButton(ConsoleButtonString button, int buttonTop, int buttonHeight, bool allowEscapedPartZ = true)
 	{
 		if (buttonHeight <= 0)
 			buttonHeight = EffectiveLineHeight;
@@ -1546,7 +1578,7 @@ public partial class EmueraContent : Control
 		btn.AddChild(contentBox);
 
 		foreach (var part in button.StrArray)
-			AddPartToContainer(part, contentBox, button.PointX);
+			AddPartToContainer(part, contentBox, button.PointX, allowEscapedPartZ);
 
 		foreach (var child in contentBox.GetChildren())
 		{
@@ -2290,6 +2322,7 @@ public partial class EmueraContent : Control
 		canvasImageOverlayNodes[lineNo] = nodes;
 		RebuildCanvasOverlayIndexesForLine(lineNo);
 		UpdateCanvasPositionedNodeIndexForLine(lineNo);
+		canvasOverlayRowsDirty = true;
 	}
 
 	void RegisterCanvasDivOverlays(int lineNo, List<CanvasDivOverlay> nodes)
@@ -2299,6 +2332,7 @@ public partial class EmueraContent : Control
 		canvasDivOverlayNodes[lineNo] = nodes;
 		RebuildCanvasOverlayIndexesForLine(lineNo);
 		UpdateCanvasPositionedNodeIndexForLine(lineNo);
+		canvasOverlayRowsDirty = true;
 	}
 
 	void ReleaseCanvasImageOverlays(int lineNo)
@@ -2308,6 +2342,7 @@ public partial class EmueraContent : Control
 		canvasImageOverlayNodes.Remove(lineNo);
 		RebuildCanvasOverlayIndexesForLine(lineNo);
 		UpdateCanvasPositionedNodeIndexForLine(lineNo);
+		canvasOverlayRowsDirty = true;
 		ReleaseCanvasImageOverlayList(nodes);
 	}
 
@@ -2326,6 +2361,7 @@ public partial class EmueraContent : Control
 		canvasDivOverlayNodes.Remove(lineNo);
 		RebuildCanvasOverlayIndexesForLine(lineNo);
 		UpdateCanvasPositionedNodeIndexForLine(lineNo);
+		canvasOverlayRowsDirty = true;
 		ReleaseCanvasDivOverlayList(nodes);
 	}
 
@@ -3149,7 +3185,7 @@ public partial class EmueraContent : Control
 
 	// Convert one emuera display part into Godot Controls under container.
 	// relX is used for button/div-local coordinates.
-	int AddPartToContainer(AConsoleDisplayPart part, Control container, int relX)
+	int AddPartToContainer(AConsoleDisplayPart part, Control container, int relX, bool allowEscapedPartZ = true)
 	{
 		if(part is ConsoleStyledString css)
 		{
@@ -3189,7 +3225,7 @@ public partial class EmueraContent : Control
 			}
 
 			var texture = GetSpriteTexture(sprite);
-			if (texture == null && !string.IsNullOrEmpty(cip.ResourceName) && !IsDynamicCutinName(cip.ResourceName) && !failedTextureSearches.Contains(cip.ResourceName))
+			if (texture == null && ShouldUseRawImageResourceFallback(cip.ResourceName, sprite))
 			{
 				string resName = cip.ResourceName;
 				var tryPaths = new List<string>
@@ -3308,7 +3344,7 @@ public partial class EmueraContent : Control
 				emuImg.FlipX = cip.FlipX;
 				emuImg.FlipY = cip.FlipY;
 				emuImg.SetColorMatrix(cip.ColorMatrix);
-				if (ImageEscapesLine(cip))
+				if (allowEscapedPartZ && ImageEscapesLine(cip))
 					emuImg.ZIndex = EscapedConsolePartZIndex;
 				// Inline images are absolutely positioned inside a fixed-height Emuera line.
 				// Giving them a minimum size lets Godot containers add blank vertical space.
@@ -3471,15 +3507,15 @@ public partial class EmueraContent : Control
 				int buttonHeight = GetButtonBottom(button, true, rowHeight) - buttonTop;
 				if (buttonHeight <= 0)
 					buttonHeight = rowHeight;
-				var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
-				if (buttonTop < 0 || buttonHeight > rowHeight)
-					btn.ZIndex = EscapedConsolePartZIndex;
+				var btn = BuildConsoleButton(button, buttonTop, buttonHeight, allowEscapedPartZ: false);
 				row.AddChild(btn);
 			}
 			else
 			{
 				foreach (var part in button.StrArray)
-					AddPartToContainer(part, row, 0);
+					// div 内部已经由外层 div 的 depth 和裁剪框控制层级；子图片不能再用 escaped ZIndex
+					// 抬到兄弟 div 之上，否则 eraFL 状态栏的背景图会盖住后续文字 div。
+					AddPartToContainer(part, row, 0, allowEscapedPartZ: false);
 			}
 		}
 
@@ -3560,10 +3596,11 @@ public partial class EmueraContent : Control
 		}
 	}
 
-	// Keep emuera HTML depth order stable while mapping it into Godot's ZIndex.
+	// HTML 的 depth 数值越大越靠后；Godot 的 ZIndex 需要整体抬到 Canvas 绘制面之上。
+	// eraFL 的房间框使用 depth=1，若直接映射为负数会被 Canvas 背景盖住，只剩无 depth 的局部遮罩可见。
 	static int GetGodotZIndexForHtmlDepth(int depth)
 	{
-		return -depth;
+		return System.Math.Max(1, HtmlDivZIndexBase - depth);
 	}
 
 	// Resolve absolute/relative image placement for HTML-style output.
@@ -3701,6 +3738,9 @@ public partial class EmueraContent : Control
 			}
 			if (ti.texture == null)
 			{
+				// ti 存在但 texture 为 null：ImageTexture lazy create 失败或 image 解码未完成。
+				// 追踪当前行为 pending，确保 ProcessAsyncTextureRefreshes 会重试。
+				TrackAsyncTextureRequestForCurrentRender();
 				if (renderingCbgTextures)
 					cbgTextureUnavailableDuringRender = true;
 				return null;
