@@ -133,6 +133,11 @@ namespace MinorShift.Emuera.GameView
 		readonly RectangleF originalRectF;
 		bool visible = false;
 		Rectangle rect;
+		public bool HasRenderableRect { get { return visible && rect.Width > 0 && rect.Height > 0; } }
+		public int RenderX { get { return rect.X; } }
+		public int RenderY { get { return rect.Y; } }
+		public int RenderWidth { get { return rect.Width; } }
+		public int RenderHeight { get { return rect.Height; } }
 		public override void DrawTo(Graphics graph, int pointY, bool isSelecting, bool isBackLog, TextDrawingMode mode)
 		{
 			if (!visible)

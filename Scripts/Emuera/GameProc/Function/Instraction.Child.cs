@@ -3666,7 +3666,8 @@ namespace MinorShift.Emuera.GameProc.Function
 				UserDefinedFunctionArgument arg = null;
 				if (spCallArg.IsConst)
 				{
-					call = spCallArg.CallFunc;
+					// SetJumpTo 阶段缓存的是可复用模板；每次执行必须克隆为独立调用帧。
+					call = spCallArg.CallFunc?.Clone();
 					labelName = spCallArg.ConstStr;
 					arg = spCallArg.UDFArgument;
 				}

@@ -232,6 +232,12 @@ public partial class EmueraContent : Control
 	string canvasVisualButtonInput;
 	long canvasVisualButtonGeneration = long.MinValue;
 
+	// 虚拟鼠标状态：Android 端通过 VirtualMousePad 选择按键类型，桌面端用真实鼠标按键直接传递。
+	int pendingMouseVk = 0x01;           // 默认左键 VK_LBUTTON
+	bool pendingMouseSingleShot = false; // true = 单次模式：点一次后自动复位为左键
+	int contentDragMouseVk = 0x01;       // 本次拖拽/点击使用的实际 VK
+	VirtualMousePad virtualMousePad;
+
 	// Desired scroll is a mirror of the viewport position we want after Godot has
 	// completed its layout pass. This prevents layout refreshes from snapping the
 	// ScrollContainer back to the top-left after buttons are regenerated.
@@ -712,6 +718,9 @@ public partial class EmueraContent : Control
 		quickButtons = new QuickButtons();
 		AddChild(quickButtons);
 
+		virtualMousePad = new VirtualMousePad();
+		AddChild(virtualMousePad);
+
 		inputpad = new Inputpad();
 		AddChild(inputpad);
 
@@ -1102,7 +1111,34 @@ public partial class EmueraContent : Control
 			return baseLineHeight;
 		}
 		if (part is ConsoleDivPart)
+		{
+			// eraFL 的 UI 容器通常先用 HTML_PRINT ...,1 输出相对定位 div，
+			// 再用 NEWLINE(n) 显式保留窗口高度。这里不能再按 div.Bottom
+			// 撑高逻辑行，否则会把游戏脚本自己预留的高度重复计算一遍。
 			return baseLineHeight;
+		}
+		return System.Math.Max(baseLineHeight, part.Bottom);
+	}
+
+	int GetPartVisualBottom(AConsoleDisplayPart part, int lineHeight = -1)
+	{
+		int baseLineHeight = lineHeight > 0 ? lineHeight : EffectiveLineHeight;
+		if (part == null)
+			return baseLineHeight;
+		if (part is ConsoleImagePart image)
+		{
+			if (image.Display == DisplayMode.Relative || image.Display == DisplayMode.AbsoluteLeftTop)
+				return GetImagePartBottom(image, baseLineHeight);
+			return baseLineHeight;
+		}
+		if (part is ConsoleDivPart div)
+		{
+			// div 不参与逻辑文本流撑高，但可视内容仍可能越过所在行。
+			// ScrollContainer 的子内容尺寸必须覆盖这部分溢出，否则状态页下半块会被父容器裁掉。
+			if (div.Display == DisplayMode.Relative || div.Display == DisplayMode.AbsoluteLeftTop)
+				return System.Math.Max(baseLineHeight, div.Y + div.DivHeight);
+			return baseLineHeight;
+		}
 		return System.Math.Max(baseLineHeight, part.Bottom);
 	}
 
@@ -1175,6 +1211,17 @@ public partial class EmueraContent : Control
 		return bottom;
 	}
 
+	int GetButtonVisualBottom(ConsoleButtonString button, int lineHeight = -1)
+	{
+		int baseLineHeight = lineHeight > 0 ? lineHeight : EffectiveLineHeight;
+		int bottom = baseLineHeight;
+		if (button?.StrArray == null)
+			return bottom;
+		foreach (var part in button.StrArray)
+			bottom = System.Math.Max(bottom, GetPartVisualBottom(part, baseLineHeight));
+		return bottom;
+	}
+
 	int GetLineBottom(ConsoleDisplayLine line)
 	{
 		int bottom = EffectiveLineHeight;
@@ -1183,6 +1230,26 @@ public partial class EmueraContent : Control
 		foreach (var button in line.Buttons)
 			bottom = System.Math.Max(bottom, GetButtonBottom(button));
 		return bottom;
+	}
+
+	int GetLineVisualBottom(ConsoleDisplayLine line)
+	{
+		int bottom = EffectiveLineHeight;
+		if (line?.Buttons == null)
+			return bottom;
+		foreach (var button in line.Buttons)
+			bottom = System.Math.Max(bottom, GetButtonVisualBottom(button));
+		return bottom;
+	}
+
+	int GetLineVisualRight(ConsoleDisplayLine line)
+	{
+		int right = 0;
+		if (line?.Buttons == null)
+			return right;
+		foreach (var button in line.Buttons)
+			right = System.Math.Max(right, GetButtonVisualRight(button));
+		return right;
 	}
 
 	// Transparent styles keep emuera buttons visually driven by their child text
@@ -1804,9 +1871,11 @@ public partial class EmueraContent : Control
 		}
 		else if (part is ConsoleRectangleShapePart rectShape)
 		{
-			rect = new Rect2(rectShape.PointX - relX, rectShape.Top,
-				System.Math.Max(rectShape.Width, 1),
-				System.Math.Max(rectShape.Bottom - rectShape.Top, 1));
+			if (!rectShape.HasRenderableRect)
+				return false;
+			rect = new Rect2(rectShape.PointX - relX + rectShape.RenderX, rectShape.RenderY,
+				System.Math.Max(rectShape.RenderWidth, 1),
+				System.Math.Max(rectShape.RenderHeight, 1));
 		}
 		else
 		{
@@ -3274,10 +3343,27 @@ public partial class EmueraContent : Control
 	{
 		float width = Mathf.Max(Config.DrawableWidth, widestLineWidth);
 		float height = totalLineHeight;
+		EnsureLineLayout();
+		for (int i = 0; i < lineLayoutEntries.Count; i++)
+		{
+			var entry = lineLayoutEntries[i];
+			if (lineObjects.TryGetValue(entry.LineNo, out var line))
+			{
+				// eraFL 的右侧信息窗、日志窗等使用相对 div 伸出普通文本宽度。
+				// 宽度也必须按可视右边界兜底，否则窄屏/Android 安全区会把右侧 UI 裁掉。
+				width = Mathf.Max(width, GetLineVisualRight(line));
+				height = Mathf.Max(height, entry.Top + GetLineVisualBottom(line));
+			}
+		}
 		int visibleRows = lineNumbers.Count;
 		if (!UseCanvasRenderBackend && visibleRows > 1 && lineContainer is VBoxContainer rows)
 			height += (visibleRows - 1) * rows.GetThemeConstant("separation");
 		return new Vector2(width, height);
+	}
+
+	public float GetCurrentVisualContentWidth()
+	{
+		return CalculateLineContentSize().X;
 	}
 
 	// Convert one emuera display part into Godot Controls under container.
@@ -3469,12 +3555,14 @@ public partial class EmueraContent : Control
 		{
 			if (csp is ConsoleRectangleShapePart rectShape)
 			{
+				if (!rectShape.HasRenderableRect)
+					return rectShape.Bottom;
 				var colorRect = new ColorRect();
 				colorRect.MouseFilter = MouseFilterEnum.Ignore;
-				colorRect.CustomMinimumSize = new Vector2(rectShape.Width, rectShape.Bottom - rectShape.Top);
+				SetFixedControlSize(colorRect, new Vector2(rectShape.RenderWidth, rectShape.RenderHeight));
 				var sc = rectShape.pColor;
 				colorRect.Color = sc.ToGodotColor();
-				colorRect.Position = new Vector2(rectShape.PointX - relX, rectShape.Top);
+				colorRect.Position = new Vector2(rectShape.PointX - relX + rectShape.RenderX, rectShape.RenderY);
 				container.AddChild(colorRect);
 				return rectShape.Bottom;
 			}
@@ -3641,12 +3729,13 @@ public partial class EmueraContent : Control
 	// emuera HTML styling.
 	void AddDivBorder(Control wrapper, int[] border, int[] borderColor, float boxX, float boxY, float boxW, float boxH)
 	{
-		if (border == null || borderColor == null || boxW <= 0 || boxH <= 0)
+		if (border == null || boxW <= 0 || boxH <= 0)
 			return;
-		AddBorderRect(wrapper, boxX, boxY, boxW, BoxValue(border, BoxDirection.Top), ColorValue(borderColor, BoxDirection.Top));
-		AddBorderRect(wrapper, boxX + boxW - BoxValue(border, BoxDirection.Right), boxY, BoxValue(border, BoxDirection.Right), boxH, ColorValue(borderColor, BoxDirection.Right));
-		AddBorderRect(wrapper, boxX, boxY + boxH - BoxValue(border, BoxDirection.Bottom), boxW, BoxValue(border, BoxDirection.Bottom), ColorValue(borderColor, BoxDirection.Bottom));
-		AddBorderRect(wrapper, boxX, boxY, BoxValue(border, BoxDirection.Left), boxH, ColorValue(borderColor, BoxDirection.Left));
+		int defaultColor = Config.ForeColor.ToArgb() & 0xFFFFFF;
+		AddBorderRect(wrapper, boxX, boxY, boxW, BoxValue(border, BoxDirection.Top), ColorValue(borderColor, BoxDirection.Top, defaultColor));
+		AddBorderRect(wrapper, boxX + boxW - BoxValue(border, BoxDirection.Right), boxY, BoxValue(border, BoxDirection.Right), boxH, ColorValue(borderColor, BoxDirection.Right, defaultColor));
+		AddBorderRect(wrapper, boxX, boxY + boxH - BoxValue(border, BoxDirection.Bottom), boxW, BoxValue(border, BoxDirection.Bottom), ColorValue(borderColor, BoxDirection.Bottom, defaultColor));
+		AddBorderRect(wrapper, boxX, boxY, BoxValue(border, BoxDirection.Left), boxH, ColorValue(borderColor, BoxDirection.Left, defaultColor));
 	}
 
 	// Add one border rectangle if the side has positive thickness.
@@ -3671,10 +3760,10 @@ public partial class EmueraContent : Control
 	}
 
 	// Safe border-color lookup with transparent fallback.
-	static int ColorValue(int[] values, int index)
+	static int ColorValue(int[] values, int index, int fallback = -1)
 	{
 		if (values == null || index < 0 || index >= values.Length)
-			return -1;
+			return fallback;
 		return values[index];
 	}
 
@@ -4997,6 +5086,18 @@ public partial class EmueraContent : Control
 		OnButtonPressed(input, generation);
 	}
 
+	// VirtualMousePad 调用此接口切换当前待用鼠标键。
+	// vk: 0x01=左键 0x02=右键 0x04=中键
+	// singleShot: true=单次（点一次后自动复位左键）；false=锁定（保持直到再次切换）
+	public void SetPendingMouseButton(int vk, bool singleShot)
+	{
+		pendingMouseVk = vk;
+		pendingMouseSingleShot = singleShot;
+		virtualMousePad?.RefreshStatusLabel();
+	}
+	public int PendingMouseVk => pendingMouseVk;
+	public bool PendingMouseSingleShot => pendingMouseSingleShot;
+
 	// Hide quick buttons after one is pressed until a new button generation is
 	// rendered. This prevents double-submits during core processing.
 	void HideQuickUntilNextButtons(long generation)
@@ -5134,12 +5235,12 @@ public partial class EmueraContent : Control
 
 	// Submit an inline or quick command button to the core. Old generations are
 	// treated as a plain advance, matching emuera's stale-button behavior.
-	void OnButtonPressed(string input, long generation, bool skip = false)
+	void OnButtonPressed(string input, long generation, bool skip = false, int mouseVk = 0x01)
 	{
 		RememberCurrentContentScroll();
 		if (GenericUtils.IsScrollTraceActive)
 		{
-			TraceScroll("button_pressed", () => $"input={GenericUtils.ClipTrace(input, 64)} gen={generation} lastGen={lastButtonGeneration} skip={skip}");
+			TraceScroll("button_pressed", () => $"input={GenericUtils.ClipTrace(input, 64)} gen={generation} lastGen={lastButtonGeneration} skip={skip} vk={mouseVk}");
 			GenericUtils.StartScrollTraceCoreWindow(() => $"button input={GenericUtils.ClipTrace(input, 64)} gen={generation} skip={skip}");
 		}
 		if (generation < lastButtonGeneration)
@@ -5150,7 +5251,7 @@ public partial class EmueraContent : Control
 			EmueraThread.instance.Input("", false, skip);
 			return;
 		}
-		EmueraThread.instance.Input(input, true, skip, 1);
+		EmueraThread.instance.Input(input, true, skip, mouseVk);
 	}
 
 	// Return to the first scene after confirming the emuera worker is idle.
@@ -5666,7 +5767,7 @@ public partial class EmueraContent : Control
 		if (HandleContentTouchGesture(@event, acceptEvent))
 			return true;
 
-		if (!TryGetPointer(@event, out var pointerPosition, out var pressed, out var released, out var motion))
+		if (!TryGetPointer(@event, out var pointerPosition, out var pressed, out var released, out var motion, out var eventMouseVk))
 			return false;
 
 		UpdatePointerPosition(pointerPosition);
@@ -5703,7 +5804,10 @@ public partial class EmueraContent : Control
 				generation = hitGeneration;
 			}
 
-			MinorShift._Library.WinInput.PulseVirtualKey(0x01);
+			// 桌面:用事件的真实 VK；Android 触控(eventMouseVk<0):用 pendingMouseVk
+			int effectiveVk = eventMouseVk >= 0 ? eventMouseVk : pendingMouseVk;
+			MinorShift._Library.WinInput.PulseVirtualKey(effectiveVk);
+			contentDragMouseVk = effectiveVk;
 			StopContentInertia();
 			contentDragActive = true;
 			contentDragMoved = false;
@@ -5745,7 +5849,8 @@ public partial class EmueraContent : Control
 		if (motion)
 		{
 			var totalDelta = pointerPosition - contentDragStartPosition;
-			if (!contentDragMoved && totalDelta.Length() >= ScrollDragThreshold)
+			// 右/中键不滚动，无论移动多少像素都不标记为 drag。
+			if (!contentDragMoved && contentDragMouseVk == 0x01 && totalDelta.Length() >= ScrollDragThreshold)
 			{
 				contentDragMoved = true;
 				contentScrollInteractionSerial++;
@@ -5789,6 +5894,7 @@ public partial class EmueraContent : Control
 		bool restoreQuickInputGate = false;
 		string pressedButtonInput = null;
 		long pressedButtonGeneration = 0;
+		int pressedButtonMouseVk = contentDragMouseVk;
 		Control pressedButtonControl = null;
 		bool pressedButtonContentCenterValid = false;
 		Vector2 pressedButtonContentCenter = Vector2.Zero;
@@ -5810,7 +5916,12 @@ public partial class EmueraContent : Control
 		else if (!contentDragStartedOnButton)
 		{
 			var console = GlobalStatic.Console;
-			advanceTap = console != null && (console.IsWaitingEnterKey || console.IsWaitAnyKey);
+			bool isNonLeftClick = pressedButtonMouseVk != 0x01;
+			// 左クリック: EnterKey/AnyKey 待ちのみ advance。
+			// 右/中クリック: INPUT 数値入力待ち中も advance（ゲームが RESULT:1==2 で右クリック検知）。
+			advanceTap = console != null && (
+				console.IsWaitingEnterKey || console.IsWaitAnyKey ||
+				(isNonLeftClick && console.IsWaitingInput));
 			handled = advanceTap;
 			restoreQuickInputGate = advanceTap;
 		}
@@ -5831,10 +5942,17 @@ public partial class EmueraContent : Control
 				UpdatePointerPositionForButton(pressedButtonControl, pointerPosition);
 			if (quickButtons != null && quickButtons.IsShow)
 				HideQuickUntilNextButtons(pressedButtonGeneration);
-			OnButtonPressed(pressedButtonInput, pressedButtonGeneration);
+			OnButtonPressed(pressedButtonInput, pressedButtonGeneration, mouseVk: pressedButtonMouseVk);
+			// 触控单次模式：提交后复位为左键
+			if (pendingMouseSingleShot && eventMouseVk < 0)
+			{
+				pendingMouseVk = 0x01;
+				pendingMouseSingleShot = false;
+				virtualMousePad?.RefreshStatusLabel();
+			}
 		}
 		else if (advanceTap)
-			TryAdvanceTap(acceptEvent);
+			TryAdvanceTap(acceptEvent, pressedButtonMouseVk);
 		if (restoreQuickInputGate)
 			RestoreQuickInputGate();
 		if (handled)
@@ -6516,20 +6634,30 @@ public partial class EmueraContent : Control
 	}
 
 	// Submit an empty input when the console is waiting for enter/any key.
-	bool TryAdvanceTap(bool acceptEvent)
+	// mouseVk: 右/中键时以 from_button=true 送入，让 RESULT_ARRAY[1] 写入正确按键码。
+	bool TryAdvanceTap(bool acceptEvent, int mouseVk = 0x01)
 	{
 		var console = GlobalStatic.Console;
-		if (console == null || (!console.IsWaitingEnterKey && !console.IsWaitAnyKey))
+		bool isNonLeft = mouseVk != 0x01;
+		// 左键：仅 EnterKey/AnyKey 等待时 advance。
+		// 右/中键：IsWaitingInput（含 INPUT 数值等待）也 advance，让游戏通过 RESULT:1 检测右键。
+		if (console == null)
+			return false;
+		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInput))
 			return false;
 
 		uint nowTick = MinorShift._Library.WinmmTimer.TickCount;
 		bool skipFlag = (nowTick - lastClickTick < 200);
 		if (GenericUtils.IsScrollTraceActive)
 		{
-			TraceScroll("advance_tap", () => $"skip={skipFlag}");
-			GenericUtils.StartScrollTraceCoreWindow(() => $"advance_tap skip={skipFlag}");
+			TraceScroll("advance_tap", () => $"skip={skipFlag} vk={mouseVk}");
+			GenericUtils.StartScrollTraceCoreWindow(() => $"advance_tap skip={skipFlag} vk={mouseVk}");
 		}
-		EmueraThread.instance.Input("", false, skipFlag);
+		// 右键/中键を空エリアでタップした場合は from_button=true で送信。
+		// これにより EmueraThread の IsWaitingInputSomething ガードを通過し、
+		// RESULT_ARRAY[1] に正しいボタンコードが書き込まれる。
+		bool fromButton = mouseVk != 0x01;
+		EmueraThread.instance.Input("", fromButton, skipFlag, fromButton ? mouseVk : 0);
 		lastClickTick = nowTick;
 		return true;
 	}
@@ -6545,6 +6673,7 @@ public partial class EmueraContent : Control
 		contentDragButtonGeneration = 0;
 		contentDragButtonContentCenterValid = false;
 		contentDragButtonContentCenter = Vector2.Zero;
+		contentDragMouseVk = 0x01;
 		ClearCanvasVisualButton();
 	}
 
@@ -6559,10 +6688,11 @@ public partial class EmueraContent : Control
 		}
 	}
 
-	// Identify left mouse or screen-touch release events.
+	// Identify left mouse, right/middle mouse, or screen-touch release events.
 	static bool IsPointerRelease(InputEvent @event)
 	{
-		if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
+		if (@event is InputEventMouseButton mb &&
+			(mb.ButtonIndex == MouseButton.Left || mb.ButtonIndex == MouseButton.Right || mb.ButtonIndex == MouseButton.Middle))
 			return !mb.Pressed;
 		if (@event is InputEventScreenTouch touch)
 			return !touch.Pressed;
@@ -6570,15 +6700,21 @@ public partial class EmueraContent : Control
 	}
 
 	// Normalize Godot mouse and screen touch/drag events into one pointer shape.
-	static bool TryGetPointer(InputEvent @event, out Vector2 position, out bool pressed, out bool released, out bool motion)
+	// mouseVk: 0x01 左键 / 0x02 右键 / 0x04 中键 / -1 触控（交由 pendingMouseVk 决定）
+	static bool TryGetPointer(InputEvent @event, out Vector2 position, out bool pressed, out bool released, out bool motion, out int mouseVk)
 	{
 		position = Vector2.Zero;
 		pressed = false;
 		released = false;
 		motion = false;
+		mouseVk = -1;
 
-		if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
+		if (@event is InputEventMouseButton mb)
 		{
+			if (mb.ButtonIndex == MouseButton.Left) mouseVk = 0x01;
+			else if (mb.ButtonIndex == MouseButton.Right) mouseVk = 0x02;
+			else if (mb.ButtonIndex == MouseButton.Middle) mouseVk = 0x04;
+			else return false;
 			position = mb.GlobalPosition;
 			pressed = mb.Pressed;
 			released = !mb.Pressed;
@@ -6588,6 +6724,7 @@ public partial class EmueraContent : Control
 		{
 			position = mm.GlobalPosition;
 			motion = true;
+			mouseVk = 0x01; // motion 不区分按键，沿用左键
 			return true;
 		}
 		if (@event is InputEventScreenTouch touch)
@@ -6595,15 +6732,23 @@ public partial class EmueraContent : Control
 			position = touch.Position;
 			pressed = touch.Pressed;
 			released = !touch.Pressed;
+			mouseVk = -1; // 触控，由 pendingMouseVk 决定
 			return true;
 		}
 		if (@event is InputEventScreenDrag drag)
 		{
 			position = drag.Position;
 			motion = true;
+			mouseVk = -1;
 			return true;
 		}
 		return false;
+	}
+
+	// 兼容旧调用点（不需要 mouseVk）的5参数版本。
+	static bool TryGetPointer(InputEvent @event, out Vector2 position, out bool pressed, out bool released, out bool motion)
+	{
+		return TryGetPointer(@event, out position, out pressed, out released, out motion, out _);
 	}
 
 	// Keyboard fallback for desktop testing and for Android devices with hardware

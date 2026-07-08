@@ -544,9 +544,9 @@ namespace MinorShift.Emuera.GameProc
 		public void Return(Int64 ret)
 		{
 			CalledFunction called = functionList[functionList.Count - 1];
-			// BEFORE_ERROR / BEFORE_THROW 是错误处理事件，即使当前外层是 #FUNCTION，
-			// 也必须走事件返回路径，让 pending error/throw 在事件结束后重新抛出。
-			if (IsFunctionMethod && !(called.IsEvent && (called.FunctionName == "BEFORE_THROW" || called.FunctionName == "BEFORE_ERROR")))
+			// #FUNCTION/#FUNCTIONS 的隐式 RETURN 必须只看当前栈顶。
+			// 普通 CALL 可能发生在外层表达式函数求值期间，不能被外层 currentMin 误判成 RETURNF。
+			if (IsCurrentFunctionMethod && !(called.IsEvent && (called.FunctionName == "BEFORE_THROW" || called.FunctionName == "BEFORE_ERROR")))
 			{
 				ReturnF(null);
 				return;
@@ -797,8 +797,20 @@ namespace MinorShift.Emuera.GameProc
 		{
 			get
 			{
+				if (functionList.Count <= currentMin)
+					return false;
                 return functionList[currentMin].TopLabel.IsMethod;
             }
+		}
+
+		public bool IsCurrentFunctionMethod
+		{
+			get
+			{
+				if (functionList.Count <= currentMin)
+					return false;
+				return functionList[functionList.Count - 1].TopLabel.IsMethod;
+			}
 		}
 
 		public SingleTerm MethodReturnValue = null;

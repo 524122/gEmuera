@@ -1119,13 +1119,13 @@ public partial class EmueraContent
 				return;
 			if (part is ConsoleRectangleShapePart rectShape)
 			{
-				if (rectShape.Width <= 0)
+				if (!rectShape.HasRenderableRect)
 					return;
 				DrawRect(new Rect2(
-					rectShape.PointX - relX,
-					lineY + rectShape.Top,
-					rectShape.Width,
-					Mathf.Max(rectShape.Bottom - rectShape.Top, 1)),
+					rectShape.PointX - relX + rectShape.RenderX,
+					lineY + rectShape.RenderY,
+					rectShape.RenderWidth,
+					rectShape.RenderHeight),
 					(isSelecting ? rectShape.pButtonColor : rectShape.pColor).ToGodotColor());
 				return;
 			}

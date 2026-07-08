@@ -478,12 +478,17 @@ namespace MinorShift.Emuera.GameProc
 			SingleTerm ret = null;
             int temp_current = state.currentMin;
             state.currentMin = state.functionCount;
-            udmt.Call.updateRetAddress(state.CurrentLine);
+			// UserDefinedMethodTerm 会被表达式树缓存，CalledFunction 只能作为模板复用。
+			// 每次求值克隆独立调用帧，避免 returnAddress/RETURNF 状态串到下一次调用。
+			CalledFunction call = udmt.Call.Clone();
+            call.updateRetAddress(state.CurrentLine);
 			bool success = false;
 			var savedState = state.CaptureCallState();
             try
             {
-				state.IntoFunction(udmt.Call, udmt.Argument, exm);
+				// fallthrough や隠れた早期リターンで前回の RETURNF 値が残らないよう事前にクリア
+			state.MethodReturnValue = null;
+			state.IntoFunction(call, udmt.Argument, exm);
                 //do whileの中でthrow されたエラーはここではキャッチされない。
 				//#functionを全て抜けてDoScriptでキャッチされる。
     			runScriptProc();
@@ -494,8 +499,8 @@ namespace MinorShift.Emuera.GameProc
 			{
 				if (success)
 				{
-					if (udmt.Call.TopLabel.hasPrivDynamicVar)
-						udmt.Call.TopLabel.Out();
+					if (call.TopLabel.hasPrivDynamicVar)
+						call.TopLabel.Out();
 					// RETURNF 已在 ProcessState.ReturnF() 中移除当前函数帧。
 					// 这里不能再 PopContext，否则会误弹父调用栈，导致后续 LOCAL/ARG 和返回流程错乱。
 					state.CurrentLine = savedState.currentLine;

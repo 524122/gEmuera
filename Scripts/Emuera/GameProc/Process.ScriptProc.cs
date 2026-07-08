@@ -95,7 +95,7 @@ namespace MinorShift.Emuera.GameProc
 				{//（関数終端） or ファイル終端
 					//if (sequential)
 					//{//流れ落ちてきた
-					if (!state.IsFunctionMethod)
+					if (!state.IsCurrentFunctionMethod)
 						vEvaluator.RESULT = 0;
 					state.Return(0);
 					//}
