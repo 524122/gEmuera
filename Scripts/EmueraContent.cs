@@ -232,11 +232,10 @@ public partial class EmueraContent : Control
 	string canvasVisualButtonInput;
 	long canvasVisualButtonGeneration = long.MinValue;
 
-	// 虚拟鼠标状态：Android 端通过 VirtualMousePad 选择按键类型，桌面端用真实鼠标按键直接传递。
-	int pendingMouseVk = 0x01;           // 默认左键 VK_LBUTTON
-	bool pendingMouseSingleShot = false; // true = 单次模式：点一次后自动复位为左键
+	// 虚拟鼠标状态：桌面端用真实鼠标按键直接传递；Android 端由 VirtualCursor
+	// 接管单指手势（移动光标+长按=右键+短按=左键），不再有“预选按键”状态。
 	int contentDragMouseVk = 0x01;       // 本次拖拽/点击使用的实际 VK
-	VirtualMousePad virtualMousePad;
+	VirtualCursor virtualCursor;
 
 	// Desired scroll is a mirror of the viewport position we want after Godot has
 	// completed its layout pass. This prevents layout refreshes from snapping the
@@ -336,6 +335,7 @@ public partial class EmueraContent : Control
 	TextureButton quickMenuButton;
 	TextureButton autoSkipMenuButton;
 	TextureButton scaleMenuButton;
+	TextureButton mouseMenuButton;
 	bool autoClickSkipEnabled = false;
 	ulong lastAutoClickSkipTick = 0;
 	static readonly Color ActiveSystemButtonColor = new Color(1.0f, 0.86f, 0.15f, 1.0f);
@@ -702,6 +702,7 @@ public partial class EmueraContent : Control
 		AddIconButton("res://Icons/Title.svg", OnGotoTitlePressed);
 		AddIconButton("res://Icons/exit.svg", OnExitPressed);
 		scaleMenuButton = AddIconButton("res://Icons/Scale.svg", OnScaleTogglePressed);
+		mouseMenuButton = AddIconButton("res://Icons/mouse.svg", OnVirtualCursorTogglePressed);
 
 		// Toggle at the right edge (last child = rightmost in HBox).
 		var menuToggleBtn = new TextureButton();
@@ -718,8 +719,8 @@ public partial class EmueraContent : Control
 		quickButtons = new QuickButtons();
 		AddChild(quickButtons);
 
-		virtualMousePad = new VirtualMousePad();
-		AddChild(virtualMousePad);
+		virtualCursor = new VirtualCursor();
+		AddChild(virtualCursor);
 
 		inputpad = new Inputpad();
 		AddChild(inputpad);
@@ -5086,17 +5087,80 @@ public partial class EmueraContent : Control
 		OnButtonPressed(input, generation);
 	}
 
-	// VirtualMousePad 调用此接口切换当前待用鼠标键。
-	// vk: 0x01=左键 0x02=右键 0x04=中键
-	// singleShot: true=单次（点一次后自动复位左键）；false=锁定（保持直到再次切换）
-	public void SetPendingMouseButton(int vk, bool singleShot)
+	// ------------------------------------------------------------------
+	// VirtualCursor 转发入口：把私有的坐标换算/命中测试/点击提交/hover 高亮
+	// 方法暴露给 VirtualCursor，使其可以脱离真实 InputEvent 驱动同一套判定链路。
+	// ------------------------------------------------------------------
+
+	// 反向坐标换算：content-local 坐标 → 屏幕全局坐标（供光标可视化定位）。
+	// 是 UpdatePointerPosition 换算公式的镜像：
+	//   content = (global - scrollRect.Position + scrollOffset) / contentScale
+	//   global  = content * contentScale - scrollOffset + scrollRect.Position
+	public Vector2 VirtualCursorContentToGlobal(Vector2 contentPosition)
 	{
-		pendingMouseVk = vk;
-		pendingMouseSingleShot = singleShot;
-		virtualMousePad?.RefreshStatusLabel();
+		if (scrollContainer == null)
+			return contentPosition;
+		var rect = scrollContainer.GetGlobalRect();
+		var scrollOffset = new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
+		var scaled = contentPosition * (contentScale > 0.001f ? contentScale : 1.0f);
+		return scaled - scrollOffset + rect.Position;
 	}
-	public int PendingMouseVk => pendingMouseVk;
-	public bool PendingMouseSingleShot => pendingMouseSingleShot;
+
+	// 正向坐标换算：屏幕全局坐标 → content-local 坐标（供虚拟光标存储坐标状态）。
+	// 与 UpdatePointerPosition 逻辑一致。
+	public Vector2 VirtualCursorGlobalToContent(Vector2 globalPosition)
+	{
+		if (scrollContainer == null)
+			return globalPosition;
+		var rect = scrollContainer.GetGlobalRect();
+		var contentPosition = globalPosition - rect.Position;
+		contentPosition += new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
+		if (contentScale > 0.001f)
+			contentPosition /= contentScale;
+		return contentPosition;
+	}
+
+	// 当前可视内容区域（全局坐标），供 VirtualCursor clamp 光标移动范围。
+	public Rect2 VirtualCursorGetContentViewportRect()
+	{
+		return scrollContainer != null ? scrollContainer.GetGlobalRect() : new Rect2(Vector2.Zero, GetViewport().GetVisibleRect().Size);
+	}
+
+	// 命中测试：光标当前全局坐标下是否有按钮，命中则驱动 Canvas 高亮（通道B）+
+	// 原生 hover 字段（通道A，ERB MOUSEBUTTON() 读取），未命中则清空两条通道。
+	public bool VirtualCursorUpdateHover(Vector2 globalPosition)
+	{
+		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out _, out var hoverInput, out var hoverGeneration, out _, out _))
+		{
+			SetCanvasVisualButton(hoverInput, hoverGeneration);
+			GenericUtils.SetPointingButton(hoverInput, hoverGeneration);
+			return true;
+		}
+		ClearCanvasVisualButton();
+		GenericUtils.ClearPointingButton();
+		return false;
+	}
+
+	// 在光标当前全局坐标提交一次点击：命中按钮则走 OnButtonPressed，否则走
+	// TryAdvanceTap（空白区域点击，用于 eraFL 地图/状态切换等场景）。
+	public void VirtualCursorCommitClick(Vector2 globalPosition, int mouseVk)
+	{
+		UpdatePointerPosition(globalPosition);
+		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out var hitButton, out var hitInput, out var hitGeneration, out var contentCenterValid, out var contentCenter))
+		{
+			if (contentCenterValid)
+				UpdatePointerPositionForContentPoint(contentCenter);
+			else
+				UpdatePointerPositionForButton(hitButton, globalPosition);
+			if (quickButtons != null && quickButtons.IsShow)
+				HideQuickUntilNextButtons(hitGeneration);
+			OnButtonPressed(hitInput, hitGeneration, mouseVk: mouseVk);
+		}
+		else
+		{
+			TryAdvanceTap(true, mouseVk);
+		}
+	}
 
 	// Hide quick buttons after one is pressed until a new button generation is
 	// rendered. This prevents double-submits during core processing.
@@ -5325,6 +5389,7 @@ public partial class EmueraContent : Control
 		{
 			quickButtons?.HidePad();
 			scalepad?.HidePad();
+			virtualCursor?.Disable();
 			inputpad.ShowPad();
 		}
 		UpdateSystemButtonVisuals();
@@ -5343,6 +5408,7 @@ public partial class EmueraContent : Control
 			ClearQuickAutoHiddenState();
 			inputpad?.HidePad();
 			scalepad?.HidePad();
+			virtualCursor?.Disable();
 			quickButtons.ShowPad();
 			SetLastButtonGeneration(lastButtonGeneration);
 		}
@@ -5472,7 +5538,26 @@ public partial class EmueraContent : Control
 		{
 			inputpad?.HidePad();
 			quickButtons?.HidePad();
+			virtualCursor?.Disable();
 			scalepad.ShowPad();
+		}
+		UpdateSystemButtonVisuals();
+	}
+
+	// Toggle 虚拟光标模式；与 输入/快捷/缩放 面板保持同一套互斥逻辑，避免叠加遮挡触控区域。
+	void OnVirtualCursorTogglePressed()
+	{
+		ClearQuickAutoHiddenState();
+		if (virtualCursor != null && virtualCursor.IsEnabled)
+		{
+			virtualCursor.Disable();
+		}
+		else
+		{
+			inputpad?.HidePad();
+			quickButtons?.HidePad();
+			scalepad?.HidePad();
+			virtualCursor?.Enable();
 		}
 		UpdateSystemButtonVisuals();
 	}
@@ -5484,6 +5569,7 @@ public partial class EmueraContent : Control
 		SetSystemButtonActive(quickMenuButton, quickButtons != null && quickButtons.IsShow);
 		SetSystemButtonActive(autoSkipMenuButton, autoClickSkipEnabled);
 		SetSystemButtonActive(scaleMenuButton, scalepad != null && scalepad.IsShow);
+		SetSystemButtonActive(mouseMenuButton, virtualCursor != null && virtualCursor.IsEnabled);
 	}
 
 	// Apply active/inactive tint to one menu icon.
@@ -5767,6 +5853,13 @@ public partial class EmueraContent : Control
 		if (HandleContentTouchGesture(@event, acceptEvent))
 			return true;
 
+		// 虚拟光标模式开启时，单指按下/拖动/释放全部交给 VirtualCursor 处理
+		// （移动光标 + 短按=左键/长按=右键），不进入下面的滚动/点击判定分支。
+		// 双指缩放优先级不受影响，因为已经在 HandleContentTouchGesture 判断之后。
+		if (virtualCursor != null && virtualCursor.IsEnabled
+			&& virtualCursor.HandleGesture(@event, acceptEvent))
+			return true;
+
 		if (!TryGetPointer(@event, out var pointerPosition, out var pressed, out var released, out var motion, out var eventMouseVk))
 			return false;
 
@@ -5804,8 +5897,10 @@ public partial class EmueraContent : Control
 				generation = hitGeneration;
 			}
 
-			// 桌面:用事件的真实 VK；Android 触控(eventMouseVk<0):用 pendingMouseVk
-			int effectiveVk = eventMouseVk >= 0 ? eventMouseVk : pendingMouseVk;
+			// 桌面:用事件的真实 VK；Android 触控(eventMouseVk<0):默认左键。
+			// 右/中键在虚拟光标模式下改由 HandleVirtualCursorGesture 独立提交，
+			// 不会经过这条常规按钮按下路径。
+			int effectiveVk = eventMouseVk >= 0 ? eventMouseVk : 0x01;
 			MinorShift._Library.WinInput.PulseVirtualKey(effectiveVk);
 			contentDragMouseVk = effectiveVk;
 			StopContentInertia();
@@ -5943,13 +6038,6 @@ public partial class EmueraContent : Control
 			if (quickButtons != null && quickButtons.IsShow)
 				HideQuickUntilNextButtons(pressedButtonGeneration);
 			OnButtonPressed(pressedButtonInput, pressedButtonGeneration, mouseVk: pressedButtonMouseVk);
-			// 触控单次模式：提交后复位为左键
-			if (pendingMouseSingleShot && eventMouseVk < 0)
-			{
-				pendingMouseVk = 0x01;
-				pendingMouseSingleShot = false;
-				virtualMousePad?.RefreshStatusLabel();
-			}
 		}
 		else if (advanceTap)
 			TryAdvanceTap(acceptEvent, pressedButtonMouseVk);
@@ -6700,7 +6788,7 @@ public partial class EmueraContent : Control
 	}
 
 	// Normalize Godot mouse and screen touch/drag events into one pointer shape.
-	// mouseVk: 0x01 左键 / 0x02 右键 / 0x04 中键 / -1 触控（交由 pendingMouseVk 决定）
+	// mouseVk: 0x01 左键 / 0x02 右键 / 0x04 中键 / -1 触控（虚拟光标模式关闭时按左键处理）
 	static bool TryGetPointer(InputEvent @event, out Vector2 position, out bool pressed, out bool released, out bool motion, out int mouseVk)
 	{
 		position = Vector2.Zero;
@@ -6732,7 +6820,7 @@ public partial class EmueraContent : Control
 			position = touch.Position;
 			pressed = touch.Pressed;
 			released = !touch.Pressed;
-			mouseVk = -1; // 触控，由 pendingMouseVk 决定
+			mouseVk = -1; // 触控事件本身不带按键语义，由虚拟光标模式的手势独立判定
 			return true;
 		}
 		if (@event is InputEventScreenDrag drag)

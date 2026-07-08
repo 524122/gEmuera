@@ -989,7 +989,9 @@ namespace MinorShift.Emuera.GameProc.Function
                 LexicalAnalyzer.SkipWhiteSpace(st);
                 if (st.EOS)
                     return new ExpressionArgument(null);
-                if (line.FunctionCode == FunctionCode.ONEINPUTS && !st.EOS && st.Current == ',')
+                // eraFL 的 "INPUTS ,1" 表示省略第一个默认值参数，后面的值是旧式选项。
+                // 若把 ",1" 当成默认字符串，空白区域右键会提交非空 RESULTS，导致状态页切换条件失败。
+                if (!st.EOS && st.Current == ',')
                     return new ExpressionArgument(null);
                 StrFormWord sfwt = LexicalAnalyzer.AnalyseFormattedString(st, FormStrEndWith.EoL, false);
                 if (!st.EOS)

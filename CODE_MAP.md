@@ -1,5 +1,19 @@
 # CODE_MAP
 
+## 2026-07-08 虚拟鼠标重新设计：可见可拖动光标（替换 L/M/R 选键面板）
+
+- `Icons/cursor.svg`（新文件）+ `.import`：简单箭头光标图标，白色填充+黑色描边，32×32px。
+- `Scripts/VirtualCursor.cs`（新文件，替代原 `VirtualMousePad.cs`）：`CanvasLayer(Layer=92)`，虚拟光标模式开启后屏幕上出现可见、可拖动移动的光标。单指拖动=相对位移移动光标（触摸板模式，灵敏度系数 1.0），短按=左键（按下后总位移 < 10px 且松手时长 < 0.45s），长按=右键（总位移 < 10px 且持续时长达 0.45s，在按住过程中立即触发不等松手），常驻中键按钮（右上角小型 "M" 按钮，点击直接对光标当前位置提交中键）。光标移动时调用 `EmueraContent.VirtualCursorUpdateHover` 驱动 hover 高亮，同时同步两条通道（通道A：`GenericUtils.SetPointingButton` → ERB `MOUSEBUTTON()` 读取；通道B：`SetCanvasVisualButton` → Canvas 渲染高亮）。
+- `EmueraContent.cs`：删除 `pendingMouseVk`/`pendingMouseSingleShot`/`SetPendingMouseButton`/`PendingMouseVk`/`PendingMouseSingleShot` 及 `virtualMousePad` 字段，新增 `VirtualCursor virtualCursor`；新增一组 `public` 转发方法供 `VirtualCursor` 调用（`VirtualCursorContentToGlobal` 反向坐标换算、`VirtualCursorGetContentViewportRect` 当前可视区域、`VirtualCursorUpdateHover` 命中测试+双通道同步 hover、`VirtualCursorCommitClick` 点击提交）；`HandleContentPointerInput` 在 `HandleContentTouchGesture` 之后、`TryGetPointer` 之前插入虚拟光标手势拦截（`virtualCursor?.HandleGesture`），虚拟光标模式开启时接管单指按下/拖动/释放；触摸事件 `effectiveVk` 兜底逻辑简化为默认左键（0x01），不再有"预选键"分支；`OnMouseTogglePressed` 改名 `OnVirtualCursorTogglePressed`，切换 `virtualCursor.Enable()`/`Disable()`；三处 `virtualMousePad?.ClosePadExternal()` 改为 `virtualCursor?.Disable()`。
+- 影响范围：推翻上一版"右上角展开选键面板"设计，改为"可见光标+手势判定"模式。桌面端真实鼠标/键盘输入不受影响，本次只重做 Android 侧虚拟光标交互。双指缩放优先级不变（拦截插在 `HandleContentTouchGesture` 之后）。坐标换算当前实现简化处理（`cursorContentPosition` 直接用 `newGlobal` 近似），在滚动偏移大、缩放非 1.0 的场景下光标位置可能不精确，需要后续完善反向换算公式（参照 `UpdatePointerPosition` 的换算逻辑写镜像反函数）。
+- 关键设计要点：hover 双通道同步（`VirtualCursor.MoveCursorBy` 每次移动光标后必须同时更新通道A 和通道B，否则 `MOUSEBUTTON()` 返回空、立绘动效失效）；手势判定阈值（`DragThreshold=10px`、`LongPressDuration=0.45s`）可能需要根据实机触感微调。
+
+## 2026-07-08 eraFL `INPUTS ,1` 空白右键状态切换兼容
+
+- `ArgumentBuilder.cs:SP_INPUTS_ArgumentBuilder`：`INPUTS`/`ONEINPUTS` 在跳过空白后若首字符为逗号，按“第一个默认值参数省略”处理，直接返回无默认值参数，不再把 `,1` 解析成默认字符串。
+- 根因：eraFL `ERB/TRAIN/USERCOM_INPUT.ERB` 使用 `INPUTS , 1` 读取点击；空白区域右键应提交 `RESULT:1==2` 且 `RESULTS==""`，随后脚本把 `RESULT:0` 置为 `-1` 并触发地图/状态页切换。旧解析会把 `,1` 当成默认字符串，空输入被替换成非空 `RESULTS`，导致切换条件失败。
+- 影响范围：只改变 `INPUTS`/`ONEINPUTS` 首参数省略写法的解析语义；显式默认字符串（如 `INPUTS "x"`）不变。后续若出现“空白区域点击有鼠标键码但脚本条件不触发”，优先检查 `SP_INPUTS_ArgumentBuilder`、`EmueraConsole.PressEnterKey` 的默认值替换，以及 `EmueraThread.Input` 写入 `RESULT_ARRAY[1]` 的链路。
+
 ## 2026-07-08 统一鼠标三键抽象 + VirtualMousePad
 
 - `EmueraContent.cs:TryGetPointer`（6参数重载）：新增 `out int mouseVk` 输出，Left=0x01/Right=0x02/Middle=0x04/Touch=-1。5参数旧版本调用新重载，所有旧调用点不变。
