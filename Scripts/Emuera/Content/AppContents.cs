@@ -18,6 +18,7 @@ namespace MinorShift.Emuera.Content
 		static readonly Dictionary<string, AContentFile> resourceDic = new Dictionary<string, AContentFile>();
 		static readonly Dictionary<string, ASprite> imageDictionary = new Dictionary<string, ASprite>();
 		static readonly Dictionary<string, LazySpriteDefinition> lazyImageDictionary = new Dictionary<string, LazySpriteDefinition>();
+		static readonly HashSet<string> csvSpriteNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		static readonly Dictionary<string, Point> spriteBasePositions = new Dictionary<string, Point>();
 		static readonly Dictionary<string, string> resolvedExistingResourcePathCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 		static readonly Dictionary<int, GraphicsImage> gList;
@@ -105,6 +106,20 @@ namespace MinorShift.Emuera.Content
 			return false;
 		}
 
+		static public bool IsCsvSpriteName(string name)
+		{
+			if (string.IsNullOrWhiteSpace(name))
+				return false;
+			return csvSpriteNames.Contains(name.Trim().ToUpper());
+		}
+
+		static void RegisterCsvSpriteName(string name)
+		{
+			if (string.IsNullOrWhiteSpace(name))
+				return;
+			csvSpriteNames.Add(name.Trim().ToUpper());
+		}
+
 		static public void SetSpriteBasePosition(string name, Point position)
 		{
 			if (name == null)
@@ -139,11 +154,21 @@ namespace MinorShift.Emuera.Content
 
 		static public long SpriteDisposeAll(bool delCsvImage)
 		{
-			long count = imageDictionary.Count;
-			foreach (var sprite in imageDictionary.Values)
+			// delCsvImage=false 是 emuera 约定的“只清动态创建的 sprite”。eraFL 会在进出事件时调用
+			// SPRITEDISPOSEALL 0；如果连 CSV sprite 一起清掉，后续 BG01/立绘名会掉进裸文件同名搜索。
+			var removeNames = imageDictionary.Keys
+				.Where(name => delCsvImage || !csvSpriteNames.Contains(name))
+				.ToList();
+			long count = removeNames.Count;
+			foreach (string name in removeNames)
+			{
+				var sprite = imageDictionary[name];
 				sprite.Dispose();
-			imageDictionary.Clear();
-			spriteBasePositions.Clear();
+				imageDictionary.Remove(name);
+				spriteBasePositions.Remove(name);
+			}
+			if (delCsvImage)
+				spriteBasePositions.Clear();
 			return count;
 		}
 
@@ -172,10 +197,22 @@ namespace MinorShift.Emuera.Content
 		static string ResolveDynamicSpriteFilePath(string filepath)
 		{
 			// 企业级说明：SPRITECREATEFROMFILE 的相对路径按 emuera 约定以游戏目录为基准。
-			// Android 导出包下游戏目录通常位于外部存储，先归一化并走统一解析逻辑，确保大小写回退和 Godot FileAccess 生效。
+			// eraFL 等脚本会传 portrait/prt_FIX/*.webp，而真实资源在 resources 下；因此先查游戏根目录，
+			// 再查 resources 目录，同时避免把显式 resources/ 前缀拼成 resources/resources。
 			string resolved = uEmuera.Utils.NormalizePath(filepath.Trim());
-			if (!Path.IsPathRooted(resolved) && !resolved.Contains("://"))
-				resolved = Path.Combine(Program.ContentDir ?? "", resolved);
+			if (Path.IsPathRooted(resolved) || resolved.Contains("://"))
+				return uEmuera.Utils.ResolveExistingFilePath(resolved);
+
+			string gameCandidate = Path.Combine(Program.ExeDir ?? "", resolved);
+			string gameResolved = uEmuera.Utils.ResolveExistingFilePath(gameCandidate);
+			if (uEmuera.Utils.FileExists(gameResolved))
+				return gameResolved;
+
+			const string resourcesPrefix = "resources/";
+			string contentRelative = resolved.StartsWith(resourcesPrefix, StringComparison.OrdinalIgnoreCase)
+				? resolved.Substring(resourcesPrefix.Length)
+				: resolved;
+			resolved = Path.Combine(Program.ContentDir ?? "", contentRelative);
 			return uEmuera.Utils.ResolveExistingFilePath(resolved);
 		}
 
@@ -199,6 +236,7 @@ namespace MinorShift.Emuera.Content
 		static public bool LoadContents()
 		{
 			resolvedExistingResourcePathCache.Clear();
+			csvSpriteNames.Clear();
 			if (!uEmuera.Utils.DirectoryExists(Program.ContentDir))
 				return true;
 			try
@@ -240,11 +278,13 @@ namespace MinorShift.Emuera.Content
 							if (!imageDictionary.ContainsKey(item.Name))
                             {
 								imageDictionary.Add(item.Name, item);
+								RegisterCsvSpriteName(item.Name);
                                 loadedCount++;
                             }
 							else
 							{
 								ParserMediator.Warn("同名のリソースが既に作成されています: " + item.Name, sp, 0);
+								RegisterCsvSpriteName(item.Name);
 								item.Dispose();
 							}
 						}
@@ -267,6 +307,7 @@ namespace MinorShift.Emuera.Content
 			resourceDic.Clear();
 			imageDictionary.Clear();
 			lazyImageDictionary.Clear();
+			csvSpriteNames.Clear();
 			spriteBasePositions.Clear();
 			resolvedExistingResourcePathCache.Clear();
 			foreach (var graph in gList.Values)
@@ -485,6 +526,7 @@ namespace MinorShift.Emuera.Content
 						{
 							definition.Frames = new List<LazySpriteDefinition>();
 							lazyImageDictionary[spriteName] = definition;
+							RegisterCsvSpriteName(spriteName);
 							if (existing == null)
 								indexedCount++;
 							currentAnime = definition;
@@ -504,8 +546,8 @@ namespace MinorShift.Emuera.Content
 					LazySpriteDefinition existingSprite;
 					if (!lazyImageDictionary.TryGetValue(spriteName, out existingSprite) || (existingSprite.IsOptional && !definition.IsOptional))
 					{
-						// 注释候选资源只作为兼容兜底，正式CSV定义必须拥有更高优先级，避免不完整的候选行抢占有效资源名。
 						lazyImageDictionary[spriteName] = definition;
+						RegisterCsvSpriteName(spriteName);
 						if (existingSprite == null)
 							indexedCount++;
 					}

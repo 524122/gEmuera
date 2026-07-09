@@ -145,7 +145,18 @@ public class EmueraThread
                         input = "";
                     if(originalMouseButton != 0)
                         MinorShift.Emuera.GlobalStatic.Process?.InputInteger(1, originalMouseButton);
-                    console.PressEnterKey(skipflag, input, originalMouseButton != 0);
+                    // 右/中键点击空区域时 input=""，IntValue 状态下 PressEnterKey 无法解析空字符串会直接
+                    // return false，导致等待不推进、脚本永远读不到 RESULT:1。
+                    // eraFL(USERCOM_INPUT.ERB) 判定"未点击任何按钮"的条件是 RESULT:0 == -1，
+                    // 不是 0——必须补 "-1" 而不是 "0"，否则 RESULT:0==-1 的判断永远不成立。
+                    string submitInput = input;
+                    if (originalMouseButton != 0x01 && originalMouseButton != 0
+                        && string.IsNullOrEmpty(submitInput)
+                        && console.InputType == MinorShift.Emuera.GameProc.InputType.IntValue)
+                    {
+                        submitInput = "-1";
+                    }
+                    console.PressEnterKey(skipflag, submitInput, originalMouseButton != 0);
                     consumed = true;
                 }
                 finally

@@ -986,6 +986,13 @@ namespace MinorShift.Emuera.GameProc.Function
                     ret = new ExpressionArgument(null);
                     return ret;
                 }
+                LexicalAnalyzer.SkipWhiteSpace(st);
+                if (st.EOS)
+                    return new ExpressionArgument(null);
+                // eraFL 的 "INPUTS ,1" 表示省略第一个默认值参数，后面的值是旧式选项。
+                // 若把 ",1" 当成默认字符串，空白区域右键会提交非空 RESULTS，导致状态页切换条件失败。
+                if (!st.EOS && st.Current == ',')
+                    return new ExpressionArgument(null);
                 StrFormWord sfwt = LexicalAnalyzer.AnalyseFormattedString(st, FormStrEndWith.EoL, false);
                 if (!st.EOS)
                 {
@@ -1461,7 +1468,10 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
 			{
-				IOperandTerm[] terms = popTerms(line);
+				StringStream st = line.PopArgumentPrimitive();
+				WordCollection wc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
+				VariableToken nakedArrayTarget = tryGetNakedArray1DVarSetTarget(wc);
+				IOperandTerm[] terms = ExpressionParser.ReduceArguments(wc, ArgsEndWith.EoL, false);
 				if (!checkArgumentType(line, exm, terms))
 					return null;
 				VariableTerm varTerm = getChangeableVariable(terms, 1, line);
@@ -1503,7 +1513,42 @@ namespace MinorShift.Emuera.GameProc.Function
 					warn("２つの引数の型が一致していません", line, 2, false);
 					return null;
 				}
+				if (nakedArrayTarget != null)
+					return new SpVarSetArgument(new FixedVariableTerm(nakedArrayTarget), term, term3, term4);
 				return new SpVarSetArgument(varTerm, term, term3, term4);
+			}
+
+			private static VariableToken tryGetNakedArray1DVarSetTarget(WordCollection wc)
+			{
+				// 仅 VARSET 第 1 参数需要兼容原 Emuera：裸 1D 数组名表示整数组写入目标，而不是第 0 项。
+				if (wc == null || wc.Collection.Count == 0 || !(wc.Collection[0] is IdentifierWord idWord))
+					return null;
+
+				int index = 1;
+				string subKey = null;
+				if (index < wc.Collection.Count && wc.Collection[index].Type == '@')
+				{
+					index++;
+					if (index >= wc.Collection.Count || !(wc.Collection[index] is IdentifierWord subIdWord))
+						return null;
+					subKey = subIdWord.Code;
+					index++;
+				}
+				if (index < wc.Collection.Count && wc.Collection[index].Type != ',')
+					return null;
+
+				VariableToken token;
+				try
+				{
+					token = GlobalStatic.IdentifierDictionary.GetVariableToken(idWord.Code, subKey, true);
+				}
+				catch
+				{
+					return null;
+				}
+				if (token == null || !token.IsArray1D || token.IsCharacterData)
+					return null;
+				return token;
 			}
 		}
 

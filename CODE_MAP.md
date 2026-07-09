@@ -1,5 +1,159 @@
 # CODE_MAP
 
+## 2026-07-08 虚拟鼠标重新设计：可见可拖动光标（替换 L/M/R 选键面板）
+
+- `Icons/cursor.svg`（新文件）+ `.import`：简单箭头光标图标，白色填充+黑色描边，32×32px。
+- `Scripts/VirtualCursor.cs`（新文件，替代原 `VirtualMousePad.cs`）：`CanvasLayer(Layer=92)`，虚拟光标模式开启后屏幕上出现可见、可拖动移动的光标。单指拖动=相对位移移动光标（触摸板模式，灵敏度系数 1.0），短按=左键（按下后总位移 < 10px 且松手时长 < 0.45s），长按=右键（总位移 < 10px 且持续时长达 0.45s，在按住过程中立即触发不等松手），常驻中键按钮（右上角小型 "M" 按钮，点击直接对光标当前位置提交中键）。光标移动时调用 `EmueraContent.VirtualCursorUpdateHover` 驱动 hover 高亮，同时同步两条通道（通道A：`GenericUtils.SetPointingButton` → ERB `MOUSEBUTTON()` 读取；通道B：`SetCanvasVisualButton` → Canvas 渲染高亮）。
+- `EmueraContent.cs`：删除 `pendingMouseVk`/`pendingMouseSingleShot`/`SetPendingMouseButton`/`PendingMouseVk`/`PendingMouseSingleShot` 及 `virtualMousePad` 字段，新增 `VirtualCursor virtualCursor`；新增一组 `public` 转发方法供 `VirtualCursor` 调用（`VirtualCursorContentToGlobal` 反向坐标换算、`VirtualCursorGetContentViewportRect` 当前可视区域、`VirtualCursorUpdateHover` 命中测试+双通道同步 hover、`VirtualCursorCommitClick` 点击提交）；`HandleContentPointerInput` 在 `HandleContentTouchGesture` 之后、`TryGetPointer` 之前插入虚拟光标手势拦截（`virtualCursor?.HandleGesture`），虚拟光标模式开启时接管单指按下/拖动/释放；触摸事件 `effectiveVk` 兜底逻辑简化为默认左键（0x01），不再有"预选键"分支；`OnMouseTogglePressed` 改名 `OnVirtualCursorTogglePressed`，切换 `virtualCursor.Enable()`/`Disable()`；三处 `virtualMousePad?.ClosePadExternal()` 改为 `virtualCursor?.Disable()`。
+- 影响范围：推翻上一版"右上角展开选键面板"设计，改为"可见光标+手势判定"模式。桌面端真实鼠标/键盘输入不受影响，本次只重做 Android 侧虚拟光标交互。双指缩放优先级不变（拦截插在 `HandleContentTouchGesture` 之后）。坐标换算当前实现简化处理（`cursorContentPosition` 直接用 `newGlobal` 近似），在滚动偏移大、缩放非 1.0 的场景下光标位置可能不精确，需要后续完善反向换算公式（参照 `UpdatePointerPosition` 的换算逻辑写镜像反函数）。
+- 关键设计要点：hover 双通道同步（`VirtualCursor.MoveCursorBy` 每次移动光标后必须同时更新通道A 和通道B，否则 `MOUSEBUTTON()` 返回空、立绘动效失效）；手势判定阈值（`DragThreshold=10px`、`LongPressDuration=0.45s`）可能需要根据实机触感微调。
+
+## 2026-07-08 eraFL `INPUTS ,1` 空白右键状态切换兼容
+
+- `ArgumentBuilder.cs:SP_INPUTS_ArgumentBuilder`：`INPUTS`/`ONEINPUTS` 在跳过空白后若首字符为逗号，按“第一个默认值参数省略”处理，直接返回无默认值参数，不再把 `,1` 解析成默认字符串。
+- 根因：eraFL `ERB/TRAIN/USERCOM_INPUT.ERB` 使用 `INPUTS , 1` 读取点击；空白区域右键应提交 `RESULT:1==2` 且 `RESULTS==""`，随后脚本把 `RESULT:0` 置为 `-1` 并触发地图/状态页切换。旧解析会把 `,1` 当成默认字符串，空输入被替换成非空 `RESULTS`，导致切换条件失败。
+- 影响范围：只改变 `INPUTS`/`ONEINPUTS` 首参数省略写法的解析语义；显式默认字符串（如 `INPUTS "x"`）不变。后续若出现“空白区域点击有鼠标键码但脚本条件不触发”，优先检查 `SP_INPUTS_ArgumentBuilder`、`EmueraConsole.PressEnterKey` 的默认值替换，以及 `EmueraThread.Input` 写入 `RESULT_ARRAY[1]` 的链路。
+
+## 2026-07-08 统一鼠标三键抽象 + VirtualMousePad
+
+- `EmueraContent.cs:TryGetPointer`（6参数重载）：新增 `out int mouseVk` 输出，Left=0x01/Right=0x02/Middle=0x04/Touch=-1。5参数旧版本调用新重载，所有旧调用点不变。
+- `EmueraContent.cs:HandleContentPointerInput`：press 分支用 `effectiveVk = eventMouseVk>=0 ? eventMouseVk : pendingMouseVk` 替换硬编码 0x01，并记录到 `contentDragMouseVk`；release 传 mouseVk 给 OnButtonPressed；触控单次模式提交后自动复位。
+- `EmueraContent.cs:OnButtonPressed`：新增 `int mouseVk=0x01` 参数，调用 `EmueraThread.Input(input, true, skip, mouseVk)`，取代硬编码 1。
+- `EmueraContent.cs`：新增 `pendingMouseVk/pendingMouseSingleShot/contentDragMouseVk` 字段及 `SetPendingMouseButton/PendingMouseVk/PendingMouseSingleShot` 公开 API，供 `VirtualMousePad` 调用。
+- `Scripts/VirtualMousePad.cs`（新文件）：`CanvasLayer(Layer=91)`，左下角常驻切换按钮（L/M/R），展开后可选左/中/右键；短按=单次，长按=锁定；锁定时按钮变橙色并显示"[X]锁定"提示；`layerRoot.MouseFilter=Ignore` 不干扰 Emuera 点击判定。
+- 不改动：`WinInput`（已轮询三键）、`QuickButtons`（保持 mouseVk=1 默认）、`Scalepad`、`HandleContentTouchGesture`（双指仍走 pinch zoom）。
+- ERB 端：`RESULT:1` 读到 1=左键 / 2=右键 / 4=中键。
+
+### 空区域右键补充修复（eraFL 地图/状态 Tab 切换）
+
+eraFL 用 `INPUTS , 1`（StrValue 等待）读取点击，`USERCOM_INPUT.ERB` 靠 `RESULT:1==2 && RESULT:0==-1 && RESULTS==""` 判定"空区域右键"。仅让 `RESULT_ARRAY[1]` 写入右键码并不够，还需要让等待状态真正推进，且不能被拖拽逻辑吃掉。补了 4 处：
+
+- `EmueraContent.cs:IsPointerRelease`：原来只认 `MouseButton.Left`，导致 `_Input` 兜底路径识别不到右/中键释放；新增 Right/Middle 识别。
+- `EmueraContent.cs:HandleContentPointerInput` motion 分支：`contentDragMouseVk != 0x01` 时跳过拖拽阈值判断，避免右键按下后手指/鼠标轻微移动被误判为滚动（`contentDragMoved=true` 会导致 release 走 `StartContentInertia` 而不是提交按键）。
+- `EmueraContent.cs:HandleContentPointerInput` release 分支 / `TryAdvanceTap`：新增 `isNonLeftClick && console.IsWaitingInput` 条件，让右/中键在 INPUT 数值等待状态（不止 EnterKey/AnyKey）下也能 advance；`TryAdvanceTap` 内部同步放宽守卫，否则外层放行了内部仍会 `return false`。
+- `EmueraThread.cs:Work()`：`PressEnterKey` 对 `InputType.IntValue` 空字符串会 `Int64.TryParse` 失败直接 `return false`（等待不推进）。右/中键 + 空输入 + IntValue 时补 `submitInput="-1"`（不是 `"0"`——eraFL 用 `RESULT:0==-1` 判定"未点击按钮"）。注意 `USERCOM_INPUT.ERB` 实际是 StrValue 类型，`InputString("")` 本身不会失败，这条補丁只覆盖其他脚本可能用 IntValue 等待右键的场景；`InputInteger`（写 RESULT 数组）和 `InputString`（写 RESULTS）操作不同底层数组，互不覆盖，已用 Agent 核实。
+
+## 2026-07-08 #FUNCTION 参数槽清零与返回值预清零
+
+- `Process.CalledFunction.cs:UserDefinedFunctionArgument.SetTransporter`：for 循环每次迭代开始时清空当前参数槽（TransporterInt/Float/Str/Ref/ElementRef），避免 #FUNCTION 式中函数调用时缓存复用的 UserDefinedFunctionArgument 残留上次调用的 REF/值。null 参数或走 isRef 分支 continue 路径时，旧槽不会被新值覆盖，会把前一次调用的数据传给函数形参，导致 LIST_GET/ADD_MTAR 等函数写入错误的 MTAR 值。
+- `Process.cs:GetValue(SuperUserDefinedMethodTerm)`：在 IntoFunction 前清零 `state.MethodReturnValue`，防止函数 fallthrough 或异常截断时读到上次 RETURNF 的返回值。#FUNCTION 调用方通过 `ret = state.MethodReturnValue` 获取返回值，若函数未显式 RETURNF 且跳过了正常 ReturnF(null) 路径，MethodReturnValue 可能保留旧值。
+- 影响范围：只影响 #FUNCTION 表达式函数调用，普通 CALL 每次通过 ConvertArg 创建新 UserDefinedFunctionArgument 不受影响。若后续出现 #FUNCTION 调用后参数或返回值异常，优先检查这两处清零是否覆盖了相关边界。
+
+## 2026-07-07 VARSET 裸 1D 数组目标语义修复
+
+- `ArgumentBuilder.SP_VAR_SET_ArgumentBuilder`：`VARSET` 第 1 参数在词法层额外识别裸 1D 非角色数组变量名，例如 `VARSET MTAR, -1`、`VARSET MPLY, -1`，并把它作为整数组写入目标，而不是沿用普通表达式里的 `MTAR == MTAR:0` 读值兼容规则。带下标写法如 `VARSET MTAR:0, -1` 仍按单元素写入处理，普通表达式读取裸数组也不改变。
+- 影响范围：修复 eraFL `CLEAR_MTAR` / `CLEAR_MPLY` 清空参与者数组时只清 `:0` 的兼容偏差，避免状态页 `HO_STATUS_WINDOW_SET_TARGET("LEFT_BOTTOM")` 因旧数组残留或目标错误而跳过第二角色框内容。若后续出现类似“数组清空后仍残留旧角色/旧目标”的问题，优先检查 `VARSET`、`ARRAYSORT` 和 `VariableParser` 的裸数组语义边界。
+
+## 2026-07-07 eraFL 右侧信息窗横向可视宽度与 Fit 兜底
+
+- `EmueraContent.GetLineVisualRight` / `CalculateLineContentSize`：滚动内容宽度不再只依赖普通文本行宽和 `Config.DrawableWidth`，还会扫描每行相对/绝对 div、图片与 shape 的可视右边界。eraFL 状态页的右侧房间信息窗、日志窗使用 `x=4150,width=4500` 这类相对 div，窄屏或 Android 安全区下如果不把横向溢出计入内容宽度，会表现为只显示左侧角色框、右侧 UI 消失。
+- `EmueraContent.GetCurrentVisualContentWidth` / `Scalepad.OnAutoFit`：缩放面板的 `Fit` 不再只按 `Config.DrawableWidth` 计算比例，而是取配置宽度与当前真实可视内容宽度的较大值，避免 Android 动态安全区宽度把 `Config.WindowX` 缩到屏幕宽后，eraFL 右侧 div 仍无法被 Fit 纳入。
+- 影响范围：扩展 `ScrollContainer` 子内容的可显示/可横向滚动宽度，并让手动 `Fit` 使用真实可视宽度；不改变脚本输出、HTML 解析、按钮输入、逻辑行高或默认缩放值。
+
+## 2026-07-07 eraFL 状态页角色框与 shape 矩形绘制修正
+
+- `ConsoleRectangleShapePart`：公开原核心 `SetWidth()` 计算后的真实绘制矩形（偏移、宽高、可见性），区分“片段占用宽度”和“实际填充区域”。Godot Control 后端与 Canvas 后端都改为按真实矩形绘制，避免带 `x/y` 偏移的 `<shape type='rect'>` 被画到错误位置或错误尺寸。
+- `EmueraContent.BuildDivControl` / `AddDivBorder`：`<div border='...'>` 未显式指定 `bcolor` 时按 `Config.ForeColor` 绘制边框，兼容 eraFL 状态页角色卡、头像框等只声明边框厚度的写法；显式 `bcolor` 仍按原值逐边生效。
+- 影响范围：只影响 HTML/div 边框与 rectangle shape 的 Godot 显示后端，不改变 HTML 解析、ERB 输出顺序、按钮输入或逻辑行号。若后续边框颜色不符合脚本预期，应优先检查脚本是否显式设置了 `bcolor` 或运行期 `ForeColor`。
+
+## 2026-07-07 eraFL 状态页 div 可视溢出高度兜底
+
+- `EmueraContent.GetPartVisualBottom` / `GetLineVisualBottom` / `CalculateLineContentSize`：逻辑行高和可视底边分离。`ConsoleDivPart` 继续不按自身高度撑开普通文本流，避免与 eraFL `NEWLINE(n)` 预留高度重复计算；但相对定位 div 的 `Y + DivHeight` 会参与 `ScrollContainer` 子内容尺寸兜底，防止状态页下半块、第二角色栏或命令区因为父内容边界过小而被裁掉。
+- 影响范围：只扩展滚动内容的可绘制/可滚动边界，不改变 `lineNumbers`、逻辑行号、按钮 generation 或普通文本追加顺序。若后续出现 div 重叠，优先检查脚本是否缺少显式空行；若出现 UI 被裁，应检查 `GetLineVisualBottom` 是否覆盖了对应 `display` 模式。
+
+## 2026-07-07 eraFL 状态页相对 div 行高回退
+
+- `EmueraContent.GetPartBottom`：`ConsoleDivPart` 继续只按一行文本高度参与普通行高计算，即使是相对定位 div 也不再使用 `Y + DivHeight` 撑开逻辑显示行。eraFL `UIC_SHOW` / `HTML_PRINT ...,1` 会在输出 UI 容器后自行调用 `NEWLINE(26)` 预留窗口高度，若渲染层再按 div 高度占位，会把状态页下方成员栏和命令区重复推远。
+- 影响范围：div 仍会通过 `GetHtmlDivPosition` 按真实坐标绘制并可溢出所在逻辑行；行高、滚动内容高度和后续文本流则交回 ERB 脚本的 `NEWLINE(n)` 控制。若再次出现 div 内容被裁掉，应优先检查父控件 `ClipContents`、HTML 子层级和脚本是否缺少显式空行，而不是全局按 div 高度撑行。
+
+## 2026-07-07 eraFL game-icons 片段字体渲染适配
+
+- `EmueraContent.ResolveConsoleFont`：HTML/ERB 文本片段不再一律使用主控制台字体；当 `ConsoleStyledString.Font.FontFamily.Name` 指向非主字体时，会从游戏目录 `font/Font/fonts/Fonts` 下按 `*.ttf`/`*.otf` 懒加载对应字体并缓存。该路径用于兼容 eraFL `ICON()` 输出的 `@F:game-icons@...@/F@` 和 `<font face='game-icons'>...`。
+- `EmueraContent.CreateTextPart` 与 `ConsoleRenderSurface.DrawText`：Controls 后端和 Canvas 后端都按片段字体绘制，避免 `0xf347`、`0xf349` 等私有区图标码点被 `MS Gothic`/主字体误绘成“周”“閉”或方块。
+- Android 边界：主控制台字体仍保留 Android 使用内置字体的策略；片段字体不走该短路，会继续尝试加载游戏目录字体。若游戏目录缺少对应字体文件，则回退主字体并记录一次缺失缓存，避免热路径重复 I/O。
+
+## 2026-07-07 eraFL CSV sprite 生命周期与同名 fallback 修复
+
+- `AppContents`：新增 CSV sprite 名称登记表，`LoadContents()`/懒加载 CSV 索引阶段都会登记资源名；`SpriteDisposeAll(false)` 改为只清动态创建的 sprite，保留 `BG01`、立绘等 CSV 定义资源，`SpriteDisposeAll(true)` 才完整清空。
+- `AppContents.BuildLazyResourceIndex`：普通 sprite 分支重新写入 `lazyImageDictionary[spriteName] = definition` 并登记 CSV 名称，避免从 snake profile/lazy 模式启动时 `BG01` 未进入懒加载索引。
+- `EmueraContent.ShouldUseRawImageResourceFallback` 与 `ConsoleImagePart.TryResolveDynamicImageWidth`：CSV sprite 名称即使当前纹理未就绪，也禁止递归按裸文件名搜索同名图片或推断宽度，阻断 eraFL `BG01` 从 `resources/SYSTEM/BG.csv` 串到 `resources/mapimage/bg01.webp`。
+- 兼容边界：这只改变 CSV sprite 生命周期和 HTML 图片 fallback 优先级；真实裸文件路径、动态 cutin、`SPRITECREATEFROMFILE` 生成的非 CSV sprite 仍按原路径解析。
+
+## 2026-07-07 eraFL HTML div 行稳定优先渲染
+
+- `EmueraContent.Canvas.CanRenderPartOnCanvas`：所有包含 `ConsoleDivPart` 的行不再进入 Canvas div overlay 优化路径，而是整行退回 Control 渲染；Canvas 仍负责普通文本、形状和简单图片。
+- 根因：eraFL 的状态栏底图、`DRAW_PORTRAIT`/`DRAW_STILL` 立绘、房间/地图框大量依赖 `<div><img></div>` 的裁剪、`depth`、负坐标和跨行叠放。Canvas div overlay 虽能减少节点，但在异步补图、负 y 和兄弟 div 层级上仍存在边界差异。
+- 取舍：这是稳定优先方案，可能增加 HTML/div 密集页面的 Godot Control 节点数；但避免全局切回 Controls，普通文本和简单图片仍走 Canvas 快路径。若后续要恢复性能优化，应先用 eraFL 状态栏、立绘、住房/地图界面做逐项视觉回归。
+
+## 2026-07-07 eraFL HTML 图片 div 异步刷新补强
+
+- `EmueraContent.IsPureImageLine`：纯图片行判定递归识别 `ConsoleDivPart` 子树，兼容 eraFL `DRAW_PORTRAIT`、`DRAW_STILL` 和 `SHOW_STATUS.ERB` 状态栏底图常用的 `<div><img ...></div>` 写法。图片还在异步解码/上传时，这类包装图片会和顶层 `<img>` 一样延后提交，避免先显示空 div/spacer 后表现为“有框没图”。
+- `RegisterCanvasImageOverlays` / `RegisterCanvasDivOverlays` 以及对应释放路径：overlay 节点集合变化后显式标记 `canvasOverlayRowsDirty`，确保批量输出和异步补图后按最新 `lineLayoutEntries` 重新定位 Canvas overlay。
+- 影响范围：仅改变 Canvas 后端对 HTML 图片 div 首帧未就绪与 overlay 重定位的处理；含文字的 div、按钮行和普通文本不进入纯图片延后路径。
+
+## 2026-07-07 eraFL CBG/SETIMAGELAYER 换图刷新触发
+
+- `EmueraConsole.CBG_Clear` / `CBG_ClearRange` / `CBG_SetImage` / `CBG_SetButtonMap` / `CBG_SetButtonImage` 以及 `AddBackgroundImage` / `RemoveBackground` / `SetImageLayer` / `ClearImageLayer*`：背景图层列表或按钮图层状态发生变化后统一调用 `RequestCbgRefresh()`，只唤醒 `uEmuera.Window.MainWindow.Refresh()` 的 dirty 标记，由现有 `Window.Update()` 在下一帧合并拉取 `cbgList` 并调用 `EmueraContent.RefreshCBG`。
+- 根因：eraFL 图像显示库实际使用 `CBGSETG/CBGSETSPRITE/CBGSETBUTTONSPRITE/CBGSETBMAPG/CBGCLEAR/CBGREMOVERANGE` 做背景换图；这些函数已实现，但此前只修改后台 `cbgList`，若脚本本轮没有普通文本刷新，Godot 侧不会立即收到背景图层变化。
+- 兼容边界：不在 CBG 函数里直接排 Godot UI 队列或重建节点，避免多次连续 `CBGSET*` 在移动端造成热路径抖动；刷新仍走原有显示桥和异步纹理重试逻辑。
+
+## 2026-07-07 eraFL 立绘同步合成与 resources 路径回退
+
+- `SpriteManager.GetTextureInfoForScriptComposition` / `BitmapTexture.EnsureTextureInfoForScriptComposition`：为 ERB 图像合成链路提供同步真实像素读取，不把解码失败或未就绪的占位纹理当作可合成源；若已有占位缓存且本次读到真实图，会覆盖占位缓存。
+- `GraphicsImage.GCreateFromF` / `GraphicsImage.GDrawCImg`：`GCREATEFROMFILE`、`GLOAD`、`GDRAWSPRITE` 等脚本合成命令改为按真实绘制成功返回 `1/0`，失败时不再留下 `IsCreated=true` 的空图，避免后续 `SPRITECREATE` 生成空立绘。
+- `Creator.Method.ResolveGraphicsResourceFilePath` / `AppContents.ResolveDynamicSpriteFilePath`：相对图片路径按游戏根目录优先、`resources/` 目录回退解析，并避免显式 `resources/` 前缀被拼成 `resources/resources`。这用于兼容 eraFL 固定立绘路径如 `portrait/prt_FIX/*.webp` 实际位于 `resources/portrait/prt_FIX/` 的脚本写法。
+
+## 2026-07-07 GetSpriteTexture 异步纹理 pending 追踪补全
+
+- `EmueraContent.GetSpriteTexture` line 3704：修复 `ti.texture == null` 分支缺失 `TrackAsyncTextureRequestForCurrentRender()` 调用的问题。
+- 根因：当 BitmapTexture 的 `CachedTextureInfo` 已存在但 `ti.texture` 为 null 时（ImageTexture.CreateFromImage 失败或首次 lazy create 时 image 解码未完成），原代码直接返回 null 且**未追踪 pending**，导致 `ProcessAsyncTextureRefreshes` 永远不会重试该行。
+- 影响：eraFL 状态栏 BG01 底图首次渲染时纹理未就绪 → 画 spacer → 后续异步完成也不重刷 → 底图永久缺失。
+- 修复后：即使 ti.texture 为 null 也追踪 pending，确保 `TextureLoadVersion` 递增后会触发 `AddLine(pendingLine, true)` 重绘。
+
+## 2026-07-07 HtmlManager 支持 div 自闭合语法
+
+- `HtmlManager.tagAnalyze` case "div"：检测 `<div ... />` 自闭合语法（wc 最后一个 token 是 `/` 即 OperatorCode.Div）。自闭合 div 直接返回空子行的 `ConsoleDivPart`，等价于 `<div ...></div>`，不再设置 `PendingDivTag` 等待 `ReadDivInnerHtml`。
+- 根因：eraFL `SYSTEM/UI\CONTAINER/UI_CONTAINER_MAIN.ERB:96` 包含多个 `<div ... />` 自闭合标签，原 HtmlManager 不支持该语法导致解析失败，`SHOW_STATUS.ERB:70` 调用 `UIC_SHOW` 时抛出异常，line 239 的 BG01 状态栏底图输出根本没被执行。2026-07-07 前三次修复（003/004/005）都在修渲染路径，但渲染代码从未被调用过。
+
+## 2026-07-07 eraFL 状态栏背景资源优先级修复
+
+- `EmueraContent.ShouldUseRawImageResourceFallback`：HTML `<img src>` 先按 `AppContents.GetSprite` 解析 CSV sprite。只要 sprite 定义已经命中，即使本帧纹理仍在异步解码/上传中，也不再按裸文件名递归搜索同名图片；只有完全没有 sprite 定义时才走文件 fallback。该规则避免 eraFL `SHOW_STATUS.ERB` 的 `BG01` 从 `resources/SYSTEM/BG.csv` 指向的天空状态栏误落到 `resources/mapimage/bg01.webp`。
+
+## 2026-07-07 eraFL 状态栏 div 子层级修正
+
+- `EmueraContent.BuildConsoleButton` / `AddPartToContainer`：新增 `allowEscapedPartZ` 传递开关。普通控制台行里的大图仍可用 escaped `ZIndex` 跨出行高；但 `BuildDivControl` 渲染 div 子行时会关闭该抬升，避免 div 内背景图在 Godot 相对 `ZIndex` 下越过外层 HTML `depth`，盖住同批次后续文字 div。该规则用于兼容 eraFL `SHOW_STATUS.ERB` 中背景 div 与文字 div 叠放的状态栏。
+
+## 2026-07-07 eraFL HTML div 层级与制表符测量兼容
+
+- `EmueraContent.GetGodotZIndexForHtmlDepth`：HTML `depth` 仍按数值越大越靠后的语义排序，但整体映射到正向 `ZIndex` 基准之上，避免 Canvas 后端把 `depth='1'` 的 eraFL 房间框压到绘制面背后，只剩无 depth 的通路遮罩可见。
+- `StringMeasure.GetDisplayLength`：包含 tab 的字符串不再在 `GRAPHICS` 模式下替换为 8 个空格，而是走固定半角/全角网格测量；这用于兼容 eraFL `TAG_PRINT` 多行字符串把源码缩进带入按钮片段时的底部选项排版。
+
+## 2026-07-03 同名图片跨目录缓存隔离
+
+- `SpriteManager`：文件纹理缓存改为以完整规范化路径为主要 key，不再把 `Path.GetFileName()` 作为全局别名；`GetSprite` 和旧同步 `Loading` 回调也改用同一套路径级 key。这样不同目录下同名 `webp/png/jpg` 不会复用同一个 `TextureInfo`，避免 TW 角色立绘在同名文件跨文件夹时串图。仅在请求名本身是路径或没有文件路径时才保留 name alias。
+
+## 2026-07-03 普通输出追加行滚动修正
+
+- `uEmuera.Window.DecideScrollModeForDisplayDelta`：动态地图函数栈或动态地图视图中的重绘仍使用 `PreserveViewport`，避免地图刷新拉回底部；非动态地图输出如果本批 diff 中存在 `LineNo > previousMaxLineNo` 的真实追加行，即使同时刷新了旧行元数据，也改为 `FollowBottom`。这用于修正 TW 会话/泡茶等普通输出在聊完后停在旧历史位置、不自动跟随最新文本的问题。
+
+## 2026-07-03 动态地图函数栈标记
+
+- `ProcessState.IsInDynamicMapFunctionScope` / `EmueraConsole.IsDynamicMapOutputScopeActive`：输出行生成时在 ERB 后台线程读取当前调用栈，只识别 `DRAW_COLOREDMAP`、`DRAW_MAP`、`FIELDMAP` 等地图绘制根函数；`GETMAP`、`MAP_VIEWING` 等子函数不再单独触发地图标记，降低非地图页面误伤。
+- `ConsoleDisplayLine.DynamicMapFunctionScoped` / `PrintStringBuffer` / `EmueraConsole.PrintHtml`：给来自地图根函数的显示行打元数据标记，并递归标到 HTML div 子行；`GenericUtils.LineHasDynamicMapBitmapContext` 仍同时接受 `BITMAP_CACHE_ENABLE` 与函数栈标记作为诊断和地图块识别证据。
+- `uEmuera.Window.DecideScrollModeForDisplayDelta`：滚动策略只用 `DynamicMapFunctionScoped` 或已确认的动态地图视图来判定地图重绘；普通 `BITMAP_CACHE_ENABLE` 页面不再直接触发地图滚动策略，避免颜色滑块、立绘履历等非地图 UI 被误判。
+- `uEmuera.Window.TryFindDynamicMapWindowStart`：只在显示列表尾部有限范围内寻找动态地图上下文，避免历史中的旧地图块长期影响后续普通文本滚动策略。
+
+## 2026-07-03 去除动态地图视图裁剪实验
+
+- `uEmuera.Window.Update`：动态地图检测仍保留，用于 `dynamicMapViewActive`、诊断日志和滚动策略；但不再把 `displayStartIndex` 裁到地图块开始行，也不再在进入/离开动态地图时调用 `GenericUtils.ClearText()` 重建 Godot 显示层。历史文本会继续参与行级 diff，进入地图后理论上可向上查看前文。
+- 风险说明：这会恢复历史内容可见性，但也可能重新暴露 Android 上旧内容、地图块、选项一起刷新时的自动滚动或闪烁问题；本改动用于验证“视图裁剪是否是历史消失主因”。
+
+## 2026-07-03 动态地图滚动事务第一步
+
+- `GenericUtils.ApplyTextChanges` / `EmueraContent.ApplyTextChanges`：在保留旧 `scrollToBottom: bool` 入口的同时新增 `EmueraDisplayScrollMode`，用于把显示刷新后的滚动意图从简单布尔值扩展为“追底部、保留视口、保持当前选项可见”等模式。旧调用方仍按原语义工作，动态地图链路可以逐步迁移到更细的滚动策略。
+- `uEmuera.Window.DecideScrollModeForDisplayDelta`：显示差异提交前根据删除尾行、更新旧行、追加新行和动态地图视图状态决定滚动模式。当前动态地图视图直接使用 `PreserveViewport`，避免刷新时拉回底部；`KeepChoicesVisible` 保留为可扩展模式，但不再用于动态地图。
+- `EmueraContent.RequestKeepChoicesVisible`：保留“保持当前选项可见”的实现入口，等待 Godot 布局帧稳定后按当前按钮 generation 找选项并做最小补偿；当前动态地图链路不会触发该模式。
+
 ## 2026-07-02 动态地图刷新合并补充
 
 - `EmueraConsole.RefreshStrings` / `deleteLine` / `BitmapCacheEnabledForNextLine`：动态地图或状态面板进入 `CLEARLINE`、`BITMAP_CACHE_ENABLE 1...0` 区域重画时，Running 中的普通 `RefreshStrings(false)` 会先合并，不向 Godot UI 提交半成品；进入 `INPUT/TINPUT/WAIT` 或显式 `RefreshStrings(true)` 时一次提交完整显示列表，避免 Android 看到“旧菜单 -> 半张地图 -> 地图主体”的循环中间帧。
@@ -266,9 +420,9 @@ project.godot
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
 | `Process.cs` | partial `Process` | 脚本处理器主类；初始化、输入结果、开始执行、异常处理；脚本错误终止时清理函数栈与 `ExecutionContext`，表达式函数异常路径防止局部上下文残留，并在 `BEFORE_THROW` 内部异常时跳过二次 `BEFORE_ERROR`。 | `Initialize`, `InitializeAsync`, `DoScript`, `BeginTitle`, `InputInteger`, `InputString`, `ReloadErb`, `ReloadErbAsync`, `ReloadPartialErb`, `ReloadPartialErbAsync`, `GetRunningPosition` |
-| `Process.ScriptProc.cs` | partial `Process` | 内层脚本执行循环和 debug 执行；`THROW` 会记录 pending throw、进入 `BEFORE_THROW`，并在 `BEFORE_THROW/BEFORE_ERROR` 内部只打印消息避免递归错误事件。 | `runScriptProc`, `DoDebugNormalFunction`, `saveCurrentState`, `loadPrevState` |
+| `Process.ScriptProc.cs` | partial `Process` | 内层脚本执行循环和 debug 执行；函数自然流到末尾时按当前栈顶判断是否为 `#FUNCTION/#FUNCTIONS/#FUNCTIONF`，避免外层表达式函数求值影响普通 `CALL` 的 `RESULT`/返回流程；`THROW` 会记录 pending throw、进入 `BEFORE_THROW`，并在 `BEFORE_THROW/BEFORE_ERROR` 内部只打印消息避免递归错误事件。 | `runScriptProc`, `DoDebugNormalFunction`, `saveCurrentState`, `loadPrevState` |
 | `ExecutionContext.cs` | `ExecutionContext` | 函数执行上下文；持有当前调用帧的 `LOCAL/LOCALS/LOCALF/ARG/ARGS/ARGF` 运行期数组和父子关系，用于替代旧的共享局部数组存储。 | 构造函数、`Dispose`, `Parent`, `Local*`, `Arg*` |
-| `Process.State.cs` | `ProcessState`, `SystemStateCode`, `BeginType` | CALL/JUMP/RETURN、BEGIN、函数栈、返回值、状态克隆；维护 `ExecutionContext` 栈，进入函数时绑定数组 REF、元素级 REF、OUT 空引用并创建局部执行上下文；调试/表达式求值可通过 `CaptureCallState`/`RollbackToState` 恢复函数栈、上下文栈和 `CurrentLine`，克隆状态保留原上下文栈供监视表达式读取 `LOCAL@FUNCNAME`；`ClearFunctionListPreserveTrace` 用于错误/THROW 后保留调试调用栈显示。 | `JumpTo`, `SetBegin`, `Begin`, `Return`, `IntoFunction`, `ReturnF`, `CurrentContext`, `FindContextByLabel`, `CaptureCallState`, `RollbackToState`, `ClearFunctionListPreserveTrace`, `Clone` |
+| `Process.State.cs` | `ProcessState`, `SystemStateCode`, `BeginType` | CALL/JUMP/RETURN、BEGIN、函数栈、返回值、状态克隆；维护 `ExecutionContext` 栈，进入函数时绑定数组 REF、元素级 REF、OUT 空引用并创建局部执行上下文；区分外层表达式函数根 `IsFunctionMethod` 与当前栈顶 `IsCurrentFunctionMethod`，普通 `CALL` 在 `#FUNCTION` 求值期间返回时不会被误弹成 `RETURNF`；调试/表达式求值可通过 `CaptureCallState`/`RollbackToState` 恢复函数栈、上下文栈和 `CurrentLine`，克隆状态保留原上下文栈供监视表达式读取 `LOCAL@FUNCNAME`；`ClearFunctionListPreserveTrace` 用于错误/THROW 后保留调试调用栈显示。 | `JumpTo`, `SetBegin`, `Begin`, `Return`, `IntoFunction`, `ReturnF`, `IsCurrentFunctionMethod`, `CurrentContext`, `FindContextByLabel`, `CaptureCallState`, `RollbackToState`, `ClearFunctionListPreserveTrace`, `Clone` |
 | `Process.SystemProc.cs` | partial `Process` | 系统流程处理。 | 系统状态执行 helper |
 | `Process.CalledFunction.cs` | `CalledFunction`, `UserDefinedFunctionArgument` | 调用栈条目和用户函数实参；转换并暂存普通参数、数组 REF、元素级 REF 和 OUT 空引用；用户函数参数按 `EraType` 处理整数到小数的兼容扩展和可变参数类型，`VariadicArgTerm` 不进入普通 transporter，统一由 `ProcessState.IntoFunction` 展开。 | `ConvertArg`, `SetTransporter`, 参数暂存数组 |
 | `Process.LazyLoading.cs` | partial `Process`, `LazyStatus` | ERB lazy loading 表、索引、按需加载、缓存；Android 索引缺失/失效时优先用轻量标签扫描建表，预扫描只抽取 `@label` 与 `#FUNCTION/#FUNCTIONS/#FUNCTIONF`，非 Android 保持 BuildTable/full-load 建表路径；首次真实命中仍执行完整 ERB 解析与检查；索引构建和局部更新会排除事件函数与方法文件，避免预解析依赖的方法被延迟加载；运行期维护 file -> functions 反向索引，按需加载后只移除相关映射，避免扫描整张 lazy 表；运行期 lazy ERB 补加载带慢调用诊断；EVENTLOAD 保持命中时按需加载，`PreloadEventLoadLazyErbs` 仅保留为诊断/实验入口，不在系统读档流程调用。 | `TryLazyLoadErb`, `LoadLazyLoadingTable`, `SaveLazyLoadingList`, `SavePartialLazyLoadingList`, `PreloadEventLoadLazyErbs` |

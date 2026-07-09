@@ -355,7 +355,7 @@ namespace MinorShift.Emuera.GameData.Function
                 if (arguments[0] is SingleTerm)
                 {
                     string varName = ((SingleTerm)arguments[0]).Str;
-                    if (GlobalStatic.IdentifierDictionary.GetVariableToken(varName, null, true) == null)
+                    if (ResolveVarsizeVariable(varName) == null)
                         return name + "関数の1番目の引数が変数名ではありません";
                 }
                 if (arguments.Length == 1)
@@ -368,7 +368,8 @@ namespace MinorShift.Emuera.GameData.Function
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
-                VariableToken var = GlobalStatic.IdentifierDictionary.GetVariableToken(arguments[0].GetStrValue(exm), null, true);
+                string varName = arguments[0].GetStrValue(exm);
+                VariableToken var = ResolveVarsizeVariable(varName);
                 if (var == null)
                     throw new CodeEE("VARSIZEの1番目の引数(\"" + arguments[0].GetStrValue(exm) + "\")が変数名ではありません");
                 int dim = 0;
@@ -385,12 +386,30 @@ namespace MinorShift.Emuera.GameData.Function
 					arguments[1].Restructure(exm);
 				if (arguments[0] is SingleTerm && (arguments.Length == 1 || arguments[1] is SingleTerm))
 				{
-					VariableToken var = GlobalStatic.IdentifierDictionary.GetVariableToken(arguments[0].GetStrValue(exm), null, true);
+					VariableToken var = ResolveVarsizeVariable(arguments[0].GetStrValue(exm));
 					if (var == null || var.IsReference)//可変長の場合は定数化できない
 						return false;
 					return true;
 				}
 				return false;
+			}
+
+			static VariableToken ResolveVarsizeVariable(string varName)
+			{
+				VariableToken var = GlobalStatic.IdentifierDictionary.GetVariableToken(varName, null, true);
+				if (var != null || string.IsNullOrEmpty(varName))
+					return var;
+
+				// v24/snake 系では旧名 VARSIZE("FOO") が実体配列 FOO_ENG/FOO_JP を指すケースがある。
+				// 完全一致を優先し、代表的な表示名配列だけへ限定して回退する。
+				string[] suffixes = new string[] { "_ENG", "_JP" };
+				for (int i = 0; i < suffixes.Length; i++)
+				{
+					var = GlobalStatic.IdentifierDictionary.GetVariableToken(varName + suffixes[i], null, true);
+					if (var != null)
+						return var;
+				}
+				return null;
 			}
         }
 
@@ -3693,8 +3712,24 @@ namespace MinorShift.Emuera.GameData.Function
 			public GraphicsSetFontMethod()
 			{
 				ReturnType = EraType.Integer;
-				argumentTypeArray = new EraType[] { EraType.Integer, EraType.String, EraType.Integer };
+				argumentTypeArray = null;
 				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 3)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum1, name, 3);
+				if (arguments.Length > 4)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum2, name);
+				if (arguments[0] == null || !arguments[0].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
+				if (arguments[1] == null || !arguments[1].IsString)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 2);
+				if (arguments[2] == null || !arguments[2].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 3);
+				if (arguments.Length == 4 && (arguments[3] == null || !arguments[3].IsInteger))
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 4);
+				return null;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -3705,11 +3740,12 @@ namespace MinorShift.Emuera.GameData.Function
 					return 0;
 				string fontname = arguments[1].GetStrValue(exm);
 				Int64 fontsize = arguments[2].GetIntValue(exm);
+				FontStyle fontStyle = arguments.Length >= 4 ? GraphicsFontStyleFromInt(arguments[3].GetIntValue(exm)) : FontStyle.Regular;
 
                 Font styledFont;
                 try
 				{
-					styledFont = new Font(fontname, fontsize, FontStyle.Regular, GraphicsUnit.Pixel);
+					styledFont = new Font(fontname, fontsize, fontStyle, GraphicsUnit.Pixel);
 				}
 				catch
 				{
@@ -3718,6 +3754,20 @@ namespace MinorShift.Emuera.GameData.Function
 				g.GSetFont(styledFont);
 				return 1;
 			}
+		}
+
+		static FontStyle GraphicsFontStyleFromInt(long style)
+		{
+			FontStyle fontStyle = FontStyle.Regular;
+			if ((style & 1) != 0)
+				fontStyle |= FontStyle.Bold;
+			if ((style & 2) != 0)
+				fontStyle |= FontStyle.Italic;
+			if ((style & 4) != 0)
+				fontStyle |= FontStyle.Strikeout;
+			if ((style & 8) != 0)
+				fontStyle |= FontStyle.Underline;
+			return fontStyle;
 		}
 		
 		public sealed class GraphicsSetPenMethod : FunctionMethod
@@ -3924,12 +3974,7 @@ namespace MinorShift.Emuera.GameData.Function
                 BitmapTexture bmp = null;
 				try
 				{
-					string filepath = filename;
-					if(!System.IO.Path.IsPathRooted(filepath))
-						filepath = System.IO.Path.Combine(Program.ContentDir ?? "", filename);
-					string resolved = uEmuera.Utils.ResolveExistingFilePath(filepath);
-					if (!string.IsNullOrEmpty(resolved))
-						filepath = resolved;
+					string filepath = ResolveGraphicsResourceFilePath(filename);
 					if (!uEmuera.Utils.FileExists(filepath))
 						return 0;
 					bmp = new BitmapTexture(filepath);
@@ -3937,7 +3982,8 @@ namespace MinorShift.Emuera.GameData.Function
 						return 0;
 					if (bmp.Width == 0 || bmp.Height == 0)
 						return 0;
-					g.GCreateFromF(bmp, (Config.TextDrawingMode == TextDrawingMode.WINAPI));
+					if (!g.GCreateFromF(bmp, (Config.TextDrawingMode == TextDrawingMode.WINAPI)))
+						return 0;
 				}
 				catch (Exception e)
 				{
@@ -3954,6 +4000,38 @@ namespace MinorShift.Emuera.GameData.Function
 					return 0;
 				return 1;
 			}
+		}
+
+		static string ResolveGraphicsResourceFilePath(string filename)
+		{
+			if (string.IsNullOrWhiteSpace(filename))
+				return filename;
+			string normalized = uEmuera.Utils.NormalizePath(filename.Trim());
+			if (System.IO.Path.IsPathRooted(normalized) || normalized.Contains("://"))
+				return uEmuera.Utils.ResolveExistingFilePath(normalized);
+
+			foreach (string candidate in BuildGraphicsResourcePathCandidates(normalized))
+			{
+				if (string.IsNullOrEmpty(candidate))
+					continue;
+				string resolved = uEmuera.Utils.ResolveExistingFilePath(candidate);
+				if (uEmuera.Utils.FileExists(resolved))
+					return resolved;
+			}
+			return uEmuera.Utils.ResolveExistingFilePath(System.IO.Path.Combine(Program.ExeDir ?? "", normalized));
+		}
+
+		static IEnumerable<string> BuildGraphicsResourcePathCandidates(string normalized)
+		{
+			string gameDir = Program.ExeDir ?? "";
+			string contentDir = Program.ContentDir ?? "";
+			yield return System.IO.Path.Combine(gameDir, normalized);
+
+			const string resourcesPrefix = "resources/";
+			if (normalized.StartsWith(resourcesPrefix, StringComparison.OrdinalIgnoreCase))
+				yield return System.IO.Path.Combine(contentDir, normalized.Substring(resourcesPrefix.Length));
+			else
+				yield return System.IO.Path.Combine(contentDir, normalized);
 		}
 
 		public sealed class GraphicsDisposeMethod : FunctionMethod
@@ -4303,28 +4381,24 @@ namespace MinorShift.Emuera.GameData.Function
 				Rectangle destRect = new Rectangle(0, 0, img.DestBaseSize.Width, img.DestBaseSize.Height);
 				if (arguments.Length == 2)
 				{
-					dest.GDrawCImg(img, destRect);
-					return 1;
+					return dest.GDrawCImg(img, destRect) ? 1 : 0;
 				}
 				if (arguments.Length == 4)
 				{
 					Point p = ReadPoint(Name, exm, arguments, 2);
 					destRect.X = p.X;
 					destRect.Y = p.Y;
-					dest.GDrawCImg(img, destRect);
-					return 1;
+					return dest.GDrawCImg(img, destRect) ? 1 : 0;
 				}
 				if (arguments.Length == 6)
 				{
 					destRect = ReadRectangle(Name, exm, arguments, 2);
-					dest.GDrawCImg(img, destRect);
-					return 1;
+					return dest.GDrawCImg(img, destRect) ? 1 : 0;
 				}
 				//if (arguments.Length == 7)
 				destRect = ReadRectangle(Name, exm, arguments, 2);
 				float[][] cm = ReadColormatrix(Name, exm, arguments, 6);
-				dest.GDrawCImg(img, destRect, cm);
-				return 1;
+				return dest.GDrawCImg(img, destRect, cm) ? 1 : 0;
 			}
 
 			public override bool UniqueRestructure(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -5735,7 +5809,7 @@ namespace MinorShift.Emuera.GameData.Function
 			if (!TryGetSafeRelativeTextPath(pathTerm.GetStrValue(exm), out filepath))
 				return false;
 			string extension = System.IO.Path.HasExtension(filepath) ? System.IO.Path.GetExtension(filepath).TrimStart('.').ToLowerInvariant() : "";
-			if (!string.Equals(extension, "txt", StringComparison.OrdinalIgnoreCase))
+			if (!Config.IsLoadTextExtensionAllowed(extension))
 			{
 				if (!forSave)
 					return false;
@@ -5774,6 +5848,16 @@ namespace MinorShift.Emuera.GameData.Function
 			try
 			{
 				byte[] bytes = System.IO.File.ReadAllBytes(filepath);
+				// eraFL 的部分 xml 实际保存为 UTF-16/UTF-32，但声明仍写 utf-8。
+				// 这里先按 BOM 识别真实编码，避免 LOADTEXT 把内容读成带 NUL 的乱码。
+				if (bytes.Length >= 4 && bytes[0] == 0xFF && bytes[1] == 0xFE && bytes[2] == 0x00 && bytes[3] == 0x00)
+					return Encoding.UTF32.GetString(bytes);
+				if (bytes.Length >= 4 && bytes[0] == 0x00 && bytes[1] == 0x00 && bytes[2] == 0xFE && bytes[3] == 0xFF)
+					return new UTF32Encoding(true, true).GetString(bytes);
+				if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+					return Encoding.Unicode.GetString(bytes);
+				if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+					return Encoding.BigEndianUnicode.GetString(bytes);
 				if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
 					return new UTF8Encoding(true, true).GetString(bytes);
 				try
@@ -5864,7 +5948,8 @@ namespace MinorShift.Emuera.GameData.Function
 						return 0;
 					if (bmp.Width == 0 || bmp.Height == 0)
 						return 0;
-					g.GCreateFromF(bmp, (Config.TextDrawingMode == TextDrawingMode.WINAPI));
+					if (!g.GCreateFromF(bmp, (Config.TextDrawingMode == TextDrawingMode.WINAPI)))
+						return 0;
 				}
 				catch (Exception e)
 				{
@@ -5954,8 +6039,25 @@ namespace MinorShift.Emuera.GameData.Function
 		public GraphicsDrawStringMethod()
 		{
 			ReturnType = EraType.Integer;
-			argumentTypeArray = new EraType[] { EraType.Integer, EraType.String, EraType.Integer, EraType.Integer };
+			argumentTypeArray = null;
 			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length != 2 && arguments.Length != 4)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+			if (arguments[0] == null || !arguments[0].IsInteger)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
+			if (arguments[1] == null || !arguments[1].IsString)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 2);
+			if (arguments.Length == 4)
+			{
+				if (arguments[2] == null || !arguments[2].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 3);
+				if (arguments[3] == null || !arguments[3].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 4);
+			}
+			return null;
 		}
 		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 		{
@@ -5965,8 +6067,8 @@ namespace MinorShift.Emuera.GameData.Function
 			if (!g.IsCreated)
 				return 0;
 			string text = arguments[1].GetStrValue(exm) ?? "";
-			int x = (int)arguments[2].GetIntValue(exm);
-			int y = (int)arguments[3].GetIntValue(exm);
+			int x = arguments.Length >= 4 ? (int)arguments[2].GetIntValue(exm) : 0;
+			int y = arguments.Length >= 4 ? (int)arguments[3].GetIntValue(exm) : 0;
 			return g.GDrawString(text, x, y) ? 1 : 0;
 		}
 	}
@@ -6536,8 +6638,19 @@ namespace MinorShift.Emuera.GameData.Function
 		public GraphicsDrawGWithRotateMethod()
 		{
 			ReturnType = EraType.Integer;
-			argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
+			argumentTypeArray = null;
 			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length != 3 && arguments.Length != 5)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+			for (int i = 0; i < arguments.Length; i++)
+			{
+				if (arguments[i] == null || !arguments[i].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
+			}
+			return null;
 		}
 		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 		{
@@ -6550,8 +6663,9 @@ namespace MinorShift.Emuera.GameData.Function
 			if (!src.IsCreated)
 				return 0;
 			long angle = arguments[2].GetIntValue(exm);
-			int pivotX = (int)arguments[3].GetIntValue(exm);
-			int pivotY = (int)arguments[4].GetIntValue(exm);
+			// eraFL 省略 pivot 时默认围绕源图中心旋转，避免只给角度时图像被转出画布。
+			int pivotX = arguments.Length >= 5 ? (int)arguments[3].GetIntValue(exm) : src.Width / 2;
+			int pivotY = arguments.Length >= 5 ? (int)arguments[4].GetIntValue(exm) : src.Height / 2;
 			dest.GDrawGWithRotate(src, angle, pivotX, pivotY);
 			return 1;
 		}

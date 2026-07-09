@@ -129,6 +129,7 @@ namespace MinorShift.Emuera
 			PluginAvailableWarn = instance.GetConfigValue<bool>(ConfigCode.PluginAvailableWarn);
 			DisableBeforeErrorThrow = instance.GetConfigValue<bool>(ConfigCode.DisableBeforeErrorThrow);
 			UseScopedVariableInstruction = instance.GetConfigValue<bool>(ConfigCode.UseScopedVariableInstruction);
+			LoadTextValidExtensions = ParseLoadTextValidExtensions(instance.GetConfigValue<string>(ConfigCode.LoadTextValidExtensions));
 			
 			CompatiFuncArgAutoConvert = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgAutoConvert);
 			CompatiFuncArgOptional = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgOptional);
@@ -203,6 +204,37 @@ namespace MinorShift.Emuera
 
 			if (Godot.OS.GetName() == "Android" && InfiniteLoopAlertTime < 20000)
 				InfiniteLoopAlertTime = 20000;
+		}
+
+		private static HashSet<string> ParseLoadTextValidExtensions(string configValue)
+		{
+			var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			if (!string.IsNullOrWhiteSpace(configValue))
+			{
+				string[] parts = configValue.Split(',');
+				for (int i = 0; i < parts.Length; i++)
+				{
+					string extension = NormalizeLoadTextExtension(parts[i]);
+					if (extension.Length != 0)
+						extensions.Add(extension);
+				}
+			}
+			if (extensions.Count == 0)
+				extensions.Add("txt");
+			return extensions;
+		}
+
+		private static string NormalizeLoadTextExtension(string extension)
+		{
+			if (string.IsNullOrWhiteSpace(extension))
+				return "";
+			return extension.Trim().TrimStart('.');
+		}
+
+		public static bool IsLoadTextExtensionAllowed(string extension)
+		{
+			string normalized = NormalizeLoadTextExtension(extension);
+			return normalized.Length != 0 && LoadTextValidExtensions.Contains(normalized);
 		}
 
 		internal static void SetJsonConfig(JSONConfigData data)
@@ -554,6 +586,8 @@ namespace MinorShift.Emuera
 		public static bool PluginAvailableWarn { get; private set; }
 		public static bool DisableBeforeErrorThrow { get; private set; }
 		public static bool UseScopedVariableInstruction { get; private set; } = true;
+		public static HashSet<string> LoadTextValidExtensions { get; private set; } =
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "txt" };
 		public static bool UseButtonFocusBackgroundColor { get; private set; }
 		public static bool UseNewRandom { get; private set; }
 		public static RenderingBackend RenderingBackend { get; private set; } = RenderingBackend.Auto;

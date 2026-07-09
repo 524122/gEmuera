@@ -93,6 +93,14 @@ namespace MinorShift.Emuera.GameProc
 
 	internal sealed class ProcessState
 	{
+		static readonly string[] dynamicMapRenderRootFunctionNames =
+		{
+			"DRAW_COLOREDMAP",
+			"DRAW_COLOREDMAP_GD",
+			"DRAW_MAP",
+			"FIELDMAP",
+		};
+
 		public ProcessState(EmueraConsole console)
 		{
 			if (Program.DebugMode)//DebugModeでなければ知らなくて良い
@@ -223,6 +231,44 @@ namespace MinorShift.Emuera.GameProc
 				return functionList[functionList.Count - 1];
 			}
 		}
+
+		public bool IsInDynamicMapFunctionScope()
+		{
+			// 动态地图的滚动判断必须绑定到“输出行生成时”的脚本调用栈。
+			// 不能依赖 Godot UI 线程事后轮询，否则短函数进出后会漏标。
+			if (IsDynamicMapFunctionName(currentLine?.ParentLabelLine?.LabelName))
+				return true;
+
+			for (int i = functionList.Count - 1; i >= 0; i--)
+			{
+				CalledFunction called = functionList[i];
+				if (IsDynamicMapFunctionName(called?.FunctionName)
+					|| IsDynamicMapFunctionName(called?.TopLabel?.LabelName)
+					|| IsDynamicMapFunctionName(called?.CurrentLabel?.LabelName))
+					return true;
+			}
+
+			foreach (ExecutionContext context in ContextStack)
+			{
+				if (IsDynamicMapFunctionName(context?.Function?.LabelName))
+					return true;
+			}
+			return false;
+		}
+
+		static bool IsDynamicMapFunctionName(string labelName)
+		{
+			if (string.IsNullOrEmpty(labelName))
+				return false;
+			string name = labelName[0] == '@' ? labelName.Substring(1) : labelName;
+			for (int i = 0; i < dynamicMapRenderRootFunctionNames.Length; i++)
+			{
+				if (string.Equals(name, dynamicMapRenderRootFunctionNames[i], StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+			return name.StartsWith("DRAW_COLOREDMAP_", StringComparison.OrdinalIgnoreCase);
+		}
+
 		public int CurrentVariadicArgCount
 		{
 			get
@@ -498,9 +544,9 @@ namespace MinorShift.Emuera.GameProc
 		public void Return(Int64 ret)
 		{
 			CalledFunction called = functionList[functionList.Count - 1];
-			// BEFORE_ERROR / BEFORE_THROW 是错误处理事件，即使当前外层是 #FUNCTION，
-			// 也必须走事件返回路径，让 pending error/throw 在事件结束后重新抛出。
-			if (IsFunctionMethod && !(called.IsEvent && (called.FunctionName == "BEFORE_THROW" || called.FunctionName == "BEFORE_ERROR")))
+			// #FUNCTION/#FUNCTIONS 的隐式 RETURN 必须只看当前栈顶。
+			// 普通 CALL 可能发生在外层表达式函数求值期间，不能被外层 currentMin 误判成 RETURNF。
+			if (IsCurrentFunctionMethod && !(called.IsEvent && (called.FunctionName == "BEFORE_THROW" || called.FunctionName == "BEFORE_ERROR")))
 			{
 				ReturnF(null);
 				return;
@@ -751,8 +797,20 @@ namespace MinorShift.Emuera.GameProc
 		{
 			get
 			{
+				if (functionList.Count <= currentMin)
+					return false;
                 return functionList[currentMin].TopLabel.IsMethod;
             }
+		}
+
+		public bool IsCurrentFunctionMethod
+		{
+			get
+			{
+				if (functionList.Count <= currentMin)
+					return false;
+				return functionList[functionList.Count - 1].TopLabel.IsMethod;
+			}
 		}
 
 		public SingleTerm MethodReturnValue = null;

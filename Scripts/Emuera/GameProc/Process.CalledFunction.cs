@@ -40,6 +40,13 @@ namespace MinorShift.Emuera.GameProc
 		{
 			for (int i = 0; i < Arguments.Length; i++)
 			{
+				// #FUNCTION の UserDefinedFunctionArgument はキャッシュ再利用される。
+				// 前回呼び出しの REF/値が残らないよう、毎回スロットをリセットする。
+				TransporterInt[i] = 0;
+				TransporterFloat[i] = 0d;
+				TransporterStr[i] = null;
+				TransporterRef[i] = null;
+				TransporterElementRef[i] = default;
 				if (Arguments[i] == null)
 					continue;
 				if (isRef[i])
@@ -116,7 +123,9 @@ namespace MinorShift.Emuera.GameProc
 
 	/// <summary>
 	/// 現在呼び出し中の関数
-	/// イベント関数を除いて実行中に内部状態は変化しないので使いまわしても良い
+	/// 预解析缓存的 CalledFunction 只能作为模板使用。
+	/// 实际执行时 returnAddress、IsJump、VariadicArgCount 等会随调用帧变化，
+	/// 嵌套 CALL/CALLF 若复用同一对象会污染后续调用。
 	/// </summary>
 	internal sealed class CalledFunction
 	{
@@ -364,6 +373,9 @@ namespace MinorShift.Emuera.GameProc
 
 			called.counter = this.counter;
 			called.returnAddress = this.returnAddress;
+			called.IsJump = this.IsJump;
+			called.Finished = this.Finished;
+			called.VariadicArgCount = this.VariadicArgCount;
 			return called;
 		}
 

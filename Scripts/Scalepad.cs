@@ -102,10 +102,13 @@ public partial class Scalepad : Control
         int safeWidth = EmueraContent.ContentSafeWidth > 0
             ? EmueraContent.ContentSafeWidth
             : DisplayServer.WindowGetSize().X;
-        int drawableWidth = MinorShift.Emuera.Config.DrawableWidth + 3;
+        float visualWidth = EmueraContent.instance?.GetCurrentVisualContentWidth() ?? 0.0f;
+        float drawableWidth = MinorShift.Emuera.Config.DrawableWidth + 3;
+        // eraFL 右侧信息窗等相对 div 可能伸出配置宽度，Fit 应按真实可视宽度缩放。
+        float fitWidth = Mathf.Max(drawableWidth, visualWidth);
         float scale;
-        if (drawableWidth > 0)
-            scale = safeWidth / (float)drawableWidth;
+        if (fitWidth > 0)
+            scale = safeWidth / fitWidth;
         else
             scale = 1.0f;
         if (scale < 0.5f) scale = 0.5f;

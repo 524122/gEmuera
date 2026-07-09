@@ -118,12 +118,42 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (lineList == null)
 				return;
+			bool dynamicMapFunctionScoped = IsDynamicMapOutputScopeActive;
 			for (int i = 0; i < lineList.Length; i++)
 			{
 				if (lineList[i] == null)
 					continue;
-				lineList[i].TextBackgroundColor = TextBackgroundColor;
-				lineList[i].BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
+				ApplyCurrentLineMetadata(lineList[i], dynamicMapFunctionScoped);
+			}
+		}
+
+		internal void ApplyCurrentLineMetadata(ConsoleDisplayLine line)
+		{
+			ApplyCurrentLineMetadata(line, IsDynamicMapOutputScopeActive);
+		}
+
+		private void ApplyCurrentLineMetadata(ConsoleDisplayLine line, bool dynamicMapFunctionScoped)
+		{
+			if (line == null)
+				return;
+			line.TextBackgroundColor = TextBackgroundColor;
+			line.BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
+			line.DynamicMapFunctionScoped = dynamicMapFunctionScoped;
+			if (line.Buttons == null)
+				return;
+			for (int i = 0; i < line.Buttons.Length; i++)
+			{
+				var parts = line.Buttons[i]?.StrArray;
+				if (parts == null)
+					continue;
+				for (int j = 0; j < parts.Length; j++)
+				{
+					if (parts[j] is ConsoleDivPart div && div.Children != null)
+					{
+						for (int k = 0; k < div.Children.Length; k++)
+							ApplyCurrentLineMetadata(div.Children[k], dynamicMapFunctionScoped);
+					}
+				}
 			}
 		}
 

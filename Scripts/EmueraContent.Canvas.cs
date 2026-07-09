@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using MinorShift.Emuera;
 using MinorShift.Emuera.Content;
 using MinorShift.Emuera.GameView;
+using EmuFont = uEmuera.Drawing.Font;
 
 public partial class EmueraContent
 {
@@ -85,6 +86,12 @@ public partial class EmueraContent
 			// 图片按混合策略处理：普通图片由 Canvas 直接绘制，ColorMatrix/动画/绝对定位图片
 			// 只为该图片创建 EmueraImage overlay，避免把包含文本的整行退回旧节点树。
 			return true;
+		}
+		if (part is ConsoleDivPart)
+		{
+			// eraFL 的底图、立绘、房间/地图框大量依赖 <div><img></div> 的裁剪、depth 和跨行叠放。
+			// Canvas div overlay 在异步补图、负 y 和兄弟 div 层级上仍有边界差异；为可用性优先，div 行整行退回 Control 渲染。
+			return false;
 		}
 		if (part is ConsoleDivPart div)
 		{
@@ -181,9 +188,35 @@ public partial class EmueraContent
 			if (button?.StrArray == null)
 				continue;
 			foreach (var part in button.StrArray)
+				PrepareCanvasPartResources(part);
+		}
+	}
+
+	void PrepareCanvasPartResources(AConsoleDisplayPart part)
+	{
+		if (part == null)
+			return;
+		if (part is ConsoleImagePart image)
+		{
+			TryResolveCanvasImage(image, 0, out _);
+			return;
+		}
+		if (part is ConsoleDivPart div && div.Children != null)
+		{
+			// eraFL 的状态栏底图是 div 子树里的 <img src='BG01'>。
+			// Canvas 后端首帧需要递归预热子图，否则只会先构建 spacer，
+			// 在部分刷新路径下看起来像“底图没有输出”。
+			foreach (var childLine in div.Children)
 			{
-				if (part is ConsoleImagePart image)
-					TryResolveCanvasImage(image, 0, out _);
+				if (childLine?.Buttons == null)
+					continue;
+				foreach (var childButton in childLine.Buttons)
+				{
+					if (childButton?.StrArray == null)
+						continue;
+					foreach (var childPart in childButton.StrArray)
+						PrepareCanvasPartResources(childPart);
+				}
 			}
 		}
 	}
@@ -214,6 +247,18 @@ public partial class EmueraContent
 		if (sprite == null && !string.IsNullOrEmpty(image.ResourceName))
 			sprite = AppContents.GetSprite(image.ResourceName);
 		return sprite;
+	}
+
+	bool ShouldUseRawImageResourceFallback(string resourceName, ASprite sprite)
+	{
+		// HTML img 的 src 既可能是 CSV sprite 名，也可能是裸文件路径。CSV sprite 已命中时，
+		// 纹理为空通常只是异步解码/上传尚未完成，不能再递归搜索同名文件，否则 eraFL 的
+		// BG01 会从 SYSTEM/BG.csv 定义的天空图误落到 mapimage/bg01.webp。
+		return sprite == null
+			&& !string.IsNullOrEmpty(resourceName)
+			&& !AppContents.IsCsvSpriteName(resourceName)
+			&& !IsDynamicCutinName(resourceName)
+			&& !failedTextureSearches.Contains(resourceName);
 	}
 
 	void AddCanvasImageOverlay(int lineNo, ConsoleImagePart image, int relX, List<CanvasImageOverlay> overlays)
@@ -358,9 +403,7 @@ public partial class EmueraContent
 
 		var texture = GetSpriteTexture(sprite);
 		if (texture == null
-			&& !string.IsNullOrEmpty(image.ResourceName)
-			&& !IsDynamicCutinName(image.ResourceName)
-			&& !failedTextureSearches.Contains(image.ResourceName))
+			&& ShouldUseRawImageResourceFallback(image.ResourceName, sprite))
 		{
 			texture = ResolveCanvasTextureByResourceName(image.ResourceName);
 		}
@@ -1076,19 +1119,19 @@ public partial class EmueraContent
 				return;
 			if (part is ConsoleRectangleShapePart rectShape)
 			{
-				if (rectShape.Width <= 0)
+				if (!rectShape.HasRenderableRect)
 					return;
 				DrawRect(new Rect2(
-					rectShape.PointX - relX,
-					lineY + rectShape.Top,
-					rectShape.Width,
-					Mathf.Max(rectShape.Bottom - rectShape.Top, 1)),
+					rectShape.PointX - relX + rectShape.RenderX,
+					lineY + rectShape.RenderY,
+					rectShape.RenderWidth,
+					rectShape.RenderHeight),
 					(isSelecting ? rectShape.pButtonColor : rectShape.pColor).ToGodotColor());
 				return;
 			}
 			if (part is ConsoleErrorShapePart errShape)
 			{
-				DrawText(errShape.AltText ?? errShape.Str ?? "", Config.ForeColor.ToGodotColor(), false,
+				DrawText(errShape.AltText ?? errShape.Str ?? "", Config.ForeColor.ToGodotColor(), Config.Font, false,
 					part.PointX - relX, lineY, Mathf.Max(part.Width, owner.EffectiveLineHeight));
 			}
 		}
@@ -1121,24 +1164,25 @@ public partial class EmueraContent
 			}
 			else if (isBackLog && !css.pColorChanged)
 				color = Config.LogColor;
-			DrawText(css.Str, color.ToGodotColor(), css.Font?.Bold == true, x, lineY, width);
+			DrawText(css.Str, color.ToGodotColor(), css.Font, css.Font?.Bold == true, x, lineY, width);
 		}
 
-		void DrawText(string text, Color color, bool bold, float x, float lineY, float width)
+		void DrawText(string text, Color color, EmuFont emuFont, bool bold, float x, float lineY, float width)
 		{
-			if (owner.mainFont == null || string.IsNullOrEmpty(text))
+			Font font = owner.ResolveConsoleFont(emuFont);
+			if (font == null || string.IsNullOrEmpty(text))
 				return;
 			text = uEmuera.Utils.StripZeroWidth(text) ?? "";
 			if (string.IsNullOrEmpty(text))
 				return;
-			float fontHeight = owner.mainFont.GetHeight(owner.FontSize);
-			float baseline = GetTextBaseline(owner.mainFont, owner.FontSize, owner.EffectiveLineHeight, fontHeight);
+			float fontHeight = font.GetHeight(owner.FontSize);
+			float baseline = GetTextBaseline(font, owner.FontSize, owner.EffectiveLineHeight, fontHeight);
 			if (!ShouldUseGridDrawing(text))
 			{
-				DrawString(owner.mainFont, new Vector2(x, lineY + baseline), text, HorizontalAlignment.Left,
+				DrawString(font, new Vector2(x, lineY + baseline), text, HorizontalAlignment.Left,
 					Mathf.Max(1.0f, width), owner.FontSize, color);
 				if (bold)
-					DrawString(owner.mainFont, new Vector2(x + 1.0f, lineY + baseline), text, HorizontalAlignment.Left,
+					DrawString(font, new Vector2(x + 1.0f, lineY + baseline), text, HorizontalAlignment.Left,
 						Mathf.Max(1.0f, width - 1.0f), owner.FontSize, color);
 				return;
 			}
@@ -1154,13 +1198,13 @@ public partial class EmueraContent
 				// 逐字符绘制只负责保持 emuera 的半角/全角格点起点，裁剪仍由整段宽度决定。
 				// 若按单元格宽度裁剪，Godot 字体 fallback 下的箱线/空白敏感字符会出现缺笔或整字丢失。
 				float drawWidth = Mathf.Max(cellWidth, x + width - drawX);
-				DrawGridChar(text[i], drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
+				DrawGridChar(font, text[i], drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
 		}
 
-		void DrawGridChar(char value, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
+		void DrawGridChar(Font font, char value, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
 		{
 			if (TryGetSolidBlockElementRect(value, cellWidth, owner.EffectiveLineHeight, fontHeight, out var blockRect))
 			{
@@ -1169,9 +1213,9 @@ public partial class EmueraContent
 			}
 			string glyph = value.ToString();
 			float drawWidth = Mathf.Max(1.0f, cellWidth);
-			DrawString(owner.mainFont, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, owner.FontSize, color);
+			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, owner.FontSize, color);
 			if (bold)
-				DrawString(owner.mainFont, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), owner.FontSize, color);
+				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), owner.FontSize, color);
 		}
 
 		void DrawImagePart(ConsoleImagePart image, float lineY, int relX)

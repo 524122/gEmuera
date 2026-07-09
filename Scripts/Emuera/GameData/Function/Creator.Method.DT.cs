@@ -204,7 +204,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public DtColumnNamesMethod()
             {
-                ReturnType = EraType.String;
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -220,17 +220,17 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の2番目の引数は文字列型1次元配列変数である必要があります";
                 return null;
             }
-            public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
                 if (!TryGetDataTable(arguments[0].GetStrValue(exm) ?? "", out var table))
-                    return "";
+                    return -1;
                 var names = table.Columns.Cast<DataColumn>().Select(column => column.ColumnName).ToArray();
                 if (arguments.Length == 2)
                     WriteStringResults(exm, arguments[1] as VariableTerm, names);
                 else
                     WriteStringResults(exm, null, names);
                 SetIntegerResult(exm, 0, names.Length);
-                return names.Length > 0 ? names[0] : "";
+                return names.Length;
             }
         }
 

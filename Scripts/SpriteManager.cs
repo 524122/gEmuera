@@ -26,6 +26,12 @@ internal static class SpriteManager
 	const int DesktopCleanupDisposeBudget = 96;
 	const ulong PlaceholderRetryIntervalMs = 1000;
 
+	// 批量加载优化：队列积压超过此阈值时自动提升并发数
+	const int BulkLoadQueueThreshold = 8;
+	// 批量加载时的最大并发数（Android 限制为 2，避免内存压力）
+	const int MobileBulkLoadMaxConcurrency = 2;
+	const int DesktopBulkLoadMaxConcurrency = 4;
+
 	internal class SpriteInfo : IDisposable
 	{
 		internal SpriteInfo(TextureInfo p, AtlasTexture s)
@@ -276,11 +282,11 @@ internal static class SpriteManager
 			return;
 		}
 
-		var basename = src.Bitmap.filename;
+		var textureKey = BuildTextureCacheKey(src.Bitmap.path, src.Bitmap.filename);
 		TextureInfo ti = null;
 		lock(dictLock)
 		{
-			texture_dict.TryGetValue(basename, out ti);
+			TryGetTextureInfoAliasLocked(textureKey, out ti);
 		}
 		if(ti == null)
 		{
@@ -288,12 +294,12 @@ internal static class SpriteManager
 			lock(dictLock)
 			{
 				List<CallbackInfo> list = null;
-				if(loading_set.TryGetValue(basename, out list))
+				if(loading_set.TryGetValue(textureKey, out list))
 					list.Add(item);
 				else
 				{
 					list = new List<CallbackInfo> { item };
-					loading_set.Add(basename, list);
+					loading_set.Add(textureKey, list);
 					Loading(src.Bitmap);
 				}
 			}
@@ -326,6 +332,37 @@ internal static class SpriteManager
 		if (!isPlaceholder && GenericUtils.IsImageDebugEnabled("log_success"))
 			GenericUtils.ImageTrace("IMAGE.TEXTURE.LOAD_OK", () => "texture loaded",
 				() => $"name={name} filename={GenericUtils.RedactTracePath(filename)} size={img.GetWidth()}x{img.GetHeight()}");
+		return CacheTextureInfo(name, filename, ti);
+	}
+
+	internal static TextureInfo GetTextureInfoForScriptComposition(string name, string filename)
+	{
+		if(string.IsNullOrEmpty(filename))
+			return null;
+		string resolved = uEmuera.Utils.ResolveExistingFilePath(filename);
+		if(!string.IsNullOrEmpty(resolved))
+			filename = resolved;
+		if(!uEmuera.Utils.FileExists(filename))
+			return null;
+
+		TextureInfo ti = null;
+		lock(dictLock)
+		{
+			ti = GetTextureInfoCachedLocked(name, filename);
+			if(ti != null && !ti.IsPlaceholder && ti.image != null && !ti.IsDisposed)
+			{
+				ti.Touch();
+				return ti;
+			}
+		}
+
+		Image img = LoadImageOrPlaceholder(filename, name, out bool isPlaceholder);
+		if(isPlaceholder || img == null || img.GetWidth() <= 0 || img.GetHeight() <= 0)
+		{
+			img?.Dispose();
+			return null;
+		}
+		ti = new TextureInfo(name, img, false);
 		return CacheTextureInfo(name, filename, ti);
 	}
 
@@ -435,32 +472,29 @@ internal static class SpriteManager
 		if(uEmuera.Utils.FileExists(baseimage.path))
 		{
 			Image img = LoadImageOrPlaceholder(baseimage.path, baseimage.filename, out bool isPlaceholder);
-			ti = new TextureInfo(baseimage.filename, img, isPlaceholder);
+			ti = new TextureInfo(baseimage.path, img, isPlaceholder);
 			baseimage.size.Width = img.GetWidth();
 			baseimage.size.Height = img.GetHeight();
 		}
 		else
 		{
-			ti = CreatePlaceholderTextureInfo(baseimage.filename, baseimage.path, "file not found");
+			ti = CreatePlaceholderTextureInfo(baseimage.path, baseimage.path, "file not found");
 			baseimage.size.Width = ti.width;
 			baseimage.size.Height = ti.height;
 		}
 
 		List<CallbackInfo> callbacks = null;
+		TextureInfo cached = null;
 		lock(dictLock)
 		{
 			if (ti != null)
-			{
-				// Index by both filename and full path for consistent lookup
-				texture_dict[baseimage.filename] = ti;
-				if (!string.IsNullOrEmpty(baseimage.path) && baseimage.path != baseimage.filename)
-					texture_dict[baseimage.path] = ti;
-			}
+				cached = CacheTextureInfo(baseimage.path, baseimage.path, ti);
 
-			if(loading_set.TryGetValue(baseimage.filename, out var list))
+			string textureKey = BuildTextureCacheKey(baseimage.path, baseimage.filename);
+			if(loading_set.TryGetValue(textureKey, out var list))
 			{
 				callbacks = new List<CallbackInfo>(list);
-				loading_set.Remove(baseimage.filename);
+				loading_set.Remove(textureKey);
 			}
 		}
 
@@ -470,7 +504,7 @@ internal static class SpriteManager
 			for(int i=0; i<count; ++i)
 			{
 				var item = callbacks[i];
-				item.DoCallback(GetSpriteInfo(ti, item.src));
+				item.DoCallback(GetSpriteInfo(cached ?? ti, item.src));
 			}
 		}
 	}
@@ -545,7 +579,6 @@ internal static class SpriteManager
 		TextureInfo replacedPlaceholder = null;
 		lock(dictLock)
 		{
-			var fileOnly = System.IO.Path.GetFileName(filename);
 			var existing = GetTextureInfoCachedLocked(name, filename);
 			if(existing != null)
 			{
@@ -563,19 +596,18 @@ internal static class SpriteManager
 					// 任一别名已存在时都复用同一个 TextureInfo，避免移动端重复持有大图像素；也不要用占位降级真实纹理。
 					ti.Dispose();
 					existing.Touch();
-					SetTextureInfoAliasLocked(name, existing);
 					SetTextureInfoAliasLocked(filename, existing);
-					SetTextureInfoAliasLocked(fileOnly, existing);
+					if (ShouldAliasTextureName(name, filename))
+						SetTextureInfoAliasLocked(name, existing);
 					return existing;
 				}
 			}
 
-			// Index by the requested name, full path, and file name. Era scripts use
-			// all three forms depending on command source, and resolving the alias once
-			// avoids repeated Android storage probes during display refresh.
-			SetTextureInfoAliasLocked(name, ti);
+			// 纹理缓存必须以完整路径作为主要身份。TW 等资源包允许不同目录下存在同名 webp；
+			// 如果把 basename 当全局别名，会导致角色立绘复用到另一个文件夹里的同名图片。
 			SetTextureInfoAliasLocked(filename, ti);
-			SetTextureInfoAliasLocked(fileOnly, ti);
+			if (ShouldAliasTextureName(name, filename))
+				SetTextureInfoAliasLocked(name, ti);
 		}
 		replacedPlaceholder?.Dispose();
 		return ti;
@@ -583,6 +615,7 @@ internal static class SpriteManager
 
 	static void SetTextureInfoAliasLocked(string key, TextureInfo ti)
 	{
+		key = NormalizeTextureCacheKey(key);
 		if (string.IsNullOrEmpty(key))
 			return;
 		if (texture_dict.TryGetValue(key, out var existing))
@@ -594,17 +627,61 @@ internal static class SpriteManager
 		texture_dict[key] = ti;
 	}
 
+	static bool TryGetTextureInfoAliasLocked(string key, out TextureInfo ti)
+	{
+		ti = null;
+		key = NormalizeTextureCacheKey(key);
+		if (string.IsNullOrEmpty(key))
+			return false;
+		return texture_dict.TryGetValue(key, out ti) && ti != null && !ti.IsDisposed;
+	}
+
 	static TextureInfo GetTextureInfoCachedLocked(string name, string filename)
 	{
 		TextureInfo ti = null;
-		if(!string.IsNullOrEmpty(name) && texture_dict.TryGetValue(name, out ti) && ti != null && !ti.IsDisposed)
+		if(!string.IsNullOrEmpty(filename) && TryGetTextureInfoAliasLocked(filename, out ti))
 			return ti;
-		if(!string.IsNullOrEmpty(filename) && texture_dict.TryGetValue(filename, out ti) && ti != null && !ti.IsDisposed)
+		if(ShouldAliasTextureName(name, filename) && TryGetTextureInfoAliasLocked(name, out ti))
 			return ti;
-		string fileOnly = System.IO.Path.GetFileName(filename);
-		if(!string.IsNullOrEmpty(fileOnly) && texture_dict.TryGetValue(fileOnly, out ti) && ti != null && !ti.IsDisposed)
+		if(string.IsNullOrEmpty(filename) && !string.IsNullOrEmpty(name) && TryGetTextureInfoAliasLocked(name, out ti))
 			return ti;
 		return null;
+	}
+
+	static string BuildTextureCacheKey(string filename, string fallbackName)
+	{
+		string key = !string.IsNullOrEmpty(filename) ? filename : fallbackName;
+		return NormalizeTextureCacheKey(key);
+	}
+
+	static string NormalizeTextureCacheKey(string key)
+	{
+		if (string.IsNullOrEmpty(key))
+			return "";
+		return uEmuera.Utils.NormalizePath(key.Trim());
+	}
+
+	static bool ShouldAliasTextureName(string name, string filename)
+	{
+		if (string.IsNullOrEmpty(name))
+			return false;
+		if (string.IsNullOrEmpty(filename))
+			return true;
+		string normalizedName = NormalizeTextureCacheKey(name);
+		string normalizedFilename = NormalizeTextureCacheKey(filename);
+		if (string.Equals(normalizedName, normalizedFilename, StringComparison.OrdinalIgnoreCase))
+			return true;
+		return IsPathLikeTextureKey(normalizedName);
+	}
+
+	static bool IsPathLikeTextureKey(string key)
+	{
+		if (string.IsNullOrEmpty(key))
+			return false;
+		return key.Contains("://", StringComparison.Ordinal)
+			|| key.IndexOf('/') >= 0
+			|| key.IndexOf('\\') >= 0
+			|| System.IO.Path.IsPathRooted(key);
 	}
 
 	static SpriteInfo GetSpriteInfo(TextureInfo textinfo, ASprite src)
@@ -722,7 +799,10 @@ internal static class SpriteManager
 
 	static void ProcessAsyncTextureLoadCompletions()
 	{
-		int budget = OS.HasFeature("mobile") ? MobileAsyncTextureCompletionBudget : DesktopAsyncTextureCompletionBudget;
+		int baseBudget = OS.HasFeature("mobile") ? MobileAsyncTextureCompletionBudget : DesktopAsyncTextureCompletionBudget;
+		// 批量加载时提高每帧完成数
+		int pendingCount = completed_async_texture_loads.Count;
+		int budget = pendingCount > BulkLoadQueueThreshold ? Math.Min(baseBudget * 2, 12) : baseBudget;
 		int processed = 0;
 		while(processed < budget && completed_async_texture_loads.TryDequeue(out var result))
 		{
@@ -758,13 +838,32 @@ internal static class SpriteManager
 
 	static void StartPendingAsyncTextureLoadsLocked()
 	{
-		int limit = async_texture_load_concurrency > 0 ? async_texture_load_concurrency : MobileAsyncTextureConcurrency;
+		int limit = GetEffectiveConcurrency();
 		while(active_async_texture_loads < limit && pending_async_texture_loads.Count > 0)
 		{
 			var request = pending_async_texture_loads.Dequeue();
 			active_async_texture_loads++;
 			ThreadPool.QueueUserWorkItem(_ => RunAsyncTextureLoad(request));
 		}
+	}
+
+	/// <summary>
+	/// 根据队列积压情况动态调整并发数。
+	/// 当队列积压超过阈值时（如角色立绘批量加载），临时提高并发数以加速加载。
+	/// </summary>
+	static int GetEffectiveConcurrency()
+	{
+		int baseConcurrency = async_texture_load_concurrency > 0
+			? async_texture_load_concurrency
+			: (OS.HasFeature("mobile") ? MobileAsyncTextureConcurrency : DesktopAsyncTextureConcurrency);
+
+		int pendingCount = pending_async_texture_loads.Count;
+		if(pendingCount <= BulkLoadQueueThreshold)
+			return baseConcurrency;
+
+		// 队列积压超过阈值，临时提升并发数
+		int maxConcurrency = OS.HasFeature("mobile") ? MobileBulkLoadMaxConcurrency : DesktopBulkLoadMaxConcurrency;
+		return Math.Min(baseConcurrency * 2, maxConcurrency);
 	}
 
 	static void RunAsyncTextureLoad(AsyncTextureLoadRequest request)
@@ -918,9 +1017,9 @@ internal static class SpriteManager
 	}
 
 	static Dictionary<string, List<CallbackInfo>> loading_set =
-		new Dictionary<string, List<CallbackInfo>>();
+		new Dictionary<string, List<CallbackInfo>>(StringComparer.OrdinalIgnoreCase);
 	static Dictionary<string, TextureInfo> texture_dict =
-		new Dictionary<string, TextureInfo>();
+		new Dictionary<string, TextureInfo>(StringComparer.OrdinalIgnoreCase);
 	static Queue<AsyncTextureLoadRequest> pending_async_texture_loads =
 		new Queue<AsyncTextureLoadRequest>();
 	static HashSet<string> async_loading_keys =
