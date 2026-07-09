@@ -1358,31 +1358,9 @@ internal static class GenericUtils
 
     static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line, int depth)
     {
-        if (line == null || depth > 4)
-            return false;
-        if (line.BitmapCacheEnabled || line.DynamicMapFunctionScoped)
-            return true;
-        var buttons = line.Buttons;
-        if (buttons == null)
-            return false;
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            var parts = buttons[i]?.StrArray;
-            if (parts == null)
-                continue;
-            for (int j = 0; j < parts.Length; j++)
-            {
-                if (parts[j] is ConsoleDivPart div && div.Children != null)
-                {
-                    for (int k = 0; k < div.Children.Length; k++)
-                    {
-                        if (LineHasDynamicMapBitmapContext(div.Children[k], depth + 1))
-                            return true;
-                    }
-                }
-            }
-        }
-        return false;
+        // 动态地图 BitmapCache 标记已移除；保留旧入口名，内部改走函数栈标记，
+        // 避免诊断和滚动策略调用点大范围重命名。
+        return LineHasDynamicMapFunctionScope(line, depth);
     }
 
     public static string BuildDynamicMapLineTailSummary(IReadOnlyList<ConsoleDisplayLine> lines)
@@ -1430,7 +1408,6 @@ internal static class GenericUtils
         int maxTextChars = GetDynamicMapMaxTextChars();
         var sb = new StringBuilder(160);
         sb.Append("{no=").Append(line.LineNo)
-            .Append(",bmp=").Append(line.BitmapCacheEnabled ? 1 : 0)
             .Append(",mapfn=").Append(line.DynamicMapFunctionScoped ? 1 : 0)
             .Append(",logic=").Append(line.IsLogicalLine ? 1 : 0)
             .Append(",tmp=").Append(line.IsTemporary ? 1 : 0)

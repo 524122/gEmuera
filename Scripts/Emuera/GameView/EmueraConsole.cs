@@ -2039,13 +2039,13 @@ namespace MinorShift.Emuera.GameView
 			get { return emuera?.State?.IsInDynamicMapFunctionScope() == true; }
 		}
 
-		bool bitmapCacheEnabledForNextLine = false;
 		public bool BitmapCacheEnabledForNextLine
 		{
-			get { return bitmapCacheEnabledForNextLine; }
+			get { return false; }
 			set
 			{
-				bitmapCacheEnabledForNextLine = value;
+				// 动态地图缓存先按用户要求禁用：保留 BITMAP_CACHE_ENABLE API 和刷新提示，
+				// 但不再记录输出行缓存状态，避免后续显示层按缓存块处理。
 				if (value)
 					MarkDisplayRewriteInProgress();
 			}

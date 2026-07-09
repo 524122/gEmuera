@@ -1,5 +1,14 @@
 # CODE_MAP
 
+## 2026-07-09 动态地图打开卡顿优化与清理实验移除
+
+- `EmueraContent.cs`：移除未启用的动态地图旧行激进清理实验代码，不再保留 `DynamicMapAggressiveTrimEnabled` 开关、专用清理入口和 `TrimOldDynamicMapLines` 方法；普通 `MaxVisibleLines` overflow 清理仍保持原逻辑。
+- `ConsoleDisplayLine.cs` / `EmueraConsole.cs:BitmapCacheEnabledForNextLine` / `GenericUtils.LineHasDynamicMapBitmapContext`：删除动态地图 `BitmapCacheEnabled` 行缓存状态；`BITMAP_CACHE_ENABLE` 脚本 API 保留为空操作兼容入口，传入 true 时仍触发 rewrite-in-progress 刷新提示，但不再给输出行保存缓存标记。旧 `LineHasDynamicMapBitmapContext` 入口仅委托 `DynamicMapFunctionScoped`，2026-07-02 记录中的 BitmapCache 块识别方案已废弃。
+- `EmueraContent.cs:lineVisualExtents / visualLayoutContentHeight`：打开动态地图/状态页时不再每次扫描全部历史 retained lines 计算内容宽高；行注册和 data-only 刷新时缓存可视边界，布局 dirty 时顺手计算真实 `lineTop + visualBottom`，避免把靠前地图行的大 div 溢出高度错误叠到整段历史输出末尾，造成滚到底部后一大片黑屏。
+- `EmueraContent.cs:buttonGenerationLineNumbers / CollectCurrentGenerationQuickButtonGroups`：快捷按钮刷新从遍历全部 `lineObjects` 改为按当前 `lastButtonGeneration` 精确取候选行，降低动态地图历史输出越积越多后的打开卡顿。
+- 风险说明：本轮不再尝试删除旧地图行，只优化尺寸与快捷按钮索引，因此不会引入旧行误删风险；若后续仍要做历史地图行裁剪，需要重新评估 `DynamicMapFunctionScoped` 与 bitmap context 的误判边界。
+- DataTable ID 列写入兼容：`DT_ROW_ADD` 允许手动指定新行的 ID 列，`DT_ROW_SET` 仍禁止修改已有行的 ID。修复 eraFL `CLOSE_COMBAT_FUNCTION.ERB` 中 `DT_ROW_ADD "CC_SP_TOKEN_NUM", "ID", ACTOR_DID` 报错"DataTable id column is read-only"的兼容问题。`SetDataTableValue` 新增 `allowSetId` 参数，`DT_ROW_ADD` 调用时传 `true`。
+
 ## 2026-07-08 虚拟鼠标重新设计：可见可拖动光标（替换 L/M/R 选键面板）
 
 - `Icons/cursor.svg`（新文件）+ `.import`：简单箭头光标图标，白色填充+黑色描边，32×32px。

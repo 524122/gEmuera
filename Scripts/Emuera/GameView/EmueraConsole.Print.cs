@@ -137,7 +137,6 @@ namespace MinorShift.Emuera.GameView
 			if (line == null)
 				return;
 			line.TextBackgroundColor = TextBackgroundColor;
-			line.BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
 			line.DynamicMapFunctionScoped = dynamicMapFunctionScoped;
 			if (line.Buttons == null)
 				return;

@@ -62,6 +62,10 @@ public partial class EmueraContent : Control
 	Dictionary<int, ConsoleButtonHit[]> canvasLineButtonHits = new Dictionary<int, ConsoleButtonHit[]>();
 	Dictionary<int, List<CanvasImageOverlay>> canvasImageOverlayNodes = new Dictionary<int, List<CanvasImageOverlay>>();
 	Dictionary<int, List<CanvasDivOverlay>> canvasDivOverlayNodes = new Dictionary<int, List<CanvasDivOverlay>>();
+	Dictionary<int, Vector2> lineVisualExtents = new Dictionary<int, Vector2>();
+	Dictionary<int, long> lineMaxButtonGeneration = new Dictionary<int, long>();
+	Dictionary<int, List<long>> lineButtonGenerations = new Dictionary<int, List<long>>();
+	Dictionary<long, SortedSet<int>> buttonGenerationLineNumbers = new Dictionary<long, SortedSet<int>>();
 	HashSet<int> canvasRowsWithPositionedNodes = new HashSet<int>();
 	HashSet<int> canvasRowsWithEscapedOverlays = new HashSet<int>();
 	HashSet<int> canvasLastVisibilityRows = new HashSet<int>();
@@ -177,6 +181,8 @@ public partial class EmueraContent : Control
 	bool batchingDisplayLines = false;
 	float totalLineHeight = 0;
 	float widestLineWidth = 0;
+	float widestVisualLineWidth = 0;
+	float visualLayoutContentHeight = 0;
 
 	// Visible line cap. Android memory pressure is the main constraint here, so
 	// old Controls are trimmed in batches instead of letting the scene tree grow
@@ -189,6 +195,7 @@ public partial class EmueraContent : Control
 	public const int MaxMaxVisibleLines = 3000;
 	static int MaxVisibleLines => ConfiguredMaxVisibleLines;
 	static int LineTrimBatch => System.Math.Max(40, System.Math.Min(200, MaxVisibleLines / 6));
+	const int ButtonGenerationScanMaxDepth = 8;
 
 	// Button generation and quick-button cache state. emuera reuses button text
 	// across waits, so generation guards prevent an old visible button from
@@ -207,6 +214,7 @@ public partial class EmueraContent : Control
 	long quickInputGateGeneration = -1;
 	int quickInputGateRevision = -1;
 	ulong quickInputGateTick = 0;
+	long maxRenderedButtonGeneration = long.MinValue;
 	int lastCbgScrollVertical = int.MinValue;
 	uint lastClickTick = 0;
 
@@ -1490,6 +1498,11 @@ public partial class EmueraContent : Control
 		// 动态地图独立刷新时，底部选项的视觉内容通常不变，只是按钮 generation 前进。
 		// 这里只替换行数据和命中信息，不重建 Control/Canvas 节点，避免选项闪烁。
 		lineObjects[line.LineNo] = line;
+		if (lineSizes.TryGetValue(line.LineNo, out var existingSize))
+		{
+			if (UpdateLineDerivedCaches(line.LineNo, line, existingSize))
+				MarkLineLayoutDirty();
+		}
 		if (UseCanvasRenderBackend)
 		{
 			var hits = BuildCanvasLineButtonHits(line);
@@ -2197,7 +2210,7 @@ public partial class EmueraContent : Control
 			if (dataOnlyLines != null && dataOnlyLines.Count > 0)
 			{
 				for (int i = 0; i < dataOnlyLines.Count; i++)
-					RefreshRenderedLineDataOnly(dataOnlyLines[i]);
+					changed |= RefreshRenderedLineDataOnly(dataOnlyLines[i]);
 			}
 		}
 		finally
@@ -2422,6 +2435,7 @@ public partial class EmueraContent : Control
 		totalLineHeight += size.Y;
 		if (size.X > widestLineWidth)
 			widestLineWidth = size.X;
+		UpdateLineDerivedCaches(lineNo, line, size);
 		UpdateCanvasPositionedNodeIndexForLine(lineNo);
 		MarkLineLayoutDirty();
 	}
@@ -2429,6 +2443,132 @@ public partial class EmueraContent : Control
 	int GetRetainedLineCount()
 	{
 		return lineNumbers.Count;
+	}
+
+	bool UpdateLineDerivedCaches(int lineNo, ConsoleDisplayLine line, Vector2 size)
+	{
+		bool hadOldVisual = lineVisualExtents.TryGetValue(lineNo, out var oldVisual);
+		bool oldVisualWasMax = false;
+		if (hadOldVisual)
+			oldVisualWasMax = oldVisual.X >= widestVisualLineWidth;
+
+		RemoveLineButtonGenerationIndex(lineNo);
+
+		var visualExtents = ComputeLineVisualExtents(line, size);
+		lineVisualExtents[lineNo] = visualExtents;
+		if (visualExtents.X > widestVisualLineWidth)
+			widestVisualLineWidth = visualExtents.X;
+
+		UpdateLineButtonGenerationIndex(lineNo, line);
+
+		if (oldVisualWasMax && visualExtents.X < widestVisualLineWidth)
+			RecalculateVisualLineMetrics();
+		return !hadOldVisual
+			|| System.Math.Abs(oldVisual.X - visualExtents.X) > 0.5f
+			|| System.Math.Abs(oldVisual.Y - visualExtents.Y) > 0.5f;
+	}
+
+	Vector2 ComputeLineVisualExtents(ConsoleDisplayLine line, Vector2 fallbackSize)
+	{
+		float right = fallbackSize.X;
+		float bottom = fallbackSize.Y;
+		if (line?.Buttons == null)
+			return new Vector2(right, bottom);
+		foreach (var button in line.Buttons)
+		{
+			if (button == null)
+				continue;
+			right = Mathf.Max(right, GetButtonVisualRight(button));
+			bottom = Mathf.Max(bottom, GetButtonVisualBottom(button));
+		}
+		return new Vector2(right, bottom);
+	}
+
+	void UpdateLineButtonGenerationIndex(int lineNo, ConsoleDisplayLine line)
+	{
+		var generations = new List<long>();
+		CollectLineButtonGenerations(line, generations, 0);
+		if (generations.Count == 0)
+		{
+			lineMaxButtonGeneration[lineNo] = long.MinValue;
+			return;
+		}
+
+		long lineMax = long.MinValue;
+		for (int i = 0; i < generations.Count; i++)
+		{
+			long generation = generations[i];
+			lineMax = System.Math.Max(lineMax, generation);
+			if (!buttonGenerationLineNumbers.TryGetValue(generation, out var rows))
+			{
+				rows = new SortedSet<int>();
+				buttonGenerationLineNumbers[generation] = rows;
+			}
+			rows.Add(lineNo);
+		}
+		lineButtonGenerations[lineNo] = generations;
+		lineMaxButtonGeneration[lineNo] = lineMax;
+		if (lineMax > maxRenderedButtonGeneration)
+			maxRenderedButtonGeneration = lineMax;
+	}
+
+	void RemoveLineButtonGenerationIndex(int lineNo)
+	{
+		if (!lineButtonGenerations.TryGetValue(lineNo, out var generations))
+		{
+			lineMaxButtonGeneration.Remove(lineNo);
+			return;
+		}
+
+		bool removedMax = false;
+		for (int i = 0; i < generations.Count; i++)
+		{
+			long generation = generations[i];
+			if (generation >= maxRenderedButtonGeneration)
+				removedMax = true;
+			if (!buttonGenerationLineNumbers.TryGetValue(generation, out var rows))
+				continue;
+			rows.Remove(lineNo);
+			if (rows.Count == 0)
+				buttonGenerationLineNumbers.Remove(generation);
+		}
+		lineButtonGenerations.Remove(lineNo);
+		lineMaxButtonGeneration.Remove(lineNo);
+		if (removedMax)
+			RecalculateMaxRenderedButtonGeneration();
+	}
+
+	void RecalculateMaxRenderedButtonGeneration()
+	{
+		maxRenderedButtonGeneration = long.MinValue;
+		foreach (long generation in buttonGenerationLineNumbers.Keys)
+		{
+			if (generation > maxRenderedButtonGeneration)
+				maxRenderedButtonGeneration = generation;
+		}
+	}
+
+	void CollectLineButtonGenerations(ConsoleDisplayLine line, List<long> output, int depth)
+	{
+		if (line?.Buttons == null || output == null || depth > ButtonGenerationScanMaxDepth)
+			return;
+		foreach (var button in line.Buttons)
+		{
+			if (button == null)
+				continue;
+			if (button.IsButton && !output.Contains(button.Generation))
+				output.Add(button.Generation);
+			if (button.StrArray == null)
+				continue;
+			foreach (var part in button.StrArray)
+			{
+				if (part is ConsoleDivPart div && div.Children != null)
+				{
+					foreach (var childLine in div.Children)
+						CollectLineButtonGenerations(childLine, output, depth + 1);
+				}
+			}
+		}
 	}
 
 	// Remove one row from lookup tables and subtract its cached contribution from
@@ -2445,9 +2585,16 @@ public partial class EmueraContent : Control
 		lineControls.Remove(lineNo);
 		canvasLineButtonHits.Remove(lineNo);
 		canvasRowsWithPositionedNodes.Remove(lineNo);
+		bool removedVisualWidest = false;
+		if (lineVisualExtents.TryGetValue(lineNo, out var visualExtents))
+			removedVisualWidest = visualExtents.X >= widestVisualLineWidth;
+		lineVisualExtents.Remove(lineNo);
+		RemoveLineButtonGenerationIndex(lineNo);
 		bool removedNumber = lineNumbers.Remove(lineNo);
 		if (!lineSizes.TryGetValue(lineNo, out var size))
 		{
+			if (removedVisualWidest)
+				RecalculateVisualLineMetrics();
 			if (removedNumber)
 				MarkLineLayoutDirty();
 			return;
@@ -2456,6 +2603,8 @@ public partial class EmueraContent : Control
 		totalLineHeight = System.Math.Max(0, totalLineHeight - size.Y);
 		if (size.X >= widestLineWidth)
 			RecalculateWidestLineWidth();
+		if (removedVisualWidest)
+			RecalculateVisualLineMetrics();
 		MarkLineLayoutDirty();
 	}
 
@@ -2472,6 +2621,10 @@ public partial class EmueraContent : Control
 		recentPureImageFallbackLines.Clear();
 		canvasLineButtonHits.Clear();
 		canvasRowsWithPositionedNodes.Clear();
+		lineVisualExtents.Clear();
+		lineMaxButtonGeneration.Clear();
+		lineButtonGenerations.Clear();
+		buttonGenerationLineNumbers.Clear();
 		lineSizes.Clear();
 		lineNumbers.Clear();
 		lineLayoutEntries.Clear();
@@ -2480,6 +2633,9 @@ public partial class EmueraContent : Control
 		canvasOverlayRowsDirty = false;
 		totalLineHeight = 0;
 		widestLineWidth = 0;
+		widestVisualLineWidth = 0;
+		visualLayoutContentHeight = 0;
+		maxRenderedButtonGeneration = long.MinValue;
 	}
 
 	void RegisterCanvasImageOverlays(int lineNo, List<CanvasImageOverlay> nodes)
@@ -2692,6 +2848,7 @@ public partial class EmueraContent : Control
 		lineLayoutEntries.Clear();
 		lineLayoutIndexByLineNo.Clear();
 		float y = 0;
+		float visualBottom = 0;
 		foreach (int lineNo in lineNumbers)
 		{
 			if (!lineSizes.TryGetValue(lineNo, out var size))
@@ -2704,8 +2861,15 @@ public partial class EmueraContent : Control
 				Size = size,
 			});
 			lineLayoutIndexByLineNo[lineNo] = index;
+			if (lineVisualExtents.TryGetValue(lineNo, out var visualExtents))
+				visualBottom = Mathf.Max(visualBottom, y + visualExtents.Y);
+			else
+				visualBottom = Mathf.Max(visualBottom, y + size.Y);
 			y += size.Y;
 		}
+		// 可视溢出必须按真实行顶点计算。仅用 totalLineHeight + maxOverflow 会把靠前地图行
+		// 的大 div 高度叠到整段历史输出末尾，造成滚到底部后一大片黑屏。
+		visualLayoutContentHeight = Mathf.Max(y, visualBottom);
 		lineLayoutDirty = false;
 	}
 
@@ -2795,6 +2959,22 @@ public partial class EmueraContent : Control
 		{
 			if (size.X > widestLineWidth)
 				widestLineWidth = size.X;
+		}
+	}
+
+	void RecalculateWidestVisualLineWidth()
+	{
+		RecalculateVisualLineMetrics();
+	}
+
+	void RecalculateVisualLineMetrics()
+	{
+		widestVisualLineWidth = 0;
+		foreach (var kvp in lineVisualExtents)
+		{
+			var visualExtents = kvp.Value;
+			if (visualExtents.X > widestVisualLineWidth)
+				widestVisualLineWidth = visualExtents.X;
 		}
 	}
 
@@ -3342,20 +3522,11 @@ public partial class EmueraContent : Control
 	// Fast layout size calculation from cached line metrics.
 	Vector2 CalculateLineContentSize()
 	{
-		float width = Mathf.Max(Config.DrawableWidth, widestLineWidth);
-		float height = totalLineHeight;
+		// 动态地图会保留历史输出，不能在每次打开地图/缩放/滚动时重新扫描全部行。
+		// 行注册与 data-only 刷新时缓存可视边界；布局 dirty 时只重建一次 prefix 快照。
 		EnsureLineLayout();
-		for (int i = 0; i < lineLayoutEntries.Count; i++)
-		{
-			var entry = lineLayoutEntries[i];
-			if (lineObjects.TryGetValue(entry.LineNo, out var line))
-			{
-				// eraFL 的右侧信息窗、日志窗等使用相对 div 伸出普通文本宽度。
-				// 宽度也必须按可视右边界兜底，否则窄屏/Android 安全区会把右侧 UI 裁掉。
-				width = Mathf.Max(width, GetLineVisualRight(line));
-				height = Mathf.Max(height, entry.Top + GetLineVisualBottom(line));
-			}
-		}
+		float width = Mathf.Max(Config.DrawableWidth, Mathf.Max(widestLineWidth, widestVisualLineWidth));
+		float height = Mathf.Max(totalLineHeight, visualLayoutContentHeight);
 		int visibleRows = lineNumbers.Count;
 		if (!UseCanvasRenderBackend && visibleRows > 1 && lineContainer is VBoxContainer rows)
 			height += (visibleRows - 1) * rows.GetThemeConstant("separation");
@@ -4885,17 +5056,7 @@ public partial class EmueraContent : Control
 				return;
 			}
 
-			var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
-			foreach (var kvp in lineObjects)
-			{
-				var line = kvp.Value;
-				var lineButtons = new List<(string text, Godot.Color color, string code)>();
-				CollectQuickButtons(line, lineButtons);
-				if (lineButtons.Count > 0)
-					lineGroups.Add((kvp.Key, lineButtons));
-			}
-
-			lineGroups.Sort((a, b) => a.lineNo.CompareTo(b.lineNo));
+			var lineGroups = CollectCurrentGenerationQuickButtonGroups();
 
 			if (lineGroups.Count == 0)
 			{
@@ -4989,6 +5150,28 @@ public partial class EmueraContent : Control
 				quickButtons.EndBatch();
 			}
 		}
+	}
+
+	List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> CollectCurrentGenerationQuickButtonGroups()
+	{
+		var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
+		if (lastButtonGeneration < 0 || lastButtonGeneration > maxRenderedButtonGeneration)
+			return lineGroups;
+		if (!buttonGenerationLineNumbers.TryGetValue(lastButtonGeneration, out var rows) || rows == null)
+			return lineGroups;
+
+		// 动态地图会累积大量历史行；当前等待代的按钮只可能出现在 generation 索引命中的行里。
+		// 这里避免每次打开地图/刷新快捷按钮时遍历全部 retained line。
+		foreach (int lineNo in rows)
+		{
+			if (!lineObjects.TryGetValue(lineNo, out var line))
+				continue;
+			var lineButtons = new List<(string text, Godot.Color color, string code)>();
+			CollectQuickButtons(line, lineButtons);
+			if (lineButtons.Count > 0)
+				lineGroups.Add((lineNo, lineButtons));
+		}
+		return lineGroups;
 	}
 
 	string BuildQuickButtonGroupsSignature(List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> lineGroups)

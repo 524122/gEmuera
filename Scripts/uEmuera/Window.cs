@@ -437,7 +437,6 @@ namespace uEmuera.Window
                 || current.IsLogicalLine != next.IsLogicalLine
                 || current.IsTemporary != next.IsTemporary
                 || current.IsLineEnd != next.IsLineEnd
-                || current.BitmapCacheEnabled != next.BitmapCacheEnabled
                 || current.DynamicMapFunctionScoped != next.DynamicMapFunctionScoped
                 || current.Align != next.Align
                 || current.TextBackgroundColor != next.TextBackgroundColor)
