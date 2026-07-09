@@ -1,5 +1,19 @@
 # CODE_MAP
 
+## 2026-07-09 eraTW/snake 泡茶展开浮层兼容
+- `Scripts/EmueraContent.cs:BuildConsoleButton/CreateTextPart/ConsoleTextPart`：Control 后端按钮文本现在也使用 `ConsoleStyledString.pButtonColor` 和焦点背景绘制 hover/press 视觉，补齐旧节点后端与 Canvas 后端、原生 Emuera 的按钮选中态差异。
+- `Scripts/EmueraContent.cs:GetHtmlDivPosition`：HTML `absolute/absolute-leftbottom` div 遇到负 `Y` 时按 Emuera 的底边 0、向上为负坐标解释；正数仍保留原 left-bottom 距底部解释。用于兼容 eraTW/snake `QOL_USERCOM.ERB` 这类通过 `MOUSEY() - DIV_HEIGHT` 把浮层显示在按钮上方的脚本。
+- `Scripts/EmueraContent.cs:ShouldAnchorRelativeDivToViewport` / `RefreshViewportAnchoredRelativeDivRows` 与 `Scripts/EmueraContent.Canvas.cs:RefreshCanvasOverlayRows`：eraTW/snake 泡茶面板没有写 `display='absolute'`，会作为 `relative div` 被 Canvas 排除并落到整行 fallback Control 渲染。命中 `depth<0`、负 `Y` 且 `Y+height<0` 的浮层时，行内 wrapper 会保存视口锚定坐标；刷新时按 `viewportPosition - lineY` 放置，避免再叠加历史输出行坐标导致面板位置不变。
+- `Scripts/EmueraContent.cs:UpdatePointerPosition/UpdatePointerPositionForButton/UpdatePointerPositionForContentPoint`：写给 ERB `MOUSEX()`/`MOUSEY()` 的坐标改回当前可视窗口 client 坐标，不再带 `ScrollContainer` 的全文滚动偏移；按钮提交仍使用按钮中心，但会换算成可视窗口坐标。否则动态菜单打开在历史输出很长时会把 Y 算成正的大数，触发脚本底部溢出保护而贴到底部。
+- `Scripts/EmueraContent.cs:TryAdvanceTap` / `Scripts/Emuera/GameView/EmueraConsole.cs:IsWaitingDefaultableIntValue`：空白左键在 `INPUT -1` 这类带默认值的数值等待中会以鼠标输入提交空串，让核心套用默认值并写入 `RESULT:1=1`，从而点击任意空白处关闭浮层；无默认值的普通数值输入仍不吞空白点击。
+- 影响范围：主要影响 HTML/Control 按钮 hover、负 Y 绝对 div 定位、带默认值 `INPUT` 的空白左键推进；不改 ERB、不改 Canvas 普通文本路径、不改变无默认值输入的等待行为。
+
+## 2026-07-09 虚拟光标拖动起步偏移修复
+- `Scripts/VirtualCursor.cs`：虚拟光标拖动位移改为优先使用 `InputEventMouseMotion.Relative` / `InputEventScreenDrag.Relative`，不再用“当前 position - 按下/上一帧 position”作为主路径，避免 Android 上按下事件与第一帧拖动事件坐标基准不一致时，每次开始移动先横向跳一段。
+- `Scripts/VirtualCursor.cs` / `Scripts/EmueraContent.cs:VirtualCursorBeginSlide/VirtualCursorSlideBy/VirtualCursorEndSlide`：长按改为“待定右键”。长按后松手且未移动时提交右键；长按后继续拖动时进入真实滑动，复用主控制台 `ScrollContentBy`、`UpdateContentScrollVelocity`、`StartContentInertia` 链路，而不是只移动虚拟光标。
+- `Scripts/VirtualCursor.cs:GetCursorMovementBounds / ClampCursorToMovementBounds`：虚拟光标初始位置和移动边界改为优先使用 `EmueraContent.VirtualCursorGetContentViewportRect()` 返回的控制台可视区域，缺失时才回退到 viewport 可视区域，减少菜单栏/安全区边界导致的首次拖动强制回拉。
+- 影响范围：仅影响虚拟光标模式下的鼠标/触控板式移动；短按左键、中键按钮、hover 双通道同步和 `VirtualCursorCommitClick` 提交流程保持不变。右键从“长按到阈值立即提交”调整为“长按后松手提交”，以便长按拖动能被区分为真实滑动。保险逻辑是：若某些设备第一帧拖动 `Relative` 为 0 且 position 差值已经超过拖动阈值，则丢弃这一帧差值，避免用错坐标基准推光标。
+
 ## 2026-07-09 动态地图打开卡顿优化与清理实验移除
 
 - `EmueraContent.cs`：移除未启用的动态地图旧行激进清理实验代码，不再保留 `DynamicMapAggressiveTrimEnabled` 开关、专用清理入口和 `TrimOldDynamicMapLines` 方法；普通 `MaxVisibleLines` overflow 清理仍保持原逻辑。

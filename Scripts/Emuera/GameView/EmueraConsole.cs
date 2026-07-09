@@ -737,6 +737,18 @@ namespace MinorShift.Emuera.GameView
 				return false;
 			}
 		}
+
+		internal bool IsWaitingDefaultableIntValue
+		{
+			get
+			{
+				return IsWaitInputState
+					&& inputReq != null
+					&& inputReq.InputType == InputType.IntValue
+					&& inputReq.HasDefValue
+					&& !IsRunningTimer;
+			}
+		}
 		
 		internal string SelectedString
 		{

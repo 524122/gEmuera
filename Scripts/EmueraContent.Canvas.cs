@@ -357,7 +357,10 @@ public partial class EmueraContent
 		var node = overlay.Node;
 		if (node == null || !GodotObject.IsInstanceValid(node))
 			return;
-		node.Position = GetHtmlDivPosition(overlay.Div, overlay.RelX) + new Vector2(0, lineY);
+		if (ShouldAnchorRelativeDivToViewport(overlay.Div))
+			node.Position = GetViewportAnchoredRelativeDivPosition(overlay.Div);
+		else
+			node.Position = GetHtmlDivPosition(overlay.Div, overlay.RelX) + new Vector2(0, lineY);
 		node.Size = new Vector2(overlay.Div.DivWidth, overlay.Div.DivHeight);
 		node.CustomMinimumSize = node.Size;
 		node.ZIndex = GetGodotZIndexForHtmlDepth(overlay.Div.Depth);
@@ -584,6 +587,8 @@ public partial class EmueraContent
 				&& GodotObject.IsInstanceValid(control))
 			{
 				control.Position = new Vector2(0, y);
+				if (viewportAnchoredRelativeDivLineNos.Contains(lineNo))
+					RefreshViewportAnchoredRelativeDivs(control, y);
 			}
 			if (canvasImageOverlayNodes.TryGetValue(lineNo, out var overlays) && overlays != null)
 			{
@@ -614,6 +619,7 @@ public partial class EmueraContent
 		if (!UseCanvasRenderBackend)
 			return;
 		var visible = GetVisibleCanvasContentRange();
+		RefreshViewportAnchoredRelativeDivRows();
 		canvasVisibilityTargetRows.Clear();
 		canvasVisibilityTargetRowSet.Clear();
 		canvasCurrentVisibilityRows.Clear();
@@ -678,6 +684,13 @@ public partial class EmueraContent
 		{
 			for (int i = 0; i < divOverlays.Count; i++)
 			{
+				if (ShouldAnchorRelativeDivToViewport(divOverlays[i].Div))
+				{
+					var overlay = divOverlays[i];
+					UpdateCanvasDivOverlay(overlay, overlay.LineY, visible);
+					divOverlays[i] = overlay;
+					continue;
+				}
 				var node = divOverlays[i].Node;
 				if (node == null || !GodotObject.IsInstanceValid(node))
 					continue;

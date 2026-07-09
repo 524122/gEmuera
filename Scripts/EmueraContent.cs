@@ -68,6 +68,7 @@ public partial class EmueraContent : Control
 	Dictionary<long, SortedSet<int>> buttonGenerationLineNumbers = new Dictionary<long, SortedSet<int>>();
 	HashSet<int> canvasRowsWithPositionedNodes = new HashSet<int>();
 	HashSet<int> canvasRowsWithEscapedOverlays = new HashSet<int>();
+	HashSet<int> viewportAnchoredRelativeDivLineNos = new HashSet<int>();
 	HashSet<int> canvasLastVisibilityRows = new HashSet<int>();
 	List<int> canvasVisibilityTargetRows = new List<int>();
 	HashSet<int> canvasVisibilityTargetRowSet = new HashSet<int>();
@@ -112,6 +113,11 @@ public partial class EmueraContent : Control
 	Dictionary<int, int> lineLayoutIndexByLineNo = new Dictionary<int, int>();
 	bool lineLayoutDirty = false;
 	bool canvasOverlayRowsDirty = false;
+	const string ViewportAnchoredRelativeDivMeta = "viewport_anchor_relative_div";
+	const string ViewportAnchoredRelativeDivRowMeta = "viewport_anchor_relative_div_row";
+	const string ViewportAnchoredRelativeDivXMeta = "viewport_anchor_relative_div_x";
+	const string ViewportAnchoredRelativeDivYMeta = "viewport_anchor_relative_div_y";
+	const string ViewportAnchoredRelativeDivHeightMeta = "viewport_anchor_relative_div_height";
 	// Texture pins mirror presentation lifetime: console rows own line pins and
 	// CBG owns background pins. activeTexturePinCollector is scoped to the current
 	// render pass so GetSpriteTexture can remain a pure conversion helper.
@@ -232,7 +238,6 @@ public partial class EmueraContent : Control
 	string contentDragButtonInput;
 	long contentDragButtonGeneration;
 	bool contentDragButtonContentCenterValid = false;
-	Vector2 contentDragButtonContentCenter = Vector2.Zero;
 	ulong contentLastDragTick = 0;
 	bool contentInertiaActive = false;
 	float contentInertiaDeceleration = 900.0f;
@@ -939,9 +944,15 @@ public partial class EmueraContent : Control
 
 	// Render a text fragment in emuera's fixed half/full-width grid. Godot Label
 	// uses real glyph advance, which makes CJK/box-drawing maps drift on Android.
-	Control CreateTextPart(string text, EmuColor color, EmuFont font, float width)
+	Control CreateTextPart(string text, EmuColor color, EmuFont font, float width, EmuColor? selectedColor = null)
 	{
-		var textPart = new ConsoleTextPart(ResolveConsoleFont(font), FontSize, color.ToGodotColor(), font?.Bold == true, text);
+		var textPart = new ConsoleTextPart(
+			ResolveConsoleFont(font),
+			FontSize,
+			color.ToGodotColor(),
+			(selectedColor ?? color).ToGodotColor(),
+			font?.Bold == true,
+			text);
 		SetFixedControlSize(textPart, new Vector2(width, EffectiveLineHeight));
 		return textPart;
 	}
@@ -1744,8 +1755,8 @@ public partial class EmueraContent : Control
 		string inputs = button.Inputs;
 		long generation = button.Generation;
 		btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, GetRenderedButtonInput(btn), GetRenderedButtonGeneration(btn));
-		btn.MouseEntered += () => GenericUtils.SetPointingButton(GetRenderedButtonInput(btn), GetRenderedButtonGeneration(btn));
-		btn.MouseExited += () => GenericUtils.ClearPointingButton(GetRenderedButtonGeneration(btn));
+		btn.MouseEntered += () => SetRenderedButtonHover(btn, true);
+		btn.MouseExited += () => SetRenderedButtonHover(btn, false);
 		btn.SetMeta("button_input", inputs);
 		btn.SetMeta("generation", generation);
 
@@ -1797,6 +1808,36 @@ public partial class EmueraContent : Control
 		{
 			return 0;
 		}
+	}
+
+	void SetRenderedButtonHover(Control button, bool selected)
+	{
+		if (button == null || !GodotObject.IsInstanceValid(button))
+			return;
+
+		string input = GetRenderedButtonInput(button);
+		long generation = GetRenderedButtonGeneration(button);
+		SetControlButtonSelected(button, selected);
+		if (selected)
+		{
+			SetCanvasVisualButton(input, generation);
+			GenericUtils.SetPointingButton(input, generation);
+		}
+		else
+		{
+			ClearCanvasVisualButtonIfMatches(input, generation);
+			GenericUtils.ClearPointingButton(generation);
+		}
+	}
+
+	static void SetControlButtonSelected(Node node, bool selected)
+	{
+		if (node == null || !GodotObject.IsInstanceValid(node))
+			return;
+		if (node is ConsoleTextPart textPart)
+			textPart.SetSelected(selected);
+		foreach (var child in node.GetChildren())
+			SetControlButtonSelected(child, selected);
 	}
 
 	Rect2 GetButtonVisualBounds(ConsoleButtonString button, int buttonTop, int buttonHeight, int renderRelX, int renderOriginX)
@@ -2430,6 +2471,7 @@ public partial class EmueraContent : Control
 		{
 			canvasLineButtonHits.Remove(lineNo);
 		}
+		UpdateViewportAnchoredRelativeDivLineIndex(lineNo, control);
 		lineSizes[lineNo] = size;
 		lineNumbers.Add(lineNo);
 		totalLineHeight += size.Y;
@@ -2584,6 +2626,7 @@ public partial class EmueraContent : Control
 		lineObjects.Remove(lineNo);
 		lineControls.Remove(lineNo);
 		canvasLineButtonHits.Remove(lineNo);
+		viewportAnchoredRelativeDivLineNos.Remove(lineNo);
 		canvasRowsWithPositionedNodes.Remove(lineNo);
 		bool removedVisualWidest = false;
 		if (lineVisualExtents.TryGetValue(lineNo, out var visualExtents))
@@ -2620,6 +2663,7 @@ public partial class EmueraContent : Control
 		pendingAsyncLineUpdates.Clear();
 		recentPureImageFallbackLines.Clear();
 		canvasLineButtonHits.Clear();
+		viewportAnchoredRelativeDivLineNos.Clear();
 		canvasRowsWithPositionedNodes.Clear();
 		lineVisualExtents.Clear();
 		lineMaxButtonGeneration.Clear();
@@ -2696,6 +2740,14 @@ public partial class EmueraContent : Control
 			canvasRowsWithPositionedNodes.Add(lineNo);
 		else
 			canvasRowsWithPositionedNodes.Remove(lineNo);
+	}
+
+	void UpdateViewportAnchoredRelativeDivLineIndex(int lineNo, Control control)
+	{
+		if (control != null && control.HasMeta(ViewportAnchoredRelativeDivRowMeta))
+			viewportAnchoredRelativeDivLineNos.Add(lineNo);
+		else
+			viewportAnchoredRelativeDivLineNos.Remove(lineNo);
 	}
 
 	bool HasCanvasPositionedNodesForLine(int lineNo)
@@ -2933,6 +2985,21 @@ public partial class EmueraContent : Control
 			return;
 		}
 		RefreshCanvasOverlayRows();
+	}
+
+	void RefreshViewportAnchoredRelativeDivRows()
+	{
+		if (viewportAnchoredRelativeDivLineNos.Count == 0)
+			return;
+		EnsureLineLayout();
+		foreach (int lineNo in viewportAnchoredRelativeDivLineNos)
+		{
+			if (!lineControls.TryGetValue(lineNo, out var control)
+				|| control == null
+				|| !GodotObject.IsInstanceValid(control))
+				continue;
+			RefreshViewportAnchoredRelativeDivs(control, GetLineTopByLayout(lineNo));
+		}
 	}
 
 	void ReleaseCbgTexturePins()
@@ -3558,7 +3625,7 @@ public partial class EmueraContent : Control
 			{
 				w = css.Width > 0 ? css.Width : 9999;
 			}
-			var text = CreateTextPart(css.Str, css.pColor, css.Font, w);
+			var text = CreateTextPart(css.Str, css.pColor, css.Font, w, css.pButtonColor);
 			text.Position = new Vector2(posX, 0);
 			container.AddChild(text);
 
@@ -3767,6 +3834,8 @@ public partial class EmueraContent : Control
 	int AddDivPartToContainer(ConsoleDivPart div, Control container, int relX)
 	{
 		var wrapper = BuildDivControl(div, relX);
+		if (wrapper.HasMeta(ViewportAnchoredRelativeDivMeta))
+			container.SetMeta(ViewportAnchoredRelativeDivRowMeta, true);
 		container.AddChild(wrapper);
 		return EffectiveLineHeight;
 	}
@@ -3783,6 +3852,8 @@ public partial class EmueraContent : Control
 		wrapper.Size = new Vector2(div.DivWidth, div.DivHeight);
 		wrapper.CustomMinimumSize = new Vector2(div.DivWidth, div.DivHeight);
 		wrapper.ZIndex = GetGodotZIndexForHtmlDepth(div.Depth);
+		if (ShouldAnchorRelativeDivToViewport(div))
+			MarkViewportAnchoredRelativeDiv(wrapper, div);
 
 		int[] margin = div.StyledBox?.Margin;
 		int[] padding = div.StyledBox?.Padding;
@@ -3841,6 +3912,41 @@ public partial class EmueraContent : Control
 		}
 
 		return wrapper;
+	}
+
+	void MarkViewportAnchoredRelativeDiv(Control wrapper, ConsoleDivPart div)
+	{
+		if (wrapper == null || div == null)
+			return;
+		wrapper.SetMeta(ViewportAnchoredRelativeDivMeta, true);
+		wrapper.SetMeta(ViewportAnchoredRelativeDivXMeta, div.X);
+		wrapper.SetMeta(ViewportAnchoredRelativeDivYMeta, div.Y);
+		wrapper.SetMeta(ViewportAnchoredRelativeDivHeightMeta, div.DivHeight);
+	}
+
+	void RefreshViewportAnchoredRelativeDivs(Control root, float lineY)
+	{
+		if (root == null || !GodotObject.IsInstanceValid(root))
+			return;
+		RefreshViewportAnchoredRelativeDiv(root, lineY);
+		foreach (var child in root.GetChildren())
+		{
+			if (child is Control childControl)
+				RefreshViewportAnchoredRelativeDivs(childControl, lineY);
+		}
+	}
+
+	void RefreshViewportAnchoredRelativeDiv(Control control, float lineY)
+	{
+		if (control == null || !control.HasMeta(ViewportAnchoredRelativeDivMeta))
+			return;
+		int x = (int)control.GetMeta(ViewportAnchoredRelativeDivXMeta).AsInt64();
+		int y = (int)control.GetMeta(ViewportAnchoredRelativeDivYMeta).AsInt64();
+		int height = (int)control.GetMeta(ViewportAnchoredRelativeDivHeightMeta).AsInt64();
+		// eraTW/snake 泡茶菜单把 MOUSEY()-DIV_HEIGHT 写成普通 relative div。
+		// fallback Control 行本身已经按历史输出 lineY 放置，因此这里必须减掉 lineY，
+		// 否则浮层会继续跟着原输出行走，而不是贴到当前可视窗口里的鼠标上方。
+		control.Position = GetViewportAnchoredRelativeDivPosition(x, y, height) - new Vector2(0, lineY);
 	}
 
 	// Render a child ConsoleDisplayLine into an existing container at yOffset.
@@ -3946,12 +4052,50 @@ public partial class EmueraContent : Control
 		{
 			case DisplayMode.Absolute:
 			case DisplayMode.AbsoluteLeftBottom:
-				return new Vector2(div.X, GetContentViewportHeight() - div.Y - div.DivHeight);
+				return new Vector2(div.X, ResolveBottomOriginHtmlY(div.Y, div.DivHeight));
 			case DisplayMode.AbsoluteLeftTop:
 				return new Vector2(div.X, div.Y);
 			default:
 				return new Vector2(div.PointX - relX + div.X, div.Y);
 		}
+	}
+
+	float ResolveBottomOriginHtmlY(int y, int height)
+	{
+		// Emuera 的 MOUSEY/CLIENTHEIGHT 坐标是底边为 0、向上为负。
+		// v24/snake 的浮层会直接把这个负数作为 div 的上边缘；正数 left-bottom
+		// 旧用法仍按“距底部高度”处理，避免破坏已有资源。
+		if (y < 0)
+			return GetContentViewportHeight() + y;
+		return GetContentViewportHeight() - y - height;
+	}
+
+	bool ShouldAnchorRelativeDivToViewport(ConsoleDivPart div)
+	{
+		if (div == null || div.Display != DisplayMode.Relative || !div.IsRelative)
+			return false;
+		// eraTW/snake 的泡茶子菜单没有显式 display='absolute'，但脚本用
+		// MOUSEY()-DIV_HEIGHT 得到的是 Emuera 底边原点坐标。它的下边缘仍为负数，
+		// 且 depth=-1；普通行内 relative div 不满足这个形态约束，继续按 lineY 相对定位。
+		return div.Depth < 0 && div.Y < 0 && div.Y + div.DivHeight < 0;
+	}
+
+	Vector2 GetViewportAnchoredRelativeDivPosition(ConsoleDivPart div)
+	{
+		if (div == null)
+			return Vector2.Zero;
+		return GetViewportAnchoredRelativeDivPosition(div.X, div.Y, div.DivHeight);
+	}
+
+	Vector2 GetViewportAnchoredRelativeDivPosition(int x, int y, int height)
+	{
+		var viewportPosition = new Vector2(x, ResolveBottomOriginHtmlY(y, height));
+		if (scrollContainer == null)
+			return viewportPosition;
+		var scroll = new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
+		if (contentScale > 0.001f)
+			scroll /= contentScale;
+		return scroll + viewportPosition;
 	}
 
 	// HTML 的 depth 数值越大越靠后；Godot 的 ZIndex 需要整体抬到 Canvas 绘制面之上。
@@ -5329,10 +5473,10 @@ public partial class EmueraContent : Control
 	public void VirtualCursorCommitClick(Vector2 globalPosition, int mouseVk)
 	{
 		UpdatePointerPosition(globalPosition);
-		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out var hitButton, out var hitInput, out var hitGeneration, out var contentCenterValid, out var contentCenter))
+		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out var hitButton, out var hitInput, out var hitGeneration, out var contentCenterValid, out _))
 		{
 			if (contentCenterValid)
-				UpdatePointerPositionForContentPoint(contentCenter);
+				UpdatePointerPosition(globalPosition);
 			else
 				UpdatePointerPositionForButton(hitButton, globalPosition);
 			if (quickButtons != null && quickButtons.IsShow)
@@ -5343,6 +5487,63 @@ public partial class EmueraContent : Control
 		{
 			TryAdvanceTap(true, mouseVk);
 		}
+	}
+
+	public void VirtualCursorBeginSlide(Vector2 globalPosition)
+	{
+		if (scrollContainer == null)
+			return;
+
+		StopContentInertia();
+		contentDragActive = true;
+		contentDragMoved = true;
+		contentDragStartedOnButton = false;
+		contentDragButton = null;
+		contentDragButtonInput = null;
+		contentDragButtonGeneration = 0;
+		contentDragButtonContentCenterValid = false;
+		contentDragMouseVk = 0x01;
+		contentDragStartPosition = globalPosition;
+		contentDragLastPosition = globalPosition;
+		contentScrollVelocity = Vector2.Zero;
+		contentInertiaRemainder = Vector2.Zero;
+		contentLastDragTick = Time.GetTicksMsec();
+		lastScrollTraceDragTick = contentLastDragTick;
+		contentScrollInteractionSerial++;
+		ClearCanvasVisualButton();
+		UpdatePointerPosition(globalPosition);
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("virtual_cursor_slide_begin", () => $"pos=({Mathf.RoundToInt(globalPosition.X)},{Mathf.RoundToInt(globalPosition.Y)})");
+	}
+
+	public void VirtualCursorSlideBy(Vector2 pointerDelta)
+	{
+		if (scrollContainer == null)
+			return;
+
+		if (!contentDragActive)
+			VirtualCursorBeginSlide(VirtualCursorGetContentViewportRect().GetCenter());
+
+		var rawScrollDelta = -pointerDelta;
+		var appliedDelta = ScrollContentBy(rawScrollDelta);
+		UpdateContentScrollVelocity(rawScrollDelta, appliedDelta);
+		contentDragLastPosition += pointerDelta;
+		if (GenericUtils.IsScrollTraceActive && appliedDelta.LengthSquared() > 0.01f)
+			TraceScroll("virtual_cursor_slide_move", () => $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
+	}
+
+	public void VirtualCursorEndSlide(bool startInertia)
+	{
+		if (!contentDragActive)
+			return;
+
+		if (startInertia)
+			StartContentInertia();
+		else
+			StopContentInertia();
+		ResetContentDragState();
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("virtual_cursor_slide_end", () => $"inertia={startInertia}");
 	}
 
 	// Hide quick buttons after one is pressed until a new button generation is
@@ -6005,6 +6206,15 @@ public partial class EmueraContent : Control
 		QueueCanvasVisualRedraw();
 	}
 
+	void ClearCanvasVisualButtonIfMatches(string input, long generation)
+	{
+		if (canvasVisualButtonGeneration != generation)
+			return;
+		if (!string.Equals(canvasVisualButtonInput ?? "", input ?? "", StringComparison.Ordinal))
+			return;
+		ClearCanvasVisualButton();
+	}
+
 	void QueueCanvasVisualRedraw()
 	{
 		if (!UseCanvasRenderBackend || consoleRenderSurface == null || !GodotObject.IsInstanceValid(consoleRenderSurface))
@@ -6072,8 +6282,7 @@ public partial class EmueraContent : Control
 		if (pressed)
 		{
 			bool hitContentCenterValid = false;
-			Vector2 hitContentCenter = Vector2.Zero;
-			if (button == null && TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var hitButton, out var hitInput, out var hitGeneration, out hitContentCenterValid, out hitContentCenter))
+			if (button == null && TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var hitButton, out var hitInput, out var hitGeneration, out hitContentCenterValid, out _))
 			{
 				button = hitButton;
 				input = hitInput;
@@ -6094,9 +6303,11 @@ public partial class EmueraContent : Control
 			contentDragButtonInput = input;
 			contentDragButtonGeneration = generation;
 			contentDragButtonContentCenterValid = hitContentCenterValid;
-			contentDragButtonContentCenter = hitContentCenter;
 			if (contentDragStartedOnButton)
+			{
 				SetCanvasVisualButton(input, generation);
+				SetControlButtonSelected(button, true);
+			}
 			else
 				ClearCanvasVisualButton();
 			contentDragStartPosition = pointerPosition;
@@ -6132,6 +6343,7 @@ public partial class EmueraContent : Control
 			{
 				contentDragMoved = true;
 				contentScrollInteractionSerial++;
+				SetControlButtonSelected(contentDragButton, false);
 				ClearCanvasVisualButton();
 				if (GenericUtils.IsScrollTraceActive)
 					TraceScroll("drag_start", () => $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
@@ -6175,7 +6387,6 @@ public partial class EmueraContent : Control
 		int pressedButtonMouseVk = contentDragMouseVk;
 		Control pressedButtonControl = null;
 		bool pressedButtonContentCenterValid = false;
-		Vector2 pressedButtonContentCenter = Vector2.Zero;
 		bool advanceTap = false;
 		if (contentDragMoved)
 		{
@@ -6188,7 +6399,6 @@ public partial class EmueraContent : Control
 			pressedButtonGeneration = contentDragButtonGeneration;
 			pressedButtonControl = contentDragButton;
 			pressedButtonContentCenterValid = contentDragButtonContentCenterValid;
-			pressedButtonContentCenter = contentDragButtonContentCenter;
 			handled = true;
 		}
 		else if (!contentDragStartedOnButton)
@@ -6199,7 +6409,8 @@ public partial class EmueraContent : Control
 			// 右/中クリック: INPUT 数値入力待ち中も advance（ゲームが RESULT:1==2 で右クリック検知）。
 			advanceTap = console != null && (
 				console.IsWaitingEnterKey || console.IsWaitAnyKey ||
-				(isNonLeftClick && console.IsWaitingInput));
+				(isNonLeftClick && console.IsWaitingInput) ||
+				ShouldSubmitBlankLeftClickDefault(console, pressedButtonMouseVk));
 			handled = advanceTap;
 			restoreQuickInputGate = advanceTap;
 		}
@@ -6215,7 +6426,7 @@ public partial class EmueraContent : Control
 		if (pressedButtonInput != null)
 		{
 			if (pressedButtonContentCenterValid)
-				UpdatePointerPositionForContentPoint(pressedButtonContentCenter);
+				UpdatePointerPosition(pointerPosition);
 			else
 				UpdatePointerPositionForButton(pressedButtonControl, pointerPosition);
 			if (quickButtons != null && quickButtons.IsShow)
@@ -6633,7 +6844,9 @@ public partial class EmueraContent : Control
 			+ ",something=" + console.IsWaitingInputSomething;
 	}
 
-	// Update the emuera pointer position in unscaled console coordinates.
+	// Update MOUSEX/MOUSEY in client coordinates, matching WinForms PointToClient.
+	// 滚动条位置不能混入这里，否则 ERB 会把“历史输出全文坐标”误当成窗口坐标，
+	// v24/snake 的鼠标浮层会触发底部溢出保护并贴到底部。
 	void UpdatePointerPosition(Vector2 globalPosition)
 	{
 		if (scrollContainer == null)
@@ -6642,12 +6855,19 @@ public partial class EmueraContent : Control
 			return;
 		}
 
+		var pointerPosition = GetViewportPointerPositionFromGlobal(globalPosition);
+		GenericUtils.SetPointerPosition(pointerPosition.X, pointerPosition.Y);
+	}
+
+	Vector2 GetViewportPointerPositionFromGlobal(Vector2 globalPosition)
+	{
+		if (scrollContainer == null)
+			return globalPosition;
 		var rect = scrollContainer.GetGlobalRect();
 		var contentPosition = globalPosition - rect.Position;
-		contentPosition += new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 		if (contentScale > 0.001f)
 			contentPosition /= contentScale;
-		GenericUtils.SetPointerPosition(contentPosition.X, contentPosition.Y);
+		return contentPosition;
 	}
 
 	// Use the button center for command submission so the core receives a stable
@@ -6660,24 +6880,14 @@ public partial class EmueraContent : Control
 			return;
 		}
 
-		if (button.Size.X <= 0 || button.Size.Y <= 0 || scaledContentRoot == null || !GodotObject.IsInstanceValid(scaledContentRoot))
+		if (button.Size.X <= 0 || button.Size.Y <= 0)
 		{
 			UpdatePointerPosition(fallbackGlobalPosition);
 			return;
 		}
 
 		var globalCenter = button.GetGlobalTransformWithCanvas() * (button.Size * 0.5f);
-		// HTML island 和普通行不是同一个直接父容器；统一换算到 scaledContentRoot，
-		// 再除以当前缩放，才能得到 emuera 核心期望的未缩放控制台坐标。
-		var contentCenter = scaledContentRoot.GetGlobalTransformWithCanvas().AffineInverse() * globalCenter;
-		if (contentScale > 0.001f)
-			contentCenter /= contentScale;
-		GenericUtils.SetPointerPosition(contentCenter.X, contentCenter.Y);
-	}
-
-	void UpdatePointerPositionForContentPoint(Vector2 contentPoint)
-	{
-		GenericUtils.SetPointerPosition(contentPoint.X, contentPoint.Y);
+		UpdatePointerPosition(globalCenter);
 	}
 
 	// Apply user-configured sensitivity to a scroll delta.
@@ -6914,7 +7124,8 @@ public partial class EmueraContent : Control
 		// 右/中键：IsWaitingInput（含 INPUT 数值等待）也 advance，让游戏通过 RESULT:1 检测右键。
 		if (console == null)
 			return false;
-		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInput))
+		bool submitBlankLeftDefault = ShouldSubmitBlankLeftClickDefault(console, mouseVk);
+		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInput) && !submitBlankLeftDefault)
 			return false;
 
 		uint nowTick = MinorShift._Library.WinmmTimer.TickCount;
@@ -6927,15 +7138,26 @@ public partial class EmueraContent : Control
 		// 右键/中键を空エリアでタップした場合は from_button=true で送信。
 		// これにより EmueraThread の IsWaitingInputSomething ガードを通過し、
 		// RESULT_ARRAY[1] に正しいボタンコードが書き込まれる。
-		bool fromButton = mouseVk != 0x01;
+		bool fromButton = mouseVk != 0x01 || submitBlankLeftDefault;
 		EmueraThread.instance.Input("", fromButton, skipFlag, fromButton ? mouseVk : 0);
 		lastClickTick = nowTick;
 		return true;
 	}
 
+	static bool ShouldSubmitBlankLeftClickDefault(MinorShift.Emuera.GameView.EmueraConsole console, int mouseVk)
+	{
+		// eraTW/snake 的泡茶展开面板用 INPUT -1 等待下一次点击。
+		// 原生空白左键会提交默认值 -1 并写入 RESULT:1=1，从而关闭浮层；
+		// 普通数值输入没有默认值时仍不吞空白点击，避免误提交。
+		return mouseVk == 0x01
+			&& console != null
+			&& console.IsWaitingDefaultableIntValue;
+	}
+
 	// Clear ordinary drag/tap tracking state.
 	void ResetContentDragState()
 	{
+		SetControlButtonSelected(contentDragButton, false);
 		contentDragActive = false;
 		contentDragMoved = false;
 		contentDragStartedOnButton = false;
@@ -6943,7 +7165,6 @@ public partial class EmueraContent : Control
 		contentDragButtonInput = null;
 		contentDragButtonGeneration = 0;
 		contentDragButtonContentCenterValid = false;
-		contentDragButtonContentCenter = Vector2.Zero;
 		contentDragMouseVk = 0x01;
 		ClearCanvasVisualButton();
 	}
@@ -7183,19 +7404,30 @@ public partial class EmueraContent : Control
 		readonly Font font;
 		readonly int fontSize;
 		readonly Color color;
+		readonly Color selectedColor;
 		readonly bool bold;
 		readonly string text;
 		Vector2 fixedSize;
+		bool selected;
 
-		public ConsoleTextPart(Font font, int fontSize, Color color, bool bold, string text)
+		public ConsoleTextPart(Font font, int fontSize, Color color, Color selectedColor, bool bold, string text)
 		{
 			this.font = font;
 			this.fontSize = fontSize > 0 ? fontSize : 18;
 			this.color = color;
+			this.selectedColor = selectedColor;
 			this.bold = bold;
 			this.text = uEmuera.Utils.StripZeroWidth(text) ?? "";
 			MouseFilter = MouseFilterEnum.Ignore;
 			ClipContents = true;
+		}
+
+		public void SetSelected(bool value)
+		{
+			if (selected == value)
+				return;
+			selected = value;
+			QueueRedraw();
 		}
 
 		public void SetFixedSize(Vector2 size)
@@ -7217,9 +7449,12 @@ public partial class EmueraContent : Control
 
 			float fontHeight = font.GetHeight(fontSize);
 			float baseline = GetTextBaseline(font, fontSize, Size.Y, fontHeight);
+			Color drawColor = selected ? selectedColor : color;
+			if (selected && Config.UseButtonFocusBackgroundColor && !string.IsNullOrWhiteSpace(text))
+				DrawRect(new Rect2(Vector2.Zero, Size), new Color(50.0f / 255.0f, 50.0f / 255.0f, 50.0f / 255.0f, 1.0f));
 			if (!ShouldUseGridDrawing(text))
 			{
-				DrawPlainText(baseline);
+				DrawPlainText(baseline, drawColor);
 				return;
 			}
 
@@ -7233,18 +7468,18 @@ public partial class EmueraContent : Control
 				float nextExactX = exactX + GetCellWidth(half);
 				float nextDrawX = (int)nextExactX;
 				float cellWidth = nextDrawX - drawX;
-				DrawGridChar(text[i], drawX, 0, baseline, cellWidth, fontHeight);
+				DrawGridChar(text[i], drawX, 0, baseline, cellWidth, fontHeight, drawColor);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
 		}
 
-		void DrawPlainText(float baseline)
+		void DrawPlainText(float baseline, Color drawColor)
 		{
 			float drawWidth = System.Math.Max(1.0f, Size.X);
-			DrawString(font, new Vector2(0, baseline), text, HorizontalAlignment.Left, drawWidth, fontSize, color);
+			DrawString(font, new Vector2(0, baseline), text, HorizontalAlignment.Left, drawWidth, fontSize, drawColor);
 			if (bold)
-				DrawString(font, new Vector2(1.0f, baseline), text, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, color);
+				DrawString(font, new Vector2(1.0f, baseline), text, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, drawColor);
 		}
 
 		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f)
@@ -7284,11 +7519,11 @@ public partial class EmueraContent : Control
 				|| c == '\u3000';
 		}
 
-		void DrawGridChar(char value, float x, float lineTop, float baseline, float cellWidth, float fontHeight)
+		void DrawGridChar(char value, float x, float lineTop, float baseline, float cellWidth, float fontHeight, Color drawColor)
 		{
 			if (TryGetSolidBlockElementRect(value, cellWidth, Size.Y, fontHeight, out var blockRect))
 			{
-				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), color);
+				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), drawColor);
 				return;
 			}
 			// 每个字符仍按 emuera 的网格起点绘制，但不能再按单元格宽度裁剪字形。
@@ -7296,9 +7531,9 @@ public partial class EmueraContent : Control
 			// 若逐格裁剪会出现横线缺失。片段边界继续由本 Control 的 ClipContents 统一限制。
 			string glyph = value.ToString();
 			float drawWidth = System.Math.Max(1.0f, System.Math.Max(cellWidth, Size.X - x));
-			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, fontSize, color);
+			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, fontSize, drawColor);
 			if (bold)
-				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, color);
+				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, drawColor);
 		}
 	}
 
