@@ -19,6 +19,7 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
 | 文档 | 状态 | 说明 |
 |------|------|------|
 | `CODE_MAP.md` | **必读** | 代码地图，减少无目的文件检索；改 `Scripts/**/*.cs` 后判断是否需同步更新 |
+| `NewFrameworkDesign/DeveloperHandoff.md` | **接手必读** | 当前已有能力、实际 owner、阶段阻断、验证入口和下一开发顺序 |
 | `NewFrameworkDesign/` | 当前设计 | 新架构设计文档（Godot-master skill + 学习 XEmuera 架构重新设计） |
 | `OriginalFrameworkDesign/` | 已过时 | 早期架构设计，部分内容有误，仅供参考 |
 | `addons/gdUnit4/ADDON.md` | 按需 | GDUnit4 插件使用指南（WHY/WHEN/WHERE/HOW），用 GDUnit 做 TDD 时阅读 |

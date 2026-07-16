@@ -6,6 +6,8 @@
 
 当前唯一允许直接拆工单实施的范围是 [M0M2ImplementationBaseline](M0M2ImplementationBaseline.md)。M0 仍是发布门禁的起点；已实现的 [M1CoreRuntimeContractSlice](M1CoreRuntimeContractSlice.md) 已包含最小 `LegacySessionFacade`/Godot legacy backend 接线，但只处于 `InProgress / Blocked`，不等同于 M1 通过，也不改变 M2 的门禁状态。M3+、PixelStore、新 VM 调度、新 renderer 和 SAF 主路径仍是目标设计，不是已批准工作。
 
+新维护者应先阅读 [DeveloperHandoff](DeveloperHandoff.md)。该文档按当前实现列出可运行路径、Core/Host/工具能力、实际 owner、已知阻断和验证入口，避免把本目录中的目标设计误当成已经切换的生产实现。
+
 ## 证据规则
 
 兼容事实分层而非简单覆盖：上游 XEmuera 定义原版语义；旧 gEmuera 定义现有扩展/修复；Snake、eraFL 和 Android fixture 决定真实依赖。`Compatible` 必须指明 profile 和差分报告；只有源码阅读时最多是 `Mapped`。
@@ -16,18 +18,19 @@
 
 ## 推荐阅读顺序
 
-1. [Architecture](Architecture.md)：目标、所有权、Autoload、线程和事务。
-2. [GEmueraBaseline](GEmueraBaseline.md)、[EvidenceIndex](EvidenceIndex.md)、[InstructionInventory](InstructionInventory.md)：三层事实和名称库存。
-3. [DialectExtensionSystem](DialectExtensionSystem.md)：v24、Snake 与未来魔改解释器的组合、隔离和扩展契约。
-4. [DependencyGraph](DependencyGraph.md)、[ProjectStructure](ProjectStructure.md)、[GodotIntegration](GodotIntegration.md)：工程与场景接线。
-5. [MigrationPlan](MigrationPlan.md)、[M0M2ImplementationBaseline](M0M2ImplementationBaseline.md)、[M1CoreRuntimeContractSlice](M1CoreRuntimeContractSlice.md)、[ExecutionContract](ExecutionContract.md)、[ScriptEngine](ScriptEngine.md)：迁移、当前实施范围、已落地合同边界、线程和同步顺序。
-6. [M3CoreExtraction](M3CoreExtraction.md)、[M4ResourceGraphics](M4ResourceGraphics.md)、[M5PlatformComposition](M5PlatformComposition.md)：M3-M5 的 Core、资源和平台组合设计；这些文档不能替代 M0-M2 门禁。
-7. [M6SchedulingRenderingExperiment](M6SchedulingRenderingExperiment.md)、[M7CleanupReleaseGovernance](M7CleanupReleaseGovernance.md)、[M3M7EngineeringExecution](M3M7EngineeringExecution.md)：实验、清理、发布、回退及跨阶段工单/报告闭环。
-8. [SaveFormat](SaveFormat.md)、[SaveLoadSystem](SaveLoadSystem.md)、[VariableSystem](VariableSystem.md)：数据正确性。
-9. [ResourceSystem](ResourceSystem.md)、[MarkupSystem](MarkupSystem.md)、[InstructionRenderMap](InstructionRenderMap.md)：兼容内容。
-10. [RenderingSystem](RenderingSystem.md)、[AudioSystem](AudioSystem.md)、[LifecycleMemory](LifecycleMemory.md)：Godot 表现与资源。
-11. [ExtensionRuntime](ExtensionRuntime.md)、[SecurityLimits](SecurityLimits.md)、[ErrorRecovery](ErrorRecovery.md)、[PerformanceOptimization](PerformanceOptimization.md)：扩展运行时与生产边界。
-12. [HowToRun](HowToRun.md)、[VerificationPlan](VerificationPlan.md)、[AcceptanceTraceability](AcceptanceTraceability.md)：构建与关闭条件。
+1. [DeveloperHandoff](DeveloperHandoff.md)：当前已经具备的实现、owner、阻断和接手入口。
+2. [Architecture](Architecture.md)：目标、所有权、Autoload、线程和事务。
+3. [GEmueraBaseline](GEmueraBaseline.md)、[EvidenceIndex](EvidenceIndex.md)、[InstructionInventory](InstructionInventory.md)：三层事实和名称库存。
+4. [DialectExtensionSystem](DialectExtensionSystem.md)：v24、Snake 与未来魔改解释器的组合、隔离和扩展契约。
+5. [DependencyGraph](DependencyGraph.md)、[ProjectStructure](ProjectStructure.md)、[GodotIntegration](GodotIntegration.md)：工程与场景接线。
+6. [MigrationPlan](MigrationPlan.md)、[M0M2ImplementationBaseline](M0M2ImplementationBaseline.md)、[M1CoreRuntimeContractSlice](M1CoreRuntimeContractSlice.md)、[ExecutionContract](ExecutionContract.md)、[ScriptEngine](ScriptEngine.md)：迁移、当前实施范围、已落地合同边界、线程和同步顺序。
+7. [M3CoreExtraction](M3CoreExtraction.md)、[M4ResourceGraphics](M4ResourceGraphics.md)、[M5PlatformComposition](M5PlatformComposition.md)：M3-M5 的 Core、资源和平台组合设计；这些文档不能替代 M0-M2 门禁。
+8. [M6SchedulingRenderingExperiment](M6SchedulingRenderingExperiment.md)、[M7CleanupReleaseGovernance](M7CleanupReleaseGovernance.md)、[M3M7EngineeringExecution](M3M7EngineeringExecution.md)：实验、清理、发布、回退及跨阶段工单/报告闭环。
+9. [SaveFormat](SaveFormat.md)、[SaveLoadSystem](SaveLoadSystem.md)、[VariableSystem](VariableSystem.md)：数据正确性。
+10. [ResourceSystem](ResourceSystem.md)、[MarkupSystem](MarkupSystem.md)、[InstructionRenderMap](InstructionRenderMap.md)：兼容内容。
+11. [RenderingSystem](RenderingSystem.md)、[AudioSystem](AudioSystem.md)、[LifecycleMemory](LifecycleMemory.md)：Godot 表现与资源。
+12. [ExtensionRuntime](ExtensionRuntime.md)、[SecurityLimits](SecurityLimits.md)、[ErrorRecovery](ErrorRecovery.md)、[PerformanceOptimization](PerformanceOptimization.md)：扩展运行时与生产边界。
+13. [HowToRun](HowToRun.md)、[VerificationPlan](VerificationPlan.md)、[AcceptanceTraceability](AcceptanceTraceability.md)：构建与关闭条件。
 
 ## AI 实施与快反馈
 
