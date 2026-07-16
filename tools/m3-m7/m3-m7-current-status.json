@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0.0",
+  "statusKind": "implementationInventory",
+  "generatedFor": "M3-M7",
+  "generatedAtUtc": "2026-07-15T16:50:00Z",
+  "executionStatus": "InProgress",
+  "gateStatus": "Blocked",
+  "blockerCode": "EvidenceMissing",
+  "implementedContracts": [
+    "M3 parser/diagnostic, VariableStore candidate snapshots, deterministic save codec, dialect consumer, legacy Core adapter",
+    "M4 PixelStore CPU truth, ResourceCatalog, MemoryBudget, resource upload generation/revision ledger",
+    "M5 typed port manifest, completion dispatcher, input/storage/database/audio/lifecycle contracts",
+    "M6 independent flags, experiment identity/metrics, yieldability audit, cooperative Step/Resume runner",
+    "M7 removal inventory, release-cycle, rollback-drill and approval contracts"
+  ],
+  "fastLoopEvidence": [
+    "dotnet build src/Core/GEmuera.Core.csproj -c Release --no-restore",
+    "dotnet build tools/core-contracts/CoreContractSmoke.csproj -c Release --no-restore",
+    "dotnet run --project tools/core-contracts/CoreContractSmoke.csproj -c Release --no-build",
+    "tools/core-contracts/Test-CoreArchitecture.ps1",
+    "tools/m3-m7/Test-M3M7Governance.ps1",
+    "tools/doc-guards/Invoke-DocGuard.ps1",
+    "dotnet build gemuera-c#.csproj -c Debug --no-restore",
+    "artifacts/evidence/m0-m2-local-evidence-20260716.json",
+    "artifacts/evidence/m5-m7-external-capability-20260716.json"
+  ],
+  "uncovered": [
+    "M0-M2 formal gate decisions and approved predecessors",
+    "Upstream/legacy/eraFL parser and save differential reports",
+    "Godot visual/hit golden, PixelStore Texture/RID/Node bridge and renderer experiment",
+    "Android SAF canary, target devices, APK/export and lifecycle evidence",
+    "Real Era game replay, performance p99/RSS/GPU measurements and two release-cycle zero-traffic evidence",
+    "Independent prepared/reviewed/approved gate signatures and rollback drill artifact"
+  ],
+  "defaultRoute": "legacy",
+  "featureFlags": {
+    "core.extracted": false,
+    "graphics.pixel_store": false,
+    "ports.typed": false,
+    "platform.saf": false,
+    "vm.main_thread_experiment": false,
+    "render.backend.candidate": false,
+    "experiment.dual_run": false
+  }
+}

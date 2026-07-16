@@ -63,5 +63,23 @@ namespace MinorShift.Emuera
 			ExistPlugin = false;
 			tempDic.Clear();
 		}
+
+		internal static void ResetCanarySessionState()
+		{
+			ctrlZ.ResetSessionState();
+#if UEMUERA_DEBUG
+			StackList.Clear();
+#endif
+			// These compatibility roots are not part of the frozen process
+			// catalog.  They hold paths, parser substitutions, input pulses and
+			// diagnostics produced by the active legacy candidate.
+			MinorShift.Emuera.ParserMediator.ResetSessionState();
+			MinorShift.Emuera.GameProc.Process.ResetCanarySessionState();
+			MinorShift.Emuera.KeyMacro.ResetCanarySessionState();
+			MinorShift.Emuera.GameData.Function.FunctionMethodCreator.ResetCanarySessionState();
+			MinorShift.Emuera.Config.ResetCanarySessionState();
+			uEmuera.Utils.ResetCanarySessionState();
+			GenericUtils.ResetCanarySessionState();
+		}
 	}
 }

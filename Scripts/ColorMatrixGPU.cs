@@ -116,6 +116,21 @@ public static class ColorMatrixGPU
 	}
 
 	/// <summary>
+	/// Drops matrix-derived materials owned by the active legacy session. Shader
+	/// resources remain process-scoped, but matrix materials are produced from
+	/// game input and must not keep old session Resource references alive.
+	/// </summary>
+	internal static void ResetCanarySessionState()
+	{
+		lock (materialCacheLock)
+		{
+			sharedMaterialCache.Clear();
+			sharedMaterialLruNodes.Clear();
+			sharedMaterialLru.Clear();
+		}
+	}
+
+	/// <summary>
 	/// Build a stable bit-level key for a 5x4 GDI+ ColorMatrix payload.
 	/// Float bits are hashed directly so semantically different script matrices do
 	/// not accidentally share a mutable material state.

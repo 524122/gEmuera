@@ -2,6 +2,7 @@
 using System.IO;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 
 namespace uEmuera
@@ -150,7 +151,7 @@ namespace uEmuera
                 return null;
             string result = null;
             shiftjis_to_utf8.TryGetValue(md5, out result);
-            if(string.IsNullOrEmpty(result))
+            if(string.IsNullOrEmpty(result) && utf8zhcn_to_utf8 != null)
                 utf8zhcn_to_utf8.TryGetValue(text, out result);
             return result;
         }
@@ -533,7 +534,7 @@ namespace uEmuera
             }
 
             var result = new List<string>();
-            CollectFilePaths(search, pattern, option, result);
+            CollectFilePaths(search, GlobToRegex(pattern), option, result);
             return result;
         }
 
@@ -693,7 +694,7 @@ namespace uEmuera
             return current;
         }
 
-        static void CollectFilePaths(string search, string pattern, SearchOption option, List<string> result)
+        static void CollectFilePaths(string search, System.Text.RegularExpressions.Regex pattern, SearchOption option, List<string> result)
         {
             using var dir = Godot.DirAccess.Open(search);
             if (dir == null)
@@ -704,21 +705,13 @@ namespace uEmuera
             dir.IncludeHidden = true;
             foreach (string file in dir.GetFiles())
             {
-                if (WildcardMatch(file, pattern))
+                if (pattern.IsMatch(file))
                     result.Add(search.TrimEnd('/') + "/" + file);
             }
             if (option != SearchOption.AllDirectories)
                 return;
             foreach (string subdir in dir.GetDirectories())
                 CollectFilePaths(search.TrimEnd('/') + "/" + subdir, pattern, option, result);
-        }
-
-        static bool WildcardMatch(string value, string pattern)
-        {
-            string regex = "^" + System.Text.RegularExpressions.Regex.Escape(pattern)
-                .Replace("\\*", ".*")
-                .Replace("\\?", ".") + "$";
-            return System.Text.RegularExpressions.Regex.IsMatch(value, regex, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
 
         public static string GetSuffix(string filename)
@@ -765,8 +758,21 @@ namespace uEmuera
             // 否则 ×、±、°、全角数字等会被当成半角，地图和 GDRAWTEXT 的列推进会错位。
             if(CheckFullSize(c))
                 return false;
+            if (IsSingleCellUnicodeArt(c))
+                return true;
             // 箱线字符统一走默认全宽路径；┏━┓、╋┃ 等地图格线若混入半宽横线会破坏固定网格。
             return c < 0x127 || IsHalfWidthKatakana(c) || halfsize.Contains(c);
+        }
+
+        static bool IsSingleCellUnicodeArt(char c)
+        {
+            // v24/snake 使用字体实际测量；Godot 固定网格只能做分类近似。
+            // TW 的 PRINT_COLORBAR/快感条使用 U+2585、U+2588、U+2592 等 Block Elements，
+            // 原核心在 MS Gothic/Skia 下按单列块状字形推进；这里统一按半宽占位，避免同类条形图宽度分裂。
+            if (c >= '\u2580' && c <= '\u259F')
+                return true;
+            // Braille 点阵常被脚本当作 ASCII Art 的单列像素块，继续按半宽推进。
+            return c >= '\u2800' && c <= '\u28FF';
         }
 
         static bool IsFullWidthForm(char c)
@@ -782,6 +788,11 @@ namespace uEmuera
 
         public static bool CheckZeroWidth(char c)
         {
+            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(c);
+            if (category == UnicodeCategory.NonSpacingMark
+                || category == UnicodeCategory.EnclosingMark
+                || category == UnicodeCategory.Format)
+                return true;
             return c == '\u200B'
                 || c == '\u200C'
                 || c == '\u200D'
@@ -894,9 +905,9 @@ namespace uEmuera
         }
         public static List<string> GetFiles(string search, string[] extensions, SearchOption option)
         {
-            var extension_checker = new HashSet<string>();
+            var extension_checker = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for(int i = 0; i < extensions.Length; ++i)
-                extension_checker.Add(extensions[i].ToUpper());
+                extension_checker.Add(extensions[i]);
 
             var files = GetFilePaths(search, "*.???", option);
             var filecount = files.Count;
@@ -904,7 +915,7 @@ namespace uEmuera
             for(int i = 0; i < filecount; ++i)
             {
                 var file = files[i];
-                string ext = Path.GetExtension(file).ToUpper();
+                string ext = Path.GetExtension(file);
                 if(extension_checker.Contains(ext))
                     result.Add(file);
             }
@@ -1003,18 +1014,25 @@ namespace uEmuera
                     if(str.Length == 0 || str.StartsWith(";"))
                         continue;
 
-                    string[] tokens = str.Split(',');
-                    if(tokens.Length >= 6)
+                    int tokenCount = ReadCsvHeadFields6(
+                        str,
+                        out string token0,
+                        out string token1,
+                        out string token2,
+                        out string token3,
+                        out string token4,
+                        out string token5);
+                    if(tokenCount >= 6)
                     {
                         try
                         {
-                            if (!string.IsNullOrEmpty(tokens[2]) &&
-                                !string.IsNullOrEmpty(tokens[3]) &&
-                                !string.IsNullOrEmpty(tokens[4]) &&
-                                !string.IsNullOrEmpty(tokens[5]))
+                            if (!string.IsNullOrEmpty(token2) &&
+                                !string.IsNullOrEmpty(token3) &&
+                                !string.IsNullOrEmpty(token4) &&
+                                !string.IsNullOrEmpty(token5))
                             {
-                                var w = int.Parse(tokens[4]);
-                                var h = int.Parse(tokens[5]);
+                                var w = int.Parse(token4);
+                                var h = int.Parse(token5);
                                 if (w != 0 && h != 0)
                                 {
                                     newlines.Add(line);
@@ -1022,12 +1040,12 @@ namespace uEmuera
                                 }
                             }
                         }
-                        catch (Exception e)
+                        catch
                         {}
                     }
-                    if (tokens.Length <= 1)
+                    if (tokenCount <= 1)
                         continue;
-                    string name = tokens[1].ToUpper();
+                    string name = token1.ToUpper();
                     string imagepath = null;
                     content_files.TryGetValue(name, out imagepath);
                     if(imagepath == null)
@@ -1037,7 +1055,7 @@ namespace uEmuera
                     if(ti == null)
                         continue;
                     line = string.Format("{0},{1},0,0,{2},{3}",
-                        tokens[0], tokens[1], ti.width, ti.height);
+                        token0, token1, ti.width, ti.height);
                     newlines.Add(line);
                     fixcount += 1;
                 }
@@ -1085,6 +1103,75 @@ namespace uEmuera
                 resource_csv_lines_.Clear();
                 resource_csv_lines_ = null;
             }
+        }
+
+        /// <summary>
+        /// Clears path/resource lookup state owned by one legacy
+        /// session.  The normal M0 shutdown path intentionally keeps its
+        /// historical behaviour; only the canary bridge calls this boundary
+        /// after the worker has quiesced.
+        /// </summary>
+        internal static void ResetCanarySessionState()
+        {
+            lock (recursiveFileIndexLock)
+                recursiveFileIndexCache.Clear();
+
+            // The encoding dictionaries are populated from res:// once by
+            // the startup bridge and are immutable process catalogs.  Keep
+            // them alive across a game switch; clearing them here would make
+            // the next canary depend on whether startup happened again.
+            ResourceClear();
+            MinorShift.Emuera.Sub.Preload.Clear();
+        }
+
+        static int ReadCsvHeadFields6(
+            string line,
+            out string token0,
+            out string token1,
+            out string token2,
+            out string token3,
+            out string token4,
+            out string token5)
+        {
+            token0 = "";
+            token1 = "";
+            token2 = "";
+            token3 = "";
+            token4 = "";
+            token5 = "";
+            if(line == null)
+                line = "";
+
+            int count = 1;
+            int fieldIndex = 0;
+            int start = 0;
+            for(int i = 0; i <= line.Length; i++)
+            {
+                if(i < line.Length && line[i] != ',')
+                    continue;
+                if(fieldIndex < 6)
+                {
+                    string value = i == start ? "" : line.Substring(start, i - start);
+                    if(fieldIndex == 0)
+                        token0 = value;
+                    else if(fieldIndex == 1)
+                        token1 = value;
+                    else if(fieldIndex == 2)
+                        token2 = value;
+                    else if(fieldIndex == 3)
+                        token3 = value;
+                    else if(fieldIndex == 4)
+                        token4 = value;
+                    else
+                        token5 = value;
+                }
+                fieldIndex++;
+                if(i >= line.Length)
+                    break;
+                count++;
+                start = i + 1;
+            }
+            return count;
         }
         static Dictionary<string, string> content_files = null;
         static Dictionary<string, string[]> resource_csv_lines_ = null;

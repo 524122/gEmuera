@@ -100,6 +100,19 @@ namespace uEmuera.Drawing
 		{
 			get { return TryResolveCachedTextureInfo(); }
 		}
+		internal SpriteManager.TextureInfo EnsureTextureInfoForScriptComposition()
+		{
+			var ti = SpriteManager.GetTextureInfoForScriptComposition(path, path);
+			if (ti == null && !string.IsNullOrEmpty(filename))
+				ti = SpriteManager.GetTextureInfoForScriptComposition(filename, path);
+			textureinfo = ti;
+			if (textureinfo != null)
+			{
+				size.Width = textureinfo.width;
+				size.Height = textureinfo.height;
+			}
+			return textureinfo;
+		}
 		SpriteManager.TextureInfo textureinfo = null;
 
 		SpriteManager.TextureInfo EnsureTextureInfo()
@@ -122,7 +135,8 @@ namespace uEmuera.Drawing
 
 		internal bool RequestTextureInfoAsync()
 		{
-			if (TryResolveCachedTextureInfo() != null)
+			var cached = TryResolveCachedTextureInfo();
+			if (cached != null && !cached.IsPlaceholder)
 				return false;
 			return SpriteManager.RequestTextureInfoAsync(path, path)
 				|| (!string.IsNullOrEmpty(filename) && SpriteManager.RequestTextureInfoAsync(filename, path));

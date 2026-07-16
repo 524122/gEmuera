@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-legacy-save-fixture-audit-1.0.0.json",
+  "title": "gEmuera M0 legacy save fixture audit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workPackage", "auditId", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result", "sourceRoot", "sourceReadOnly", "candidatePolicy", "sourceSaveFilesRead", "binaryHeaderCount", "offsetMapStatus", "roundTripStatus", "profileBindingStatus", "fixtureSetHash", "fixtures", "uncovered"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackage": { "const": "M0-SAV-01" },
+    "auditId": { "const": "gemuera.m0.legacy-save-fixture-audit" },
+    "generatedAtUtc": { "type": "string" },
+    "executionStatus": { "const": "InProgress" },
+    "gateStatus": { "const": "Blocked" },
+    "blockerCode": { "const": "EvidenceMissing" },
+    "result": { "const": "Partial" },
+    "sourceRoot": { "type": "string", "minLength": 1 },
+    "sourceReadOnly": { "const": true },
+    "candidatePolicy": { "type": "string", "minLength": 1 },
+    "sourceSaveFilesRead": { "type": "integer", "minimum": 0 },
+    "binaryHeaderCount": { "type": "integer", "minimum": 0 },
+    "offsetMapStatus": { "enum": ["Uncovered", "HeaderOnly"] },
+    "roundTripStatus": { "const": "Uncovered" },
+    "profileBindingStatus": { "const": "Unbound" },
+    "fixtureSetHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fixtures": { "type": "array", "items": { "$ref": "#/$defs/fixture" } },
+    "uncovered": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+  },
+  "$defs": {
+    "fixture": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "fileTypeCandidate", "extension", "readOnly", "wire"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "fileTypeCandidate": { "enum": ["Normal", "Global", "Var", "CharVar", "Unknown"] },
+        "extension": { "type": "string" },
+        "readOnly": { "const": true },
+        "wire": {
+          "type": "object", "additionalProperties": false,
+          "required": ["bytes", "sha256", "magicHex", "headerKind", "formatStatus", "version", "dataCount", "offsets"],
+          "properties": {
+            "bytes": { "type": "integer", "minimum": 0 },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "magicHex": { "type": "string" },
+            "headerKind": { "enum": ["Ordinary1808", "GZip1808", "Unknown"] },
+            "formatStatus": { "enum": ["HeaderOnly", "Unrecognized", "Truncated"] },
+            "version": { "type": ["integer", "null"] },
+            "dataCount": { "type": ["integer", "null"] },
+            "offsets": { "type": "object" }
+          }
+        }
+      }
+    }
+  }
+}

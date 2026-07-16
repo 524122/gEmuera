@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-module-visibility-1.0.0.json",
+  "title": "gEmuera M0 dialect module visibility evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result",
+    "sourceRegistrySnapshotHash", "sourceOwnershipEvidenceHash", "sourceNameLookupContractHash",
+    "catalogId", "catalogVersion", "catalogHash", "visibilitySetHash", "coverage",
+    "currentRuntimeIsolation", "parserVmConsumption", "ownershipResolution", "uncovered", "entries"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "workPackage": {"const": "M0-DIA-09"},
+    "generatedAtUtc": {"type": "string", "format": "date-time"},
+    "executionStatus": {"const": "InProgress"},
+    "gateStatus": {"const": "Blocked"},
+    "blockerCode": {"const": "EvidenceMissing"},
+    "result": {"const": "Partial"},
+    "sourceRegistrySnapshotHash": {"$ref": "#/$defs/sha256"},
+    "sourceOwnershipEvidenceHash": {"$ref": "#/$defs/sha256"},
+    "sourceNameLookupContractHash": {"$ref": "#/$defs/sha256"},
+    "catalogId": {"type": "string", "minLength": 1},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "catalogHash": {"$ref": "#/$defs/sha256"},
+    "visibilitySetHash": {"$ref": "#/$defs/sha256"},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "currentRuntimeIsolation": {"$ref": "#/$defs/runtimeIsolation"},
+    "parserVmConsumption": {"$ref": "#/$defs/parserVmConsumption"},
+    "ownershipResolution": {"$ref": "#/$defs/ownershipResolution"},
+    "uncovered": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "entries": {"type": "array", "minItems": 131, "maxItems": 131, "items": {"$ref": "#/$defs/entry"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "unresolvedOwnershipInputCount", "unresolvedInstructionCount", "unresolvedExpressionFunctionCount",
+        "v24VisibleCandidateCount", "snakeOnlyCandidateCount", "missingSnakeProjectionCount",
+        "v24VisibleInstructionCount", "snakeOnlyInstructionCount",
+        "v24VisibleExpressionFunctionCount", "snakeOnlyExpressionFunctionCount"
+      ],
+      "properties": {
+        "unresolvedOwnershipInputCount": {"const": 131},
+        "unresolvedInstructionCount": {"const": 14},
+        "unresolvedExpressionFunctionCount": {"const": 117},
+        "v24VisibleCandidateCount": {"const": 123},
+        "snakeOnlyCandidateCount": {"const": 8},
+        "missingSnakeProjectionCount": {"const": 0},
+        "v24VisibleInstructionCount": {"const": 8},
+        "snakeOnlyInstructionCount": {"const": 6},
+        "v24VisibleExpressionFunctionCount": {"const": 115},
+        "snakeOnlyExpressionFunctionCount": {"const": 2}
+      }
+    },
+    "runtimeIsolation": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "Failed"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "parserVmConsumption": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "NotConsumed"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "ownershipResolution": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "Unresolved"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "projection": {
+      "type": "object", "additionalProperties": false, "required": ["presence", "moduleId", "currentContribution"],
+      "properties": {
+        "presence": {"enum": ["Present", "Absent"]},
+        "moduleId": {"type": "string"},
+        "currentContribution": {"type": "string"}
+      }
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "registryKind", "publicKey", "currentTargetModule", "currentHandler", "ownershipEvidenceStatus",
+        "visibilityEvidenceStatus", "visibilityCandidate", "candidateReason", "v24Projection", "snakeProjection",
+        "lookupContract", "instructionProjection", "aliasStatus", "replacementStatus",
+        "behaviorCompatibilityStatus", "completionEffectStatus"
+      ],
+      "properties": {
+        "registryKind": {"enum": ["Instruction", "ExpressionFunction"]},
+        "publicKey": {"type": "string", "minLength": 1},
+        "currentTargetModule": {"type": "string", "minLength": 1},
+        "currentHandler": {"type": "string", "minLength": 1},
+        "ownershipEvidenceStatus": {"const": "Unresolved"},
+        "visibilityEvidenceStatus": {"const": "StaticProjectionMembership"},
+        "visibilityCandidate": {"enum": ["V24VisibleCandidate", "SnakeOnlyCandidate"]},
+        "candidateReason": {"type": "string", "minLength": 1},
+        "v24Projection": {"$ref": "#/$defs/projection"},
+        "snakeProjection": {"$ref": "#/$defs/projection"},
+        "lookupContract": {"enum": ["InstructionConditionalICVariable", "ExpressionOrdinalWithConditionalCurrentCultureUpper"]},
+        "instructionProjection": {"enum": ["DirectInstruction", "ProjectedAsMethodInstruction", "SuppressedByInstructionCollision"]},
+        "aliasStatus": {"const": "Unresolved"},
+        "replacementStatus": {"const": "Unresolved"},
+        "behaviorCompatibilityStatus": {"const": "Uncovered"},
+        "completionEffectStatus": {"const": "Uncovered"}
+      }
+    }
+  }
+}

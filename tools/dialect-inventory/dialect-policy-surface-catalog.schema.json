@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-policy-surface-catalog-1.0.0.json",
+  "title": "gEmuera M0 static future policy surface catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage", "sourcePolicyConsumerBoundaryWorkPackage", "sourceDeclarationVocabularyWorkPackage", "sourcePolicyConsumerBoundaryHash", "sourceDeclarationVocabularyHash", "expectedBehaviorKeyCount", "expectedContractCount", "expectedPolicyDecisionCount", "expectedBridgeProjectionCount", "expectedFrozenCatalogContributionCount", "contracts"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"}, "catalogId": {"type": "string", "minLength": 1}, "catalogVersion": {"$ref": "#/$defs/semver"}, "sourceWorkPackage": {"const": "M0-DIA-15"}, "sourcePolicyConsumerBoundaryWorkPackage": {"const": "M0-DIA-14"}, "sourceDeclarationVocabularyWorkPackage": {"const": "M0-DIA-13"}, "sourcePolicyConsumerBoundaryHash": {"$ref": "#/$defs/sha256"}, "sourceDeclarationVocabularyHash": {"$ref": "#/$defs/sha256"},
+    "expectedBehaviorKeyCount": {"const": 10}, "expectedContractCount": {"const": 10}, "expectedPolicyDecisionCount": {"const": 6}, "expectedBridgeProjectionCount": {"const": 2}, "expectedFrozenCatalogContributionCount": {"const": 2}, "contracts": {"type": "array", "minItems": 10, "maxItems": 10, "items": {"$ref": "#/$defs/contract"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "semver": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "contract": {"type": "object", "additionalProperties": false, "required": ["behaviorKeyId", "consumerContractId", "decisionOwner", "portTypeId", "contractKind", "contractDraftStatus", "policyValueStatus"], "properties": {"behaviorKeyId": {"type": "string", "pattern": "^[a-z][a-z0-9.\\-]*\\.v[0-9]+$"}, "consumerContractId": {"type": "string", "pattern": "^[a-z][a-z0-9.\\-]*\\.v[0-9]+$"}, "decisionOwner": {"type": "string", "minLength": 1}, "portTypeId": {"type": "string", "pattern": "^I[A-Za-z][A-Za-z0-9]*$"}, "contractKind": {"enum": ["PolicyDecision", "BridgeProjection", "FrozenCatalogContribution"]}, "contractDraftStatus": {"const": "InterfaceDraftOnly"}, "policyValueStatus": {"const": "Unspecified"}}}
+  }
+}

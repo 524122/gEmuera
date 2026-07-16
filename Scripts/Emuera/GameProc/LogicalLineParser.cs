@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-using MinorShift.Emuera.Sub;
 using System.Text.RegularExpressions;
+using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameData.Variable;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.GameView;
@@ -14,27 +14,7 @@ namespace MinorShift.Emuera.GameProc
 {
 	internal static class LogicalLineParser
 	{
-		private static readonly HashSet<string> AllowedSharpTokens = new HashSet<string>(StringComparer.Ordinal)
-		{
-			"SINGLE",
-			"LATER",
-			"PRI",
-			"ONLY",
-			"FUNCTION",
-			"FUNCTIONS",
-			"FUNCTIONF",
-			"LOCALSIZE",
-			"LOCALSSIZE",
-			"LOCALFSIZE",
-			"DIM",
-			"DIMS",
-			"DIMF",
-			"REF",
-			"REFS",
-			"REFF",
-		};
-
-		private static readonly Regex SnakeFloatLiteralRegex =
+		private static readonly Regex SnakeDimfSizeFloatLiteralRegex =
 			new Regex(@"(?<![A-Za-z0-9_])([+-]?\d+)\.\d+(?![A-Za-z0-9_])", RegexOptions.Compiled);
 
 		static EraType GetFunctionReturnType(string token)
@@ -52,15 +32,15 @@ namespace MinorShift.Emuera.GameProc
 			string token = LexicalAnalyzer.ReadSingleIdentifier(st);//#～自体にはマクロ非適用
 			if (Config.ICFunction)
 				token = token.ToUpper();
-            //#行として不正な行でもAnalyzeに行って引っかかることがあるので、先に存在しない#～は弾いてしまう
-            if (!IsAllowedSharpToken(token))
+            //#行として不正な行でもAnalyzeに行って引っかかることがあるので、空の#～だけは先に弾く
+            if (string.IsNullOrEmpty(token))
             {
                 ParserMediator.Warn("解釈できない#行です", position, 1);
                 return false;
             }
 			try
 			{
-				WordCollection wc = AnalyzeSharpArguments(st, token);
+				WordCollection wc = null;
 				switch (token)
 				{
 					case "SINGLE":
@@ -237,6 +217,7 @@ namespace MinorShift.Emuera.GameProc
 					case "LOCALSSIZE":
 					case "LOCALFSIZE":
 						{
+							wc = AnalyzeSharpArguments(st);
 							if (wc.EOL)
 							{
 								ParserMediator.Warn("#" + token + "の後に有効な数値が指定されていません", position, 2);
@@ -304,6 +285,7 @@ namespace MinorShift.Emuera.GameProc
 					case "DIMS":
 					case "DIMF":
 						{
+							wc = AnalyzeSharpArguments(st, token);
 							UserDefinedVariableData data = UserDefinedVariableData.Create(wc, token == "DIMS", token == "DIMF", true, position);
 							if (!label.AddPrivateVariable(data))
 							{
@@ -316,6 +298,7 @@ namespace MinorShift.Emuera.GameProc
 					case "REFS":
 					case "REFF":
 						{
+							wc = AnalyzeSharpArguments(st);
 							bool isStr = token == "REFS";
 							bool isFloat = token == "REFF";
 							UserDefinedVariableData data = UserDefinedVariableData.CreateRefScalar(wc, isStr, isFloat, true, position);
@@ -330,7 +313,7 @@ namespace MinorShift.Emuera.GameProc
 						ParserMediator.Warn("解釈できない#行です", position, 1);
 						break;
 				}
-				if (!wc.EOL)
+				if (wc != null && !wc.EOL)
 					ParserMediator.Warn("#の識別子の後に余分な文字があります", position, 1);
 			}
 			catch (Exception e)
@@ -343,25 +326,38 @@ namespace MinorShift.Emuera.GameProc
 			return false;
 		}
 
-		private static WordCollection AnalyzeSharpArguments(StringStream st, string token)
+		private static WordCollection AnalyzeSharpArguments(StringStream st)
 		{
-			if (string.Equals(token, "DIMF", StringComparison.OrdinalIgnoreCase))
-				return LexicalAnalyzer.Analyse(new StringStream(NormalizeSnakeFloatLiterals(st.Substring())), LexEndWith.EoL, LexAnalyzeFlag.AllowAssignment);
+			// v24/snake 原核心只在需要参数的 # 行解析剩余内容。
+			// #FUNCTION/#SINGLE 等无参数属性行不能提前词法分析，否则旧脚本里原本会被忽略的尾随内容会变成加载错误。
 			return LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.AllowAssignment);
 		}
 
-		private static bool IsAllowedSharpToken(string token)
+		private static WordCollection AnalyzeSharpArguments(StringStream st, string token)
 		{
-			return token != null && AllowedSharpTokens.Contains(token);
+			if (string.Equals(token, "DIMF", StringComparison.OrdinalIgnoreCase))
+			{
+				string source = NormalizeSnakeDimfSizeLiterals(st.Substring());
+				return LexicalAnalyzer.Analyse(new StringStream(source), LexEndWith.EoL, LexAnalyzeFlag.AllowAssignment);
+			}
+			return AnalyzeSharpArguments(st);
 		}
 
-		private static string NormalizeSnakeFloatLiterals(string source)
+		private static string NormalizeSnakeDimfSizeLiterals(string source)
 		{
 			if (string.IsNullOrEmpty(source))
 				return source;
-			return SnakeFloatLiteralRegex.Replace(source, "$1");
+			int assignmentIndex = source.IndexOf('=');
+			if (assignmentIndex < 0)
+				return SnakeDimfSizeFloatLiteralRegex.Replace(source, "$1");
+			if (assignmentIndex == 0)
+				return source;
+			// #DIMF 的尺寸参数仍按整数数组长度处理；只兼容等号前的旧 snake 写法，
+			// 等号后的浮点默认值必须保持原样，否则 3.14 会被错误截断成 3。
+			string sizePart = SnakeDimfSizeFloatLiteralRegex.Replace(source.Substring(0, assignmentIndex), "$1");
+			return sizePart + source.Substring(assignmentIndex);
 		}
-		
+
 		public static LogicalLine ParseLine(string str, EmueraConsole console)
 		{
 			ScriptPosition position = new ScriptPosition();
@@ -466,7 +462,7 @@ namespace MinorShift.Emuera.GameProc
 		}
 		
 		
-		public static LogicalLine ParseLine(StringStream stream, ScriptPosition position, EmueraConsole console)
+		public static LogicalLine ParseLine(StringStream stream, ScriptPosition position, EmueraConsole console, FunctionLabelLine currentLabel = null)
 		{
 			//int lineNo = position.LineNo;
 			string errMes;
@@ -506,31 +502,38 @@ namespace MinorShift.Emuera.GameProc
 					//命令文
 					if (func != null)//関数文
 					{
-						if (stream.EOS) //引数の無い関数
-							return new InstructionLine(position, func, stream);
-						if ((stream.Current != ';') && (stream.Current != ' ') && (stream.Current != '\t') && (!Config.SystemAllowFullSpace || (stream.Current != '　')))
-						{
-							if (stream.Current == '　')
-								errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています(この警告はシステムオプション「" + Config.GetConfigName(ConfigCode.SystemAllowFullSpace) + "」により無視できます)";
-							else
-								errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています";
-							goto err;
-						}
-						stream.ShiftNext();
-						// 命令名と同名の変数への代入を優先する
-						// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応
-						// ※PRINTFORM = ... のような正当な命令呼び出しを誤判定しないよう、
-						//   VARS/VARI のみに限定する
-						LexicalAnalyzer.SkipWhiteSpace(stream);
-						if (!stream.EOS && stream.Current == '='
-						    && (func.Code == FunctionCode.VARS || func.Code == FunctionCode.VARI))
+						if (ShouldPreferPrivateVariableAssignment(idCode, currentLabel, stream))
 						{
 							stream.Seek(0, System.IO.SeekOrigin.Begin);
-							// Fall through to assignment parsing below
 						}
 						else
 						{
-							return new InstructionLine(position, func, stream);
+							if (stream.EOS) //引数の無い関数
+								return new InstructionLine(position, func, stream);
+							if ((stream.Current != ';') && (stream.Current != ' ') && (stream.Current != '\t') && (!Config.SystemAllowFullSpace || (stream.Current != '　')))
+							{
+								if (stream.Current == '　')
+									errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています(この警告はシステムオプション「" + Config.GetConfigName(ConfigCode.SystemAllowFullSpace) + "」により無視できます)";
+								else
+									errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています";
+								goto err;
+							}
+							stream.ShiftNext();
+							// 命令名と同名の変数への代入を優先する
+							// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応
+							// ※PRINTFORM = ... のような正当な命令呼び出しを誤判定しないよう、
+							//   VARS/VARI のみに限定する
+							LexicalAnalyzer.SkipWhiteSpace(stream);
+							if (!stream.EOS && stream.Current == '='
+							    && (func.Code == FunctionCode.VARS || func.Code == FunctionCode.VARI))
+							{
+								stream.Seek(0, System.IO.SeekOrigin.Begin);
+								// Fall through to assignment parsing below
+							}
+							else
+							{
+								return new InstructionLine(position, func, stream);
+							}
 						}
 					}
 				}
@@ -581,6 +584,34 @@ namespace MinorShift.Emuera.GameProc
 				uEmuera.Media.SystemSounds.Hand.Play();
 				return new InvalidLine(position, e.Message);
 			}
+		}
+
+		static bool ShouldPreferPrivateVariableAssignment(string idCode, FunctionLabelLine currentLabel, StringStream stream)
+		{
+			if (currentLabel == null || string.IsNullOrEmpty(idCode))
+				return false;
+			string varName = Config.ICVariable ? idCode.ToUpper() : idCode;
+			if (currentLabel.GetPrivateVariable(varName) == null)
+				return false;
+
+			int savedPosition = stream.CurrentPosition;
+			LexicalAnalyzer.SkipWhiteSpace(stream);
+			bool result = IsPrivateVariableAssignmentStart(stream);
+			stream.CurrentPosition = savedPosition;
+			return result;
+		}
+
+		static bool IsPrivateVariableAssignmentStart(StringStream stream)
+		{
+			if (stream.EOS)
+				return false;
+			if (stream.Current == '=')
+				return true;
+			if ((stream.Current == '+' || stream.Current == '-') && stream.Next == stream.Current)
+				return true;
+			if ((stream.Current == '+' || stream.Current == '-' || stream.Current == '*' || stream.Current == '/' || stream.Current == '%' || stream.Current == '&' || stream.Current == '|' || stream.Current == '^') && stream.Next == '=')
+				return true;
+			return false;
 		}
 		
 	}

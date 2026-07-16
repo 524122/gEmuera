@@ -8,6 +8,7 @@ using MinorShift.Emuera.GameProc;
 using MinorShift.Emuera.GameView;
 using System.IO;
 using System.Text.RegularExpressions;
+using GEmuera.Core.Compatibility;
 
 namespace MinorShift.Emuera
 {
@@ -29,11 +30,54 @@ namespace MinorShift.Emuera
 		}
 
 		static EmueraConsole console;
+		static CompatibilityPlan compatibilityPlan;
+		static LegacyCompatibilityConsumptionSnapshot compatibilityConsumption;
+		public static CompatibilityPlan CurrentCompatibilityPlan { get { return compatibilityPlan; } }
+		public static LegacyCompatibilityConsumptionSnapshot CurrentCompatibilityConsumption { get { return compatibilityConsumption; } }
 		public static void Initialize(EmueraConsole console)
 		{
 			ParserMediator.console = console;
 			if (Program.IsSnakeProfile && !Program.AnalysisMode)
 				snakeLoggedWarnings.Clear();
+		}
+
+		/// <summary>
+		/// Captures the immutable plan for parser/diagnostic consumers. Existing
+		/// registrations remain the legacy behavior owner during M1; this binding
+		/// makes plan identity observable and prevents profile drift.
+		/// </summary>
+		internal static void BindCompatibilityPlan(CompatibilityPlan plan)
+		{
+			if (plan == null)
+			{
+				if (Program.CurrentCompatibilityPlan != null)
+					throw new InvalidOperationException("Parser plan cannot clear a plan bound at legacy startup.");
+				compatibilityPlan = null;
+				return;
+			}
+			if (!string.Equals(plan.ProfileId, Program.IsSnakeProfile ? "snake" : "v24pure", StringComparison.Ordinal))
+				throw new InvalidOperationException("Parser plan profile does not match the selected legacy profile.");
+			var startupPlan = Program.CurrentCompatibilityPlan;
+			if (startupPlan == null || !string.Equals(startupPlan.CanonicalHash, plan.CanonicalHash, StringComparison.Ordinal))
+				throw new InvalidOperationException("Parser plan hash does not match the plan bound at legacy startup.");
+			compatibilityPlan = plan;
+		}
+
+		/// <summary>
+		/// Consumes the frozen descriptor surface after the legacy registry is
+		/// built. Empty descriptor registries preserve legacy behavior; any
+		/// selected descriptor must nevertheless exist in the active registry.
+		/// </summary>
+		internal static void ConsumeCompatibilityPlan(
+			IEnumerable<string> legacyInstructionNames,
+			IEnumerable<string> legacyFunctionNames)
+		{
+			if (compatibilityPlan == null)
+				throw new InvalidOperationException("Parser compatibility plan must be bound before registry consumption.");
+			compatibilityConsumption = LegacyCompatibilityPlanConsumption.Validate(
+				compatibilityPlan,
+				legacyInstructionNames,
+				legacyFunctionNames);
 		}
 
 		#region Rename
@@ -141,6 +185,22 @@ namespace MinorShift.Emuera
 		public static void ClearWarningList()
 		{
 			warningList.Clear();
+		}
+
+		/// <summary>
+		/// Drops parser-side session roots before the next candidate binds its
+		/// console.  RenameDic and the de-duplication set are game/profile data;
+		/// they are intentionally not treated as an immutable process catalog.
+		/// </summary>
+		internal static void ResetSessionState()
+		{
+			console = null;
+			compatibilityPlan = null;
+			compatibilityConsumption = null;
+			RenameDic?.Clear();
+			RenameDic = null;
+			warningList.Clear();
+			snakeLoggedWarnings.Clear();
 		}
 
 		public static void FlushWarningList()

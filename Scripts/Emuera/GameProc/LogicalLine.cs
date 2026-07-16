@@ -125,6 +125,10 @@ namespace MinorShift.Emuera.GameProc
 			argprimitive = null;
 			return ret;
 		}
+		public string PeekArgumentPrimitive()
+		{
+			return argprimitive == null ? "" : argprimitive.Substring();
+		}
 		public WordCollection PopAssignmentDestStr()
 		{
 			WordCollection ret = assigndest;

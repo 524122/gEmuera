@@ -103,50 +103,48 @@ namespace MinorShift.Emuera.GameData
 				StringStream st = null;
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
-					string[] tokens = st.Substring().Split(',');
-					if (tokens.Length < 2)
+					if (ReadCsvHeadFields(st.Substring(), out string token0, out string token1) < 2)
 						continue;
-					string param = tokens[1].Trim();
 					pos = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					switch (tokens[0])
+					switch (token0)
 					{
 						case "コード":
-							if (tryatoi(tokens[1], out ScriptUniqueCode))
+							if (tryatoi(token1, out ScriptUniqueCode))
 							{
 								if (ScriptUniqueCode == 0L)
 									ParserMediator.Warn("コード:0のセーブデータはいかなるコードのスクリプトからも読めるデータとして扱われます", pos, 0);
 							}							
 							break;
 						case "バージョン":
-							ScriptVersionDefined = tryatoi(tokens[1], out ScriptVersion);
+							ScriptVersionDefined = tryatoi(token1, out ScriptVersion);
 							break;
 						case "バージョン違い認める":
-							tryatoi(tokens[1], out ScriptCompatibleMinVersion);
+							tryatoi(token1, out ScriptCompatibleMinVersion);
 							break;
 						case "最初からいるキャラ":
-							tryatoi(tokens[1], out DefaultCharacter);
+							tryatoi(token1, out DefaultCharacter);
 							break;
 						case "アイテムなし":
-							tryatoi(tokens[1], out DefaultNoItem);
+							tryatoi(token1, out DefaultNoItem);
 							break;
 						case "タイトル":
-							ScriptTitle = tokens[1];
+							ScriptTitle = token1;
 							break;
 						case "作者":
-							ScriptAutherName = tokens[1];
+							ScriptAutherName = token1;
 							break;
 						case "製作年":
-							ScriptYear = tokens[1];
+							ScriptYear = token1;
 							break;
 						case "追加情報":
-							ScriptDetail = tokens[1];
+							ScriptDetail = token1;
 							break;
 						case "ウィンドウタイトル":
-							ScriptWindowTitle = tokens[1];
+							ScriptWindowTitle = token1;
 							break;
 							
                         case "動作に必要なEmueraのバージョン":
-                            Compatible_EmueraVer = tokens[1];
+                            Compatible_EmueraVer = token1;
                             if (!Regex.IsMatch(Compatible_EmueraVer, @"^\d+\.\d+\.\d+\.\d+$"))
                             {
                                 ParserMediator.Warn("バージョン指定を読み取れなかったので処理を省略します", pos, 0);
@@ -161,10 +159,10 @@ namespace MinorShift.Emuera.GameData
                             }
                             break;
 						case "バージョン情報URL":
-							UpdateCheckURL = tokens[1];
+							UpdateCheckURL = token1;
 							break;
 						case "バージョン名":
-							VersionName = tokens[1];
+							VersionName = token1;
 							break;
 					}
 				}
@@ -186,6 +184,33 @@ namespace MinorShift.Emuera.GameData
 					ScriptWindowTitle = ScriptTitle + " " + ScriptVersionText;
 			}
 			return true;
+		}
+
+		private static int ReadCsvHeadFields(string line, out string token0, out string token1)
+		{
+			token0 = "";
+			token1 = "";
+			if (line == null)
+				line = "";
+
+			int count = 1;
+			int fieldIndex = 0;
+			int start = 0;
+			for (int i = 0; i <= line.Length; i++)
+			{
+				if (i < line.Length && line[i] != ',')
+					continue;
+				if (fieldIndex == 0)
+					token0 = i == start ? "" : line.Substring(start, i - start);
+				else if (fieldIndex == 1)
+					token1 = i == start ? "" : line.Substring(start, i - start);
+				fieldIndex++;
+				if (i >= line.Length)
+					break;
+				count++;
+				start = i + 1;
+			}
+			return count;
 		}
 	}
 

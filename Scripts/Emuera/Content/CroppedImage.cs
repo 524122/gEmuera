@@ -76,13 +76,7 @@ namespace MinorShift.Emuera.Content
 		{
 			if (DestBaseSize.Width <= 0 || DestBaseSize.Height <= 0)
 				return false;
-			int srcW = System.Math.Abs(SrcRectangle.Width);
-			int srcH = System.Math.Abs(SrcRectangle.Height);
-			if (srcW == 0 || srcH == 0)
-				return false;
-			return !DestBasePosition.IsEmpty
-				|| srcW != DestBaseSize.Width
-				|| srcH != DestBaseSize.Height;
+			return !DestBasePosition.IsEmpty;
 		}
 		internal Rectangle ApplyDestBaseCanvas(Rectangle destRect)
 		{

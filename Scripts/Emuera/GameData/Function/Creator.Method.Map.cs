@@ -185,7 +185,7 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の引数が多すぎます";
                 if (arguments[0] == null || !arguments[0].IsString)
                     return name + "関数の1番目の引数が文字列ではありません";
-                if (arguments.Length >= 2 && arguments[1] != null && !arguments[1].IsInteger)
+                if (arguments.Length == 2 && (arguments[1] == null || !arguments[1].IsInteger))
                     return name + "関数の2番目の引数が整数ではありません";
                 if (arguments.Length == 3 && (arguments[1] == null || !(arguments[1] is VariableTerm) || !((VariableTerm)arguments[1]).Identifier.IsString || !((VariableTerm)arguments[1]).Identifier.IsArray1D))
                     return name + "関数の2番目の引数は文字列型1次元配列変数である必要があります";
@@ -232,7 +232,7 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の引数が多すぎます";
                 if (arguments[0] == null || !arguments[0].IsString)
                     return name + "関数の1番目の引数が文字列ではありません";
-                if (arguments.Length >= 2 && arguments[1] != null && !arguments[1].IsInteger)
+                if (arguments.Length == 2 && (arguments[1] == null || !arguments[1].IsInteger))
                     return name + "関数の2番目の引数が整数ではありません";
                 if (arguments.Length == 3 && (arguments[1] == null || !(arguments[1] is VariableTerm) || !((VariableTerm)arguments[1]).Identifier.IsString || !((VariableTerm)arguments[1]).Identifier.IsArray1D))
                     return name + "関数の2番目の引数は文字列型1次元配列変数である必要があります";

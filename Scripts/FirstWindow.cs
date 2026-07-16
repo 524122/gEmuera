@@ -11,6 +11,10 @@ public partial class FirstWindow : Control
 	const string LauncherLastGamePathKey = "last_game_path";
 	const string LauncherLastCoreProfileKey = "last_core_profile";
 	const int LauncherScrollBarWidth = 24;
+	const int LauncherBaseMarginLeft = 20;
+	const int LauncherBaseMarginTop = 22;
+	const int LauncherBaseMarginRight = 20;
+	const int LauncherBaseMarginBottom = 22;
 	public const string CoreProfileV24Pure = "v24pure";
 	public const string CoreProfileSnake = "snake";
 
@@ -30,11 +34,31 @@ public partial class FirstWindow : Control
 	public static string SelectedGamePath { get; private set; }
 	public static string SelectedCoreProfileName { get; private set; } = CoreProfileV24Pure;
 
+	/// <summary>
+	/// M0 baseline runner-only session injection. The normal launcher never calls this method.
+	/// Unlike SetSelectedGamePath, this does not persist launcher.cfg and therefore cannot
+	/// change the next interactive startup.
+	/// </summary>
+	public static bool ConfigureM0RunnerSession(string path, string coreProfileName, out string errorMessage)
+	{
+		errorMessage = "";
+		if (!IsUsableEraGameDirectory(path))
+		{
+			errorMessage = "invalid_era_game_directory";
+			return false;
+		}
+
+		SelectedGamePath = path.TrimEnd('/', '\\');
+		SelectedCoreProfileName = NormalizeCoreProfileName(coreProfileName);
+		return true;
+	}
+
 	ItemList gameList;
 	Button startButton;
 	Label statusLabel;
 	Label categoryHintLabel;
 	Label announcementStatusLabel;
+	MarginContainer launcherMargin;
 	Button v24TabButton;
 	Button snakeTabButton;
 	Button announcementTabButton;
@@ -57,6 +81,8 @@ public partial class FirstWindow : Control
 		GenericUtils.InitializeLogging();
 
 		BuildLauncherUi();
+		ApplyLauncherSafeArea();
+		GetViewport().SizeChanged += OnViewportSizeChanged;
 
 		if (OS.GetName() == "Android")
 		{
@@ -80,19 +106,15 @@ public partial class FirstWindow : Control
 		background.SetAnchorsPreset(LayoutPreset.FullRect);
 		AddChild(background);
 
-		var margin = new MarginContainer();
-		margin.SetAnchorsPreset(LayoutPreset.FullRect);
-		margin.AddThemeConstantOverride("margin_left", 20);
-		margin.AddThemeConstantOverride("margin_top", 22);
-		margin.AddThemeConstantOverride("margin_right", 20);
-		margin.AddThemeConstantOverride("margin_bottom", 22);
-		AddChild(margin);
+		launcherMargin = new MarginContainer();
+		launcherMargin.SetAnchorsPreset(LayoutPreset.FullRect);
+		AddChild(launcherMargin);
 
 		var root = new VBoxContainer();
 		root.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		root.SizeFlagsVertical = SizeFlags.ExpandFill;
 		root.AddThemeConstantOverride("separation", 10);
-		margin.AddChild(root);
+		launcherMargin.AddChild(root);
 
 		root.AddChild(CreateHeader());
 		root.AddChild(CreateLauncherTabs());
@@ -103,6 +125,29 @@ public partial class FirstWindow : Control
 		statusLabel.AddThemeColorOverride("font_color", new Color(0.78f, 0.84f, 0.9f));
 		statusLabel.AddThemeFontSizeOverride("font_size", 14);
 		root.AddChild(statusLabel);
+	}
+
+	void OnViewportSizeChanged()
+	{
+		ApplyLauncherSafeArea();
+	}
+
+	void ApplyLauncherSafeArea()
+	{
+		if (launcherMargin == null)
+			return;
+
+		Rect2 safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
+		Vector2 viewportSize = GetViewport().GetVisibleRect().Size;
+		int left = LauncherBaseMarginLeft + Mathf.RoundToInt(System.Math.Max(0, safeRect.Position.X));
+		int top = LauncherBaseMarginTop + Mathf.RoundToInt(System.Math.Max(0, safeRect.Position.Y));
+		int right = LauncherBaseMarginRight + Mathf.RoundToInt(System.Math.Max(0, viewportSize.X - (safeRect.Position.X + safeRect.Size.X)));
+		int bottom = LauncherBaseMarginBottom + Mathf.RoundToInt(System.Math.Max(0, viewportSize.Y - (safeRect.Position.Y + safeRect.Size.Y)));
+
+		launcherMargin.AddThemeConstantOverride("margin_left", left);
+		launcherMargin.AddThemeConstantOverride("margin_top", top);
+		launcherMargin.AddThemeConstantOverride("margin_right", right);
+		launcherMargin.AddThemeConstantOverride("margin_bottom", bottom);
 	}
 
 	Control CreateHeader()
@@ -572,6 +617,7 @@ public partial class FirstWindow : Control
 
 	public override void _ExitTree()
 	{
+		GetViewport().SizeChanged -= OnViewportSizeChanged;
 		if (OS.GetName() == "Android")
 			GetTree().OnRequestPermissionsResult -= OnPermissionsResult;
 	}
@@ -695,6 +741,12 @@ public partial class FirstWindow : Control
 				if (!string.IsNullOrEmpty(resDir))
 					AddUniqueRoot(roots, resDir);
 			}
+
+			string configuredLibrary = ProjectSettings.GetSetting(
+				"launcher/default_game_library",
+				"").AsString();
+			if (!string.IsNullOrWhiteSpace(configuredLibrary))
+				AddUniqueRoot(roots, configuredLibrary);
 		}
 
 		string userDir = ProjectSettings.GlobalizePath("user://");

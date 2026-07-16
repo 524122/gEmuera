@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M0-DIA-17 dialect behavior fixture contract report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result",
+    "sourceDeclarationVocabularyHash", "sourcePolicySurfaceHash", "catalogId", "catalogVersion", "catalogHash",
+    "behaviorFixtureContractSetHash", "contractCounts", "contracts", "currentRuntimeIsolation", "parserVmConsumption",
+    "compatibilityPlanRuntime", "policyManagerRuntime", "runtimeTypeDeclarations", "m1Eligibility", "uncovered"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "workPackage": {"const": "M0-DIA-17"},
+    "executionStatus": {"const": "InProgress"},
+    "gateStatus": {"const": "Blocked"},
+    "blockerCode": {"const": "EvidenceMissing"},
+    "result": {"const": "Partial"},
+    "sourceDeclarationVocabularyHash": {"pattern": "^[0-9a-f]{64}$"},
+    "sourcePolicySurfaceHash": {"pattern": "^[0-9a-f]{64}$"},
+    "catalogHash": {"pattern": "^[0-9a-f]{64}$"},
+    "behaviorFixtureContractSetHash": {"pattern": "^[0-9a-f]{64}$"},
+    "contracts": {"type": "array", "minItems": 10, "maxItems": 10}
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-fixture-catalog-1.0.0.json",
+  "title": "gEmuera M0 Fixture Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workPackage", "fixtures"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackage": { "const": "M0-FIX-01" },
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fixture" }
+    }
+  },
+  "$defs": {
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "layer", "category", "profile", "rootBinding", "source", "authorization", "expectedReports", "expectedCoverage", "notes"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(UP|GE|SN|FL|AN)-[A-Z0-9][A-Z0-9-]*$" },
+        "layer": { "enum": ["upstream", "legacy", "game"] },
+        "category": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
+        "rootBinding": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/$defs/source" },
+        "authorization": { "$ref": "#/$defs/authorization" },
+        "expectedReports": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/expectedReport" } },
+        "expectedCoverage": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "notes": { "type": "string" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "origin", "revision"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "origin": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "origin", "license", "evidence", "redistributionAllowed"],
+      "properties": {
+        "status": { "enum": ["Verified", "Unverified", "MissingEvidence"] },
+        "origin": { "type": "string", "minLength": 1 },
+        "license": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string" },
+        "redistributionAllowed": { "type": "boolean" }
+      }
+    },
+    "expectedReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "required"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" }
+      }
+    }
+  }
+}

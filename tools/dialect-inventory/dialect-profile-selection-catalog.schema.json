@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-profile-selection-catalog-1.0.0.json",
+  "title": "gEmuera M0 legacy CoreProfile selection catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage", "sourcePlanPreflightWorkPackage", "sourceFiles", "expected"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"}, "catalogId": {"type": "string", "minLength": 1}, "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}, "sourceWorkPackage": {"const": "M0-DIA-11"}, "sourcePlanPreflightWorkPackage": {"const": "M0-DIA-10"},
+    "sourceFiles": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/sourceFile"}}, "expected": {"$ref": "#/$defs/expected"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "sourceFile": {"type": "object", "additionalProperties": false, "required": ["id", "path", "sha256"], "properties": {"id": {"enum": ["FirstWindow", "Program", "LegacyRunnerConfig"]}, "path": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/sha256"}}},
+    "expected": {"type": "object", "additionalProperties": false, "required": ["legacyCoreProfileEnums", "launcherProfileIds", "launcherFallbackProfileId", "modernMarkerFileNames", "legacyMarkerFileNames", "selectionPrecedence"], "properties": {"legacyCoreProfileEnums": {"type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": {"enum": ["V24Pure", "Snake", "SnakeModernMobile"]}}, "launcherProfileIds": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["v24pure", "snake"]}}, "launcherFallbackProfileId": {"const": "v24pure"}, "modernMarkerFileNames": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "pattern": "\\.txt$"}}, "legacyMarkerFileNames": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "pattern": "\\.txt$"}}, "selectionPrecedence": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"$ref": "#/$defs/rule"}}}},
+    "rule": {"type": "object", "additionalProperties": false, "required": ["order", "inputKind", "outputLegacyCoreProfileEnum"], "properties": {"order": {"type": "integer", "minimum": 1, "maximum": 5}, "inputKind": {"enum": ["EmptyExeDir", "LauncherProfileSnake", "ModernMarker", "LegacyMarker", "Default"]}, "outputLegacyCoreProfileEnum": {"enum": ["V24Pure", "Snake", "SnakeModernMobile"]}}}
+  }
+}

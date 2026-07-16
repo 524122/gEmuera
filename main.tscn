@@ -1,6 +1,30 @@
 [gd_scene format=3 uid="uid://c4u7kgm7pnjux"]
 
 [ext_resource type="Script" uid="uid://p364fp5n6mlo" path="res://Scripts/EmueraMain.cs" id="1_emuera"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/PrototypeRuntimeNode.cs" id="2_prototype"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/PrototypeStatusView.cs" id="3_status"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/PrototypeInputBridge.cs" id="4_input"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/PrototypeAudioBridge.cs" id="5_audio"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/PrototypeResourceBridge.cs" id="6_resource"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/PrototypeCommandPanel.cs" id="7_panel"]
 
 [node name="Main" type="Node" unique_id=57311244]
 script = ExtResource("1_emuera")
+
+[node name="PrototypeRuntime" type="Node" parent="."]
+script = ExtResource("2_prototype")
+
+[node name="PrototypeStatusView" type="CanvasLayer" parent="."]
+script = ExtResource("3_status")
+
+[node name="PrototypeInputBridge" type="Node" parent="."]
+script = ExtResource("4_input")
+
+[node name="PrototypeAudioBridge" type="Node" parent="."]
+script = ExtResource("5_audio")
+
+[node name="PrototypeResourceBridge" type="Node" parent="."]
+script = ExtResource("6_resource")
+
+[node name="PrototypeCommandPanel" type="Control" parent="."]
+script = ExtResource("7_panel")

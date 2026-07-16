@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.dialect-module-composition",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-16",
+  "sourceCompatibilityPackWorkPackage": "M0-DIA-12",
+  "sourcePolicySurfaceWorkPackage": "M0-DIA-15",
+  "sourceCompatibilityPackHash": "e9ffd09462b7bd4ecf2340d36850604533102b0e5c5bb659a29fe06f88438c46",
+  "sourcePolicySurfaceHash": "2213bf38212c06c6d4d9ffd1cb12c095f62ceaa17b544d651cea915e27c9e012",
+  "expectedModuleCount": 2,
+  "expectedDependencyEdgeCount": 1,
+  "expectedPortDeclarationCount": 10,
+  "modules": [
+    {"moduleId":"gemuera.v24","moduleVersion":"1.0.0","moduleApiVersion":1,"dependencies":[],"declaredPortTypeIds":[],"descriptorStatus":"StaticCandidate","runtimeStatus":"NotImplemented","distributionEligibility":"Blocked"},
+    {"moduleId":"game.snake","moduleVersion":"1.0.0","moduleApiVersion":1,"dependencies":[{"moduleId":"gemuera.v24","versionRange":"[1.0.0,2.0.0)"}],"declaredPortTypeIds":["IExtraArgumentPolicy","IPrivateArgumentShapePolicy","IEffectiveDisplayConfigurationProjection","IDisplayRefreshTimingPolicy","IExpressionFunctionCatalog","IInstructionCatalogBuilder","IStartupFaultPolicy","IUserVariableResolutionPolicy","IParserDiagnosticsSinkPolicy","IResourceLazyIndexPolicy"],"descriptorStatus":"StaticCandidate","runtimeStatus":"NotImplemented","distributionEligibility":"Blocked"}
+  ]
+}

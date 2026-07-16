@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-module-composition-catalog-1.0.0.json",
+  "title": "gEmuera M0 static dialect module composition catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage", "sourceCompatibilityPackWorkPackage", "sourcePolicySurfaceWorkPackage", "sourceCompatibilityPackHash", "sourcePolicySurfaceHash", "expectedModuleCount", "expectedDependencyEdgeCount", "expectedPortDeclarationCount", "modules"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"}, "catalogId": {"type": "string", "minLength": 1}, "catalogVersion": {"$ref": "#/$defs/semver"}, "sourceWorkPackage": {"const": "M0-DIA-16"}, "sourceCompatibilityPackWorkPackage": {"const": "M0-DIA-12"}, "sourcePolicySurfaceWorkPackage": {"const": "M0-DIA-15"}, "sourceCompatibilityPackHash": {"$ref": "#/$defs/sha256"}, "sourcePolicySurfaceHash": {"$ref": "#/$defs/sha256"}, "expectedModuleCount": {"const": 2}, "expectedDependencyEdgeCount": {"const": 1}, "expectedPortDeclarationCount": {"const": 10}, "modules": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/module"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "semver": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "dependency": {"type": "object", "additionalProperties": false, "required": ["moduleId", "versionRange"], "properties": {"moduleId": {"type": "string", "pattern": "^[a-z][a-z0-9.\\-]*$"}, "versionRange": {"type": "string", "pattern": "^\\[[0-9]+\\.[0-9]+\\.[0-9]+,[0-9]+\\.[0-9]+\\.[0-9]+\\)$"}}},
+    "module": {"type": "object", "additionalProperties": false, "required": ["moduleId", "moduleVersion", "moduleApiVersion", "dependencies", "declaredPortTypeIds", "descriptorStatus", "runtimeStatus", "distributionEligibility"], "properties": {"moduleId": {"type": "string", "pattern": "^[a-z][a-z0-9.\\-]*$"}, "moduleVersion": {"$ref": "#/$defs/semver"}, "moduleApiVersion": {"type": "integer", "minimum": 1}, "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}}, "declaredPortTypeIds": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^I[A-Za-z][A-Za-z0-9]*$"}}, "descriptorStatus": {"const": "StaticCandidate"}, "runtimeStatus": {"const": "NotImplemented"}, "distributionEligibility": {"const": "Blocked"}}}
+  }
+}

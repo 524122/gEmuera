@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-baseline-identity-1.0.0.json",
+  "title": "gEmuera M0 Baseline Identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "workPackage",
+    "generatedAtUtc",
+    "status",
+    "source",
+    "toolchain",
+    "configurations",
+    "resources",
+    "fonts",
+    "artifacts",
+    "game",
+    "uncovered",
+    "errors"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackage": { "const": "M0-ID-01" },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["Complete", "Partial"] },
+    "source": {
+      "type": "object",
+      "required": ["identityKind", "root", "manifest", "git", "exclusionPolicy"],
+      "properties": {
+        "identityKind": { "const": "treeManifest" },
+        "root": { "type": "string", "minLength": 1 },
+        "manifest": { "$ref": "#/$defs/manifestSummary" },
+        "git": { "type": "object" },
+        "exclusionPolicy": { "const": "M0-ID-01-v1" }
+      }
+    },
+    "toolchain": { "type": "object" },
+    "configurations": { "$ref": "#/$defs/manifestSummary" },
+    "resources": { "type": "object" },
+    "fonts": { "type": "object" },
+    "artifacts": { "type": "object" },
+    "game": { "type": "object" },
+    "uncovered": { "type": "array", "items": { "type": "string" } },
+    "errors": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "manifestSummary": {
+      "type": "object",
+      "required": ["reportPath", "documentSha256", "canonicalSha256", "fileCount", "totalBytes"],
+      "properties": {
+        "reportPath": { "type": "string" },
+        "documentSha256": { "$ref": "#/$defs/sha256" },
+        "canonicalSha256": { "$ref": "#/$defs/sha256" },
+        "fileCount": { "type": "integer", "minimum": 0 },
+        "totalBytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

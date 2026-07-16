@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -40,6 +41,15 @@ public enum EmueraLogCategory
     All = int.MaxValue
 }
 
+internal enum EmueraDisplayScrollMode
+{
+    FollowBottom = 0,
+    PreserveViewport = 1,
+    KeepRegionVisible = 2,
+    KeepChoicesVisible = 3,
+    ManualHold = 4
+}
+
 internal static class GenericUtils
 {
     static readonly ConcurrentQueue<Action> uiQueue = new ConcurrentQueue<Action>();
@@ -55,6 +65,8 @@ internal static class GenericUtils
     static readonly object snakeAudioLock = new object();
     static readonly SnakeAudioState[] snakeSounds = CreateSnakeAudioStates();
     static readonly SnakeAudioState snakeBgm = new SnakeAudioState();
+    static readonly object soundFallbackResolveCacheLock = new object();
+    static readonly Dictionary<string, string> soundFallbackResolveCache = new Dictionary<string, string>();
     static readonly object inputStateLock = new object();
     static uEmuera.Drawing.Point pointerPosition = uEmuera.Drawing.Point.Empty;
     static string pointingButtonInput = "";
@@ -63,6 +75,7 @@ internal static class GenericUtils
     static int scrollTraceEnabled = 0;
     static int scrollTraceSequence = 0;
     static int scrollTraceCoreLinesRemaining = 0;
+    static long dynamicMapLastContextTickMs = long.MinValue;
     const string ScrollTracePrefix = "[SCROLL_TRACE]";
     const int ScrollTraceCoreBurstLineCount = 120;
     const int MaxLogMessageChars = 8192;
@@ -87,6 +100,26 @@ internal static class GenericUtils
     static double _performanceFrameMsTotal;
     static double _performanceFrameMsMax;
     static int _performanceFrameCount;
+    static long _lastConsoleRenderSampleMs;
+    static double _consoleRenderMsTotal;
+    static double _consoleRenderMsMax;
+    static int _consoleRenderSampleCount;
+    static int _consoleRenderDrawCount;
+    static int _consoleRenderHitOnlyCount;
+    static int _consoleRenderHitRebuildCount;
+    static int _consoleRenderVisibleRowsTotal;
+    static int _consoleRenderVisibleRowsMax;
+    static int _consoleRenderCanvasRowsTotal;
+    static int _consoleRenderCanvasRowsMax;
+    static int _consoleRenderOverlayRowsTotal;
+    static int _consoleRenderOverlayRowsMax;
+    static int _consoleRenderPartsTotal;
+    static int _consoleRenderPartsMax;
+    static int _consoleRenderHitRectsTotal;
+    static int _consoleRenderHitRectsMax;
+    static readonly double[] _consoleRenderMsSamples = new double[512];
+    static int _consoleRenderMsSampleCount;
+    static int _consoleRenderMsSampleOverflow;
 
     public static bool HasPendingUIWork => Volatile.Read(ref pendingUiActions) > 0;
     public static bool HasPendingDisplayWork => Volatile.Read(ref pendingDisplayActions) > 0;
@@ -156,6 +189,29 @@ internal static class GenericUtils
         return IsMainThread();
     }
 
+    public static void ShellOpen(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+            return;
+
+        void OpenTarget()
+        {
+            try
+            {
+                OS.ShellOpen(target);
+            }
+            catch (Exception ex)
+            {
+                Warn(EmueraLogCategory.General, () => $"[SHELL] Open failed: {RedactTracePath(target)} - {ex.Message}");
+            }
+        }
+
+        if (IsMainThread())
+            OpenTarget();
+        else
+            EnqueueUI(OpenTarget);
+    }
+
     public static void SetPointerPosition(float x, float y)
     {
         var point = new uEmuera.Drawing.Point((int)MathF.Round(x), (int)MathF.Round(y));
@@ -190,6 +246,96 @@ internal static class GenericUtils
             pointingButtonGeneration = long.MinValue;
             pointingButtonActive = false;
         }
+    }
+
+    /// <summary>
+    /// Clears bridge-side state that is produced by one legacy session.  This
+    /// is deliberately separate from diagnostics initialization: the runner's
+    /// sinks, rate limits and ring buffers are process scoped, while audio,
+    /// input replay, fallback paths and queued view work belong to the active
+    /// candidate.  The canary invokes this only after the legacy worker has
+    /// stopped, so draining the UI queue cannot race a producer.
+    /// </summary>
+    internal static void ResetCanarySessionState()
+    {
+        lock (soundFallbackResolveCacheLock)
+            soundFallbackResolveCache.Clear();
+
+        lock (snakeAudioLock)
+        {
+            for (int i = 0; i < snakeSounds.Length; i++)
+                ResetSnakeAudioStateLocked(snakeSounds[i]);
+            ResetSnakeAudioStateLocked(snakeBgm);
+        }
+
+        lock (inputStateLock)
+        {
+            pointerPosition = uEmuera.Drawing.Point.Empty;
+            pointingButtonInput = "";
+            pointingButtonGeneration = long.MinValue;
+            pointingButtonActive = false;
+        }
+        uEmuera.Forms.Control.MousePosition = uEmuera.Drawing.Point.Empty;
+        MinorShift._Library.WinInput.ResetCanarySessionState();
+        uEmuera.Forms.Timer.ResetSessionState();
+
+        // All queued actions at this point were produced by the stopped
+        // candidate.  A stale action must never mutate the next candidate's
+        // Godot view, so discard the envelopes and their accounting together.
+        while (uiQueue.TryDequeue(out _)) { }
+        Interlocked.Exchange(ref pendingUiActions, 0);
+        Interlocked.Exchange(ref pendingDisplayActions, 0);
+        Interlocked.Increment(ref uiFrameGeneration);
+
+        _currentInputId = 0;
+        _runtimeGamePath = "";
+        _runtimeCoreProfile = "";
+        DiagnosticLogExporter.NotifyGamePathSelected("");
+        var cfg = _runtimeConfig;
+        _inputReplay = cfg != null && cfg.InputReplayEnabled
+            ? new InputReplayBuffer(cfg.InputReplayMaxEvents)
+            : null;
+        _saveLogOperationTrail.Clear();
+
+        scrollTraceSequence = 0;
+        scrollTraceCoreLinesRemaining = 0;
+        dynamicMapLastContextTickMs = long.MinValue;
+        _lastPerformanceSampleMs = 0;
+        _performanceFrameMsTotal = 0.0;
+        _performanceFrameMsMax = 0.0;
+        _performanceFrameCount = 0;
+        _lastConsoleRenderSampleMs = 0;
+        _consoleRenderMsTotal = 0.0;
+        _consoleRenderMsMax = 0.0;
+        _consoleRenderSampleCount = 0;
+        _consoleRenderDrawCount = 0;
+        _consoleRenderHitOnlyCount = 0;
+        _consoleRenderHitRebuildCount = 0;
+        _consoleRenderVisibleRowsTotal = 0;
+        _consoleRenderVisibleRowsMax = 0;
+        _consoleRenderCanvasRowsTotal = 0;
+        _consoleRenderCanvasRowsMax = 0;
+        _consoleRenderOverlayRowsTotal = 0;
+        _consoleRenderOverlayRowsMax = 0;
+        _consoleRenderPartsTotal = 0;
+        _consoleRenderPartsMax = 0;
+        _consoleRenderHitRectsTotal = 0;
+        _consoleRenderHitRectsMax = 0;
+        Array.Clear(_consoleRenderMsSamples, 0, _consoleRenderMsSamples.Length);
+    }
+
+    static void ResetSnakeAudioStateLocked(SnakeAudioState state)
+    {
+        state.Path = null;
+        state.Playing = false;
+        state.PendingStart = false;
+        state.Paused = false;
+        state.Volume = 100;
+        state.Speed = 100;
+        state.Repeat = 1;
+        state.StartedAtMs = 0;
+        state.TotalMs = 0;
+        state.LastKnownCurrentMs = 0;
     }
 
     public static string GetPointingButtonInput()
@@ -423,6 +569,7 @@ internal static class GenericUtils
         if (cfg.StatementRecognitionEnabled) parts.Add("statement_recognition");
         if (cfg.ImageDebugEnabled) parts.Add("image");
         if (cfg.UiLayoutEnabled) parts.Add("ui_layout");
+        if (cfg.DynamicMapDebugEnabled) parts.Add("dynamic_map");
         if (cfg.RuntimePanelEnabled) parts.Add("runtime_panel");
         if (cfg.InputReplayEnabled) parts.Add("input_replay");
         if (cfg.AndroidStorageEnabled) parts.Add("android_storage");
@@ -1139,7 +1286,314 @@ internal static class GenericUtils
     public static bool UiOverlayButtonRectEnabled => _runtimeConfig?.UiOverlayButtonRect ?? true;
     public static int UiOverlayMaxDrawnRects => _runtimeConfig?.UiOverlayMaxDrawnRects ?? 128;
 
+    /// <summary>
+    /// 动态地图诊断只记录证据，不改变滚动、按钮或渲染行为。
+    /// 调用方需要先判断此开关，避免在 Android 刷新路径中无意义地构造行快照字符串。
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsDynamicMapTraceEnabled(string subSwitch = "")
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.LoggingEnabled || !cfg.DynamicMapDebugEnabled)
+            return false;
+        if (!DiagnosticLogRouter.IsCategoryEnabled(EmueraLogCategory.UI))
+            return false;
+
+        if (string.IsNullOrEmpty(subSwitch))
+            return true;
+        return subSwitch switch
+        {
+            "line_snapshot" => cfg.DynamicMapLogLineSnapshot,
+            "scroll" => cfg.DynamicMapLogScroll,
+            "buttons" => cfg.DynamicMapLogButtons,
+            _ => false,
+        };
+    }
+
+    public static bool IsDynamicMapLineSnapshotTraceEnabled => IsDynamicMapTraceEnabled("line_snapshot");
+    public static bool IsDynamicMapScrollTraceEnabled => IsDynamicMapTraceEnabled("scroll");
+    public static bool IsDynamicMapButtonTraceEnabled => IsDynamicMapTraceEnabled("buttons");
+
+    public static bool ShouldTraceDynamicMap(bool hasBitmapContext)
+    {
+        var cfg = _runtimeConfig;
+        if (!IsDynamicMapTraceEnabled())
+            return false;
+
+        long now = DiagnosticLogRouter.GetMonotonicMilliseconds();
+        if (hasBitmapContext)
+            Volatile.Write(ref dynamicMapLastContextTickMs, now);
+
+        if (!cfg.DynamicMapOnlyBitmapContext)
+            return true;
+        if (hasBitmapContext)
+            return true;
+
+        long last = Volatile.Read(ref dynamicMapLastContextTickMs);
+        int windowMs = Math.Max(0, cfg.DynamicMapContextWindowMs);
+        return last != long.MinValue && now - last <= windowMs;
+    }
+
+    public static void DynamicMapTrace(string eventId, Func<string> messageFactory, Func<string> dataFactory = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
+    {
+        if (!IsDynamicMapTraceEnabled())
+            return;
+        LogStructured(EmueraLogLevel.Debug, EmueraLogCategory.UI, eventId, dataFactory,
+            messageFactory, member, file, line);
+    }
+
+    public static bool ContainsDynamicMapFunctionScope(IReadOnlyList<ConsoleDisplayLine> lines)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapFunctionScope(lines[i]))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool ContainsDynamicMapFunctionScope(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapFunctionScope(lines[i].Line))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool LineHasDynamicMapFunctionScope(ConsoleDisplayLine line)
+    {
+        return LineHasDynamicMapFunctionScope(line, 0);
+    }
+
+    static bool LineHasDynamicMapFunctionScope(ConsoleDisplayLine line, int depth)
+    {
+        if (line == null || depth > 4)
+            return false;
+        if (line.DynamicMapFunctionScoped)
+            return true;
+        var buttons = line.Buttons;
+        if (buttons == null)
+            return false;
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            var parts = buttons[i]?.StrArray;
+            if (parts == null)
+                continue;
+            for (int j = 0; j < parts.Length; j++)
+            {
+                if (parts[j] is ConsoleDivPart div && div.Children != null)
+                {
+                    for (int k = 0; k < div.Children.Length; k++)
+                    {
+                        if (LineHasDynamicMapFunctionScope(div.Children[k], depth + 1))
+                            return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public static bool ContainsDynamicMapBitmapContext(IReadOnlyList<ConsoleDisplayLine> lines)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapBitmapContext(lines[i]))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool ContainsDynamicMapBitmapContext(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapBitmapContext(lines[i].Line))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool ContainsDynamicMapBitmapContextTail(IReadOnlyList<ConsoleDisplayLine> lines)
+    {
+        if (lines == null || lines.Count == 0)
+            return false;
+        int maxLines = GetDynamicMapMaxLines();
+        int start = Math.Max(0, lines.Count - maxLines);
+        for (int i = start; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapBitmapContext(lines[i]))
+                return true;
+        }
+        return false;
+    }
+
+    public static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line)
+    {
+        return LineHasDynamicMapBitmapContext(line, 0);
+    }
+
+    static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line, int depth)
+    {
+        if (line == null || depth > 4)
+            return false;
+        if (line.BitmapCacheEnabled || line.DynamicMapFunctionScoped)
+            return true;
+        var buttons = line.Buttons;
+        if (buttons == null)
+            return false;
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            var parts = buttons[i]?.StrArray;
+            if (parts == null)
+                continue;
+            for (int j = 0; j < parts.Length; j++)
+            {
+                if (parts[j] is ConsoleDivPart div && div.Children != null)
+                {
+                    for (int k = 0; k < div.Children.Length; k++)
+                    {
+                        if (LineHasDynamicMapBitmapContext(div.Children[k], depth + 1))
+                            return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public static string BuildDynamicMapLineTailSummary(IReadOnlyList<ConsoleDisplayLine> lines)
+    {
+        if (lines == null || lines.Count == 0)
+            return "none";
+        int maxLines = GetDynamicMapMaxLines();
+        int start = Math.Max(0, lines.Count - maxLines);
+        var sb = new StringBuilder(maxLines * 96);
+        for (int i = start; i < lines.Count; i++)
+        {
+            if (sb.Length > 0)
+                sb.Append('|');
+            sb.Append(i).Append(':').Append(BuildDynamicMapLineSummary(lines[i], false, false));
+        }
+        return sb.ToString();
+    }
+
+    public static string BuildDynamicMapDeltaLineSummary(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
+    {
+        if (lines == null || lines.Count == 0)
+            return "none";
+        int maxLines = GetDynamicMapMaxLines();
+        int start = Math.Max(0, lines.Count - maxLines);
+        var sb = new StringBuilder(maxLines * 96);
+        for (int i = start; i < lines.Count; i++)
+        {
+            if (sb.Length > 0)
+                sb.Append('|');
+            sb.Append(i).Append(':').Append(BuildDynamicMapLineSummary(lines[i].Line, true, lines[i].Update));
+        }
+        return sb.ToString();
+    }
+
+    static string BuildDynamicMapLineSummary(ConsoleDisplayLine line, bool includeUpdate, bool update)
+    {
+        if (line == null)
+            return "{null}";
+
+        int commandCount = 0;
+        int commandWritten = 0;
+        var commands = new StringBuilder(64);
+        AccumulateDynamicMapCommandSummary(line, commands, ref commandCount, ref commandWritten, 0);
+
+        int maxTextChars = GetDynamicMapMaxTextChars();
+        var sb = new StringBuilder(160);
+        sb.Append("{no=").Append(line.LineNo)
+            .Append(",bmp=").Append(line.BitmapCacheEnabled ? 1 : 0)
+            .Append(",mapfn=").Append(line.DynamicMapFunctionScoped ? 1 : 0)
+            .Append(",logic=").Append(line.IsLogicalLine ? 1 : 0)
+            .Append(",tmp=").Append(line.IsTemporary ? 1 : 0)
+            .Append(",end=").Append(line.IsLineEnd ? 1 : 0)
+            .Append(",seg=").Append(line.Buttons?.Length ?? 0)
+            .Append(",cmd=").Append(commandCount);
+        if (includeUpdate)
+            sb.Append(",upd=").Append(update ? 1 : 0);
+        if (commands.Length > 0)
+            sb.Append(",cmds=").Append(commands);
+        sb.Append(",text=").Append(CompactTraceValue(line.ToString(), maxTextChars)).Append('}');
+        return sb.ToString();
+    }
+
+    static void AccumulateDynamicMapCommandSummary(ConsoleDisplayLine line, StringBuilder commands, ref int commandCount, ref int commandWritten, int depth)
+    {
+        if (line?.Buttons == null || depth > 4)
+            return;
+        for (int i = 0; i < line.Buttons.Length; i++)
+        {
+            var button = line.Buttons[i];
+            if (button == null)
+                continue;
+            if (button.IsButton)
+            {
+                commandCount++;
+                if (commandWritten < 4)
+                {
+                    if (commands.Length > 0)
+                        commands.Append(',');
+                    commands.Append(CompactTraceValue(button.Inputs, 24))
+                        .Append(':')
+                        .Append(CompactTraceValue(button.ToString(), 24))
+                        .Append("@g")
+                        .Append(button.Generation);
+                    commandWritten++;
+                }
+            }
+
+            var parts = button.StrArray;
+            if (parts == null)
+                continue;
+            for (int j = 0; j < parts.Length; j++)
+            {
+                if (parts[j] is ConsoleDivPart div && div.Children != null)
+                {
+                    for (int k = 0; k < div.Children.Length; k++)
+                        AccumulateDynamicMapCommandSummary(div.Children[k], commands, ref commandCount, ref commandWritten, depth + 1);
+                }
+            }
+        }
+    }
+
+    static int GetDynamicMapMaxLines()
+    {
+        return Math.Min(64, Math.Max(1, _runtimeConfig?.DynamicMapMaxLines ?? 12));
+    }
+
+    static int GetDynamicMapMaxTextChars()
+    {
+        return Math.Min(240, Math.Max(8, _runtimeConfig?.DynamicMapMaxTextChars ?? 48));
+    }
+
+    static string CompactTraceValue(string value, int maxLength)
+    {
+        return ClipTrace(value, maxLength)
+            .Replace(' ', '_')
+            .Replace('|', '/')
+            .Replace(';', ',');
+    }
+
     public static string RedactTracePath(string path) => DiagnosticLogRouter.RedactPath(path);
+
 
     /// <summary>
     /// 企业级说明：输出结构化触摸诊断日志，event_id 与 data 原样写入结构化记录。
@@ -1410,6 +1864,120 @@ internal static class GenericUtils
             "PERF.SAMPLE", "performance sample", data.ToString().TrimEnd());
     }
 
+    public static void SampleConsoleRenderFrame(double elapsedMs, bool draw, bool rebuildHits,
+        int visibleRows, int canvasRows, int overlayRows, int drawnParts, int rebuiltHitRects,
+        Func<string> snapshotDataFactory)
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
+            return;
+
+        double safeElapsedMs = Math.Max(0.0, elapsedMs);
+        _consoleRenderMsTotal += safeElapsedMs;
+        _consoleRenderMsMax = Math.Max(_consoleRenderMsMax, safeElapsedMs);
+        _consoleRenderSampleCount++;
+        if (draw)
+            _consoleRenderDrawCount++;
+        else
+            _consoleRenderHitOnlyCount++;
+        if (rebuildHits)
+            _consoleRenderHitRebuildCount++;
+        _consoleRenderVisibleRowsTotal += Math.Max(0, visibleRows);
+        _consoleRenderVisibleRowsMax = Math.Max(_consoleRenderVisibleRowsMax, visibleRows);
+        _consoleRenderCanvasRowsTotal += Math.Max(0, canvasRows);
+        _consoleRenderCanvasRowsMax = Math.Max(_consoleRenderCanvasRowsMax, canvasRows);
+        _consoleRenderOverlayRowsTotal += Math.Max(0, overlayRows);
+        _consoleRenderOverlayRowsMax = Math.Max(_consoleRenderOverlayRowsMax, overlayRows);
+        _consoleRenderPartsTotal += Math.Max(0, drawnParts);
+        _consoleRenderPartsMax = Math.Max(_consoleRenderPartsMax, drawnParts);
+        _consoleRenderHitRectsTotal += Math.Max(0, rebuiltHitRects);
+        _consoleRenderHitRectsMax = Math.Max(_consoleRenderHitRectsMax, rebuiltHitRects);
+        if (_consoleRenderMsSampleCount < _consoleRenderMsSamples.Length)
+            _consoleRenderMsSamples[_consoleRenderMsSampleCount++] = safeElapsedMs;
+        else
+            _consoleRenderMsSampleOverflow++;
+
+        long nowMs = GetTickMs();
+        long interval = Math.Max(250, cfg.PerformanceSamplingIntervalMs);
+        if (_lastConsoleRenderSampleMs != 0 && nowMs - _lastConsoleRenderSampleMs < interval)
+            return;
+        _lastConsoleRenderSampleMs = nowMs;
+
+        int count = Math.Max(1, _consoleRenderSampleCount);
+        double avg = _consoleRenderMsTotal / count;
+        double max = _consoleRenderMsMax;
+        int p95SampleCount = _consoleRenderMsSampleCount;
+        double p95 = max;
+        if (p95SampleCount > 0)
+        {
+            Array.Sort(_consoleRenderMsSamples, 0, p95SampleCount);
+            int p95Index = Math.Clamp((int)Math.Ceiling(p95SampleCount * 0.95) - 1, 0, p95SampleCount - 1);
+            p95 = _consoleRenderMsSamples[p95Index];
+        }
+
+        string snapshotData = "";
+        try
+        {
+            snapshotData = snapshotDataFactory?.Invoke() ?? "";
+        }
+        catch (Exception ex)
+        {
+            snapshotData = "snapshot_error=" + ex.GetType().Name;
+        }
+
+        var data = new StringBuilder(320);
+        data.Append("backend=canvas")
+            .Append(" samples=").Append(count)
+            .Append(" draw_calls=").Append(_consoleRenderDrawCount)
+            .Append(" hit_only_rebuilds=").Append(_consoleRenderHitOnlyCount)
+            .Append(" hit_rebuilds=").Append(_consoleRenderHitRebuildCount)
+            .Append(" draw_ms_avg=").Append(FormatDiagnosticNumber(avg))
+            .Append(" draw_ms_p95=").Append(FormatDiagnosticNumber(p95))
+            .Append(" draw_ms_max=").Append(FormatDiagnosticNumber(max))
+            .Append(" visible_rows_avg=").Append(_consoleRenderVisibleRowsTotal / count)
+            .Append(" visible_rows_max=").Append(_consoleRenderVisibleRowsMax)
+            .Append(" canvas_rows_avg=").Append(_consoleRenderCanvasRowsTotal / count)
+            .Append(" canvas_rows_max=").Append(_consoleRenderCanvasRowsMax)
+            .Append(" overlay_rows_avg=").Append(_consoleRenderOverlayRowsTotal / count)
+            .Append(" overlay_rows_max=").Append(_consoleRenderOverlayRowsMax)
+            .Append(" parts_avg=").Append(_consoleRenderPartsTotal / count)
+            .Append(" parts_max=").Append(_consoleRenderPartsMax)
+            .Append(" hit_rects_avg=").Append(_consoleRenderHitRectsTotal / count)
+            .Append(" hit_rects_max=").Append(_consoleRenderHitRectsMax)
+            .Append(" sample_overflow=").Append(_consoleRenderMsSampleOverflow);
+        if (!string.IsNullOrEmpty(snapshotData))
+            data.Append(' ').Append(snapshotData.Trim());
+
+        _consoleRenderMsTotal = 0.0;
+        _consoleRenderMsMax = 0.0;
+        _consoleRenderSampleCount = 0;
+        _consoleRenderDrawCount = 0;
+        _consoleRenderHitOnlyCount = 0;
+        _consoleRenderHitRebuildCount = 0;
+        _consoleRenderVisibleRowsTotal = 0;
+        _consoleRenderVisibleRowsMax = 0;
+        _consoleRenderCanvasRowsTotal = 0;
+        _consoleRenderCanvasRowsMax = 0;
+        _consoleRenderOverlayRowsTotal = 0;
+        _consoleRenderOverlayRowsMax = 0;
+        _consoleRenderPartsTotal = 0;
+        _consoleRenderPartsMax = 0;
+        _consoleRenderHitRectsTotal = 0;
+        _consoleRenderHitRectsMax = 0;
+        _consoleRenderMsSampleCount = 0;
+        _consoleRenderMsSampleOverflow = 0;
+
+        // 性能采样打开时才聚合输出，默认 APK 不会进入这里；采样窗口记录 p95/max，
+        // 用于判断 Canvas 后端是否接近移动端可视绘制预算，而不是只看应用能否启动。
+        DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Performance,
+            "PERF.CONSOLE_RENDER", "console render performance sample", data.ToString());
+    }
+
+    static string FormatDiagnosticNumber(double value)
+    {
+        return value.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
     public static List<string> CalcMd5List(byte[] bytes)
     {
         return CalcMd5ListForConfig(bytes);
@@ -1492,22 +2060,42 @@ internal static class GenericUtils
 
     public static void RemoveTextCount(int count)
     {
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("remove_bottom", count, 0, false, -1, "preserve_viewport", 0);
         EnqueueUI(() => EmueraContent.instance?.RemoveBottomLines(count), true);
     }
 
     public static void AddText(ConsoleDisplayLine line, bool update)
     {
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("append", 0, line == null ? 0 : 1, update, -1, "unspecified", 0);
         EnqueueUI(() => EmueraContent.instance?.AddLine(line, update), true);
     }
 
     public static void AddTexts(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
     {
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("append_batch", 0, lines?.Count ?? 0, false, -1, "unspecified", 0);
         EnqueueUI(() => EmueraContent.instance?.AddLines(lines), true);
     }
 
-    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update, int lastButtonGeneration)
+    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
+        int lastButtonGeneration, bool scrollToBottom = true, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
     {
-        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration), true);
+        ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration,
+            scrollToBottom ? EmueraDisplayScrollMode.FollowBottom : EmueraDisplayScrollMode.PreserveViewport,
+            dataOnlyLines);
+    }
+
+    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
+        int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
+    {
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+        {
+            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("apply_text_changes", removeBottomCount, lines?.Count ?? 0,
+                update, lastButtonGeneration, scrollMode.ToString(), dataOnlyLines?.Count ?? 0);
+        }
+        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration, scrollMode, dataOnlyLines), true);
     }
 
     public static void SetLastButtonGeneration(int generation)
@@ -1563,6 +2151,8 @@ internal static class GenericUtils
             state.TotalMs = 0;
             state.LastKnownCurrentMs = 0;
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", path, "play", channel, repeat);
         EnqueueUI(() => EmueraContent.instance?.PlaySoundFile(path, repeat, channel));
     }
 
@@ -1579,6 +2169,8 @@ internal static class GenericUtils
                 state.LastKnownCurrentMs = 0;
             }
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", "", "stop_all", -1, 0);
         EnqueueUI(() => EmueraContent.instance?.StopSounds());
     }
 
@@ -1596,6 +2188,8 @@ internal static class GenericUtils
             snakeBgm.TotalMs = 0;
             snakeBgm.LastKnownCurrentMs = 0;
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", path, "play", -1, -1);
         EnqueueUI(() => EmueraContent.instance?.PlayBgmFile(path));
     }
 
@@ -1609,6 +2203,8 @@ internal static class GenericUtils
             snakeBgm.Repeat = 1;
             snakeBgm.LastKnownCurrentMs = 0;
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", "", "stop", -1, 0);
         EnqueueUI(() => EmueraContent.instance?.StopBgm());
     }
 
@@ -1619,6 +2215,8 @@ internal static class GenericUtils
             foreach (var state in snakeSounds)
                 state.Volume = ClampEraVolume(volume);
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", "", "set_volume", -1, volume);
         EnqueueUI(() => EmueraContent.instance?.SetSoundVolume(volume));
     }
 
@@ -1626,6 +2224,8 @@ internal static class GenericUtils
     {
         lock (snakeAudioLock)
             snakeBgm.Volume = ClampEraVolume(volume);
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", "", "set_volume", -1, volume);
         EnqueueUI(() => EmueraContent.instance?.SetBgmVolume(volume));
     }
 
@@ -1974,17 +2574,58 @@ internal static class GenericUtils
         string soundDir = System.IO.Path.Combine(exeDir, "sound");
         if (uEmuera.Utils.DirectoryExists(soundDir))
         {
+            string cacheKey = BuildSoundFallbackResolveCacheKey(soundDir, name);
+            if (TryGetSoundFallbackResolveCache(cacheKey, out string cached))
+            {
+                if (!string.IsNullOrEmpty(cached) && uEmuera.Utils.FileExists(cached))
+                    return cached;
+                return System.IO.Path.GetFullPath(candidates[0]);
+            }
+
             string found = uEmuera.Utils.FindFileRecursive(soundDir, name);
             if (!string.IsNullOrEmpty(found) && uEmuera.Utils.FileExists(found))
+            {
+                SetSoundFallbackResolveCache(cacheKey, found);
                 return found;
+            }
             found = FindSimilarSoundFile(soundDir, name);
             if (!string.IsNullOrEmpty(found) && uEmuera.Utils.FileExists(found))
             {
+                SetSoundFallbackResolveCache(cacheKey, found);
                 Info(EmueraLogCategory.Audio, () => $"[AUDIO] Resolved similar sound \"{name}\" -> \"{found}\"");
                 return found;
             }
+            SetSoundFallbackResolveCache(cacheKey, "");
         }
         return System.IO.Path.GetFullPath(candidates[0]);
+    }
+
+    static string BuildSoundFallbackResolveCacheKey(string soundDir, string requestedName)
+    {
+        string root = "";
+        try
+        {
+            root = System.IO.Path.GetFullPath(soundDir ?? "");
+        }
+        catch
+        {
+            root = soundDir ?? "";
+        }
+        return root + "\n" + (requestedName ?? "");
+    }
+
+    static bool TryGetSoundFallbackResolveCache(string key, out string resolved)
+    {
+        lock (soundFallbackResolveCacheLock)
+            return soundFallbackResolveCache.TryGetValue(key, out resolved);
+    }
+
+    static void SetSoundFallbackResolveCache(string key, string resolved)
+    {
+        // fallback 只处理直接候选路径未命中的音频。缓存未命中结果可以避免脚本循环播放缺失音效时
+        // 反复递归扫描 Android 外部存储；直接候选路径仍会在缓存前检查，因此新增同名文件后仍可命中。
+        lock (soundFallbackResolveCacheLock)
+            soundFallbackResolveCache[key] = resolved ?? "";
     }
 
     static string FindSimilarSoundFile(string soundDir, string requestedName)

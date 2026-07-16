@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-legacy-save-baseline-catalog-1.0.0.json",
+  "title": "gEmuera M0 legacy save baseline catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion","catalogId","catalogVersion","sourceWorkPackage","expectedSourceFileCount","sources","header","expectedFileTypes","expectedDataTypes","expectedSparseMarkers","profileConflict","legacyMutationEvidence"],
+  "properties": {
+    "schemaVersion":{"const":"1.0.0"},"catalogId":{"type":"string","minLength":1},"catalogVersion":{"type":"string","pattern":"^[0-9]+\\.[0-9]+\\.[0-9]+$"},"sourceWorkPackage":{"const":"M0-SAV-01"},"expectedSourceFileCount":{"const":5},
+    "sources":{"type":"array","minItems":5,"maxItems":5},"header":{"type":"object"},"expectedFileTypes":{"type":"array","minItems":4,"maxItems":4},"expectedDataTypes":{"type":"array","minItems":19,"maxItems":19},"expectedSparseMarkers":{"type":"array","minItems":11,"maxItems":11},"profileConflict":{"type":"object"},"legacyMutationEvidence":{"type":"array","minItems":2,"maxItems":2}
+  }
+}

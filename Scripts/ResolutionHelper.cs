@@ -13,6 +13,12 @@ public static class ResolutionHelper
     public static void Apply()
     {
         RefreshResolutions();
+        if (OS.GetName() == "Android")
+        {
+            // Android 的窗口尺寸必须由系统/设备安全区决定；手动 WindowSetSize 会让
+            // 横屏宽机型出现系统黑边，导致 Godot 画布无法占满实际屏幕。
+            return;
+        }
         if(resolution_index < 0)
         {
             var current_height = DisplayServer.WindowGetSize().Y;

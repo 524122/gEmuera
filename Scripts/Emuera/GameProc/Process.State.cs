@@ -93,6 +93,14 @@ namespace MinorShift.Emuera.GameProc
 
 	internal sealed class ProcessState
 	{
+		static readonly string[] dynamicMapRenderRootFunctionNames =
+		{
+			"DRAW_COLOREDMAP",
+			"DRAW_COLOREDMAP_GD",
+			"DRAW_MAP",
+			"FIELDMAP",
+		};
+
 		public ProcessState(EmueraConsole console)
 		{
 			if (Program.DebugMode)//DebugModeでなければ知らなくて良い
@@ -101,6 +109,7 @@ namespace MinorShift.Emuera.GameProc
 		readonly EmueraConsole console = null;
 		readonly List<CalledFunction> functionList = new List<CalledFunction>();
 		readonly Stack<ExecutionContext> contextStack = new Stack<ExecutionContext>();
+		private Stack<ExecutionContext> savedContextStack;
 		private LogicalLine currentLine;
 		//private LogicalLine nextLine;
 		public int lineCount = 0;
@@ -134,7 +143,26 @@ namespace MinorShift.Emuera.GameProc
 
 		public ExecutionContext CurrentContext
 		{
-			get { return contextStack.Count > 0 ? contextStack.Peek() : null; }
+			get { return contextStack.Count > 0 ? contextStack.Peek() : savedContextStack != null && savedContextStack.Count > 0 ? savedContextStack.Peek() : null; }
+		}
+
+		public IEnumerable<ExecutionContext> ContextStack
+		{
+			get { return contextStack.Count > 0 ? contextStack : savedContextStack ?? contextStack; }
+		}
+
+		public ExecutionContext FindContextByLabel(string labelName)
+		{
+			Stack<ExecutionContext> stack = contextStack.Count > 0 ? contextStack : savedContextStack;
+			if (stack != null)
+			{
+				foreach (ExecutionContext context in stack)
+				{
+					if (context.Function != null && context.Function.LabelName == labelName)
+						return context;
+				}
+			}
+			return null;
 		}
 
 		public void PushContext(ExecutionContext context)
@@ -145,6 +173,33 @@ namespace MinorShift.Emuera.GameProc
 		public ExecutionContext PopContext()
 		{
 			return contextStack.Count > 0 ? contextStack.Pop() : null;
+		}
+
+		public int ContextStackCount
+		{
+			get { return contextStack.Count; }
+		}
+
+		public (int funcCount, int ctxCount, LogicalLine currentLine) CaptureCallState()
+		{
+			return (functionList.Count, contextStack.Count, currentLine);
+		}
+
+		public void RollbackToState(int targetFuncCount, int targetCtxCount, LogicalLine targetCurrentLine)
+		{
+			while (functionList.Count > targetFuncCount)
+			{
+				CalledFunction called = functionList[functionList.Count - 1];
+				if (called.CurrentLabel.hasPrivDynamicVar)
+					called.CurrentLabel.Out();
+				functionList.RemoveAt(functionList.Count - 1);
+			}
+			while (contextStack.Count > targetCtxCount)
+			{
+				ExecutionContext context = contextStack.Pop();
+				context?.Dispose();
+			}
+			currentLine = targetCurrentLine;
 		}
 
 		SystemStateCode sysStateCode = SystemStateCode.Title_Begin;
@@ -176,6 +231,44 @@ namespace MinorShift.Emuera.GameProc
 				return functionList[functionList.Count - 1];
 			}
 		}
+
+		public bool IsInDynamicMapFunctionScope()
+		{
+			// 动态地图的滚动判断必须绑定到“输出行生成时”的脚本调用栈。
+			// 不能依赖 Godot UI 线程事后轮询，否则短函数进出后会漏标。
+			if (IsDynamicMapFunctionName(currentLine?.ParentLabelLine?.LabelName))
+				return true;
+
+			for (int i = functionList.Count - 1; i >= 0; i--)
+			{
+				CalledFunction called = functionList[i];
+				if (IsDynamicMapFunctionName(called?.FunctionName)
+					|| IsDynamicMapFunctionName(called?.TopLabel?.LabelName)
+					|| IsDynamicMapFunctionName(called?.CurrentLabel?.LabelName))
+					return true;
+			}
+
+			foreach (ExecutionContext context in ContextStack)
+			{
+				if (IsDynamicMapFunctionName(context?.Function?.LabelName))
+					return true;
+			}
+			return false;
+		}
+
+		static bool IsDynamicMapFunctionName(string labelName)
+		{
+			if (string.IsNullOrEmpty(labelName))
+				return false;
+			string name = labelName[0] == '@' ? labelName.Substring(1) : labelName;
+			for (int i = 0; i < dynamicMapRenderRootFunctionNames.Length; i++)
+			{
+				if (string.Equals(name, dynamicMapRenderRootFunctionNames[i], StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+			return name.StartsWith("DRAW_COLOREDMAP_", StringComparison.OrdinalIgnoreCase);
+		}
+
 		public int CurrentVariadicArgCount
 		{
 			get
@@ -330,6 +423,20 @@ namespace MinorShift.Emuera.GameProc
 			begintype = BeginType.NULL;
 		}
 
+		public void ClearFunctionListPreserveTrace()
+		{
+			foreach (CalledFunction called in functionList)
+				if (called.CurrentLabel.hasPrivDynamicVar)
+					called.CurrentLabel.Out();
+			while (contextStack.Count > 0)
+			{
+				ExecutionContext context = contextStack.Pop();
+				context.Dispose();
+			}
+			functionList.Clear();
+			begintype = BeginType.NULL;
+		}
+
 		public bool calledWhenNormal = true;
 		/// <summary>
 		/// BEGIN命令によるプログラム状態の変化
@@ -437,9 +544,9 @@ namespace MinorShift.Emuera.GameProc
 		public void Return(Int64 ret)
 		{
 			CalledFunction called = functionList[functionList.Count - 1];
-			// BEFORE_ERROR / BEFORE_THROW 是错误处理事件，即使当前外层是 #FUNCTION，
-			// 也必须走事件返回路径，让 pending error/throw 在事件结束后重新抛出。
-			if (IsFunctionMethod && !(called.IsEvent && (called.FunctionName == "BEFORE_THROW" || called.FunctionName == "BEFORE_ERROR")))
+			// #FUNCTION/#FUNCTIONS 的隐式 RETURN 必须只看当前栈顶。
+			// 普通 CALL 可能发生在外层表达式函数求值期间，不能被外层 currentMin 误判成 RETURNF。
+			if (IsCurrentFunctionMethod && !(called.IsEvent && (called.FunctionName == "BEFORE_THROW" || called.FunctionName == "BEFORE_ERROR")))
 			{
 				ReturnF(null);
 				return;
@@ -690,8 +797,20 @@ namespace MinorShift.Emuera.GameProc
 		{
 			get
 			{
+				if (functionList.Count <= currentMin)
+					return false;
                 return functionList[currentMin].TopLabel.IsMethod;
             }
+		}
+
+		public bool IsCurrentFunctionMethod
+		{
+			get
+			{
+				if (functionList.Count <= currentMin)
+					return false;
+				return functionList[functionList.Count - 1].TopLabel.IsMethod;
+			}
 		}
 
 		public SingleTerm MethodReturnValue = null;
@@ -741,6 +860,9 @@ namespace MinorShift.Emuera.GameProc
             //ret.sequential = this.sequential;
 			ret.sysStateCode = this.sysStateCode;
 			ret.begintype = this.begintype;
+			// 调试窗口求值会克隆 ProcessState。克隆体不执行原调用栈，但 LOCAL@FUNCNAME
+			// 仍需要读取原栈上下文，否则监视表达式中的 LOCAL/ARG 会退回空数组。
+			ret.savedContextStack = this.contextStack;
 			//ret.MethodReturnValue = this.MethodReturnValue;
 			return ret;
 

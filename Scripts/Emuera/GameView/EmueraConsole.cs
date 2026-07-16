@@ -216,6 +216,7 @@ namespace MinorShift.Emuera.GameView
 		}
 		public void CBG_Clear()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for(var i=0; i<cbgList.Count; ++i)
@@ -228,17 +229,22 @@ namespace MinorShift.Emuera.GameView
 						cimg.Img.Dispose();
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
-				CBG_ClearBMap();
+				changed |= ClearCbgButtonMapState();
 				cbgList.Add(new ClientBackGroundImage(0));
 				cbgList.Sort();
+				changed = true;
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearRange(int zmin, int zmax)
 		{
 			if (zmin > zmax)
 				return;
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count;i++)
@@ -254,12 +260,16 @@ namespace MinorShift.Emuera.GameView
 						cimg.Img.Dispose();
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearButton()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -273,21 +283,42 @@ namespace MinorShift.Emuera.GameView
 						cimg.Img.Dispose();
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
-				CBG_ClearBMap();
+				changed |= ClearCbgButtonMapState();
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearBMap()
 		{
-			cbgButtonMap = null;
-			selectingCBGButtonInt = -1;
-			lastSelectingCBGButtonInt = -1;
+			bool changed;
+			lock (cbgLock)
+				changed = ClearCbgButtonMapState();
+			if (changed)
+				RequestCbgRefresh();
 		}
 		public List<ClientBackGroundImage> GetCBGList()
 		{
 			lock (cbgLock)
 				return new List<ClientBackGroundImage>(cbgList);
+		}
+
+		private bool ClearCbgButtonMapState()
+		{
+			bool changed = cbgButtonMap != null || selectingCBGButtonInt != -1 || lastSelectingCBGButtonInt != -1;
+			cbgButtonMap = null;
+			selectingCBGButtonInt = -1;
+			lastSelectingCBGButtonInt = -1;
+			return changed;
+		}
+
+		private void RequestCbgRefresh()
+		{
+			// CBG/SETIMAGELAYER 只改背景列表时可能没有文本输出触发刷新。
+			// 这里只唤醒 uEmuera 窗口，实际 Godot 节点重建仍由 Window.Update 合并到下一帧执行。
+			window?.Refresh();
 		}
 
 		public bool CBG_SetGraphics(GraphicsImage gra, int x, int y, int zdepth, int width = 0, int height = 0, float opacity = 1.0f, float[][] colorMatrix = null)
@@ -316,6 +347,7 @@ namespace MinorShift.Emuera.GameView
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 			return true;
 		}
 
@@ -334,10 +366,12 @@ namespace MinorShift.Emuera.GameView
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 		}
 
 		public void ClearBackgroundImage()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -349,14 +383,18 @@ namespace MinorShift.Emuera.GameView
 						continue;
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void RemoveBackground(string key)
 		{
 			if (string.IsNullOrEmpty(key))
 				return;
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -369,8 +407,11 @@ namespace MinorShift.Emuera.GameView
 						continue;
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void SetImageLayer(string spriteName, long depth, int x, int y, int width, int height, int opacity, float[][] colorMatrix, bool followScroll)
@@ -379,6 +420,7 @@ namespace MinorShift.Emuera.GameView
 			if (sprite == null || !sprite.IsCreated)
 				return;
 			int zdepth = normalizeSnakeDepth(depth);
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -389,6 +431,7 @@ namespace MinorShift.Emuera.GameView
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 				ClientBackGroundImage cbg = new ClientBackGroundImage(zdepth);
@@ -405,11 +448,15 @@ namespace MinorShift.Emuera.GameView
 				cbg.snakeImageName = spriteName;
 				cbgList.Add(cbg);
 				cbgList.Sort();
+				changed = true;
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void ClearImageLayer(long depth)
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -420,13 +467,17 @@ namespace MinorShift.Emuera.GameView
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void ClearImageLayerAll()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -435,9 +486,12 @@ namespace MinorShift.Emuera.GameView
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public bool ExistsImageLayer(long depth)
@@ -539,6 +593,7 @@ namespace MinorShift.Emuera.GameView
 			cbgButtonMap = gra;
 			selectingCBGButtonInt = -1;
 			lastSelectingCBGButtonInt = -1;
+			RequestCbgRefresh();
 			return true;
 		}
 
@@ -560,6 +615,7 @@ namespace MinorShift.Emuera.GameView
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 			return true;
 		}
 		public int ClientWidth { get { return Config.WindowX; } }
@@ -1023,7 +1079,13 @@ namespace MinorShift.Emuera.GameView
 		{
 			state = req.NoFocus ? ConsoleState.WaitInputNoFocus : ConsoleState.WaitInput;
 			inputReq = req;
-			if (req.NoFocus)
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
+			}
+			bool flushDeferredRewrite = ConsumeDisplayRewriteRefresh();
+			if (req.NoFocus || flushDeferredRewrite)
 				RefreshStrings(true);
 			if (req.Timelimit > 0)
 			{
@@ -1051,7 +1113,14 @@ namespace MinorShift.Emuera.GameView
 			req.StopMesskip = stopMesskip;
 			inputReq = req;
 			state = ConsoleState.WaitInput;
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
+			}
 			emuera.NeedWaitToEventComEnd = false;
+			if (ConsumeDisplayRewriteRefresh())
+				RefreshStrings(true);
 		}
 
 
@@ -1242,6 +1311,12 @@ namespace MinorShift.Emuera.GameView
 					return;
 				if (state == ConsoleState.Error)
 					return;
+			}
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled && inputReq != null)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("completion_consumed", inputReq.ID,
+					inputReq.InputType.ToString(), inputReq.NeedValue, inputReq.OneInput, inputReq.NoFocus,
+					inputReq.Timelimit, NewButtonGeneration);
 			}
 			state = ConsoleState.Running;
 			emuera.DoScript();
@@ -1727,6 +1802,8 @@ namespace MinorShift.Emuera.GameView
 		#region 描画系
 		uint lastUpdate = 0;
 		uint msPerFrame = 1000 / 60;//60FPS
+		bool deferDisplayRewriteRefresh = false;
+		bool displayRewriteRefreshDeferred = false;
 		ConsoleRedraw redraw = ConsoleRedraw.Normal;
         public ConsoleRedraw Redraw { get { return redraw; } }
 		public void SetRedraw(Int64 i)
@@ -1737,6 +1814,28 @@ namespace MinorShift.Emuera.GameView
 				redraw = ConsoleRedraw.Normal;
 			if ((i & 2) != 0)
 				RefreshStrings(true);
+		}
+
+		internal void MarkDisplayRewriteInProgress()
+		{
+			// Godot 版 UI 通过异步队列提交。动态地图这类 CLEARLINE 后逐行重画的内容，
+			// 如果在 Running 中途提交普通刷新，Android 会看见旧菜单、半张地图等中间态。
+			// 这里只合并非强制刷新，等 INPUT/TINPUT/WAIT 或显式强制刷新时提交完整画面。
+			if (state == ConsoleState.Running)
+				deferDisplayRewriteRefresh = true;
+		}
+
+		bool ShouldDeferDisplayRewriteRefresh(bool forcePaint)
+		{
+			return !forcePaint && deferDisplayRewriteRefresh && state == ConsoleState.Running;
+		}
+
+		bool ConsumeDisplayRewriteRefresh()
+		{
+			bool hadDeferredRefresh = deferDisplayRewriteRefresh || displayRewriteRefreshDeferred;
+			deferDisplayRewriteRefresh = false;
+			displayRewriteRefreshDeferred = false;
+			return hadDeferredRefresh;
 		}
 
 		string debugTitle = null;
@@ -1807,6 +1906,13 @@ namespace MinorShift.Emuera.GameView
 				else if (selectingButton.Generation != lastButtonGeneration)
 					selectingButton = null;
 			}
+			if (ShouldDeferDisplayRewriteRefresh(force_Paint))
+			{
+				displayRewriteRefreshDeferred = true;
+				return;
+			}
+			if (force_Paint)
+				ConsumeDisplayRewriteRefresh();
 			if (!force_Paint)
 			{//forceならば確実に再描画。
 				//履歴表示中でなく、最終行を表示済みであり、選択中ボタンが変更されていないなら更新不要
@@ -1833,6 +1939,11 @@ namespace MinorShift.Emuera.GameView
 			}
 			verticalScrollBarUpdate();
 			window.Refresh();//OnPaint発行
+			lastUpdate = WinmmTimer.TickCount;
+			lastDrawnLineNo = lineNo;
+			lastSelectingButton = selectingButton;
+			if (state != ConsoleState.Running)
+				ConsumeDisplayRewriteRefresh();
 
 		}
 
@@ -1939,7 +2050,22 @@ namespace MinorShift.Emuera.GameView
         }
 
 		public uEmuera.Drawing.Color? TextBackgroundColor { get; set; }
-		public bool BitmapCacheEnabledForNextLine { get; set; }
+		internal bool IsDynamicMapOutputScopeActive
+		{
+			get { return emuera?.State?.IsInDynamicMapFunctionScope() == true; }
+		}
+
+		bool bitmapCacheEnabledForNextLine = false;
+		public bool BitmapCacheEnabledForNextLine
+		{
+			get { return bitmapCacheEnabledForNextLine; }
+			set
+			{
+				bitmapCacheEnabledForNextLine = value;
+				if (value)
+					MarkDisplayRewriteInProgress();
+			}
+		}
 		public bool StrictFontFallback { get; set; }
 		readonly HotkeyState hotkeyState;
 		// Godot 版不使用 SkiaSharp，但 v24 脚本会通过这些 API 探测渲染后端。

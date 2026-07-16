@@ -1,6 +1,7 @@
 //This is used by ctrl-z shortcut to undo last input.
 //It does this by loading last save, and repeating all inputs except last one.
 
+using System;
 using System.Collections.Generic;
 
 namespace MinorShift.Emuera
@@ -40,6 +41,16 @@ namespace MinorShift.Emuera
 			mLastSave = aSaveFile;
 			mInputs.Clear();
 			GlobalStatic.VEvaluator.Rand.GetRand(mRandomSeed);
+		}
+
+		internal void ResetSessionState()
+		{
+			mLastSave = -1;
+			mLastSaveExpected = -1;
+			mInputs.Clear();
+			Array.Clear(mRandomSeed, 0, mRandomSeed.Length);
+			mRewindInProgress = false;
+			mRepeatedUndoRequested = false;
 		}
 	}
 }

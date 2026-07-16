@@ -1,4 +1,4 @@
-<Project Sdk="Godot.NET.Sdk/4.6.2">
+<Project Sdk="Godot.NET.Sdk/4.7.0">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
@@ -6,15 +6,27 @@
     <RootNamespace>gemuerac</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The pure Core contracts are consumed by the Godot host through net8.0. -->
+    <ProjectReference Include="src\Core\GEmuera.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Remove="uEmuera-0.2.9d\**" />
     <EmbeddedResource Remove="uEmuera-0.2.9d\**" />
     <None Remove="uEmuera-0.2.9d\**" />
     <Compile Remove="XEmuera-0.5.1\**" />
     <EmbeddedResource Remove="XEmuera-0.5.1\**" />
     <None Remove="XEmuera-0.5.1\**" />
+    <!-- The future Core assembly is built independently and must not leak into the Godot host glob. -->
+    <Compile Remove="src\Core\**" />
+    <EmbeddedResource Remove="src\Core\**" />
+    <None Remove="src\Core\**" />
+    <Compile Remove="tools\core-contracts\**" />
+    <EmbeddedResource Remove="tools\core-contracts\**" />
+    <None Remove="tools\core-contracts\**" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
+    <PackageReference Include="SkiaSharp" Version="2.88.8" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.6" />
   </ItemGroup>
 

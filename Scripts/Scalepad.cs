@@ -82,8 +82,9 @@ public partial class Scalepad : Control
         if (panel == null)
             return;
 
-        var viewportSize = GetViewport().GetVisibleRect().Size;
-        Position = Vector2.Zero;
+        var safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
+        var viewportSize = safeRect.Size;
+        Position = safeRect.Position;
         Size = viewportSize;
         var width = Mathf.Max(1, viewportSize.X - SideMargin * 2);
         panel.Position = new Vector2(SideMargin, Mathf.Max(0, viewportSize.Y - BottomMargin - PanelHeight));
@@ -98,11 +99,16 @@ public partial class Scalepad : Control
 
     void OnAutoFit()
     {
-        var windowSize = DisplayServer.WindowGetSize();
-        int drawableWidth = MinorShift.Emuera.Config.DrawableWidth + 3;
+        int safeWidth = EmueraContent.ContentSafeWidth > 0
+            ? EmueraContent.ContentSafeWidth
+            : DisplayServer.WindowGetSize().X;
+        float visualWidth = EmueraContent.instance?.GetCurrentVisualContentWidth() ?? 0.0f;
+        float drawableWidth = MinorShift.Emuera.Config.DrawableWidth + 3;
+        // eraFL 右侧信息窗等相对 div 可能伸出配置宽度，Fit 应按真实可视宽度缩放。
+        float fitWidth = Mathf.Max(drawableWidth, visualWidth);
         float scale;
-        if (drawableWidth > 0)
-            scale = windowSize.X / (float)drawableWidth;
+        if (fitWidth > 0)
+            scale = safeWidth / fitWidth;
         else
             scale = 1.0f;
         if (scale < 0.5f) scale = 0.5f;
@@ -156,4 +162,9 @@ public partial class Scalepad : Control
     }
 
     public bool IsShow => Visible;
+
+    public void RefreshSafeAreaLayout()
+    {
+        ApplyPanelLayout();
+    }
 }

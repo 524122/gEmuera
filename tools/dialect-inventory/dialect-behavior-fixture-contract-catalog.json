@@ -1,0 +1,123 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.dialect-behavior-fixture-contracts",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-17",
+  "sourceDeclarationVocabularyWorkPackage": "M0-DIA-13",
+  "sourcePolicySurfaceWorkPackage": "M0-DIA-15",
+  "sourceDeclarationVocabularyHash": "766c3f843f39749010d61b693b1fbef41164ef04bff2ac27e1469e193d5d98c4",
+  "sourcePolicySurfaceHash": "2213bf38212c06c6d4d9ffd1cb12c095f62ceaa17b544d651cea915e27c9e012",
+  "expectedContractCount": 10,
+  "contracts": [
+    {
+      "behaviorKeyId": "call.extra-arguments.v1",
+      "fixtureId": "DIA-CALL-EXTRA-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "call.private-argument-shape.v1",
+      "fixtureId": "DIA-CALL-PRIVATE-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "display.history-capacity.v1",
+      "fixtureId": "DIA-DISPLAY-HISTORY-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "display.refresh-timing.v1",
+      "fixtureId": "DIA-DISPLAY-TIMING-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "function.snake-fallen-state.v1",
+      "fixtureId": "DIA-FUNC-FALLEN-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "instruction.scoped-variable-registration.v1",
+      "fixtureId": "DIA-REG-SCOPEDVAR-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "parser.startup-fault.v1",
+      "fixtureId": "DIA-PARSER-FAULT-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "parser.user-variable-resolution.v1",
+      "fixtureId": "DIA-PARSER-USERVAR-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "parser.warning-routing.v1",
+      "fixtureId": "DIA-PARSER-WARN-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    },
+    {
+      "behaviorKeyId": "resource.lazy-index.v1",
+      "fixtureId": "DIA-RESOURCE-LAZY-001",
+      "requiredProfileIds": ["v24pure", "snake"],
+      "requiredEvidenceKinds": ["baseline", "extension", "undeclared"],
+      "requiredTraceFacets": ["input", "observable-result", "error", "completion", "effect"],
+      "fixtureContractStatus": "Planned",
+      "behaviorEvidenceStatus": "Uncovered",
+      "runtimeStatus": "NotImplemented",
+      "interfaceImplementationStatus": "BlockedByFixture"
+    }
+  ]
+}

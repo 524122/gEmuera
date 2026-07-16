@@ -54,6 +54,7 @@ namespace MinorShift.Emuera.GameView
 		public bool IsLineEnd = true;
 		public Color? TextBackgroundColor = null;
 		public bool BitmapCacheEnabled = false;
+		public bool DynamicMapFunctionScoped = false;
 		//EmueraConsole parent;
 		ConsoleButtonString[] buttons;
 		DisplayLineAlignment align;

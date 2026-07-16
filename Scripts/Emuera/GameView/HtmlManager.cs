@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-using System.Text.RegularExpressions;
 using MinorShift.Emuera.Sub;
 //using System.Drawing;
 using MinorShift.Emuera.GameData.Expression;
@@ -446,28 +445,28 @@ namespace MinorShift.Emuera.GameView
 		public static string[] HtmlTagSplit(string str)
 		{
 			List<string> strList = new List<string>();
-			StringStream st = new StringStream(str);
-			int found = -1;
-			while (!st.EOS)
+			int segmentStart = 0;
+			int searchStart = 0;
+			while (searchStart < str.Length)
 			{
-				found = st.Find('<');
-				if (found < 0)
-				{
-					strList.Add(st.Substring());
+				int tagStart = str.IndexOf('<', searchStart);
+				if (tagStart < 0)
 					break;
-				}
-				else if (found > 0)
+				if (!TryReadSupportedHtmlTagAt(str, tagStart, out _, out int tagEnd))
 				{
-					strList.Add(st.Substring(st.CurrentPosition, found));
-					st.CurrentPosition += found;
+					if (LooksLikeSupportedHtmlTagStart(str, tagStart))
+						return null;
+					searchStart = tagStart + 1;
+					continue;
 				}
-				found = st.Find('>');
-				if(found < 0)
-					return null;
-				found++;
-				strList.Add(st.Substring(st.CurrentPosition, found));
-				st.CurrentPosition += found;
+				if (tagStart > segmentStart)
+					strList.Add(str.Substring(segmentStart, tagStart - segmentStart));
+				strList.Add(str.Substring(tagStart, tagEnd - tagStart + 1));
+				segmentStart = tagEnd + 1;
+				searchStart = segmentStart;
 			}
+			if (segmentStart < str.Length)
+				strList.Add(str.Substring(segmentStart));
 			string[] ret = new string[strList.Count];
 			strList.CopyTo(ret);
 			return ret;
@@ -666,8 +665,173 @@ namespace MinorShift.Emuera.GameView
 
 		public static string Html2PlainText(string str)
 		{
-			string ret = Regex.Replace(str, "\\<[^<]*\\>", "");
+			if (string.IsNullOrEmpty(str))
+				return str;
+			// eraFL 等脚本会把 <A>/<C>/<S> 当作正文等级标记；这里只剥离本解析器支持的标签，
+			// 未知尖括号文本必须原样保留，避免 HTML_TOPLAINTEXT 误删游戏内容。
+			StringBuilder builder = new StringBuilder(str.Length);
+			int segmentStart = 0;
+			int searchStart = 0;
+			while (searchStart < str.Length)
+			{
+				int tagStart = str.IndexOf('<', searchStart);
+				if (tagStart < 0)
+					break;
+				if (!TryReadSupportedHtmlTagAt(str, tagStart, out string tagName, out int tagEnd) ||
+					ShouldKeepBareStyleTagAsText(str, tagStart, tagName, tagEnd))
+				{
+					searchStart = tagStart + 1;
+					continue;
+				}
+				if (tagStart > segmentStart)
+					builder.Append(str, segmentStart, tagStart - segmentStart);
+				segmentStart = tagEnd + 1;
+				searchStart = segmentStart;
+			}
+			if (segmentStart < str.Length)
+				builder.Append(str, segmentStart, str.Length - segmentStart);
+			string ret = builder.ToString();
 			return Unescape(ret);
+		}
+
+		private static bool TryReadSupportedHtmlTagAt(string source, int tagStart, out string tagName, out int tagEnd)
+		{
+			tagName = null;
+			tagEnd = -1;
+			if (string.IsNullOrEmpty(source) || tagStart < 0 || tagStart >= source.Length || source[tagStart] != '<')
+				return false;
+			if (tagStart + 4 <= source.Length && source.Substring(tagStart, 4).Equals("<!--", StringComparison.Ordinal))
+			{
+				int commentEnd = source.IndexOf("-->", tagStart + 4, StringComparison.Ordinal);
+				if (commentEnd < 0)
+					return false;
+				tagName = "!--";
+				tagEnd = commentEnd + 2;
+				return true;
+			}
+
+			int nameStart = tagStart + 1;
+			if (nameStart < source.Length && source[nameStart] == '/')
+				nameStart++;
+			if (nameStart >= source.Length || !char.IsLetter(source[nameStart]))
+				return false;
+			int nameEnd = nameStart + 1;
+			while (nameEnd < source.Length && char.IsLetterOrDigit(source[nameEnd]))
+				nameEnd++;
+			tagName = source.Substring(nameStart, nameEnd - nameStart);
+			if (!IsSupportedHtmlTagName(tagName))
+				return false;
+			if (nameEnd < source.Length && source[nameEnd] != '>' && source[nameEnd] != '/' && !char.IsWhiteSpace(source[nameEnd]))
+				return false;
+			tagEnd = FindHtmlTagEnd(source, nameEnd);
+			return tagEnd >= 0;
+		}
+
+		private static bool ShouldKeepBareStyleTagAsText(string source, int tagStart, string tagName, int tagEnd)
+		{
+			if (!IsHtmlStyleTag(tagName) || IsHtmlEndTagAt(source, tagStart) || !IsBareHtmlTag(source, tagStart, tagName, tagEnd))
+				return false;
+			return !HasMatchingEndTag(source, tagName, tagEnd + 1);
+		}
+
+		private static bool IsHtmlEndTagAt(string source, int tagStart)
+		{
+			return tagStart + 1 < source.Length && source[tagStart + 1] == '/';
+		}
+
+		private static bool IsBareHtmlTag(string source, int tagStart, string tagName, int tagEnd)
+		{
+			int pos = tagStart + 1;
+			if (pos < source.Length && source[pos] == '/')
+				pos++;
+			pos += tagName.Length;
+			while (pos < tagEnd && char.IsWhiteSpace(source[pos]))
+				pos++;
+			return pos == tagEnd;
+		}
+
+		private static bool HasMatchingEndTag(string source, string tagName, int searchStart)
+		{
+			int tagStart = source.IndexOf("</", searchStart, StringComparison.Ordinal);
+			while (tagStart >= 0)
+			{
+				if (TryReadSupportedHtmlTagAt(source, tagStart, out string endTagName, out _) &&
+					endTagName.Equals(tagName, StringComparison.OrdinalIgnoreCase))
+					return true;
+				tagStart = source.IndexOf("</", tagStart + 2, StringComparison.Ordinal);
+			}
+			return false;
+		}
+
+		private static bool LooksLikeSupportedHtmlTagStart(string source, int tagStart)
+		{
+			return TryReadHtmlTagNameStart(source, tagStart, out string tagName) && IsSupportedHtmlTagName(tagName);
+		}
+
+		private static bool TryReadHtmlTagNameStart(string source, int tagStart, out string tagName)
+		{
+			tagName = null;
+			if (string.IsNullOrEmpty(source) || tagStart < 0 || tagStart >= source.Length || source[tagStart] != '<')
+				return false;
+			if (tagStart + 4 <= source.Length && source.Substring(tagStart, 4).Equals("<!--", StringComparison.Ordinal))
+			{
+				tagName = "!--";
+				return true;
+			}
+			int nameStart = tagStart + 1;
+			if (nameStart < source.Length && source[nameStart] == '/')
+				nameStart++;
+			if (nameStart >= source.Length || !char.IsLetter(source[nameStart]))
+				return false;
+			int nameEnd = nameStart + 1;
+			while (nameEnd < source.Length && char.IsLetterOrDigit(source[nameEnd]))
+				nameEnd++;
+			if (nameEnd < source.Length && source[nameEnd] != '>' && source[nameEnd] != '/' && !char.IsWhiteSpace(source[nameEnd]))
+				return false;
+			tagName = source.Substring(nameStart, nameEnd - nameStart);
+			return true;
+		}
+
+		private static int FindHtmlTagEnd(string source, int searchStart)
+		{
+			char quote = '\0';
+			for (int i = searchStart; i < source.Length; i++)
+			{
+				char c = source[i];
+				if (quote != '\0')
+				{
+					if (c == quote)
+						quote = '\0';
+					continue;
+				}
+				if (c == '\'' || c == '"')
+				{
+					quote = c;
+					continue;
+				}
+				if (c == '>')
+					return i;
+			}
+			return -1;
+		}
+
+		private static bool IsSupportedHtmlTagName(string tagName)
+		{
+			if (string.IsNullOrEmpty(tagName))
+				return false;
+			if (tagName.Equals("!--", StringComparison.Ordinal))
+				return true;
+			if (IsHtmlStyleTag(tagName))
+				return true;
+			return tagName.Equals("p", StringComparison.OrdinalIgnoreCase)
+				|| tagName.Equals("nobr", StringComparison.OrdinalIgnoreCase)
+				|| tagName.Equals("br", StringComparison.OrdinalIgnoreCase)
+				|| tagName.Equals("button", StringComparison.OrdinalIgnoreCase)
+				|| tagName.Equals("nonbutton", StringComparison.OrdinalIgnoreCase)
+				|| tagName.Equals("clearbutton", StringComparison.OrdinalIgnoreCase)
+				|| tagName.Equals("img", StringComparison.OrdinalIgnoreCase)
+				|| tagName.Equals("shape", StringComparison.OrdinalIgnoreCase)
+				|| tagName.Equals("div", StringComparison.OrdinalIgnoreCase);
 		}
 
 		public static string Escape(string str)
@@ -1137,9 +1301,26 @@ namespace MinorShift.Emuera.GameView
 						if (state.CurrentButtonTag != null || state.FontStyle != FontStyle.Regular || state.FonttagList.Count > 0)
 							throw new CodeEE("閉じられていないタグがあります");
 						HtmlDivTag divTag = new HtmlDivTag();
+						bool isSelfClosing = false;
 						while (wc != null && !wc.EOL)
 						{
 							word = wc.Current as IdentifierWord;
+							if (word == null)
+							{
+								// 检测自闭合语法：`<div ... />`
+								// LexicalAnalyzer 将 `/` 解析为 OperatorCode.Div
+								OperatorWord slashOp = wc.Current as OperatorWord;
+								if (slashOp != null && slashOp.Code == OperatorCode.Div)
+								{
+									wc.ShiftNext();
+									if (wc.EOL)
+									{
+										isSelfClosing = true;
+										break;
+									}
+								}
+								goto error;
+							}
 							wc.ShiftNext();
 							OperatorWord op = wc.Current as OperatorWord;
 							wc.ShiftNext();
@@ -1203,6 +1384,15 @@ namespace MinorShift.Emuera.GameView
 							throw new CodeEE("<" + tag + ">タグにwidth属性が設定されていません");
 						if (divTag.Height == null)
 							throw new CodeEE("<" + tag + ">タグにheight属性が設定されていません");
+
+						// 自闭合 div 直接返回空子行的 ConsoleDivPart，不需要 ReadDivInnerHtml
+						if (isSelfClosing)
+						{
+							return new ConsoleDivPart(divTag.X, divTag.Y, divTag.Width, divTag.Height,
+								divTag.Depth, divTag.Color, divTag.StyledBox, divTag.IsRelative, divTag.Display,
+								new ConsoleDisplayLine[0]);
+						}
+
 						state.PendingDivTag = divTag;
 						return null;
 					}
@@ -1544,7 +1734,8 @@ namespace MinorShift.Emuera.GameView
 					break;
 				if (isHtmlTagAt(source, tagStart, "div", false))
 				{
-					depth++;
+					if (!isSelfClosingHtmlTag(source, tagStart))
+						depth++;
 				}
 				else if (isHtmlTagAt(source, tagStart, "div", true))
 				{
@@ -1585,6 +1776,19 @@ namespace MinorShift.Emuera.GameView
 				return false;
 			int next = pos + name.Length;
 			return next >= source.Length || source[next] == '>' || char.IsWhiteSpace(source[next]);
+		}
+
+		private static bool isSelfClosingHtmlTag(string source, int tagStart)
+		{
+			if (tagStart < 0 || tagStart >= source.Length || source[tagStart] != '<')
+				return false;
+			int tagEnd = source.IndexOf('>', tagStart);
+			if (tagEnd < 0)
+				return false;
+			int pos = tagEnd - 1;
+			while (pos > tagStart && char.IsWhiteSpace(source[pos]))
+				pos--;
+			return pos > tagStart && source[pos] == '/';
 		}
 
 		private static MixedNum parseMixedNum(string tag, string attrName, string attrValue)

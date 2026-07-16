@@ -265,13 +265,13 @@ namespace MinorShift.Emuera.GameData
 
 		private void changeVariableSizeData(string line, ScriptPosition position)
 		{
-			string[] tokens = line.Split(',');
-			if (tokens.Length < 2)
+			int tokenCount = ReadCsvHeadFields5(line, out string token0, out string token1, out string token2, out string token3, out string token4);
+			if (tokenCount < 2)
 			{
 				ParserMediator.Warn("\",\"が必要です", position, 1);
 				return;
 			}
-			string idtoken = tokens[0].Trim();
+			string idtoken = token0.Trim();
 			VariableIdentifier id = VariableIdentifier.GetVariableId(idtoken);
 			if (id == null)
 			{
@@ -290,7 +290,7 @@ namespace MinorShift.Emuera.GameData
 			}
             int length2 = 0;
             int length3 = 0;
-			if (!int.TryParse(tokens[1], out int length))
+			if (!int.TryParse(token1, out int length))
 			{
 				ParserMediator.Warn("二つ目の値を整数値として認識できません", position, 1);
 				return;
@@ -308,7 +308,7 @@ namespace MinorShift.Emuera.GameData
 					ParserMediator.Warn("使用禁止にできない変数に対して負の配列長が指定されています", position, 2);
 					return;
 				}
-                if (tokens.Length > 2 && tokens[2].Length > 0 && tokens[2].Trim().Length > 0 && char.IsDigit((tokens[2].Trim())[0]))
+                if (tokenCount > 2 && StartsWithDigitAfterTrim(token2))
                 {
                     ParserMediator.Warn("一次元配列のサイズ指定に不必要なデータは無視されます", position, 0);
                 }
@@ -317,7 +317,7 @@ namespace MinorShift.Emuera.GameData
 			}
 			if (id.IsArray1D)
 			{
-                if (tokens.Length > 2 && tokens[2].Length > 0 && tokens[2].Trim().Length > 0 && char.IsDigit((tokens[2].Trim())[0]))
+                if (tokenCount > 2 && StartsWithDigitAfterTrim(token2))
                 {
                     ParserMediator.Warn("一次元配列のサイズ指定に不必要なデータは無視されます", position, 0);
                 }
@@ -339,16 +339,16 @@ namespace MinorShift.Emuera.GameData
 			}
 			else if (id.IsArray2D)
 			{
-				if (tokens.Length < 3)
+				if (tokenCount < 3)
 				{
 					ParserMediator.Warn("二次元配列のサイズ指定には2つの数値が必要です", position, 1);
 					return;
 				}
-                if (tokens.Length > 3 && tokens[3].Length > 0 && tokens[3].Trim().Length > 0 && char.IsDigit((tokens[3].Trim())[0]))
+                if (tokenCount > 3 && StartsWithDigitAfterTrim(token3))
                 {
                     ParserMediator.Warn("二次元配列のサイズ指定に不必要なデータは無視されます", position, 0);
                 }
-                if (!int.TryParse(tokens[2], out length2))
+                if (!int.TryParse(token2, out length2))
 				{
 					ParserMediator.Warn("三つ目の値を整数値として認識できません", position, 1);
 					return;
@@ -371,21 +371,21 @@ namespace MinorShift.Emuera.GameData
 			}
 			else if (id.IsArray3D)
 			{
-				if (tokens.Length < 4)
+				if (tokenCount < 4)
 				{
 					ParserMediator.Warn("三次元配列のサイズ指定には3つの数値が必要です", position, 1);
 					return;
 				}
-                if (tokens.Length > 4 && tokens[4].Length > 0 && tokens[4].Trim().Length > 0 && char.IsDigit((tokens[4].Trim())[0]))
+                if (tokenCount > 4 && StartsWithDigitAfterTrim(token4))
                 {
                     ParserMediator.Warn("三次元配列のサイズ指定に不必要なデータは無視されます", position, 0);
                 }
-                if (!int.TryParse(tokens[2], out length2))
+                if (!int.TryParse(token2, out length2))
 				{
 					ParserMediator.Warn("三つ目の値を整数値として認識できません", position, 1);
 					return;
 				}
-				if (!int.TryParse(tokens[3], out length3))
+				if (!int.TryParse(token3, out length3))
 				{
 					ParserMediator.Warn("四つ目の値を整数値として認識できません", position, 1);
 					return;
@@ -629,7 +629,7 @@ check1break:
 			for(int i = 0; i< countNameCsv;i++)
 			{
 				names[i] = new string[MaxDataList[i]];
-				nameToIntDics[i] = new Dictionary<string, int>();
+				nameToIntDics[i] = new Dictionary<string, int>(MaxDataList[i]);
 				aliases[i] = null;
 			}
 			ItemPrice = new Int64[MaxDataList[itemIndex]];
@@ -671,16 +671,16 @@ check1break:
 				string[] nameArray = names[i];
 				for (int j = 0; j < nameArray.Length; j++)
 				{
-					if (!string.IsNullOrEmpty(nameArray[j]) && !nameToIntDics[i].ContainsKey(nameArray[j]))
-						nameToIntDics[i].Add(nameArray[j], j);
+					if (!string.IsNullOrEmpty(nameArray[j]))
+						nameToIntDics[i].TryAdd(nameArray[j], j);
 				}
 				Dictionary<string, int> aliasDict = aliases[i];
 				if (aliasDict == null)
 					continue;
 				foreach (var alias in aliasDict)
 				{
-					if (!string.IsNullOrEmpty(alias.Key) && !nameToIntDics[i].ContainsKey(alias.Key))
-						nameToIntDics[i].Add(alias.Key, alias.Value);
+					if (!string.IsNullOrEmpty(alias.Key))
+						nameToIntDics[i].TryAdd(alias.Key, alias.Value);
 				}
 			}
 			//if (!Program.AnalysisMode)
@@ -688,15 +688,16 @@ check1break:
 			loadGlobalVarExSetting(csvDir, disp);
 
 			//逆引き辞書を作成2 (RELATION)
+			relationDic.EnsureCapacity(CharacterTmplList.Count * 3);
 			for (int i = 0; i < CharacterTmplList.Count; i++)
 			{
 				CharacterTemplate tmpl = CharacterTmplList[i];
-				if (!string.IsNullOrEmpty(tmpl.Name) && !relationDic.ContainsKey(tmpl.Name))
-					relationDic.Add(tmpl.Name, (int)tmpl.No);
-				if (!string.IsNullOrEmpty(tmpl.Callname) && !relationDic.ContainsKey(tmpl.Callname))
-                    relationDic.Add(tmpl.Callname, (int)tmpl.No);
-				if (!string.IsNullOrEmpty(tmpl.Nickname) && !relationDic.ContainsKey(tmpl.Nickname))
-                    relationDic.Add(tmpl.Nickname, (int)tmpl.No);
+				if (!string.IsNullOrEmpty(tmpl.Name))
+					relationDic.TryAdd(tmpl.Name, (int)tmpl.No);
+				if (!string.IsNullOrEmpty(tmpl.Callname))
+                    relationDic.TryAdd(tmpl.Callname, (int)tmpl.No);
+				if (!string.IsNullOrEmpty(tmpl.Nickname))
+                    relationDic.TryAdd(tmpl.Nickname, (int)tmpl.No);
 			}
 		}
 
@@ -754,37 +755,38 @@ check1break:
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					string[] tokens = st.Substring().Split(',');
-					if (tokens.Length < 2)
+					string line = st.Substring();
+					int tokenCount = ReadCsvHeadFields(line, out string token0, out _, out _);
+					if (tokenCount < 2)
 					{
 						ParserMediator.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-					if (tokens[0].Length == 0)
+					if (token0.Length == 0)
 					{
 						ParserMediator.Warn("\",\"で始まっています", position, 1);
 						continue;
 					}
 
-					string key = tokens[0].Trim();
+					string key = token0.Trim();
 					if (key.Equals("GLOBAL_MAPS", Config.SCVariable))
-						addVarExtNames(GlobalSaveMaps, tokens);
+						addVarExtNames(GlobalSaveMaps, line);
 					else if (key.Equals("SAVE_MAPS", Config.SCVariable))
-						addVarExtNames(SaveMaps, tokens);
+						addVarExtNames(SaveMaps, line);
 					else if (key.Equals("GLOBAL_XMLS", Config.SCVariable))
-						addVarExtNames(GlobalSaveXmls, tokens);
+						addVarExtNames(GlobalSaveXmls, line);
 					else if (key.Equals("SAVE_XMLS", Config.SCVariable))
-						addVarExtNames(SaveXmls, tokens);
+						addVarExtNames(SaveXmls, line);
 					else if (key.Equals("GLOBAL_DTS", Config.SCVariable))
-						addVarExtNames(GlobalSaveDTs, tokens);
+						addVarExtNames(GlobalSaveDTs, line);
 					else if (key.Equals("SAVE_DTS", Config.SCVariable))
-						addVarExtNames(SaveDTs, tokens);
+						addVarExtNames(SaveDTs, line);
 					else if (key.Equals("STATIC_MAPS", Config.SCVariable))
-						addVarExtNames(StaticMaps, tokens);
+						addVarExtNames(StaticMaps, line);
 					else if (key.Equals("STATIC_XMLS", Config.SCVariable))
-						addVarExtNames(StaticXmls, tokens);
+						addVarExtNames(StaticXmls, line);
 					else if (key.Equals("STATIC_DTS", Config.SCVariable))
-						addVarExtNames(StaticDTs, tokens);
+						addVarExtNames(StaticDTs, line);
 				}
 			}
 			catch
@@ -801,10 +803,24 @@ check1break:
 			}
 		}
 
-		private static void addVarExtNames(HashSet<string> target, string[] tokens)
+		private static void addVarExtNames(HashSet<string> target, string line)
 		{
-			for (int i = 1; i < tokens.Length; i++)
-				target.Add(tokens[i].Trim());
+			if (line == null)
+				line = "";
+
+			// VarExt*.csv 允许一行声明多个保存域。原核心用裸逗号 Split，
+			// 这里逐字段扫描并保留空字段语义，避免为每行创建完整 string[]。
+			int fieldIndex = 0;
+			int start = 0;
+			for (int i = 0; i <= line.Length; i++)
+			{
+				if (i < line.Length && line[i] != ',')
+					continue;
+				if (fieldIndex > 0)
+					target.Add((i == start ? "" : line.Substring(start, i - start)).Trim());
+				fieldIndex++;
+				start = i + 1;
+			}
 		}
 
 		public bool isDefined(VariableCode varCode, string str)
@@ -833,8 +849,8 @@ check1break:
 			if (filepaths == null || filepaths.Count == 0 || string.IsNullOrEmpty(varname) || varlength <= 0)
 				return;
 
-			Dictionary<string, int> dict = new Dictionary<string, int>();
-			Dictionary<string, string> definedAt = new Dictionary<string, string>();
+			Dictionary<string, int> dict = new Dictionary<string, int>(varlength);
+			Dictionary<string, string> definedAt = new Dictionary<string, string>(varlength);
 			for (int i = 0; i < filepaths.Count; i++)
 			{
 				string[] nameArray = new string[varlength];
@@ -1397,16 +1413,20 @@ check1break:
 				return;
 			}
 			List<KeyValuePair<string, string>> csvPaths = Config.GetFiles(csvDir, "CHARA*.CSV");
+			EnsureCharacterTemplateListCapacity(csvPaths.Count);
 			for (int i = 0; i < csvPaths.Count; i++)
 				loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
 #if(UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
             csvPaths = Config.GetFiles(csvDir, "Chara*.CSV");
+            EnsureCharacterTemplateListCapacity(csvPaths.Count);
             for(int i = 0; i < csvPaths.Count; i++)
                 loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
             csvPaths = Config.GetFiles(csvDir, "CHARA*.csv");
+            EnsureCharacterTemplateListCapacity(csvPaths.Count);
             for(int i = 0; i < csvPaths.Count; i++)
                 loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
             csvPaths = Config.GetFiles(csvDir, "Chara*.csv");
+            EnsureCharacterTemplateListCapacity(csvPaths.Count);
             for(int i = 0; i < csvPaths.Count; i++)
                 loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
 #endif
@@ -1428,8 +1448,8 @@ check1break:
                 tmpl = CharacterTmplList[i];
                 tmpl.SetSpFlag();
             }
-			Dictionary<Int64, CharacterTemplate> nList = new Dictionary<Int64, CharacterTemplate>();
-			Dictionary<Int64, CharacterTemplate> spList = new Dictionary<Int64, CharacterTemplate>();
+			Dictionary<Int64, CharacterTemplate> nList = new Dictionary<Int64, CharacterTemplate>(count);
+			Dictionary<Int64, CharacterTemplate> spList = new Dictionary<Int64, CharacterTemplate>(Config.CompatiSPChara ? count : 0);
             for(int i = 0; i < count; ++i)
             {
                 tmpl = CharacterTmplList[i];
@@ -1451,6 +1471,15 @@ check1break:
 			}
 		}
 
+		private void EnsureCharacterTemplateListCapacity(int additionalFiles)
+		{
+			if (additionalFiles <= 0)
+				return;
+			int target = CharacterTmplList.Count + additionalFiles;
+			if (CharacterTmplList.Capacity < target)
+				CharacterTmplList.Capacity = target;
+		}
+
 		private void loadCharacterDataFile(string csvPath, string csvName, bool disp)
 		{
 			CharacterTemplate tmpl = null;
@@ -1470,28 +1499,29 @@ check1break:
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					string[] tokens = st.Substring().Split(',');
-					if (tokens.Length < 2)
+					string line = st.Substring();
+					int tokenCount = ReadCsvHeadFields(line, out string token0, out string token1, out string token2);
+					if (tokenCount < 2)
 					{
 						ParserMediator.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-					if (tokens[0].Length == 0)
+					if (token0.Length == 0)
 					{
 						ParserMediator.Warn("\",\"で始まっています", position, 1);
 						continue;
 					}
-					if ((tokens[0].Equals("NO", Config.SCVariable))
-						|| (tokens[0].Equals("番号", Config.SCVariable)))
+					if ((token0.Equals("NO", Config.SCVariable))
+						|| (token0.Equals("番号", Config.SCVariable)))
 					{
 						if (tmpl != null)
 						{
 							ParserMediator.Warn("番号が二重に定義されました", position, 1);
 							continue;
 						}
-						if (!Int64.TryParse(tokens[1].TrimEnd(), out index))
+						if (!Int64.TryParse(token1.TrimEnd(), out index))
 						{
-							ParserMediator.Warn(tokens[1] + "を整数値に変換できません", position, 1);
+							ParserMediator.Warn(token1 + "を整数値に変換できません", position, 1);
 							continue;
 						}
 						tmpl = new CharacterTemplate(index, this);
@@ -1517,7 +1547,7 @@ check1break:
 						ParserMediator.Warn("番号が定義される前に他のデータが始まりました", position, 1);
 						continue;
 					}
-					toCharacterTemplate(position, tmpl, tokens);
+					toCharacterTemplate(position, tmpl, token0, token1, token2, tokenCount);
 				}
 			}
 			catch
@@ -1535,6 +1565,65 @@ check1break:
 			}
 		}
 
+		private static int ReadCsvHeadFields(string line, out string token0, out string token1, out string token2)
+		{
+			return ReadCsvHeadFields5(line, out token0, out token1, out token2, out _, out _);
+		}
+
+		private static int ReadCsvHeadFields5(string line, out string token0, out string token1, out string token2, out string token3, out string token4)
+		{
+			token0 = "";
+			token1 = "";
+			token2 = "";
+			token3 = "";
+			token4 = "";
+			if (line == null)
+				line = "";
+
+			// CSV 热路径只会读取前几个字段。这里保留原版裸逗号 Split 语义，
+			// 但不为整行分配 string[]，避免上千个 CHARA*.CSV 启动加载时产生大量短命对象。
+			int count = 1;
+			int fieldIndex = 0;
+			int start = 0;
+			for (int i = 0; i <= line.Length; i++)
+			{
+				if (i < line.Length && line[i] != ',')
+					continue;
+				if (fieldIndex < 5)
+				{
+					string value = i == start ? "" : line.Substring(start, i - start);
+					if (fieldIndex == 0)
+						token0 = value;
+					else if (fieldIndex == 1)
+						token1 = value;
+					else if (fieldIndex == 2)
+						token2 = value;
+					else if (fieldIndex == 3)
+						token3 = value;
+					else if (fieldIndex == 4)
+						token4 = value;
+				}
+				fieldIndex++;
+				if (i >= line.Length)
+					break;
+				count++;
+				start = i + 1;
+			}
+			return count;
+		}
+
+		private static bool StartsWithDigitAfterTrim(string value)
+		{
+			if (string.IsNullOrEmpty(value))
+				return false;
+			for (int i = 0; i < value.Length; i++)
+			{
+				if (!char.IsWhiteSpace(value[i]))
+					return char.IsDigit(value[i]);
+			}
+			return false;
+		}
+
         private void SortCharacterTmplList()
         {
             CharacterTmplList.Sort((l, r) =>
@@ -1546,6 +1635,11 @@ check1break:
 			nicknameToTemplateMap.Clear();
 			callnameToTemplateMap.Clear();
 			masternameToTemplateMap.Clear();
+			int count = CharacterTmplList.Count;
+			nameToTemplateMap.EnsureCapacity(count);
+			nicknameToTemplateMap.EnsureCapacity(count);
+			callnameToTemplateMap.EnsureCapacity(count);
+			masternameToTemplateMap.EnsureCapacity(count);
 			for (int i = CharacterTmplList.Count - 1; i >= 0; i--)
 			{
 				CharacterTemplate tmpl = CharacterTmplList[i];
@@ -1607,6 +1701,11 @@ check1break:
 
 		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string[] tokens)
 		{
+			toCharacterTemplate(position, chara, tokens[0], tokens[1], tokens.Length >= 3 ? tokens[2] : "", tokens.Length);
+		}
+
+		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string token0, string token1, string token2, int tokenCount)
+		{
 			if (chara == null)
 				return;
 			int length;
@@ -1615,24 +1714,24 @@ check1break:
 			Dictionary<string, int> namearray;
 
 			string errPos = null;
-			string varname = tokens[0].ToUpper();
+			string varname = token0.ToUpper();
 			switch (varname)
 			{
 				case "NAME":
 				case "名前":
-					chara.Name = tokens[1];
+					chara.Name = token1;
 					return;
 				case "CALLNAME":
 				case "呼び名":
-					chara.Callname = tokens[1];
+					chara.Callname = token1;
 					return;
 				case "NICKNAME":
 				case "あだ名":
-					chara.Nickname = tokens[1];
+					chara.Nickname = token1;
 					return;
 				case "MASTERNAME":
 				case "主人の呼び方":
-					chara.Mastername = tokens[1];
+					chara.Mastername = token1;
 					return;
 				case "MARK":
 				case "刻印":
@@ -1703,7 +1802,7 @@ check1break:
 					errPos = "cstr.csv";
 					break;
 				default:
-					ParserMediator.Warn("\"" + tokens[0] + "\"は解釈できない識別子です", position, 1);
+					ParserMediator.Warn("\"" + token0 + "\"は解釈できない識別子です", position, 1);
 					return;
 			}
 			if (length < 0)
@@ -1716,7 +1815,7 @@ check1break:
 				ParserMediator.Warn(varname + "は禁止設定された変数です", position, 2);
 				return;
 			}
-			bool p1isNumeric = tryToInt64(tokens[1].TrimEnd(), out long p1);
+			bool p1isNumeric = tryToInt64(token1.TrimEnd(), out long p1);
 			if (p1isNumeric && ((p1 < 0) || (p1 >= length)))
 			{
 				ParserMediator.Warn(p1.ToString() + "は配列の範囲外です", position, 1);
@@ -1725,15 +1824,15 @@ check1break:
 			int index = (int)p1;
 			if ((!p1isNumeric) && (namearray != null))
 			{
-				if (!namearray.TryGetValue(tokens[1], out index))
+				if (!namearray.TryGetValue(token1, out index))
 				{
-					ParserMediator.Warn(errPos + "に\"" + tokens[1] + "\"の定義がありません", position, 1);
+					ParserMediator.Warn(errPos + "に\"" + token1 + "\"の定義がありません", position, 1);
 					//ParserMediator.Warn("\"" + tokens[1] + "\"は解釈できない識別子です", position, 1);
 					return;
 				}
 				else if (index >= length)
 				{
-					ParserMediator.Warn("\"" + tokens[1] + "\"は配列の範囲外です", position, 1);
+					ParserMediator.Warn("\"" + token1 + "\"は配列の範囲外です", position, 1);
 					return;
 				}
 			}
@@ -1742,23 +1841,23 @@ check1break:
 			{
 				if (p1isNumeric)
 					ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
-				else if (tokens[1].Length == 0)
+				else if (token1.Length == 0)
 					ParserMediator.Warn("二つ目の識別子がありません", position, 1);
 				else
-					ParserMediator.Warn("\"" + tokens[1] + "\"は解釈できない識別子です", position, 1);
+					ParserMediator.Warn("\"" + token1 + "\"は解釈できない識別子です", position, 1);
 				return;
 			}
 			if (strArray != null)
 			{
-				if (tokens.Length < 3)
+				if (tokenCount < 3)
 					ParserMediator.Warn("三つ目の識別子がありません", position, 1);
 				if (strArray.ContainsKey(index))
 					ParserMediator.Warn(varname + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
-				strArray[index] = tokens[2];
+				strArray[index] = token2;
 			}
 			else
 			{
-				if ((tokens.Length < 3) || !tryToInt64(tokens[2], out long p2))
+				if ((tokenCount < 3) || !tryToInt64(token2, out long p2))
 					p2 = 1;
 				if (intArray.ContainsKey(index))
 					ParserMediator.Warn(varname + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
@@ -1795,14 +1894,14 @@ check1break:
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					string[] tokens = st.Substring().Split(',');
-					if (tokens.Length < 2)
+					int tokenCount = ReadCsvHeadFields(st.Substring(), out string token0, out string token1, out _);
+					if (tokenCount < 2)
 					{
 						ParserMediator.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
 					int index;
-					if (!Int32.TryParse(tokens[0], out index))
+					if (!Int32.TryParse(token0, out index))
 					{
 						ParserMediator.Warn("一つ目の値を整数値に変換できません", position, 1);
 						continue;
@@ -1812,7 +1911,7 @@ check1break:
 						ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
 						continue;
 					}
-					target[index] = tokens[1];
+					target[index] = token1;
 				}
 			}
 			catch
@@ -1855,13 +1954,13 @@ check1break:
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					string[] tokens = st.Substring().Split(',');
-					if (tokens.Length < 2)
+					int tokenCount = ReadCsvHeadFields(st.Substring(), out string token0, out string token1, out string token2);
+					if (tokenCount < 2)
 					{
 						ParserMediator.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-                    if (!Int32.TryParse(tokens[0], out int index))
+                    if (!Int32.TryParse(token0, out int index))
                     {
                         ParserMediator.Warn("一つ目の値を整数値に変換できません", position, 1);
                         continue;
@@ -1875,14 +1974,14 @@ check1break:
 					{
 						ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
 						continue;
-					}
+                    }
                     if (!defined.Add(index))
                         ParserMediator.Warn(index.ToString() + "番目の要素はすでに定義されています（新しい値で上書きします）", position, 1);
-					target[index] = tokens[1];
-					if ((targetI != null) && (tokens.Length >= 3))
+					target[index] = token1;
+					if ((targetI != null) && (tokenCount >= 3))
 					{
 
-                        if (!Int64.TryParse(tokens[2].TrimEnd(), out long price))
+                        if (!Int64.TryParse(token2.TrimEnd(), out long price))
                         {
                             ParserMediator.Warn("金額が読み取れません", position, 1);
                             continue;
@@ -1932,27 +2031,26 @@ check1break:
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					string[] tokens = st.Substring().Split(',');
-					if (tokens.Length < 2)
+					int tokenCount = ReadCsvHeadFields(st.Substring(), out string token0, out string token1, out _);
+					if (tokenCount < 2)
 					{
 						ParserMediator.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-					if (!Int32.TryParse(tokens[0], out int index))
+					if (!Int32.TryParse(token0, out int index))
 					{
 						ParserMediator.Warn("一つ目の値を整数値に変換できません", position, 1);
 						continue;
 					}
-					string aliasName = tokens[1].Trim();
+					string aliasName = token1.Trim();
 					if (string.IsNullOrEmpty(aliasName))
 						continue;
-					if (target.ContainsKey(aliasName))
-					{
-						ParserMediator.Warn("別名\"" + aliasName + "\"は既に定義されています", position, 1);
-						continue;
+						if (!target.TryAdd(aliasName, index))
+						{
+							ParserMediator.Warn("別名\"" + aliasName + "\"は既に定義されています", position, 1);
+							continue;
+						}
 					}
-					target.Add(aliasName, index);
-				}
 			}
 			catch
 			{

@@ -19,8 +19,25 @@ namespace MinorShift.Emuera.GameData.Function
             {
                 this.create = create;
                 ReturnType = EraType.Integer;
-                argumentTypeArray = create ? new EraType[] { EraType.String, EraType.String } : new EraType[] { EraType.String };
+                argumentTypeArray = null;
                 CanRestructure = false;
+            }
+            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+            {
+                int expected = create ? 2 : 1;
+                if (arguments.Length != expected)
+                    return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+                string error = CheckXmlDocumentKeyArgument(name, arguments[0], 1);
+                if (error != null)
+                    return error;
+                if (create)
+                {
+                    if (arguments[1] == null)
+                        return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, 2);
+                    if (!arguments[1].IsString)
+                        return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 2);
+                }
+                return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -44,8 +61,14 @@ namespace MinorShift.Emuera.GameData.Function
             public XmlReleaseMethod()
             {
                 ReturnType = EraType.Integer;
-                argumentTypeArray = new EraType[] { EraType.String };
+                argumentTypeArray = null;
                 CanRestructure = false;
+            }
+            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+            {
+                if (arguments.Length != 1)
+                    return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+                return CheckXmlDocumentKeyArgument(name, arguments[0], 1);
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -62,8 +85,14 @@ namespace MinorShift.Emuera.GameData.Function
             public XmlToStrMethod()
             {
                 ReturnType = EraType.String;
-                argumentTypeArray = new EraType[] { EraType.String };
+                argumentTypeArray = null;
                 CanRestructure = false;
+            }
+            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+            {
+                if (arguments.Length != 1)
+                    return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+                return CheckXmlDocumentKeyArgument(name, arguments[0], 1);
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -339,6 +368,15 @@ namespace MinorShift.Emuera.GameData.Function
             return term.IsString ? term.GetStrValue(exm) ?? "" : term.GetIntValue(exm).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        static string CheckXmlDocumentKeyArgument(string name, IOperandTerm argument, int position)
+        {
+            if (argument == null)
+                return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, position);
+            if (!argument.IsInteger && !argument.IsString)
+                return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, position);
+            return null;
+        }
+
         static bool TryGetXmlDocument(string key, out XmlDocument document)
         {
             return RuntimeDataStore.XmlDocuments.TryGetValue(key ?? "", out document);
@@ -374,13 +412,32 @@ namespace MinorShift.Emuera.GameData.Function
             var document = new XmlDocument();
             try
             {
-                document.LoadXml(xml ?? "");
+                document.LoadXml(NormalizeXmlText(xml));
                 return document;
             }
             catch (XmlException e)
             {
                 throw new CodeEE(functionName + " received invalid XML: " + e.Message);
             }
+        }
+
+        static string NormalizeXmlText(string xml)
+        {
+            if (string.IsNullOrEmpty(xml))
+                return "";
+
+            int index = 0;
+            while (index < xml.Length)
+            {
+                char c = xml[index];
+                if (c == '\uFEFF' || char.IsWhiteSpace(c))
+                {
+                    index++;
+                    continue;
+                }
+                break;
+            }
+            return index == 0 ? xml : xml.Substring(index);
         }
 
         static XmlNodeList SelectXmlNodes(XmlDocument document, string path, string functionName)

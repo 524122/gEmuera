@@ -7,6 +7,10 @@
 bin/
 obj/
 
+# gdUnit4 6.1.3 ships its CLI as source under this directory.
+!addons/gdUnit4/bin/
+!addons/gdUnit4/bin/**
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -11,6 +11,8 @@ namespace MinorShift.Emuera.GameProc
 	{
 		private readonly Dictionary<string, List<string>> lazyLoadingTable =
 			new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, List<string>> lazyLoadingFileToFunctions =
+			new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 		private readonly Dictionary<string, long> lazyLoadingFilesTable =
 			new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
@@ -36,6 +38,7 @@ namespace MinorShift.Emuera.GameProc
 
 		const uint LazyMagicNumber = 0x4C415A59;
 		const uint LazyVersion = 3;
+		const int LazyRuntimeSlowLoadThresholdMs = 50;
 
 		public enum LazyStatus
 		{
@@ -52,11 +55,24 @@ namespace MinorShift.Emuera.GameProc
 		public void ResetLazyLoadingState()
 		{
 			lazyLoadingTable.Clear();
+			lazyLoadingFileToFunctions.Clear();
 			lazyLoadingFilesTable.Clear();
 			LazyLoadingFiles.Clear();
 			DeletedFiles.Clear();
 			ChangedFiles.Clear();
 			LazyCurrentLazyStatus = LazyStatus.Disabled;
+		}
+
+		/// <summary>
+		/// Invalidates the static Android working-directory memo used by lazy
+		/// loading.  The table itself is instance-owned, but the memo can survive
+		/// a process-wide canary switch and otherwise point a new candidate at the
+		/// previous game's fallback directory.
+		/// </summary>
+		internal static void ResetCanarySessionState()
+		{
+			cachedLazyLoadingSourceDir = null;
+			cachedLazyLoadingWorkingDir = null;
 		}
 
 		public bool TryLazyLoadErb(string functionName)
@@ -66,16 +82,19 @@ namespace MinorShift.Emuera.GameProc
 			if (!lazyLoadingTable.TryGetValue(functionName, out List<string> files) || files.Count == 0)
 				return false;
 
-			List<string> filesToLoad = files.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+			List<string> filesToLoad = new List<string>(files);
 			var loader = new ErbLoader(console, exm, this);
 			int start = Environment.TickCount;
 			if (loader.LoadErbsAsync(filesToLoad, labelDic, true).GetAwaiter().GetResult())
 			{
-				RecordLazyLoadingRuntime(functionName, filesToLoad.Count, Environment.TickCount - start);
+				int elapsedMs = Environment.TickCount - start;
+				RecordLazyLoadingRuntime(functionName, filesToLoad.Count, elapsedMs);
+				LogSlowLazyLoadingRuntime(functionName, filesToLoad.Count, elapsedMs, true);
 				RemoveLazyLoadingEntriesForFiles(filesToLoad);
 				return true;
 			}
 
+			LogSlowLazyLoadingRuntime(functionName, filesToLoad.Count, Environment.TickCount - start, false);
 			console.PrintSystemLine("LazyLoading: failed to load ERB for @" + functionName);
 			return false;
 		}
@@ -107,6 +126,14 @@ namespace MinorShift.Emuera.GameProc
 				lazyLoadingRuntimeMaxMs = elapsedMs;
 				lazyLoadingRuntimeMaxFunction = functionName;
 			}
+		}
+
+		private static void LogSlowLazyLoadingRuntime(string functionName, int fileCount, int elapsedMs, bool success)
+		{
+			if (elapsedMs < LazyRuntimeSlowLoadThresholdMs)
+				return;
+			GenericUtils.Warn(EmueraLogCategory.Load, () =>
+				$"[LOADSAVE] lazy ERB runtime load slow: function=@{functionName}, files={fileCount}, elapsed={elapsedMs}ms, success={success}, platform={Godot.OS.GetName()}");
 		}
 
 		public bool PreloadEventLoadLazyErbs()
@@ -152,17 +179,74 @@ namespace MinorShift.Emuera.GameProc
 
 		private void RemoveLazyLoadingEntriesForFiles(IReadOnlyCollection<string> loadedFiles)
 		{
-			var loadedFileSet = new HashSet<string>(loadedFiles, StringComparer.OrdinalIgnoreCase);
-			foreach (string functionName in lazyLoadingTable.Keys.ToList())
-			{
-				List<string> paths = lazyLoadingTable[functionName];
-				paths.RemoveAll(loadedFileSet.Contains);
-				if (paths.Count == 0)
-					lazyLoadingTable.Remove(functionName);
-			}
-
 			foreach (string file in loadedFiles)
-				LazyLoadingFiles.Remove(NormalizeFullPath(file));
+			{
+				string relative = RelativeErbPath(file);
+				string normalizedFull = NormalizeFullPath(ErbPath(relative));
+				if (lazyLoadingFileToFunctions.TryGetValue(relative, out List<string> functions))
+				{
+					for (int i = 0; i < functions.Count; i++)
+					{
+						string functionName = functions[i];
+						if (!lazyLoadingTable.TryGetValue(functionName, out List<string> paths))
+							continue;
+						paths.RemoveAll(path => string.Equals(NormalizeFullPath(path), normalizedFull, StringComparison.OrdinalIgnoreCase));
+						if (paths.Count == 0)
+							lazyLoadingTable.Remove(functionName);
+					}
+					lazyLoadingFileToFunctions.Remove(relative);
+				}
+				else
+				{
+					foreach (string functionName in lazyLoadingTable.Keys.ToList())
+					{
+						List<string> paths = lazyLoadingTable[functionName];
+						paths.RemoveAll(path => string.Equals(NormalizeFullPath(path), normalizedFull, StringComparison.OrdinalIgnoreCase));
+						if (paths.Count == 0)
+							lazyLoadingTable.Remove(functionName);
+					}
+				}
+				LazyLoadingFiles.Remove(normalizedFull);
+			}
+		}
+
+		private void AddLazyLoadingEntry(string functionName, string fileName)
+		{
+			// lazy 表需要同时支持“按函数找文件”和“按文件删除所有函数映射”。
+			// 运行时命中一个角色 ERB 后，如果只保存 function -> files，就必须扫描整张表；
+			// 上千角色文件在手机端会把一次按需加载放大成明显尖峰，所以这里维护反向索引。
+			if (string.IsNullOrEmpty(functionName) || string.IsNullOrEmpty(fileName))
+				return;
+
+			string relative = NormalizeRelativePath(fileName);
+			string fullPath = ErbPath(relative);
+			if (!lazyLoadingTable.TryGetValue(functionName, out List<string> paths))
+			{
+				paths = new List<string>();
+				lazyLoadingTable.Add(functionName, paths);
+			}
+			if (!ContainsIgnoreCase(paths, fullPath))
+				paths.Add(fullPath);
+
+			if (!lazyLoadingFileToFunctions.TryGetValue(relative, out List<string> functions))
+			{
+				functions = new List<string>();
+				lazyLoadingFileToFunctions.Add(relative, functions);
+			}
+			if (!ContainsIgnoreCase(functions, functionName))
+				functions.Add(functionName);
+
+			LazyLoadingFiles.Add(NormalizeFullPath(fullPath));
+		}
+
+		private static bool ContainsIgnoreCase(List<string> values, string value)
+		{
+			for (int i = 0; i < values.Count; i++)
+			{
+				if (string.Equals(values[i], value, StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+			return false;
 		}
 
 		public bool IsFunctionInLazyLoadingTable(string functionName)
@@ -268,15 +352,7 @@ namespace MinorShift.Emuera.GameProc
 						if (ChangedFiles.Contains(fileName) || DeletedFiles.Contains(fileName))
 							continue;
 
-						if (!lazyLoadingTable.TryGetValue(funcName, out List<string> paths))
-						{
-							paths = new List<string>();
-							lazyLoadingTable.Add(funcName, paths);
-						}
-
-						string path = ErbPath(fileName);
-						paths.Add(path);
-						LazyLoadingFiles.Add(NormalizeFullPath(path));
+						AddLazyLoadingEntry(funcName, fileName);
 					}
 				}
 			}
@@ -294,12 +370,13 @@ namespace MinorShift.Emuera.GameProc
 		private void RebuildLazyLoadingIndex(List<KeyValuePair<string, string>> erbFiles)
 		{
 			lazyLoadingTable.Clear();
+			lazyLoadingFileToFunctions.Clear();
 			lazyLoadingFilesTable.Clear();
 			LazyLoadingFiles.Clear();
 			DeletedFiles.Clear();
 			ChangedFiles.Clear();
 
-			if (IsAndroid() && TryBuildMobileLazyLoadingTable(erbFiles))
+			if (IsAndroid() && TryBuildLazyLoadingTableFromLabels(erbFiles))
 				return;
 
 			LazyCurrentLazyStatus = LazyStatus.BuildTable;
@@ -327,7 +404,7 @@ namespace MinorShift.Emuera.GameProc
 			return files;
 		}
 
-		private bool TryBuildMobileLazyLoadingTable(List<KeyValuePair<string, string>> erbFiles)
+		private bool TryBuildLazyLoadingTableFromLabels(List<KeyValuePair<string, string>> erbFiles)
 		{
 			HashSet<string> files = GetLazyFiles(erbFiles);
 			if (files.Count == 0)
@@ -345,6 +422,8 @@ namespace MinorShift.Emuera.GameProc
 					string path = ErbPath(relative);
 					if (!uEmuera.Utils.FileExists(path))
 						continue;
+					// 标签扫描只建立 function -> ERB 文件映射；首次真正命中时仍走完整 ERB 解析、
+					// setLabelsArg/checkScript，避免为了启动速度跳过原核心语义检查。
 					if (!TryScanLazyFileLabels(path, relative, validLabels, out bool canLazyLoad))
 						return false;
 					if (canLazyLoad)
@@ -374,26 +453,19 @@ namespace MinorShift.Emuera.GameProc
 				WriteLazyFileMeta(validFiles);
 				foreach (var label in validLabels)
 				{
-					if (!lazyLoadingTable.TryGetValue(label.Key, out List<string> paths))
-					{
-						paths = new List<string>();
-						lazyLoadingTable.Add(label.Key, paths);
-					}
-
-					string path = ErbPath(label.Value);
-					paths.Add(path);
-					LazyLoadingFiles.Add(NormalizeFullPath(path));
-					lazyLoadingFilesTable[label.Value] = GetLazyFileTimestamp(path);
+					AddLazyLoadingEntry(label.Key, label.Value);
+					lazyLoadingFilesTable[label.Value] = GetLazyFileTimestamp(ErbPath(label.Value));
 				}
 
-				console.PrintSystemLine("LazyLoading: mobile index table created without full ERB load");
+				console.PrintSystemLine("LazyLoading: index table created from labels without full ERB load");
 				LazyCurrentLazyStatus = LazyStatus.Loaded;
 				return true;
 			}
 			catch (Exception e)
 			{
-				console.PrintSystemLine("LazyLoading: failed to create mobile index table: " + e.Message);
+				console.PrintSystemLine("LazyLoading: failed to create label-scan index table: " + e.Message);
 				lazyLoadingTable.Clear();
+				lazyLoadingFileToFunctions.Clear();
 				lazyLoadingFilesTable.Clear();
 				LazyLoadingFiles.Clear();
 				return false;
@@ -408,8 +480,7 @@ namespace MinorShift.Emuera.GameProc
 		{
 			canLazyLoad = true;
 			var fileLabels = new List<string>();
-			var onlyEvents = new List<string>();
-			FunctionLabelLine currentLabel = null;
+			bool hasCurrentLabel = false;
 			using (var reader = new EraStreamReader(Config.UseRenameFile && ParserMediator.RenameDic != null))
 			{
 				if (!reader.Open(path, relativePath))
@@ -418,34 +489,24 @@ namespace MinorShift.Emuera.GameProc
 				StringStream line;
 				while ((line = reader.ReadEnabledLine()) != null)
 				{
-					var position = new ScriptPosition(reader.Filename, reader.LineNo);
 					if (line.Current == '@')
 					{
-						var parsed = LogicalLineParser.ParseLabelLine(line, position, console);
-						currentLabel = parsed as FunctionLabelLine;
-						if (currentLabel == null || currentLabel is InvalidLabelLine)
+						string labelName = ReadLazyScanLabelName(line);
+						hasCurrentLabel = false;
+						if (string.IsNullOrEmpty(labelName))
 							continue;
-						if (currentLabel.IsEvent)
+						if (IdentifierDictionary.IsEventLabelName(labelName))
 						{
 							canLazyLoad = false;
 							break;
 						}
-						if (currentLabel.IsMethod)
-						{
-							canLazyLoad = false;
-							break;
-						}
-						fileLabels.Add(currentLabel.LabelName);
+						fileLabels.Add(labelName);
+						hasCurrentLabel = true;
 					}
-					else if (line.Current == '#' && currentLabel != null)
+					else if (line.Current == '#' && hasCurrentLabel)
 					{
-						LogicalLineParser.ParseSharpLine(currentLabel, line, position, onlyEvents);
-						if (currentLabel.IsEvent)
-						{
-							canLazyLoad = false;
-							break;
-						}
-						if (currentLabel.IsMethod)
+						string token = ReadLazyScanSharpToken(line);
+						if (IsLazyScanMethodToken(token))
 						{
 							canLazyLoad = false;
 							break;
@@ -459,6 +520,33 @@ namespace MinorShift.Emuera.GameProc
 			foreach (string label in fileLabels)
 				labels.Add(new KeyValuePair<string, string>(label, NormalizeRelativePath(relativePath)));
 			return true;
+		}
+
+		private static string ReadLazyScanLabelName(StringStream line)
+		{
+			// 这里仅用于 Android 首次建立 lazy 索引：只抽取 label 名和 #FUNCTION* 标记，
+			// 真正命中 lazy 文件时仍会调用 ErbLoader 做完整解析、警告和语义检查。
+			line.ShiftNext();
+			string labelName = LexicalAnalyzer.ReadSingleIdentifier(line);
+			if (Config.ICVariable && !string.IsNullOrEmpty(labelName))
+				labelName = labelName.ToUpper();
+			return labelName;
+		}
+
+		private static string ReadLazyScanSharpToken(StringStream line)
+		{
+			line.ShiftNext();
+			string token = LexicalAnalyzer.ReadSingleIdentifier(line);
+			if (Config.ICFunction && !string.IsNullOrEmpty(token))
+				token = token.ToUpper();
+			return token;
+		}
+
+		private static bool IsLazyScanMethodToken(string token)
+		{
+			return string.Equals(token, "FUNCTION", StringComparison.Ordinal)
+				|| string.Equals(token, "FUNCTIONS", StringComparison.Ordinal)
+				|| string.Equals(token, "FUNCTIONF", StringComparison.Ordinal);
 		}
 
 		public void SaveLazyLoadingList(List<FunctionLabelLine> labels, List<KeyValuePair<string, string>> erbFiles)

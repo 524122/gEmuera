@@ -8,6 +8,7 @@ namespace MinorShift.Emuera.GameView
 	abstract partial class AConsoleColoredPart : AConsoleDisplayPart
 	{
 		public Color pColor { get { return Color; } }
-		public Color pButtonColor { get { return Color; } }
+		public Color pButtonColor { get { return ButtonColor; } }
+		public bool pColorChanged { get { return colorChanged; } }
 	}
 }

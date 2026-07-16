@@ -1968,16 +1968,34 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			Int64[] GetArrayLocal()
 			{
-				var ctx = GlobalStatic.Process?.State?.CurrentContext;
+				var procState = GlobalStatic.Process?.State;
+				var ctx = procState?.CurrentContext;
 				if (ctx != null)
 				{
-					Int64[] runtimeArray = null;
-					if (Code == VariableCode.LOCAL)
-						runtimeArray = ctx.LocalIntegers;
-					else if (Code == VariableCode.ARG)
-						runtimeArray = ctx.ArgIntegers;
-					if (runtimeArray != null)
-						return runtimeArray;
+					if (string.IsNullOrEmpty(subID) || ctx.Function?.LabelName == subID)
+					{
+						Int64[] runtimeArray = null;
+						if (Code == VariableCode.LOCAL)
+							runtimeArray = ctx.LocalIntegers;
+						else if (Code == VariableCode.ARG)
+							runtimeArray = ctx.ArgIntegers;
+						if (runtimeArray != null)
+							return runtimeArray;
+					}
+					else
+					{
+						ExecutionContext targetContext = procState.FindContextByLabel(subID);
+						if (targetContext != null)
+						{
+							Int64[] runtimeArray = null;
+							if (Code == VariableCode.LOCAL)
+								runtimeArray = targetContext.LocalIntegers;
+							else if (Code == VariableCode.ARG)
+								runtimeArray = targetContext.ArgIntegers;
+							if (runtimeArray != null)
+								return runtimeArray;
+						}
+					}
 				}
 				return FallbackArray();
 			}
@@ -2051,16 +2069,34 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			double[] GetArrayLocal()
 			{
-				var ctx = GlobalStatic.Process?.State?.CurrentContext;
+				var procState = GlobalStatic.Process?.State;
+				var ctx = procState?.CurrentContext;
 				if (ctx != null)
 				{
-					double[] runtimeArray = null;
-					if (Code == VariableCode.LOCALF)
-						runtimeArray = ctx.LocalFloats;
-					else if (Code == VariableCode.ARGF)
-						runtimeArray = ctx.ArgFloats;
-					if (runtimeArray != null)
-						return runtimeArray;
+					if (string.IsNullOrEmpty(subID) || ctx.Function?.LabelName == subID)
+					{
+						double[] runtimeArray = null;
+						if (Code == VariableCode.LOCALF)
+							runtimeArray = ctx.LocalFloats;
+						else if (Code == VariableCode.ARGF)
+							runtimeArray = ctx.ArgFloats;
+						if (runtimeArray != null)
+							return runtimeArray;
+					}
+					else
+					{
+						ExecutionContext targetContext = procState.FindContextByLabel(subID);
+						if (targetContext != null)
+						{
+							double[] runtimeArray = null;
+							if (Code == VariableCode.LOCALF)
+								runtimeArray = targetContext.LocalFloats;
+							else if (Code == VariableCode.ARGF)
+								runtimeArray = targetContext.ArgFloats;
+							if (runtimeArray != null)
+								return runtimeArray;
+						}
+					}
 				}
 				return FallbackArray();
 			}
@@ -2112,16 +2148,34 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			string[] GetArrayLocal()
 			{
-				var ctx = GlobalStatic.Process?.State?.CurrentContext;
+				var procState = GlobalStatic.Process?.State;
+				var ctx = procState?.CurrentContext;
 				if (ctx != null)
 				{
-					string[] runtimeArray = null;
-					if (Code == VariableCode.LOCALS)
-						runtimeArray = ctx.LocalStrings;
-					else if (Code == VariableCode.ARGS)
-						runtimeArray = ctx.ArgStrings;
-					if (runtimeArray != null)
-						return runtimeArray;
+					if (string.IsNullOrEmpty(subID) || ctx.Function?.LabelName == subID)
+					{
+						string[] runtimeArray = null;
+						if (Code == VariableCode.LOCALS)
+							runtimeArray = ctx.LocalStrings;
+						else if (Code == VariableCode.ARGS)
+							runtimeArray = ctx.ArgStrings;
+						if (runtimeArray != null)
+							return runtimeArray;
+					}
+					else
+					{
+						ExecutionContext targetContext = procState.FindContextByLabel(subID);
+						if (targetContext != null)
+						{
+							string[] runtimeArray = null;
+							if (Code == VariableCode.LOCALS)
+								runtimeArray = targetContext.LocalStrings;
+							else if (Code == VariableCode.ARGS)
+								runtimeArray = targetContext.ArgStrings;
+							if (runtimeArray != null)
+								return runtimeArray;
+						}
+					}
 				}
 				return FallbackArray();
 			}

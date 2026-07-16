@@ -22,6 +22,23 @@ namespace gEmuera.Diagnostics
             _buffer = new OperationEntry[Math.Max(1, capacity)];
         }
 
+        /// <summary>
+        /// Drops entries captured by the previous legacy session while keeping
+        /// the reusable ring allocation.  Sequence numbers restart with the
+        /// next candidate because this trail is a session diagnostic, not a
+        /// process-wide event journal.
+        /// </summary>
+        public void Clear()
+        {
+            lock (_lock)
+            {
+                Array.Clear(_buffer, 0, _buffer.Length);
+                _count = 0;
+                _start = 0;
+                _sequence = 0;
+            }
+        }
+
         public long Capture(string kind, string input, string codeBefore, string codeAfter,
             string waitState, bool consumed, string effect)
         {

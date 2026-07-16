@@ -44,7 +44,10 @@ namespace gEmuera.Diagnostics
 
         public string FormatForGodot()
         {
-            return $"[{Level.ToString().ToUpperInvariant()}][{Category}] {EventId} {Source}:{Line} {Member} | {Message}";
+            string text = $"[{Level.ToString().ToUpperInvariant()}][{Category}] {EventId} {Source}:{Line} {Member} | {Message}";
+            if (!string.IsNullOrEmpty(Data) && EventId.StartsWith("PERF.", StringComparison.OrdinalIgnoreCase))
+                text += " | data=" + EscapeForSingleLine(Data);
+            return text;
         }
 
         public string FormatForExport()

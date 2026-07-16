@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-module-visibility-catalog-1.0.0.json",
+  "title": "gEmuera M0 dialect module visibility catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage",
+    "sourceRegistrySnapshotWorkPackage", "sourceOwnershipEvidenceWorkPackage",
+    "sourceNameLookupContractWorkPackage", "expected"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "catalogId": {"type": "string", "minLength": 1},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "sourceWorkPackage": {"const": "M0-DIA-09"},
+    "sourceRegistrySnapshotWorkPackage": {"const": "M0-DIA-02"},
+    "sourceOwnershipEvidenceWorkPackage": {"const": "M0-DIA-07"},
+    "sourceNameLookupContractWorkPackage": {"const": "M0-DIA-08"},
+    "expected": {"$ref": "#/$defs/expected"}
+  },
+  "$defs": {
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unresolvedOwnershipCount", "unresolvedInstructionCount", "unresolvedExpressionFunctionCount",
+        "v24VisibleCandidateCount", "snakeOnlyCandidateCount", "missingSnakeProjectionCount",
+        "v24VisibleInstructionCount", "snakeOnlyInstructionCount",
+        "v24VisibleExpressionFunctionCount", "snakeOnlyExpressionFunctionCount"
+      ],
+      "properties": {
+        "unresolvedOwnershipCount": {"const": 131},
+        "unresolvedInstructionCount": {"const": 14},
+        "unresolvedExpressionFunctionCount": {"const": 117},
+        "v24VisibleCandidateCount": {"const": 123},
+        "snakeOnlyCandidateCount": {"const": 8},
+        "missingSnakeProjectionCount": {"const": 0},
+        "v24VisibleInstructionCount": {"const": 8},
+        "snakeOnlyInstructionCount": {"const": 6},
+        "v24VisibleExpressionFunctionCount": {"const": 115},
+        "snakeOnlyExpressionFunctionCount": {"const": 2}
+      }
+    }
+  }
+}
