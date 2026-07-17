@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-plan-preflight-1.0.0.json",
+  "title": "gEmuera M0 legacy dialect plan preflight evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result",
+    "sourceRegistrySnapshotHash", "sourceRegistryInventoryHash", "sourceSessionInventoryHash",
+    "catalogId", "catalogVersion", "catalogHash", "preflightSetHash", "profiles", "unsupportedLegacyCoreProfiles",
+    "currentRuntimeIsolation", "parserVmConsumption", "compatibilityPlanRuntime", "m1Eligibility", "uncovered"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "workPackage": {"const": "M0-DIA-10"},
+    "generatedAtUtc": {"type": "string", "format": "date-time"},
+    "executionStatus": {"const": "InProgress"},
+    "gateStatus": {"const": "Blocked"},
+    "blockerCode": {"const": "EvidenceMissing"},
+    "result": {"const": "Partial"},
+    "sourceRegistrySnapshotHash": {"$ref": "#/$defs/sha256"},
+    "sourceRegistryInventoryHash": {"$ref": "#/$defs/sha256"},
+    "sourceSessionInventoryHash": {"$ref": "#/$defs/sha256"},
+    "catalogId": {"type": "string", "minLength": 1},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "catalogHash": {"$ref": "#/$defs/sha256"},
+    "preflightSetHash": {"$ref": "#/$defs/sha256"},
+    "profiles": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/profile"}},
+    "unsupportedLegacyCoreProfiles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/unsupportedProfile"}},
+    "currentRuntimeIsolation": {"$ref": "#/$defs/failedStatus"},
+    "parserVmConsumption": {"$ref": "#/$defs/notConsumedStatus"},
+    "compatibilityPlanRuntime": {"$ref": "#/$defs/notImplementedStatus"},
+    "m1Eligibility": {"$ref": "#/$defs/blockedStatus"},
+    "uncovered": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "failedStatus": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "Failed"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "notConsumedStatus": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "NotConsumed"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "notImplementedStatus": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "NotImplemented"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "blockedStatus": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "Blocked"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "requestMetadata": {
+      "type": "object", "additionalProperties": false, "required": ["selectionSource", "requestedGeneration"],
+      "properties": {
+        "selectionSource": {"enum": ["StaticContract", "LegacyLauncherManual", "M0RunnerFixture"]},
+        "requestedGeneration": {"type": "integer", "minimum": 0}
+      }
+    },
+    "registryEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceWorkPackage", "sourceRegistrySnapshotHash", "sourceInventoryHash", "registryProjectionId", "projectionCanonicalHash", "selectedTestProjectionModuleIds", "instructionCount", "expressionFunctionCount"],
+      "properties": {
+        "sourceWorkPackage": {"const": "M0-DIA-02"},
+        "sourceRegistrySnapshotHash": {"$ref": "#/$defs/sha256"},
+        "sourceInventoryHash": {"$ref": "#/$defs/sha256"},
+        "registryProjectionId": {"enum": ["v24", "snake"]},
+        "projectionCanonicalHash": {"$ref": "#/$defs/sha256"},
+        "selectedTestProjectionModuleIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "instructionCount": {"type": "integer", "minimum": 0},
+        "expressionFunctionCount": {"type": "integer", "minimum": 0}
+      }
+    },
+    "sessionEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceWorkPackage", "sourceSessionInventoryHash", "rootStateInventoryCount", "currentRuntimeIsolationStatus", "parserVmConsumptionStatus", "m1EligibilityStatus"],
+      "properties": {
+        "sourceWorkPackage": {"const": "M0-SES-01"},
+        "sourceSessionInventoryHash": {"$ref": "#/$defs/sha256"},
+        "rootStateInventoryCount": {"type": "integer", "minimum": 1},
+        "currentRuntimeIsolationStatus": {"const": "Failed"},
+        "parserVmConsumptionStatus": {"const": "NotConsumed"},
+        "m1EligibilityStatus": {"const": "Blocked"}
+      }
+    },
+    "profile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "preflightKind", "profileId", "legacyCoreProfileEnum", "requestMetadata", "registryEvidence", "sessionEvidence", "planSemanticHash", "uncovered"],
+      "properties": {
+        "schemaVersion": {"const": "1.0.0"},
+        "preflightKind": {"const": "StaticEvidenceSnapshot"},
+        "profileId": {"enum": ["v24pure", "snake"]},
+        "legacyCoreProfileEnum": {"enum": ["V24Pure", "Snake"]},
+        "requestMetadata": {"$ref": "#/$defs/requestMetadata"},
+        "registryEvidence": {"$ref": "#/$defs/registryEvidence"},
+        "sessionEvidence": {"$ref": "#/$defs/sessionEvidence"},
+        "planSemanticHash": {"$ref": "#/$defs/sha256"},
+        "uncovered": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "unsupportedProfile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["legacyCoreProfileEnum", "status", "reason"],
+      "properties": {
+        "legacyCoreProfileEnum": {"type": "string", "minLength": 1},
+        "status": {"const": "Uncovered"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

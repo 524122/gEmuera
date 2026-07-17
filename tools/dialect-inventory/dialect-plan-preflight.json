@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.dialect-plan-preflight",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-10",
+  "sourceRegistrySnapshotWorkPackage": "M0-DIA-02",
+  "sourceSessionInventoryWorkPackage": "M0-SES-01",
+  "supportedSelectionSources": [
+    "StaticContract",
+    "LegacyLauncherManual",
+    "M0RunnerFixture"
+  ],
+  "profiles": [
+    {
+      "profileId": "v24pure",
+      "legacyCoreProfileEnum": "V24Pure",
+      "registryProjectionId": "v24",
+      "expected": {
+        "instructionCount": 290,
+        "expressionFunctionCount": 358,
+        "selectedTestProjectionModuleIds": [
+          "gemuera.v24",
+          "legacy.current.common",
+          "legacy.current.expression"
+        ]
+      }
+    },
+    {
+      "profileId": "snake",
+      "legacyCoreProfileEnum": "Snake",
+      "registryProjectionId": "snake",
+      "expected": {
+        "instructionCount": 326,
+        "expressionFunctionCount": 360,
+        "selectedTestProjectionModuleIds": [
+          "game.snake",
+          "gemuera.v24",
+          "legacy.current.common",
+          "legacy.current.expression"
+        ]
+      }
+    }
+  ],
+  "unsupportedLegacyCoreProfiles": [
+    {
+      "legacyCoreProfileEnum": "SnakeModernMobile",
+      "status": "Uncovered",
+      "reason": "No independent DIA-02 registry projection or static session evidence proves that SnakeModernMobile has Snake-equivalent semantics."
+    }
+  ]
+}

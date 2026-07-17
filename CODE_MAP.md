@@ -1,5 +1,14 @@
 # CODE_MAP
 
+## 2026-07-17 合并 dev：Core/M0 会话边界与 ERB 图像扩展
+
+- `project.godot`：新增 `AppBootstrap` 与 `PlatformGateway` autoload，并启用 `prototype_runtime`、`typed_ports`、`pixel_store` 标记；它们负责宿主启动和平台能力入口，不能把这套标记误解为已替换 legacy Emuera 执行器。
+- `src/Core/Compatibility/`、`src/Core/Session/`、`src/Core/Ports/`：纯 C# 的兼容计划、会话协调和端口契约层。`Program.ConfigureCompatibilityPlan` / `ClearCompatibilityPlan` 是它到 legacy 运行时的边界；当前实际 ERB handler 仍在 `Scripts/Emuera/`，不应把 Core 描述符当作增量注册表直接修改。
+- `Scripts/GodotHost/LegacySessionBackend.cs`、`LegacySessionLaunchRegistry.cs`、`LegacyThreadQuiescence.cs`：M0/M1 会话启动、停止和隔离入口。排查切换游戏、后台线程未退出或旧渲染任务泄漏时，先看 `EmueraMain.ResetCanarySessionState`、两个渲染组件的 `ResetCanarySessionState` 与 `EmueraContent.ClearForCanarySessionTransition`。
+- `Scripts/M0/`：legacy runner 的输入回放、显示观察、trace 与报告设施，仅供 fixture/验证链使用；普通桌面与 Android 游戏启动仍走 `FirstWindow` -> `EmueraMain` -> `EmueraThread` -> `Program.Main`。
+- `Scripts/Emuera/Content/GraphicsImage.cs:ClearLowAlpha` 与 `Creator.Method.cs:GraphicsClearLowAlphaMethod`：新增 `GCLEARLOWALPHA(graphicsId, threshold)`，以一次 `GetData/SetData` 清理低 alpha 像素，替代 ERB 逐像素循环；阈值为 `0..255`，WinAPI 绘制模式不可用。
+- 验证入口：根项目使用 `net8.0`（桌面）/`net9.0`（Android），`src/Core/GEmuera.Core.csproj` 对应 `net8.0;net9.0`；`dotnet build`、`dotnet build -p:GodotTargetPlatform=android` 以及 `dotnet run --project tools/core-contracts/CoreContractSmoke.csproj` 分别覆盖宿主编译、Android 编译与 Core 契约冒烟检查。
+
 ## 2026-07-09 eraTW/snake 泡茶展开浮层兼容
 - `Scripts/EmueraContent.cs:BuildConsoleButton/CreateTextPart/ConsoleTextPart`：Control 后端按钮文本现在也使用 `ConsoleStyledString.pButtonColor` 和焦点背景绘制 hover/press 视觉，补齐旧节点后端与 Canvas 后端、原生 Emuera 的按钮选中态差异。
 - `Scripts/EmueraContent.cs:GetHtmlDivPosition`：HTML `absolute/absolute-leftbottom` div 遇到负 `Y` 时按 Emuera 的底边 0、向上为负坐标解释；正数仍保留原 left-bottom 距底部解释。用于兼容 eraTW/snake `QOL_USERCOM.ERB` 这类通过 `MOUSEY() - DIV_HEIGHT` 把浮层显示在按钮上方的脚本。

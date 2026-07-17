@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-legacy-session-state-inventory-1.0.0.json",
+  "title": "gEmuera M0 legacy session root state inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result",
+    "catalogId", "catalogVersion", "catalogHash", "inventorySetHash", "scope", "sourceIdentities", "coverage",
+    "currentRuntimeIsolation", "parserVmConsumption", "m1Eligibility", "uncovered", "entries"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "workPackage": {"const": "M0-SES-01"},
+    "generatedAtUtc": {"type": "string", "format": "date-time"},
+    "executionStatus": {"const": "InProgress"},
+    "gateStatus": {"const": "Blocked"},
+    "blockerCode": {"const": "EvidenceMissing"},
+    "result": {"const": "Partial"},
+    "catalogId": {"type": "string", "minLength": 1},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "catalogHash": {"$ref": "#/$defs/sha256"},
+    "inventorySetHash": {"$ref": "#/$defs/sha256"},
+    "scope": {"$ref": "#/$defs/scope"},
+    "sourceIdentities": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/sourceIdentity"}},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "currentRuntimeIsolation": {"$ref": "#/$defs/statusReason"},
+    "parserVmConsumption": {"$ref": "#/$defs/statusReason"},
+    "m1Eligibility": {"$ref": "#/$defs/statusReason"},
+    "uncovered": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "entries": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/entry"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "scope": {
+      "type": "object", "additionalProperties": false, "required": ["included", "excluded"],
+      "properties": {
+        "included": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "excluded": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "sourceIdentity": {
+      "type": "object", "additionalProperties": false, "required": ["sourceFile", "sha256"],
+      "properties": {"sourceFile": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["globalStaticStateCount", "programStateCount", "observedStateCount", "catalogMappedCount", "unmappedCount", "explicitlyResetGlobalStateCount", "globalStateWithoutObservedResetCount", "directReferenceCount"],
+      "properties": {
+        "globalStaticStateCount": {"type": "integer", "minimum": 1},
+        "programStateCount": {"type": "integer", "minimum": 1},
+        "observedStateCount": {"type": "integer", "minimum": 2},
+        "catalogMappedCount": {"type": "integer", "minimum": 2},
+        "unmappedCount": {"const": 0},
+        "explicitlyResetGlobalStateCount": {"type": "integer", "minimum": 0},
+        "globalStateWithoutObservedResetCount": {"type": "integer", "minimum": 0},
+        "directReferenceCount": {"type": "integer", "minimum": 0}
+      }
+    },
+    "statusReason": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"type": "string", "minLength": 1}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "site": {
+      "type": "object", "additionalProperties": false, "required": ["sourceFile", "sourceLine", "operation"],
+      "properties": {"sourceFile": {"type": "string", "minLength": 1}, "sourceLine": {"type": "integer", "minimum": 1}, "operation": {"type": "string", "minLength": 1}}
+    },
+    "access": {
+      "type": "object", "additionalProperties": false, "required": ["sourceFile", "sourceLine", "accessKind"],
+      "properties": {"sourceFile": {"type": "string", "minLength": 1}, "sourceLine": {"type": "integer", "minimum": 1}, "accessKind": {"enum": ["Reference", "WriteOrMutation"]}}
+    },
+    "reset": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason", "sites"],
+      "properties": {"status": {"enum": ["ExplicitlyCleared", "NotObserved", "NoLegacyProgramReset"]}, "reason": {"type": "string", "minLength": 1}, "sites": {"type": "array", "items": {"$ref": "#/$defs/site"}}}
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scope", "symbol", "declaredType", "declarationKind", "mutability", "sourceFile", "sourceLine", "declaration", "conditionalCompilation", "legacyOwner", "candidateM1Owner", "crossSessionExpectation", "expectedReset", "fixtureIds", "migrationStage", "notes", "reset", "referenceCount", "writeSites", "references"],
+      "properties": {
+        "scope": {"enum": ["GlobalStatic", "Program"]},
+        "symbol": {"type": "string", "minLength": 1},
+        "declaredType": {"type": "string", "minLength": 1},
+        "declarationKind": {"enum": ["Field", "AutoProperty"]},
+        "mutability": {"enum": ["ReplaceableField", "ReadonlyReferenceOrValue", "PrivateSetterProperty"]},
+        "sourceFile": {"type": "string", "minLength": 1},
+        "sourceLine": {"type": "integer", "minimum": 1},
+        "declaration": {"type": "string", "minLength": 1},
+        "conditionalCompilation": {"type": "string"},
+        "legacyOwner": {"type": "string", "minLength": 1},
+        "candidateM1Owner": {"type": "string", "minLength": 1},
+        "crossSessionExpectation": {"type": "string", "minLength": 1},
+        "expectedReset": {"type": "string", "minLength": 1},
+        "fixtureIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "migrationStage": {"const": "M1"},
+        "notes": {"type": "string"},
+        "reset": {"$ref": "#/$defs/reset"},
+        "referenceCount": {"type": "integer", "minimum": 0},
+        "writeSites": {"type": "array", "items": {"$ref": "#/$defs/site"}},
+        "references": {"type": "array", "items": {"$ref": "#/$defs/access"}}
+      }
+    }
+  }
+}

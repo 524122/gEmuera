@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-ownership-evidence-1.0.0.json",
+  "title": "gEmuera M0 dialect ownership evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result", "sourceInventoryHash", "sourceRegistrySnapshotHash", "sourceDescriptorSetHash", "sourceInstructionSignatureResolutionHash", "sourceFunctionSignatureResolutionHash", "sourceInstructionFlagResolutionHash", "catalogId", "catalogVersion", "catalogHash", "evidenceSetHash", "upstreamIdentity", "instructionCount", "expressionFunctionCount", "coverage", "currentRuntimeIsolation", "uncovered", "instructions", "expressionFunctions"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"}, "workPackage": {"const": "M0-DIA-07"},
+    "generatedAtUtc": {"type": "string", "format": "date-time"},
+    "executionStatus": {"const": "InProgress"}, "gateStatus": {"const": "Blocked"},
+    "blockerCode": {"const": "EvidenceMissing"}, "result": {"const": "Partial"},
+    "sourceInventoryHash": {"$ref": "#/$defs/sha256"}, "sourceRegistrySnapshotHash": {"$ref": "#/$defs/sha256"},
+    "sourceDescriptorSetHash": {"$ref": "#/$defs/sha256"}, "sourceInstructionSignatureResolutionHash": {"$ref": "#/$defs/sha256"},
+    "sourceFunctionSignatureResolutionHash": {"$ref": "#/$defs/sha256"}, "sourceInstructionFlagResolutionHash": {"$ref": "#/$defs/sha256"},
+    "catalogId": {"type": "string", "minLength": 1}, "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "catalogHash": {"$ref": "#/$defs/sha256"}, "evidenceSetHash": {"$ref": "#/$defs/sha256"},
+    "upstreamIdentity": {"$ref": "#/$defs/upstreamIdentity"},
+    "instructionCount": {"const": 326}, "expressionFunctionCount": {"const": 360},
+    "coverage": {"$ref": "#/$defs/coverage"}, "currentRuntimeIsolation": {"$ref": "#/$defs/runtimeIsolation"},
+    "uncovered": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "instructions": {"type": "array", "minItems": 326, "maxItems": 326, "items": {"$ref": "#/$defs/evidence"}},
+    "expressionFunctions": {"type": "array", "minItems": 360, "maxItems": 360, "items": {"$ref": "#/$defs/evidence"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "count": {"type": "integer", "minimum": 0},
+    "upstreamIdentity": {"type": "object", "additionalProperties": false, "required": ["instructionSourceFile", "instructionSourceSha256", "expressionSourceFile", "expressionSourceSha256"], "properties": {"instructionSourceFile": {"type": "string", "minLength": 1}, "instructionSourceSha256": {"$ref": "#/$defs/sha256"}, "expressionSourceFile": {"type": "string", "minLength": 1}, "expressionSourceSha256": {"$ref": "#/$defs/sha256"}}},
+    "runtimeIsolation": {"type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": {"status": {"const": "Failed"}, "reason": {"type": "string", "minLength": 1}}},
+    "coverage": {"type": "object", "additionalProperties": false, "required": ["upstreamInstructionNameMatchCount", "upstreamExpressionNameMatchCount", "explicitCurrentModuleCandidateCount", "unresolvedOwnershipCount", "nameComparerUnresolvedCount", "aliasUnresolvedCount", "replacementUnresolvedCount", "behaviorUncoveredCount", "completionEffectUncoveredCount"], "properties": {"upstreamInstructionNameMatchCount": {"$ref": "#/$defs/count"}, "upstreamExpressionNameMatchCount": {"$ref": "#/$defs/count"}, "explicitCurrentModuleCandidateCount": {"$ref": "#/$defs/count"}, "unresolvedOwnershipCount": {"$ref": "#/$defs/count"}, "nameComparerUnresolvedCount": {"$ref": "#/$defs/count"}, "aliasUnresolvedCount": {"$ref": "#/$defs/count"}, "replacementUnresolvedCount": {"$ref": "#/$defs/count"}, "behaviorUncoveredCount": {"$ref": "#/$defs/count"}, "completionEffectUncoveredCount": {"$ref": "#/$defs/count"}}},
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["publicKey", "registryKind", "currentTargetModule", "currentHandler", "currentSourceFile", "currentSourceLine", "upstreamPresence", "upstreamSourceFile", "upstreamSourceLine", "upstreamSourceText", "ownershipEvidenceStatus", "stableModuleCandidate", "ownershipConflictStatus", "nameComparerCandidate", "nameComparerStatus", "aliasStatus", "replacementStatus", "behaviorCompatibilityStatus", "completionEffectStatus"],
+      "properties": {
+        "publicKey": {"type": "string", "minLength": 1}, "registryKind": {"enum": ["Instruction", "ExpressionFunction"]},
+        "currentTargetModule": {"type": "string", "minLength": 1}, "currentHandler": {"type": "string", "minLength": 1},
+        "currentSourceFile": {"type": "string", "minLength": 1}, "currentSourceLine": {"type": "integer", "minimum": 1},
+        "upstreamPresence": {"enum": ["Present", "Absent"]}, "upstreamSourceFile": {"type": "string"},
+        "upstreamSourceLine": {"type": ["integer", "null"], "minimum": 1}, "upstreamSourceText": {"type": "string"},
+        "ownershipEvidenceStatus": {"enum": ["UpstreamNameMatch", "ExplicitCurrentModuleCandidate", "Unresolved"]},
+        "stableModuleCandidate": {"enum": ["emuera.upstream", "gemuera.v24", "game.snake", "Unresolved"]},
+        "ownershipConflictStatus": {"enum": ["None", "CurrentTargetDiffersFromUpstreamCandidate"]},
+        "nameComparerCandidate": {"const": "LegacyConfig.ICFunctionCandidate"}, "nameComparerStatus": {"const": "Unresolved"},
+        "aliasStatus": {"const": "Unresolved"}, "replacementStatus": {"const": "Unresolved"},
+        "behaviorCompatibilityStatus": {"const": "Uncovered"}, "completionEffectStatus": {"const": "Uncovered"}
+      }
+    }
+  }
+}

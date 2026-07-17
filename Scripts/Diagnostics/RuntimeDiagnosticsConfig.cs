@@ -10,6 +10,11 @@ namespace gEmuera.Diagnostics
     /// </summary>
     public sealed class RuntimeDiagnosticsConfig
     {
+        // ---------- migration ----------
+        // Structural rollout switches are read at session startup only. They
+        // are deliberately not hot-applied by the diagnostics panel.
+        public bool MigrationSessionIsolationEnabled { get; set; } = false;
+
         // ---------- minimal logging switch ----------
         public bool LoggingEnabled { get; set; } = true;
 

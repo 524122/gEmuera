@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-signature-resolution-1.0.0.json",
+  "title": "gEmuera M0 dialect instruction signature resolution",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result", "sourceDescriptorSetHash", "catalogId", "catalogVersion", "catalogHash", "resolutionSetHash", "instructionCount", "coverage", "ruleMatches", "uncovered", "instructions"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackage": { "const": "M0-DIA-04" },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "executionStatus": { "const": "InProgress" },
+    "gateStatus": { "const": "Blocked" },
+    "blockerCode": { "const": "EvidenceMissing" },
+    "result": { "const": "Partial" },
+    "sourceDescriptorSetHash": { "$ref": "#/$defs/sha256" },
+    "catalogId": { "type": "string", "minLength": 1 },
+    "catalogVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "catalogHash": { "$ref": "#/$defs/sha256" },
+    "resolutionSetHash": { "$ref": "#/$defs/sha256" },
+    "instructionCount": { "type": "integer", "minimum": 1 },
+    "coverage": { "$ref": "#/$defs/coverage" },
+    "ruleMatches": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ruleMatch" } },
+    "uncovered": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "instructions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/instruction" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "stringArray": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceResolvedCount", "sourceConditionalCount", "sourceUnresolvedCount", "preservedStaticCount", "resolvedStaticByRuleCount", "unresolvedCount", "catalogRuleCount"],
+      "properties": {
+        "sourceResolvedCount": { "$ref": "#/$defs/count" },
+        "sourceConditionalCount": { "$ref": "#/$defs/count" },
+        "sourceUnresolvedCount": { "$ref": "#/$defs/count" },
+        "preservedStaticCount": { "$ref": "#/$defs/count" },
+        "resolvedStaticByRuleCount": { "$ref": "#/$defs/count" },
+        "unresolvedCount": { "$ref": "#/$defs/count" },
+        "catalogRuleCount": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ruleMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleId", "matchedCount", "matchedPublicKeys"],
+      "properties": {
+        "ruleId": { "type": "string", "minLength": 1 },
+        "matchedCount": { "type": "integer", "minimum": 1 },
+        "matchedPublicKeys": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "instruction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publicKey", "targetModule", "handlerType", "sourceArgumentSchemaStatus", "sourceArgumentSchemaCandidates", "resolvedArgumentSchema", "resolutionStatus", "ruleId", "evidenceStatus", "behaviorFixtureStatus"],
+      "properties": {
+        "publicKey": { "type": "string", "minLength": 1 },
+        "targetModule": { "type": "string", "minLength": 1 },
+        "handlerType": { "type": "string" },
+        "sourceArgumentSchemaStatus": { "enum": ["Resolved", "Conditional", "Unresolved"] },
+        "sourceArgumentSchemaCandidates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "resolvedArgumentSchema": { "type": "string" },
+        "resolutionStatus": { "enum": ["PreservedStatic", "ResolvedStaticByRule", "UnresolvedStatic"] },
+        "ruleId": { "type": "string" },
+        "evidenceStatus": { "const": "StaticCandidate" },
+        "behaviorFixtureStatus": { "const": "Uncovered" }
+      }
+    }
+  }
+}

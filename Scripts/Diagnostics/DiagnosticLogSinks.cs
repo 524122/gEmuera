@@ -60,6 +60,11 @@ namespace gEmuera.Diagnostics
 			if (_config == null || !_config.LoggingEnabled)
 				return;
 			AppendToRing(record);
+			if (record.Level >= EmueraLogLevel.Error && global::gEmuera.M0.LegacyTrace.IsEnabled)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordError("diagnostic_error", record.Level.ToString(),
+					record.EventId, record.Message, record.Source + ":" + record.Line + " " + record.Member);
+			}
 			if (ShouldMirrorToGodot(record.Level))
 				WriteToGodotConsole(record);
 		}

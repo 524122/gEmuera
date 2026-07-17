@@ -52,6 +52,16 @@ namespace uEmuera.Forms
         {
             timers.Remove(this);
         }
+
+        /// <summary>
+        /// Timers are compatibility objects created by the active ERB
+        /// session.  They have no process-wide meaning and must not tick after
+        /// a canary switch has stopped the legacy worker.
+        /// </summary>
+        internal static void ResetSessionState()
+        {
+            timers.Clear();
+        }
     }
 
     public enum TextFormatFlags

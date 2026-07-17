@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-profile-selection-1.0.0.json",
+  "title": "gEmuera M0 legacy CoreProfile selection evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result", "sourcePlanPreflightHash", "catalogId", "catalogVersion", "catalogHash", "selectionSetHash", "sourceIdentities", "legacyCoreProfiles", "launcherProfileContract", "modernMarkerContract", "legacyMarkerContract", "selectionPrecedence", "currentRuntimeIsolation", "parserVmConsumption", "compatibilityPlanRuntime", "m1Eligibility", "uncovered"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"}, "workPackage": {"const": "M0-DIA-11"}, "generatedAtUtc": {"type": "string", "format": "date-time"},
+    "executionStatus": {"const": "InProgress"}, "gateStatus": {"const": "Blocked"}, "blockerCode": {"const": "EvidenceMissing"}, "result": {"const": "Partial"},
+    "sourcePlanPreflightHash": {"$ref": "#/$defs/sha256"}, "catalogId": {"type": "string", "minLength": 1}, "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}, "catalogHash": {"$ref": "#/$defs/sha256"}, "selectionSetHash": {"$ref": "#/$defs/sha256"},
+    "sourceIdentities": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/sourceIdentity"}}, "legacyCoreProfiles": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/profile"}},
+    "launcherProfileContract": {"$ref": "#/$defs/launcher"}, "modernMarkerContract": {"$ref": "#/$defs/marker"}, "legacyMarkerContract": {"$ref": "#/$defs/marker"}, "selectionPrecedence": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"$ref": "#/$defs/rule"}},
+    "currentRuntimeIsolation": {"$ref": "#/$defs/failed"}, "parserVmConsumption": {"$ref": "#/$defs/notConsumed"}, "compatibilityPlanRuntime": {"$ref": "#/$defs/notImplemented"}, "m1Eligibility": {"$ref": "#/$defs/blocked"}, "uncovered": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sourceIdentity": {"type": "object", "additionalProperties": false, "required": ["id", "path", "sha256"], "properties": {"id": {"type": "string", "minLength": 1}, "path": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/sha256"}}},
+    "profile": {"type": "object", "additionalProperties": false, "required": ["legacyCoreProfileEnum", "launcherProfileId", "preflightEvidenceStatus", "runnerProfileStatus", "selectionAvailability"], "properties": {"legacyCoreProfileEnum": {"enum": ["V24Pure", "Snake", "SnakeModernMobile"]}, "launcherProfileId": {"type": "string"}, "preflightEvidenceStatus": {"enum": ["EvidenceBacked", "Uncovered"]}, "runnerProfileStatus": {"enum": ["Supported", "Unsupported"]}, "selectionAvailability": {"type": "string", "minLength": 1}}},
+    "launcher": {"type": "object", "additionalProperties": false, "required": ["supportedProfileIds", "unknownProfileFallback", "normalizerComparison"], "properties": {"supportedProfileIds": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"enum": ["v24pure", "snake"]}}, "unknownProfileFallback": {"const": "v24pure"}, "normalizerComparison": {"type": "string", "minLength": 1}}},
+    "marker": {"type": "object", "additionalProperties": false, "required": ["markerFileNames", "outputLegacyCoreProfileEnum"], "properties": {"markerFileNames": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string", "pattern": "\\.txt$"}}, "outputLegacyCoreProfileEnum": {"enum": ["Snake", "SnakeModernMobile"]}}},
+    "rule": {"type": "object", "additionalProperties": false, "required": ["order", "inputKind", "outputLegacyCoreProfileEnum", "source"], "properties": {"order": {"type": "integer", "minimum": 1, "maximum": 5}, "inputKind": {"type": "string", "minLength": 1}, "outputLegacyCoreProfileEnum": {"enum": ["V24Pure", "Snake", "SnakeModernMobile"]}, "source": {"type": "string", "minLength": 1}}},
+    "failed": {"type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": {"status": {"const": "Failed"}, "reason": {"type": "string", "minLength": 1}}},
+    "notConsumed": {"type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": {"status": {"const": "NotConsumed"}, "reason": {"type": "string", "minLength": 1}}},
+    "notImplemented": {"type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": {"status": {"const": "NotImplemented"}, "reason": {"type": "string", "minLength": 1}}},
+    "blocked": {"type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": {"status": {"const": "Blocked"}, "reason": {"type": "string", "minLength": 1}}}
+  }
+}

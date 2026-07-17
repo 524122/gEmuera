@@ -34,6 +34,25 @@ public partial class FirstWindow : Control
 	public static string SelectedGamePath { get; private set; }
 	public static string SelectedCoreProfileName { get; private set; } = CoreProfileV24Pure;
 
+	/// <summary>
+	/// M0 baseline runner-only session injection. The normal launcher never calls this method.
+	/// Unlike SetSelectedGamePath, this does not persist launcher.cfg and therefore cannot
+	/// change the next interactive startup.
+	/// </summary>
+	public static bool ConfigureM0RunnerSession(string path, string coreProfileName, out string errorMessage)
+	{
+		errorMessage = "";
+		if (!IsUsableEraGameDirectory(path))
+		{
+			errorMessage = "invalid_era_game_directory";
+			return false;
+		}
+
+		SelectedGamePath = path.TrimEnd('/', '\\');
+		SelectedCoreProfileName = NormalizeCoreProfileName(coreProfileName);
+		return true;
+	}
+
 	ItemList gameList;
 	Button startButton;
 	Label statusLabel;
@@ -722,6 +741,12 @@ public partial class FirstWindow : Control
 				if (!string.IsNullOrEmpty(resDir))
 					AddUniqueRoot(roots, resDir);
 			}
+
+			string configuredLibrary = ProjectSettings.GetSetting(
+				"launcher/default_game_library",
+				"").AsString();
+			if (!string.IsNullOrWhiteSpace(configuredLibrary))
+				AddUniqueRoot(roots, configuredLibrary);
 		}
 
 		string userDir = ProjectSettings.GlobalizePath("user://");

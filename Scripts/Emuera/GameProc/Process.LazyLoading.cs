@@ -63,6 +63,18 @@ namespace MinorShift.Emuera.GameProc
 			LazyCurrentLazyStatus = LazyStatus.Disabled;
 		}
 
+		/// <summary>
+		/// Invalidates the static Android working-directory memo used by lazy
+		/// loading.  The table itself is instance-owned, but the memo can survive
+		/// a process-wide canary switch and otherwise point a new candidate at the
+		/// previous game's fallback directory.
+		/// </summary>
+		internal static void ResetCanarySessionState()
+		{
+			cachedLazyLoadingSourceDir = null;
+			cachedLazyLoadingWorkingDir = null;
+		}
+
 		public bool TryLazyLoadErb(string functionName)
 		{
 			if (LazyCurrentLazyStatus == LazyStatus.Disabled)

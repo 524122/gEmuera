@@ -99,8 +99,14 @@ namespace gEmuera.Diagnostics
             // root
             if (TryGetString(sections, "", "active_debug_model", out string v)) cfg.ActiveDebugModel = v;
 
+            // migration
+            // This is a startup-only canary. ReloadRuntimeDiagnosticsConfig may
+            // refresh its stored value, but an active session never changes
+            // startup mode until the next scene/application start.
+            if (TryGetBool(sections, "migration", "session_isolation", out bool b)) cfg.MigrationSessionIsolationEnabled = b;
+
             // quick_debug
-            if (TryGetBool(sections, "quick_debug", "enabled", out bool b)) cfg.QuickDebugEnabled = b;
+            if (TryGetBool(sections, "quick_debug", "enabled", out b)) cfg.QuickDebugEnabled = b;
             if (TryGetString(sections, "quick_debug", "preset", out v)) cfg.QuickDebugPreset = v;
             if (TryGetString(sections, "quick_debug", "language", out v)) cfg.QuickDebugLanguage = v;
             if (TryGetBool(sections, "quick_debug", "apk_safe", out b)) cfg.QuickDebugApkSafe = b;

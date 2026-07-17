@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-registry-snapshots-1.0.0.json",
+  "title": "gEmuera M0 dialect registry snapshot projections",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result",
+    "sourceInventoryHash", "snapshotSetHash", "testProjectionInvariant", "currentRuntimeIsolation", "profiles", "diff", "uncovered"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackage": { "const": "M0-DIA-02" },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "executionStatus": { "const": "InProgress" },
+    "gateStatus": { "const": "Blocked" },
+    "blockerCode": { "const": "EvidenceMissing" },
+    "result": { "const": "Partial" },
+    "sourceInventoryHash": { "$ref": "#/$defs/sha256" },
+    "snapshotSetHash": { "$ref": "#/$defs/sha256" },
+    "testProjectionInvariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "baselineV24Hash", "fullCatalogV24Hash", "assertion"],
+      "properties": {
+        "status": { "enum": ["Passed", "Failed"] },
+        "baselineV24Hash": { "$ref": "#/$defs/sha256" },
+        "fullCatalogV24Hash": { "$ref": "#/$defs/sha256" },
+        "assertion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "currentRuntimeIsolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "unconditionalV24CallCount", "unconditionalSnakeCallCount", "assertion"],
+      "properties": {
+        "status": { "enum": ["Failed", "Uncovered"] },
+        "unconditionalV24CallCount": { "type": "integer", "minimum": 0 },
+        "unconditionalSnakeCallCount": { "type": "integer", "minimum": 0 },
+        "assertion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v24", "snake"],
+      "properties": {
+        "v24": { "$ref": "#/$defs/snapshot" },
+        "snake": { "$ref": "#/$defs/snapshot" }
+      }
+    },
+    "diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snakeOnlyInstructionCount", "snakeOnlyExpressionFunctionCount", "snakeOnlyInstructions", "snakeOnlyExpressionFunctions"],
+      "properties": {
+        "snakeOnlyInstructionCount": { "type": "integer", "minimum": 0 },
+        "snakeOnlyExpressionFunctionCount": { "type": "integer", "minimum": 0 },
+        "snakeOnlyInstructions": { "type": "array", "items": { "$ref": "#/$defs/registration" } },
+        "snakeOnlyExpressionFunctions": { "type": "array", "items": { "$ref": "#/$defs/registration" } }
+      }
+    },
+    "uncovered": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "profileId", "sourceInventoryHash", "canonicalHash", "nameComparison", "selectedModuleIds", "availableModuleIds",
+        "instructionCount", "expressionFunctionCount", "unresolvedInstructionCount", "candidateInstructionCount",
+        "unresolvedExpressionFunctionCount", "candidateExpressionFunctionCount", "instructions", "expressionFunctions"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "profileId": { "enum": ["v24-projection", "snake-projection"] },
+        "sourceInventoryHash": { "$ref": "#/$defs/sha256" },
+        "canonicalHash": { "$ref": "#/$defs/sha256" },
+        "nameComparison": { "type": "string", "minLength": 1 },
+        "selectedModuleIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "availableModuleIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "instructionCount": { "type": "integer", "minimum": 0 },
+        "expressionFunctionCount": { "type": "integer", "minimum": 0 },
+        "unresolvedInstructionCount": { "type": "integer", "minimum": 0 },
+        "candidateInstructionCount": { "type": "integer", "minimum": 0 },
+        "unresolvedExpressionFunctionCount": { "type": "integer", "minimum": 0 },
+        "candidateExpressionFunctionCount": { "type": "integer", "minimum": 0 },
+        "instructions": { "type": "array", "items": { "$ref": "#/$defs/registration" } },
+        "expressionFunctions": { "type": "array", "items": { "$ref": "#/$defs/registration" } }
+      }
+    },
+    "registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publicKey", "moduleId", "ownershipStatus", "handler", "currentGuard", "currentContribution", "sourceTargetModule", "provenanceWarning"],
+      "properties": {
+        "publicKey": { "type": "string", "minLength": 1 },
+        "moduleId": { "type": "string", "minLength": 1 },
+        "ownershipStatus": { "enum": ["Mapped", "Candidate", "Unresolved"] },
+        "handler": { "type": "string", "minLength": 1 },
+        "currentGuard": { "type": "string", "minLength": 1 },
+        "currentContribution": { "type": "string", "minLength": 1 },
+        "sourceTargetModule": { "type": "string", "minLength": 1 },
+        "provenanceWarning": { "type": "string" }
+      }
+    }
+  }
+}

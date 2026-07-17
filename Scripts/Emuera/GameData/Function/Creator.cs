@@ -167,6 +167,7 @@ namespace MinorShift.Emuera.GameData.Function
                 ["GFILLRECTANGLE"] = new GraphicsFillRectangleMethod(),
                 ["GDRAWSPRITE"] = new GraphicsDrawSpriteMethod(),
                 ["GSETCOLOR"] = new GraphicsSetColorMethod(),
+                ["GCLEARLOWALPHA"] = new GraphicsClearLowAlphaMethod(),
                 ["GDRAWG"] = new GraphicsDrawGMethod(),
                 ["GDRAWGWITHMASK"] = new GraphicsDrawGWithMaskMethod(),
                 ["GSETBRUSH"] = new GraphicsSetBrushMethod(),

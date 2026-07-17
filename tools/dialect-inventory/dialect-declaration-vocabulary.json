@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.dialect-declaration-vocabulary",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-13",
+  "sourceInventoryWorkPackage": "M0-DIA-01",
+  "sourceCompatibilityPackWorkPackage": "M0-DIA-12",
+  "sourceInventoryHash": "a30d210fb0273323b17c9553e7a9e9bda9879e1c6d1478ffb8ff8325c67ccdc2",
+  "sourceCompatibilityPackHash": "e9ffd09462b7bd4ecf2340d36850604533102b0e5c5bb659a29fe06f88438c46",
+  "expectedSourceClassificationCount": 30,
+  "expectedBranchHitCount": 97,
+  "declarations": [
+    {"kind":"BehaviorKey","id":"call.extra-arguments.v1","expectedBranchHitCount":1,"sourceClassificationIds":["call-extra-arguments-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-CALL-EXTRA-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"call.private-argument-shape.v1","expectedBranchHitCount":1,"sourceClassificationIds":["private-argument-shape-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-CALL-PRIVATE-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"display.history-capacity.v1","expectedBranchHitCount":3,"sourceClassificationIds":["content-selected-profile-fallback","content-snake-profile-id","view-history-capacity-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-DISPLAY-HISTORY-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"display.refresh-timing.v1","expectedBranchHitCount":5,"sourceClassificationIds":["console-refresh-timing-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-DISPLAY-TIMING-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"function.snake-fallen-state.v1","expectedBranchHitCount":1,"sourceClassificationIds":["snake-fallen-function-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-FUNC-FALLEN-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"instruction.scoped-variable-registration.v1","expectedBranchHitCount":13,"sourceClassificationIds":["scoped-variable-config-schema","scoped-variable-registration-guard"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-REG-SCOPEDVAR-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"parser.startup-fault.v1","expectedBranchHitCount":1,"sourceClassificationIds":["startup-fault-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-PARSER-FAULT-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"parser.user-variable-resolution.v1","expectedBranchHitCount":4,"sourceClassificationIds":["expression-user-variable-policy","header-user-variable-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-PARSER-USERVAR-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"parser.warning-routing.v1","expectedBranchHitCount":3,"sourceClassificationIds":["parser-warning-routing-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-PARSER-WARN-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"BehaviorKey","id":"resource.lazy-index.v1","expectedBranchHitCount":1,"sourceClassificationIds":["resource-lazy-index-policy"],"targetModuleIds":["game.snake"],"fixtureIds":["DIA-RESOURCE-LAZY-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"CapabilityId","id":"compatibility.plan.selection.v1","expectedBranchHitCount":35,"sourceClassificationIds":["launcher-profile-selection","modern-mobile-profile-projection","program-core-profile-state","program-is-snake-projection","program-profile-detection","program-selected-profile-input"],"targetModuleIds":["godot.launcher","session.selection"],"fixtureIds":["DIA-PLAN-SELECT-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"CapabilityId","id":"diagnostics.profile-identity.v1","expectedBranchHitCount":13,"sourceClassificationIds":["diagnostic-profile-identity","main-profile-observation","runner-snake-profile-id","runner-v24-profile-id","startup-component-profile-observation"],"targetModuleIds":["diagnostics","godot.host","m0.runner"],"fixtureIds":["DIA-REG-SNAKE-001","DIA-REG-V24-001","DIA-REPORT-PLAN-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"CapabilityId","id":"dialect.module-id.v1","expectedBranchHitCount":12,"sourceClassificationIds":["launcher-snake-profile-id","launcher-v24-profile-id","program-snake-profile-id"],"targetModuleIds":["game.snake","gemuera.v24"],"fixtureIds":["DIA-PLAN-SELECT-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"},
+    {"kind":"CapabilityId","id":"instruction.registry.v1","expectedBranchHitCount":4,"sourceClassificationIds":["snake-instruction-registration","v24-instruction-registration"],"targetModuleIds":["game.snake","gemuera.v24"],"fixtureIds":["DIA-REG-SNAKE-001","DIA-REG-V24-001"],"declarationStatus":"StaticCandidate","currentPackEligibility":"NotEligible"}
+  ]
+}

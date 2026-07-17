@@ -137,6 +137,7 @@ namespace MinorShift.Emuera.GameView
 			if (line == null)
 				return;
 			line.TextBackgroundColor = TextBackgroundColor;
+			line.BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
 			line.DynamicMapFunctionScoped = dynamicMapFunctionScoped;
 			if (line.Buttons == null)
 				return;
@@ -811,13 +812,16 @@ namespace MinorShift.Emuera.GameView
 			if (!baseDir.EndsWith(Path.DirectorySeparatorChar.ToString()) && !baseDir.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
 				baseDir += Path.DirectorySeparatorChar;
 
-			if (string.IsNullOrEmpty(filename))
+			bool runnerDefaultLogRedirected = Program.TryResolveM0RunnerDefaultOutputLogPath(filename, out string runnerDefaultLogPath);
+			if (runnerDefaultLogRedirected)
+				filename = runnerDefaultLogPath;
+			else if (string.IsNullOrEmpty(filename))
 				filename = Path.Combine(baseDir, "emuera.log");
 			else if (!Path.IsPathRooted(filename))
 				filename = Path.Combine(baseDir, filename);
 			filename = Path.GetFullPath(filename);
 
-            if (!filename.StartsWith(baseDir, StringComparison.CurrentCultureIgnoreCase))
+			if (!runnerDefaultLogRedirected && !filename.StartsWith(baseDir, StringComparison.CurrentCultureIgnoreCase))
             {
                 MessageBox.Show("ログファイルは実行ファイル以下のディレクトリにのみ保存できます", "ログ出力失敗");
                 return false;
@@ -827,7 +831,10 @@ namespace MinorShift.Emuera.GameView
 			{
 				if (window.Created)
 				{
-					PrintSystemLine("※※※ログファイルを" + filename + "に出力しました※※※");
+					string displayFilename = runnerDefaultLogRedirected
+						? Path.Combine(baseDir, "emuera.log")
+						: filename;
+					PrintSystemLine("※※※ログファイルを" + displayFilename + "に出力しました※※※");
 					RefreshStrings(true);
 				}
 				return true;

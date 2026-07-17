@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-legacy-save-roundtrip-evidence-1.0.0.json",
+  "title": "gEmuera M0 isolated save copy round-trip evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workPackage", "auditId", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result", "sourceRoot", "isolatedCopyRoot", "sourceReadOnly", "profileId", "profileBindingStatus", "copyRoundTripStatus", "semanticRoundTripStatus", "fixtureSetHash", "sourceSaveFilesRead", "fixtures", "uncovered"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackage": { "const": "M0-SAV-01" },
+    "auditId": { "const": "gemuera.m0.legacy-save-roundtrip-evidence" },
+    "generatedAtUtc": { "type": "string" },
+    "executionStatus": { "const": "InProgress" },
+    "gateStatus": { "const": "Blocked" },
+    "blockerCode": { "const": "EvidenceMissing" },
+    "result": { "enum": ["Partial", "ReadyForReview"] },
+    "sourceRoot": { "type": "string", "minLength": 1 },
+    "isolatedCopyRoot": { "type": "string", "minLength": 1 },
+    "sourceReadOnly": { "const": true },
+    "profileId": { "enum": ["Upstream1808", "GEmueraSnake"] },
+    "profileBindingStatus": { "const": "BoundExplicit" },
+    "copyRoundTripStatus": { "enum": ["Partial", "Passed"] },
+    "semanticRoundTripStatus": { "const": "Uncovered" },
+    "fixtureSetHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sourceSaveFilesRead": { "type": "integer", "minimum": 0 },
+    "fixtures": { "type": "array", "items": { "$ref": "#/$defs/fixture" } },
+    "uncovered": { "type": "array", "items": { "type": "string" } },
+    "compatibility": { "type": "array", "items": { "type": "string" } },
+    "rollback": { "type": "string" }
+  },
+  "$defs": {
+    "fixture": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sourceSha256", "sourceSha256After", "isolatedSha256", "roundTripSha256", "wire", "profileId", "profileBindingStatus", "copyRoundTripStatus", "semanticRoundTripStatus"],
+      "properties": {
+        "path": { "type": "string" },
+        "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sourceSha256After": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "isolatedSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "roundTripSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "wire": { "type": "object" },
+        "profileId": { "enum": ["Upstream1808", "GEmueraSnake"] },
+        "profileBindingStatus": { "enum": ["BoundExplicit", "BoundExplicitUnrecognizedWire"] },
+        "copyRoundTripStatus": { "enum": ["Passed", "Failed"] },
+        "semanticRoundTripStatus": { "const": "Uncovered" }
+      }
+    }
+  }
+}

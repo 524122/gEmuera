@@ -296,6 +296,19 @@ namespace MinorShift.Emuera
 		}
 
 		/// <summary>
+		/// Restores the legacy configuration projection to defaults after a
+		/// canary session. The next candidate loads its own files through
+		/// ConfigData.LoadConfig, so previous values are not visible during the
+		/// transition window.
+		/// </summary>
+		internal static void ResetCanarySessionState()
+		{
+			ConfigData.Instance.Clear();
+			SetConfig(ConfigData.Instance);
+			ClearFont();
+		}
+
+		/// <summary>
 		/// ディレクトリ作成失敗のExceptionは呼び出し元で処理すること
 		/// </summary>
 		public static void ForceCreateSavDir()

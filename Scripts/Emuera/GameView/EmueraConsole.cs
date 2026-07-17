@@ -1091,6 +1091,11 @@ namespace MinorShift.Emuera.GameView
 		{
 			state = req.NoFocus ? ConsoleState.WaitInputNoFocus : ConsoleState.WaitInput;
 			inputReq = req;
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
+			}
 			bool flushDeferredRewrite = ConsumeDisplayRewriteRefresh();
 			if (req.NoFocus || flushDeferredRewrite)
 				RefreshStrings(true);
@@ -1120,6 +1125,11 @@ namespace MinorShift.Emuera.GameView
 			req.StopMesskip = stopMesskip;
 			inputReq = req;
 			state = ConsoleState.WaitInput;
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
+			}
 			emuera.NeedWaitToEventComEnd = false;
 			if (ConsumeDisplayRewriteRefresh())
 				RefreshStrings(true);
@@ -1313,6 +1323,12 @@ namespace MinorShift.Emuera.GameView
 					return;
 				if (state == ConsoleState.Error)
 					return;
+			}
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled && inputReq != null)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("completion_consumed", inputReq.ID,
+					inputReq.InputType.ToString(), inputReq.NeedValue, inputReq.OneInput, inputReq.NoFocus,
+					inputReq.Timelimit, NewButtonGeneration);
 			}
 			state = ConsoleState.Running;
 			emuera.DoScript();
@@ -2050,7 +2066,6 @@ namespace MinorShift.Emuera.GameView
 		{
 			get { return emuera?.State?.IsInDynamicMapFunctionScope() == true; }
 		}
-
 		public bool BitmapCacheEnabledForNextLine
 		{
 			get { return false; }

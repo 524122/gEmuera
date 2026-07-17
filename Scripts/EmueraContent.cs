@@ -318,6 +318,8 @@ public partial class EmueraContent : Control
 	const string MaxVisibleLinesKey = "MaxVisibleLines";
 	const string ContentPinchZoomEnabledKey = "ContentPinchZoomEnabled";
 	const string ConsoleRenderBackendKey = "ConsoleRenderBackend";
+	// M0 runner 专用的显示后端覆盖值，不写入用户设置，避免影响正常启动。
+	static string m0RunnerDisplayBackendOverride;
 	const ulong QuickInputGateFallbackMs = 500;
 	static float contentDragSensitivity = -1.0f;
 	static int configuredMaxVisibleLines = -1;
@@ -628,8 +630,27 @@ public partial class EmueraContent : Control
 		contentPinchZoomEnabledLoaded = true;
 	}
 
+	public static bool ConfigureM0RunnerDisplayBackend(string value, out string errorMessage)
+	{
+		errorMessage = "";
+		if (!string.Equals(value, "controls", StringComparison.OrdinalIgnoreCase)
+			&& !string.Equals(value, "canvas", StringComparison.OrdinalIgnoreCase))
+		{
+			errorMessage = "m0_display_backend_must_be_controls_or_canvas";
+			return false;
+		}
+		m0RunnerDisplayBackendOverride = string.Equals(value, "controls", StringComparison.OrdinalIgnoreCase)
+			? "controls"
+			: "canvas";
+		return true;
+	}
+
 	ConsoleRenderBackend LoadConsoleRenderBackend()
 	{
+		if (!string.IsNullOrEmpty(m0RunnerDisplayBackendOverride))
+			return string.Equals(m0RunnerDisplayBackendOverride, "controls", StringComparison.Ordinal)
+				? ConsoleRenderBackend.Controls
+				: ConsoleRenderBackend.Canvas;
 		var cfg = new ConfigFile();
 		cfg.Load(SettingsPath);
 		string value = cfg.GetValue(SettingsSection, ConsoleRenderBackendKey, "canvas").AsString();
@@ -639,6 +660,11 @@ public partial class EmueraContent : Control
 	}
 
 	bool UseCanvasRenderBackend => consoleRenderBackend == ConsoleRenderBackend.Canvas;
+
+	public gEmuera.M0.LegacyDisplayObservation CaptureM0LegacyDisplayObservation(string requestedBackend)
+	{
+		return BuildM0LegacyDisplayObservation(requestedBackend);
+	}
 
 	// Build the UI tree entirely in code because the emulator surface is dynamic:
 	// lines, buttons, overlays, and background images are all generated from ERB
@@ -904,6 +930,17 @@ public partial class EmueraContent : Control
 		quickRenderedSignature = "";
 		if (quickButtons != null && quickButtons.IsShow)
 			quickButtons.Clear();
+	}
+
+	// 仅供已停止 legacy worker 的 M0 会话切换调用，释放会话级 Godot 资源而不改变普通重载语义。
+	internal void ClearForCanarySessionTransition()
+	{
+		Clear();
+		ClearHtmlIsland();
+		ClearCbgSessionState();
+		ClearSessionAudioState();
+		ClearGraphicsImageTextureCache();
+		ClearSessionFontCache();
 	}
 
 	public override void _ExitTree()
@@ -2434,6 +2471,65 @@ public partial class EmueraContent : Control
 		pendingHtmlIslandAsyncTextureRefresh = false;
 		displayRevision++;
 		RefreshQuickInputGate();
+	}
+
+	void ClearCbgSessionState()
+	{
+		ReleaseCbgTexturePins();
+		renderedCbgLayers.Clear();
+		lastCbgSourceLayers.Clear();
+		pendingCbgAsyncTextureRefresh = false;
+		lastCbgScrollVertical = int.MinValue;
+		TrimCbgNodes(0);
+	}
+
+	void ClearGraphicsImageTextureCache()
+	{
+		var releasedTextures = new HashSet<Texture2D>();
+		foreach (var entry in graphicsImageTextureCache.Values)
+		{
+			if (entry.Texture != null && releasedTextures.Add(entry.Texture))
+				entry.Texture.Dispose();
+		}
+		graphicsImageTextureCache.Clear();
+	}
+
+	void ClearSessionFontCache()
+	{
+		foreach (var font in consoleFontCache.Values)
+		{
+			if (font != null && font != mainFont)
+				font.Dispose();
+		}
+		consoleFontCache.Clear();
+		missingConsoleFonts.Clear();
+	}
+
+	void ClearSessionAudioState()
+	{
+		applicationPauseActive = false;
+		bgmPausedBeforeApplicationPause = false;
+		soundPausedBeforeApplicationPause.Clear();
+		if (bgmPlayer != null)
+		{
+			bgmPlayer.Stop();
+			bgmPlayer.Stream = null;
+			bgmPlayer.StreamPaused = false;
+		}
+		for (int i = 0; i < soundPlayers.Count; i++)
+		{
+			var player = soundPlayers[i];
+			if (player == null)
+				continue;
+			player.Stop();
+			player.Stream = null;
+			player.StreamPaused = false;
+			player.PitchScale = 1.0f;
+		}
+		for (int i = 0; i < soundRepeatRemaining.Count; i++)
+			soundRepeatRemaining[i] = 0;
+		soundVolume = 1.0f;
+		bgmVolume = 1.0f;
 	}
 
 	void ClearHtmlIslandControls()
@@ -6888,6 +6984,11 @@ public partial class EmueraContent : Control
 
 		var globalCenter = button.GetGlobalTransformWithCanvas() * (button.Size * 0.5f);
 		UpdatePointerPosition(globalCenter);
+	}
+
+	void UpdatePointerPositionForContentPoint(Vector2 contentPoint)
+	{
+		GenericUtils.SetPointerPosition(contentPoint.X, contentPoint.Y);
 	}
 
 	// Apply user-configured sensitivity to a scroll delta.

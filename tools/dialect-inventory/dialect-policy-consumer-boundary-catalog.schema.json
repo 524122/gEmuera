@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-policy-consumer-boundary-catalog-1.0.0.json",
+  "title": "gEmuera M0 static policy consumer boundary catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage", "sourceInventoryWorkPackage", "sourceDeclarationVocabularyWorkPackage", "sourceInventoryHash", "sourceDeclarationVocabularyHash", "expectedBehaviorKeyCount", "expectedDecisionBoundaryCount", "expectedSourceClassificationBindingCount", "expectedSourceFileBindingCount", "boundaries"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"}, "catalogId": {"type": "string", "minLength": 1}, "catalogVersion": {"$ref": "#/$defs/semver"}, "sourceWorkPackage": {"const": "M0-DIA-14"}, "sourceInventoryWorkPackage": {"const": "M0-DIA-01"}, "sourceDeclarationVocabularyWorkPackage": {"const": "M0-DIA-13"}, "sourceInventoryHash": {"$ref": "#/$defs/sha256"}, "sourceDeclarationVocabularyHash": {"$ref": "#/$defs/sha256"},
+    "expectedBehaviorKeyCount": {"const": 10}, "expectedDecisionBoundaryCount": {"const": 10}, "expectedSourceClassificationBindingCount": {"const": 14}, "expectedSourceFileBindingCount": {"const": 16}, "boundaries": {"type": "array", "minItems": 10, "maxItems": 10, "items": {"$ref": "#/$defs/boundary"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "semver": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "sourceBinding": {"type": "object", "additionalProperties": false, "required": ["classificationId", "role"], "properties": {"classificationId": {"type": "string", "minLength": 1}, "role": {"enum": ["DecisionConsumer", "ConfigurationInput"]}}},
+    "boundary": {"type": "object", "additionalProperties": false, "required": ["behaviorKeyId", "consumerContractId", "decisionOwner", "sourceBindings", "boundaryDraftStatus", "runtimeStatus"], "properties": {"behaviorKeyId": {"type": "string", "pattern": "^[a-z][a-z0-9.\\-]*\\.v[0-9]+$"}, "consumerContractId": {"type": "string", "pattern": "^[a-z][a-z0-9.\\-]*\\.v[0-9]+$"}, "decisionOwner": {"type": "string", "minLength": 1}, "sourceBindings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/sourceBinding"}}, "boundaryDraftStatus": {"const": "BoundaryDraftOnly"}, "runtimeStatus": {"const": "NotImplemented"}}}
+  }
+}

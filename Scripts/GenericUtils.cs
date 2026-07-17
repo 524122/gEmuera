@@ -248,6 +248,96 @@ internal static class GenericUtils
         }
     }
 
+    /// <summary>
+    /// Clears bridge-side state that is produced by one legacy session.  This
+    /// is deliberately separate from diagnostics initialization: the runner's
+    /// sinks, rate limits and ring buffers are process scoped, while audio,
+    /// input replay, fallback paths and queued view work belong to the active
+    /// candidate.  The canary invokes this only after the legacy worker has
+    /// stopped, so draining the UI queue cannot race a producer.
+    /// </summary>
+    internal static void ResetCanarySessionState()
+    {
+        lock (soundFallbackResolveCacheLock)
+            soundFallbackResolveCache.Clear();
+
+        lock (snakeAudioLock)
+        {
+            for (int i = 0; i < snakeSounds.Length; i++)
+                ResetSnakeAudioStateLocked(snakeSounds[i]);
+            ResetSnakeAudioStateLocked(snakeBgm);
+        }
+
+        lock (inputStateLock)
+        {
+            pointerPosition = uEmuera.Drawing.Point.Empty;
+            pointingButtonInput = "";
+            pointingButtonGeneration = long.MinValue;
+            pointingButtonActive = false;
+        }
+        uEmuera.Forms.Control.MousePosition = uEmuera.Drawing.Point.Empty;
+        MinorShift._Library.WinInput.ResetCanarySessionState();
+        uEmuera.Forms.Timer.ResetSessionState();
+
+        // All queued actions at this point were produced by the stopped
+        // candidate.  A stale action must never mutate the next candidate's
+        // Godot view, so discard the envelopes and their accounting together.
+        while (uiQueue.TryDequeue(out _)) { }
+        Interlocked.Exchange(ref pendingUiActions, 0);
+        Interlocked.Exchange(ref pendingDisplayActions, 0);
+        Interlocked.Increment(ref uiFrameGeneration);
+
+        _currentInputId = 0;
+        _runtimeGamePath = "";
+        _runtimeCoreProfile = "";
+        DiagnosticLogExporter.NotifyGamePathSelected("");
+        var cfg = _runtimeConfig;
+        _inputReplay = cfg != null && cfg.InputReplayEnabled
+            ? new InputReplayBuffer(cfg.InputReplayMaxEvents)
+            : null;
+        _saveLogOperationTrail.Clear();
+
+        scrollTraceSequence = 0;
+        scrollTraceCoreLinesRemaining = 0;
+        dynamicMapLastContextTickMs = long.MinValue;
+        _lastPerformanceSampleMs = 0;
+        _performanceFrameMsTotal = 0.0;
+        _performanceFrameMsMax = 0.0;
+        _performanceFrameCount = 0;
+        _lastConsoleRenderSampleMs = 0;
+        _consoleRenderMsTotal = 0.0;
+        _consoleRenderMsMax = 0.0;
+        _consoleRenderSampleCount = 0;
+        _consoleRenderDrawCount = 0;
+        _consoleRenderHitOnlyCount = 0;
+        _consoleRenderHitRebuildCount = 0;
+        _consoleRenderVisibleRowsTotal = 0;
+        _consoleRenderVisibleRowsMax = 0;
+        _consoleRenderCanvasRowsTotal = 0;
+        _consoleRenderCanvasRowsMax = 0;
+        _consoleRenderOverlayRowsTotal = 0;
+        _consoleRenderOverlayRowsMax = 0;
+        _consoleRenderPartsTotal = 0;
+        _consoleRenderPartsMax = 0;
+        _consoleRenderHitRectsTotal = 0;
+        _consoleRenderHitRectsMax = 0;
+        Array.Clear(_consoleRenderMsSamples, 0, _consoleRenderMsSamples.Length);
+    }
+
+    static void ResetSnakeAudioStateLocked(SnakeAudioState state)
+    {
+        state.Path = null;
+        state.Playing = false;
+        state.PendingStart = false;
+        state.Paused = false;
+        state.Volume = 100;
+        state.Speed = 100;
+        state.Repeat = 1;
+        state.StartedAtMs = 0;
+        state.TotalMs = 0;
+        state.LastKnownCurrentMs = 0;
+    }
+
     public static string GetPointingButtonInput()
     {
         lock (inputStateLock)
@@ -1356,11 +1446,12 @@ internal static class GenericUtils
         return LineHasDynamicMapBitmapContext(line, 0);
     }
 
-    static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line, int depth)
-    {
-        // 动态地图 BitmapCache 标记已移除；保留旧入口名，内部改走函数栈标记，
-        // 避免诊断和滚动策略调用点大范围重命名。
-        return LineHasDynamicMapFunctionScope(line, depth);
+	static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line, int depth)
+	{
+		if (line?.BitmapCacheEnabled == true)
+			return true;
+		// 当前分支的动态地图缓存保持禁用，仍用函数栈作用域判定滚动和诊断边界。
+		return LineHasDynamicMapFunctionScope(line, depth);
     }
 
     public static string BuildDynamicMapLineTailSummary(IReadOnlyList<ConsoleDisplayLine> lines)
@@ -1406,9 +1497,10 @@ internal static class GenericUtils
         AccumulateDynamicMapCommandSummary(line, commands, ref commandCount, ref commandWritten, 0);
 
         int maxTextChars = GetDynamicMapMaxTextChars();
-        var sb = new StringBuilder(160);
-        sb.Append("{no=").Append(line.LineNo)
-            .Append(",mapfn=").Append(line.DynamicMapFunctionScoped ? 1 : 0)
+		var sb = new StringBuilder(160);
+		sb.Append("{no=").Append(line.LineNo)
+			.Append(",bmp=").Append(line.BitmapCacheEnabled ? 1 : 0)
+			.Append(",mapfn=").Append(line.DynamicMapFunctionScoped ? 1 : 0)
             .Append(",logic=").Append(line.IsLogicalLine ? 1 : 0)
             .Append(",tmp=").Append(line.IsTemporary ? 1 : 0)
             .Append(",end=").Append(line.IsLineEnd ? 1 : 0)
@@ -1947,16 +2039,22 @@ internal static class GenericUtils
 
     public static void RemoveTextCount(int count)
     {
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("remove_bottom", count, 0, false, -1, "preserve_viewport", 0);
         EnqueueUI(() => EmueraContent.instance?.RemoveBottomLines(count), true);
     }
 
     public static void AddText(ConsoleDisplayLine line, bool update)
     {
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("append", 0, line == null ? 0 : 1, update, -1, "unspecified", 0);
         EnqueueUI(() => EmueraContent.instance?.AddLine(line, update), true);
     }
 
     public static void AddTexts(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
     {
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("append_batch", 0, lines?.Count ?? 0, false, -1, "unspecified", 0);
         EnqueueUI(() => EmueraContent.instance?.AddLines(lines), true);
     }
 
@@ -1968,10 +2066,15 @@ internal static class GenericUtils
             dataOnlyLines);
     }
 
-    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
-        int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
-    {
-        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration, scrollMode, dataOnlyLines), true);
+	public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
+		int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
+	{
+		if (gEmuera.M0.LegacyTrace.IsEnabled)
+		{
+			gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("apply_text_changes", removeBottomCount, lines?.Count ?? 0,
+				update, lastButtonGeneration, scrollMode.ToString(), dataOnlyLines?.Count ?? 0);
+		}
+		EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration, scrollMode, dataOnlyLines), true);
     }
 
     public static void SetLastButtonGeneration(int generation)
@@ -2027,6 +2130,8 @@ internal static class GenericUtils
             state.TotalMs = 0;
             state.LastKnownCurrentMs = 0;
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", path, "play", channel, repeat);
         EnqueueUI(() => EmueraContent.instance?.PlaySoundFile(path, repeat, channel));
     }
 
@@ -2043,6 +2148,8 @@ internal static class GenericUtils
                 state.LastKnownCurrentMs = 0;
             }
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", "", "stop_all", -1, 0);
         EnqueueUI(() => EmueraContent.instance?.StopSounds());
     }
 
@@ -2060,6 +2167,8 @@ internal static class GenericUtils
             snakeBgm.TotalMs = 0;
             snakeBgm.LastKnownCurrentMs = 0;
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", path, "play", -1, -1);
         EnqueueUI(() => EmueraContent.instance?.PlayBgmFile(path));
     }
 
@@ -2073,6 +2182,8 @@ internal static class GenericUtils
             snakeBgm.Repeat = 1;
             snakeBgm.LastKnownCurrentMs = 0;
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", "", "stop", -1, 0);
         EnqueueUI(() => EmueraContent.instance?.StopBgm());
     }
 
@@ -2083,6 +2194,8 @@ internal static class GenericUtils
             foreach (var state in snakeSounds)
                 state.Volume = ClampEraVolume(volume);
         }
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", "", "set_volume", -1, volume);
         EnqueueUI(() => EmueraContent.instance?.SetSoundVolume(volume));
     }
 
@@ -2090,6 +2203,8 @@ internal static class GenericUtils
     {
         lock (snakeAudioLock)
             snakeBgm.Volume = ClampEraVolume(volume);
+        if (gEmuera.M0.LegacyTrace.IsEnabled)
+            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", "", "set_volume", -1, volume);
         EnqueueUI(() => EmueraContent.instance?.SetBgmVolume(volume));
     }
 

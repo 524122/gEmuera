@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0.0",
+  "gameRoot": "",
+  "profile": "v24pure",
+  "sessionIsolationMode": "canary",
+  "inProcessSessionCycle": "cross-aba",
+  "inProcessSessionSwitchCount": 2,
+  "inProcessAlternateSession": {
+    "gameRoot": "",
+    "profile": "snake"
+  },
+  "outputDirectory": "",
+  "maxRuntimeMs": 300000,
+  "initialWaitTimeoutMs": 90000,
+  "settleFrames": 3,
+  "displaySettleFrames": 2,
+  "displayBackend": "canvas",
+  "captureScreenshot": false,
+  "viewportWidth": 1280,
+  "viewportHeight": 720,
+  "maxDisplayBytes": 16777216,
+  "traceEnabled": true,
+  "maxTraceEvents": 250000,
+  "inputs": []
+}

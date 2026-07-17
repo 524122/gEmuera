@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-legacy-session-state-classification-1.0.0.json",
+  "title": "gEmuera M0 legacy session root state classification catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workPackage", "catalogId", "catalogVersion", "entries"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "workPackage": {"const": "M0-SES-01"},
+    "catalogId": {"type": "string", "minLength": 1},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "entries": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/entry"}}
+  },
+  "$defs": {
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scope", "symbol", "legacyOwner", "candidateM1Owner", "crossSessionExpectation", "expectedReset", "fixtureIds", "migrationStage", "notes"],
+      "properties": {
+        "scope": {"enum": ["GlobalStatic", "Program"]},
+        "symbol": {"type": "string", "minLength": 1},
+        "legacyOwner": {"type": "string", "minLength": 1},
+        "candidateM1Owner": {"const": "LegacySessionFacade"},
+        "crossSessionExpectation": {"type": "string", "minLength": 1},
+        "expectedReset": {"type": "string", "minLength": 1},
+        "fixtureIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "migrationStage": {"const": "M1"},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

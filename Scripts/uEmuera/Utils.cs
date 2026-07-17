@@ -151,7 +151,7 @@ namespace uEmuera
                 return null;
             string result = null;
             shiftjis_to_utf8.TryGetValue(md5, out result);
-            if(string.IsNullOrEmpty(result))
+            if(string.IsNullOrEmpty(result) && utf8zhcn_to_utf8 != null)
                 utf8zhcn_to_utf8.TryGetValue(text, out result);
             return result;
         }
@@ -1103,6 +1103,24 @@ namespace uEmuera
                 resource_csv_lines_.Clear();
                 resource_csv_lines_ = null;
             }
+        }
+        /// <summary>
+        /// Clears path/resource lookup state owned by one legacy
+        /// session.  The normal M0 shutdown path intentionally keeps its
+        /// historical behaviour; only the canary bridge calls this boundary
+        /// after the worker has quiesced.
+        /// </summary>
+        internal static void ResetCanarySessionState()
+        {
+            lock (recursiveFileIndexLock)
+                recursiveFileIndexCache.Clear();
+
+            // The encoding dictionaries are populated from res:// once by
+            // the startup bridge and are immutable process catalogs.  Keep
+            // them alive across a game switch; clearing them here would make
+            // the next canary depend on whether startup happened again.
+            ResourceClear();
+            MinorShift.Emuera.Sub.Preload.Clear();
         }
 
         static int ReadCsvHeadFields6(

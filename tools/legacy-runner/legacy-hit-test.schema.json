@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-legacy-hit-test-1.0.0.json",
+  "title": "gEmuera M0 Legacy Backend Hit Tests",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "coverageStatus", "backend", "hits", "uncovered"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "coverageStatus": { "enum": ["Captured", "Uncovered", "Partial"] },
+    "backend": { "enum": ["controls", "canvas", "unavailable"] },
+    "hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["backend", "source", "coordinateSpace", "rect", "value", "generation", "probe", "matched"],
+        "properties": {
+          "backend": { "enum": ["controls", "canvas"] },
+          "source": { "enum": ["control-meta", "canvas-hit-cache"] },
+          "coordinateSpace": { "const": "viewport-global" },
+          "rect": { "$ref": "#/$defs/rect" },
+          "value": { "type": "string" },
+          "generation": { "type": "integer" },
+          "probe": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["point", "hit", "value", "generation"],
+            "properties": {
+              "point": { "$ref": "#/$defs/point" },
+              "hit": { "type": "boolean" },
+              "value": { "type": "string" },
+              "generation": { "type": "integer" }
+            }
+          },
+          "matched": { "type": "boolean" }
+        }
+      }
+    },
+    "uncovered": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" }, "y": { "type": "number" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Core\GEmuera.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The launch registry is intentionally path-bearing host code, but this
+         dependency-free source link gives its exact route-matching contract a
+         fast test without pulling Godot into Core. -->
+    <Compile Include="..\..\Scripts\GodotHost\LegacySessionLaunchRegistry.cs"
+             Link="GodotHost\LegacySessionLaunchRegistry.cs" />
+    <Compile Include="..\..\Scripts\GodotHost\LegacyThreadQuiescence.cs"
+             Link="GodotHost\LegacyThreadQuiescence.cs" />
+  </ItemGroup>
+</Project>

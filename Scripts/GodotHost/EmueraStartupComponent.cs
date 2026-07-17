@@ -43,9 +43,9 @@ public sealed partial class EmueraStartupComponent : Node
         if (!IsInsideTree())
             return false;
 
-        // 启动组件是核心全局状态重置的边界：UI 还未创建，后台线程也未启动，
-        // 此时重置不会打断正在运行的 Emuera 脚本或 Godot 控件树。
-        GlobalStatic.Reset();
+        // Legacy global state is reset only by LegacySessionBackend while it
+        // starts or stops a session. This component remains a path/config
+        // bridge and must not mutate a session on its own.
         return true;
     }
 
