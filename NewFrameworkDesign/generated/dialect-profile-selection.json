@@ -1,0 +1,129 @@
+{
+    "schemaVersion":  "1.0.0",
+    "workPackage":  "M0-DIA-11",
+    "generatedAtUtc":  "2026-07-15T13:54:40.2463613Z",
+    "executionStatus":  "InProgress",
+    "gateStatus":  "Blocked",
+    "blockerCode":  "EvidenceMissing",
+    "result":  "Partial",
+    "sourcePlanPreflightHash":  "d5cc089f073229aff0ea44436c7dfc2f559c83c0f785467921d035f0c815256b",
+    "catalogId":  "gemuera.m0.dialect-profile-selection",
+    "catalogVersion":  "1.0.0",
+    "catalogHash":  "fed789c7d1c8b278dafd437a5cb2baecff8b8fbcf7334259572d27b69143272b",
+    "selectionSetHash":  "0960994b046e1160dc9bddef3bbf031a4cdaaa18f8a20674a20f5b7be3bbd71d",
+    "sourceIdentities":  [
+                             {
+                                 "id":  "Program",
+                                 "path":  "Scripts/Emuera/Program.cs",
+                                 "sha256":  "6cfd9883d3c3c20fd084ca191ed6d3235f48bfbaedd2215d5f6c186f175e038a"
+                             },
+                             {
+                                 "id":  "FirstWindow",
+                                 "path":  "Scripts/FirstWindow.cs",
+                                 "sha256":  "001e2676f76b2e4df06a90347ffe3bc6bc18512fa747a42c198cbcab95b2f796"
+                             },
+                             {
+                                 "id":  "LegacyRunnerConfig",
+                                 "path":  "Scripts/M0/LegacyRunnerConfig.cs",
+                                 "sha256":  "734b405dd009641da9d5d68a73d417ba8a0e2d0755788b6a8df5d47f8cc9642b"
+                             }
+                         ],
+    "legacyCoreProfiles":  [
+                               {
+                                   "legacyCoreProfileEnum":  "Snake",
+                                   "launcherProfileId":  "snake",
+                                   "preflightEvidenceStatus":  "EvidenceBacked",
+                                   "runnerProfileStatus":  "Supported",
+                                   "selectionAvailability":  "LauncherOrLegacyMarker"
+                               },
+                               {
+                                   "legacyCoreProfileEnum":  "SnakeModernMobile",
+                                   "launcherProfileId":  "",
+                                   "preflightEvidenceStatus":  "Uncovered",
+                                   "runnerProfileStatus":  "Unsupported",
+                                   "selectionAvailability":  "ModernMarkerOnly"
+                               },
+                               {
+                                   "legacyCoreProfileEnum":  "V24Pure",
+                                   "launcherProfileId":  "v24pure",
+                                   "preflightEvidenceStatus":  "EvidenceBacked",
+                                   "runnerProfileStatus":  "Supported",
+                                   "selectionAvailability":  "LauncherOrDefault"
+                               }
+                           ],
+    "launcherProfileContract":  {
+                                    "supportedProfileIds":  [
+                                                                "snake",
+                                                                "v24pure"
+                                                            ],
+                                    "unknownProfileFallback":  "v24pure",
+                                    "normalizerComparison":  "OrdinalIgnoreCase for snake; all other values fall back to v24pure"
+                                },
+    "modernMarkerContract":  {
+                                 "markerFileNames":  [
+                                                         "modern_core.txt",
+                                                         "snake_modern_core.txt"
+                                                     ],
+                                 "outputLegacyCoreProfileEnum":  "SnakeModernMobile"
+                             },
+    "legacyMarkerContract":  {
+                                 "markerFileNames":  [
+                                                         "legacy_snake_core.txt",
+                                                         "snake_core.txt"
+                                                     ],
+                                 "outputLegacyCoreProfileEnum":  "Snake"
+                             },
+    "selectionPrecedence":  [
+                                {
+                                    "order":  1,
+                                    "inputKind":  "EmptyExeDir",
+                                    "outputLegacyCoreProfileEnum":  "V24Pure",
+                                    "source":  "Program.DetectCoreProfile"
+                                },
+                                {
+                                    "order":  2,
+                                    "inputKind":  "LauncherProfileSnake",
+                                    "outputLegacyCoreProfileEnum":  "Snake",
+                                    "source":  "FirstWindow.SelectedCoreProfileName"
+                                },
+                                {
+                                    "order":  3,
+                                    "inputKind":  "ModernMarker",
+                                    "outputLegacyCoreProfileEnum":  "SnakeModernMobile",
+                                    "source":  "Program.IsModernSnakeCoreRequested"
+                                },
+                                {
+                                    "order":  4,
+                                    "inputKind":  "LegacyMarker",
+                                    "outputLegacyCoreProfileEnum":  "Snake",
+                                    "source":  "Program.IsLegacySnakeCoreRequested"
+                                },
+                                {
+                                    "order":  5,
+                                    "inputKind":  "Default",
+                                    "outputLegacyCoreProfileEnum":  "V24Pure",
+                                    "source":  "Program.DetectCoreProfile"
+                                }
+                            ],
+    "currentRuntimeIsolation":  {
+                                    "status":  "Failed",
+                                    "reason":  "CoreProfile remains process-wide legacy static state; DIA-11 only records source selection precedence."
+                                },
+    "parserVmConsumption":  {
+                                "status":  "NotConsumed",
+                                "reason":  "DIA-11 is an offline source report and is not read by the legacy Parser or VM."
+                            },
+    "compatibilityPlanRuntime":  {
+                                     "status":  "NotImplemented",
+                                     "reason":  "DIA-11 does not create a runtime resolver, CompatibilityPlan, session facade or frozen registry."
+                                 },
+    "m1Eligibility":  {
+                          "status":  "Blocked",
+                          "reason":  "M0-DIA-10/M0-SES-01 remain static evidence only; profile selection facts do not isolate sessions."
+                      },
+    "uncovered":  [
+                      "DIA-11 proves only the current source-level selection order and marker names; it does not inspect any game directory or execute a resolver.",
+                      "SnakeModernMobile is selected only by a legacy marker path in current source and remains Uncovered by the DIA-10 v24/Snake static registry evidence.",
+                      "No runtime CompatibilityPlan, LegacySessionFacade, feature flag, parser/VM consumption, D2 frozen registry, game run, APK or device evidence is introduced."
+                  ]
+}

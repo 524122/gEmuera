@@ -1,0 +1,432 @@
+{
+    "schemaVersion":  "1.0.0",
+    "workPackage":  "M0-DIA-17",
+    "generatedAtUtc":  "2026-07-15T13:58:37.3874454Z",
+    "executionStatus":  "InProgress",
+    "gateStatus":  "Blocked",
+    "blockerCode":  "EvidenceMissing",
+    "result":  "Partial",
+    "sourceDeclarationVocabularyHash":  "766c3f843f39749010d61b693b1fbef41164ef04bff2ac27e1469e193d5d98c4",
+    "sourcePolicySurfaceHash":  "2213bf38212c06c6d4d9ffd1cb12c095f62ceaa17b544d651cea915e27c9e012",
+    "catalogId":  "gemuera.dialect-behavior-fixture-contracts",
+    "catalogVersion":  "1.0.0",
+    "catalogHash":  "07631de303446e782d14576ef6788a09271dd2e69457afc859b69eb75bc08f08",
+    "behaviorFixtureContractSetHash":  "1fed13e535a84fb8d66aee09d5eb333e87cfd2f89e5c18d6af0247b1141d73c4",
+    "contractCounts":  {
+                           "contractCount":  10,
+                           "plannedFixtureContractCount":  10,
+                           "behaviorEvidenceCoveredCount":  0,
+                           "profilePairRequirementCount":  10
+                       },
+    "contracts":  [
+                      {
+                          "behaviorKeyId":  "call.extra-arguments.v1",
+                          "fixtureId":  "DIA-CALL-EXTRA-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IExtraArgumentPolicy",
+                          "contractKind":  "PolicyDecision",
+                          "decisionOwner":  "IExtraArgumentPolicy",
+                          "consumerContractId":  "policy.call.extra-arguments.v1",
+                          "sourceClassificationIds":  [
+                                                          "call-extra-arguments-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/GameProc/Process.CalledFunction.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "call.private-argument-shape.v1",
+                          "fixtureId":  "DIA-CALL-PRIVATE-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IPrivateArgumentShapePolicy",
+                          "contractKind":  "PolicyDecision",
+                          "decisionOwner":  "IPrivateArgumentShapePolicy",
+                          "consumerContractId":  "policy.call.private-argument-shape.v1",
+                          "sourceClassificationIds":  [
+                                                          "private-argument-shape-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/GameProc/ErbLoader.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "display.history-capacity.v1",
+                          "fixtureId":  "DIA-DISPLAY-HISTORY-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IEffectiveDisplayConfigurationProjection",
+                          "contractKind":  "BridgeProjection",
+                          "decisionOwner":  "effective display configuration projection",
+                          "consumerContractId":  "bridge.display.history-capacity.v1",
+                          "sourceClassificationIds":  [
+                                                          "content-selected-profile-fallback",
+                                                          "content-snake-profile-id",
+                                                          "view-history-capacity-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/EmueraContent.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "display.refresh-timing.v1",
+                          "fixtureId":  "DIA-DISPLAY-TIMING-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IDisplayRefreshTimingPolicy",
+                          "contractKind":  "BridgeProjection",
+                          "decisionOwner":  "display timing policy consumed by Bridge",
+                          "consumerContractId":  "bridge.display.refresh-timing.v1",
+                          "sourceClassificationIds":  [
+                                                          "console-refresh-timing-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/GameView/EmueraConsole.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "function.snake-fallen-state.v1",
+                          "fixtureId":  "DIA-FUNC-FALLEN-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IExpressionFunctionCatalog",
+                          "contractKind":  "FrozenCatalogContribution",
+                          "decisionOwner":  "frozen expression function catalog",
+                          "consumerContractId":  "catalog.expression.snake-fallen-state.v1",
+                          "sourceClassificationIds":  [
+                                                          "snake-fallen-function-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/GameData/Function/Creator.Method.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "instruction.scoped-variable-registration.v1",
+                          "fixtureId":  "DIA-REG-SCOPEDVAR-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IInstructionCatalogBuilder",
+                          "contractKind":  "FrozenCatalogContribution",
+                          "decisionOwner":  "frozen DialectPlan instruction catalog builder",
+                          "consumerContractId":  "catalog.instruction.scoped-variable-registration.v1",
+                          "sourceClassificationIds":  [
+                                                          "scoped-variable-config-schema",
+                                                          "scoped-variable-registration-guard"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/Config/Config.cs",
+                                                  "Scripts/Emuera/Config/ConfigCode.cs",
+                                                  "Scripts/Emuera/Config/ConfigData.cs",
+                                                  "Scripts/Emuera/Config/JSONConfig.cs",
+                                                  "Scripts/Emuera/Config/JSONConfigData.cs",
+                                                  "Scripts/Emuera/GameProc/Function/FunctionIdentifier.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "parser.startup-fault.v1",
+                          "fixtureId":  "DIA-PARSER-FAULT-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IStartupFaultPolicy",
+                          "contractKind":  "PolicyDecision",
+                          "decisionOwner":  "IStartupFaultPolicy",
+                          "consumerContractId":  "policy.parser.startup-fault.v1",
+                          "sourceClassificationIds":  [
+                                                          "startup-fault-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/GameProc/Process.SystemProc.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "parser.user-variable-resolution.v1",
+                          "fixtureId":  "DIA-PARSER-USERVAR-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IUserVariableResolutionPolicy",
+                          "contractKind":  "PolicyDecision",
+                          "decisionOwner":  "IUserVariableResolutionPolicy",
+                          "consumerContractId":  "policy.parser.user-variable-resolution.v1",
+                          "sourceClassificationIds":  [
+                                                          "expression-user-variable-policy",
+                                                          "header-user-variable-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/GameData/Expression/ExpressionParser.cs",
+                                                  "Scripts/Emuera/GameProc/HeaderFileLoader.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "parser.warning-routing.v1",
+                          "fixtureId":  "DIA-PARSER-WARN-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IParserDiagnosticsSinkPolicy",
+                          "contractKind":  "PolicyDecision",
+                          "decisionOwner":  "parser diagnostics sink policy",
+                          "consumerContractId":  "policy.parser.warning-routing.v1",
+                          "sourceClassificationIds":  [
+                                                          "parser-warning-routing-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/GameData/ParserMediator.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      },
+                      {
+                          "behaviorKeyId":  "resource.lazy-index.v1",
+                          "fixtureId":  "DIA-RESOURCE-LAZY-001",
+                          "requiredProfileIds":  [
+                                                     "snake",
+                                                     "v24pure"
+                                                 ],
+                          "requiredEvidenceKinds":  [
+                                                        "baseline",
+                                                        "extension",
+                                                        "undeclared"
+                                                    ],
+                          "requiredTraceFacets":  [
+                                                      "completion",
+                                                      "effect",
+                                                      "error",
+                                                      "input",
+                                                      "observable-result"
+                                                  ],
+                          "portTypeId":  "IResourceLazyIndexPolicy",
+                          "contractKind":  "PolicyDecision",
+                          "decisionOwner":  "resource behavior consumer",
+                          "consumerContractId":  "policy.resource.lazy-index.v1",
+                          "sourceClassificationIds":  [
+                                                          "resource-lazy-index-policy"
+                                                      ],
+                          "sourceFilePaths":  [
+                                                  "Scripts/Emuera/Content/AppContents.cs"
+                                              ],
+                          "targetModuleIds":  [
+                                                  "game.snake"
+                                              ],
+                          "fixtureContractStatus":  "Planned",
+                          "behaviorEvidenceStatus":  "Uncovered",
+                          "runtimeStatus":  "NotImplemented",
+                          "interfaceImplementationStatus":  "BlockedByFixture"
+                      }
+                  ],
+    "currentRuntimeIsolation":  {
+                                    "status":  "Failed",
+                                    "reason":  "M0-DIA-17 is an offline fixture-plan report; Program.CoreProfile and legacy registries remain process-wide mutable state."
+                                },
+    "parserVmConsumption":  {
+                                "status":  "NotConsumed",
+                                "reason":  "M0-DIA-17 is not read by the legacy Parser or VM."
+                            },
+    "compatibilityPlanRuntime":  {
+                                     "status":  "NotImplemented",
+                                     "reason":  "M0-DIA-17 does not create a CompatibilityPlan, LegacySessionFacade, feature flag, resolver or frozen registry."
+                                 },
+    "policyManagerRuntime":  {
+                                 "status":  "NotImplemented",
+                                 "reason":  "M0-DIA-17 does not create a policy manager or select any policy value."
+                             },
+    "runtimeTypeDeclarations":  {
+                                    "status":  "NotImplemented",
+                                    "reason":  "M0-DIA-17 intentionally contains no C# interface, method signature, input DTO or decision enum."
+                                },
+    "m1Eligibility":  {
+                          "status":  "Blocked",
+                          "reason":  "Planned fixture requirements do not establish M0 approval, session isolation, generation guards, candidate commit or behavior evidence."
+                      },
+    "uncovered":  [
+                      "Each contract is a fixture requirement only. No baseline, extension or undeclared-policy behavior has been captured or approved.",
+                      "The report deliberately stores no policy value, method signature, input DTO, decision enum, executable payload, module assembly, resolver input or Parser/VM wiring.",
+                      "Future implementation must attach reproducible v24pure and snake traces for every listed fixture before the corresponding port can leave InterfaceDraftOnly."
+                  ]
+}
