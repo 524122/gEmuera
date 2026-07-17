@@ -21,6 +21,14 @@ namespace MinorShift.Emuera.GameView
 
 		private readonly PrintStringBuffer printBuffer;
 		readonly StringMeasure stringMeasure = new StringMeasure();
+		long currentInputSubmissionSequence = 0;
+
+		// EmueraThread 在一次用户输入被核心消费期间设置该序号。
+		// 输出行保留来源，供 Godot 显示桥把“主动切图”与动画刷新精确区分。
+		internal void SetCurrentInputSubmissionSequence(long sequence)
+		{
+			currentInputSubmissionSequence = sequence > 0 ? sequence : 0;
+		}
 
 		public void ClearDisplay()
 		{
@@ -139,6 +147,7 @@ namespace MinorShift.Emuera.GameView
 			line.TextBackgroundColor = TextBackgroundColor;
 			line.BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
 			line.DynamicMapFunctionScoped = dynamicMapFunctionScoped;
+			line.InputSubmissionSequence = currentInputSubmissionSequence;
 			if (line.Buttons == null)
 				return;
 			for (int i = 0; i < line.Buttons.Length; i++)

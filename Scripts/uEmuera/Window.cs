@@ -129,6 +129,7 @@ namespace uEmuera.Window
             {
                 dynamicMapViewActive = false;
                 dynamicMapViewBaseLineNo = -1;
+                renderedInputSubmissionSequences.Clear();
                 if(console_.IsInProcess)
                 {
                     dirty_ = true;
@@ -145,6 +146,7 @@ namespace uEmuera.Window
             int removeBottomCount = 0;
             System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd = null;
             System.Collections.Generic.List<ConsoleDisplayLine> linesToRefreshData = null;
+            var nextRenderedInputSubmissionSequences = new System.Collections.Generic.Dictionary<int, long>();
             int prev = GenericUtils.GetTextMaxLineNo();
             int min_lineno = GenericUtils.GetTextMinLineNo();
             int displayStartIndex = 0;
@@ -190,11 +192,15 @@ namespace uEmuera.Window
                 if(!fullReset && prev >= 0 && min_lineno >= 0 && line.LineNo < min_lineno)
                     continue;
 
+                nextRenderedInputSubmissionSequences[line.LineNo] = line.InputSubmissionSequence;
+
                 bool isUpdate = isKnownRenderedLine;
                 if(isKnownRenderedLine)
                 {
                     var existing = GenericUtils.GetText(line.LineNo);
-                    if(ShouldReuseRenderedLine(existing, line, out bool refreshDataOnly))
+                    bool hasRenderedInputSequence = renderedInputSubmissionSequences.TryGetValue(
+                        line.LineNo, out long renderedInputSequence);
+                    if(ShouldReuseRenderedLine(existing, line, renderedInputSequence, hasRenderedInputSequence, out bool refreshDataOnly))
                     {
                         if(refreshDataOnly)
                         {
@@ -213,8 +219,12 @@ namespace uEmuera.Window
             }
 
             bool hasDynamicMapFunctionDelta = GenericUtils.ContainsDynamicMapFunctionScope(linesToAdd);
+            bool hasDynamicMapFunctionDataOnly = GenericUtils.ContainsDynamicMapFunctionScope(linesToRefreshData);
+            bool hasDynamicMapOutputDelta = hasDynamicMapFunctionDelta || hasDynamicMapFunctionDataOnly;
+            int currentScrollInteractionSerial = global::EmueraContent.instance?.ContentScrollInteractionSerial ?? int.MinValue;
             EmueraDisplayScrollMode scrollMode = DecideScrollModeForDisplayDelta(prev, removeBottomCount, need_update_flag,
-                linesToAdd, dynamicMapViewActive, hasDynamicMapFunctionDelta);
+                linesToAdd, linesToRefreshData, dynamicMapViewActive, hasDynamicMapOutputDelta, currentScrollInteractionSerial,
+                out bool userNavigationFollowBottom);
             bool scrollToBottom = scrollMode == EmueraDisplayScrollMode.FollowBottom;
 
             if (GenericUtils.IsDynamicMapLineSnapshotTraceEnabled)
@@ -232,7 +242,8 @@ namespace uEmuera.Window
                             + " view_start=" + displayStartIndex
                             + " map_view=" + dynamicMapViewActive
                             + " map_base=" + dynamicMapViewBaseLineNo
-                            + " map_delta=" + hasDynamicMapFunctionDelta
+                            + " map_delta=" + hasDynamicMapOutputDelta
+                            + " user_navigation_follow=" + userNavigationFollowBottom
                             + " update=" + need_update_flag
                             + " scroll_mode=" + scrollMode
                             + " auto_scroll=" + scrollToBottom
@@ -245,6 +256,7 @@ namespace uEmuera.Window
             }
 
             GenericUtils.ApplyTextChanges(removeBottomCount, linesToAdd, need_update_flag, console_.LastButtonGeneration, scrollMode, linesToRefreshData);
+            renderedInputSubmissionSequences = nextRenderedInputSubmissionSequences;
 
             GenericUtils.ShowIsInProcess(false);
             GenericUtils.RefreshCBG(console_);
@@ -254,17 +266,22 @@ namespace uEmuera.Window
         }
 
         static EmueraDisplayScrollMode DecideScrollModeForDisplayDelta(int previousMaxLineNo, int removeBottomCount, bool update,
-            System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd, bool dynamicMapViewActive,
-            bool hasDynamicMapFunctionDelta)
+            System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd,
+            System.Collections.Generic.List<ConsoleDisplayLine> dataOnlyLines,
+            bool dynamicMapViewActive,
+            bool hasDynamicMapFunctionDelta, int currentScrollInteractionSerial, out bool userNavigationFollowBottom)
         {
+            userNavigationFollowBottom = false;
             // 动态地图、状态面板一类内容通常通过删除底部旧行再重画当前屏幕来刷新。
             // 这不是“追加新文本”，因此不能触发 ScrollContainer 自动滚到底；否则 Android 会在重绘时把视口拖走。
             // 但第一次进入地图或普通新文本追加仍应允许追到底部，否则会出现需要手动滑到底的问题。
-            if (linesToAdd == null || linesToAdd.Count == 0)
+            if ((linesToAdd == null || linesToAdd.Count == 0)
+                && (dataOnlyLines == null || dataOnlyLines.Count == 0))
                 return EmueraDisplayScrollMode.PreserveViewport;
 
             bool hasAppendAfterPreviousMax = false;
-            for (int i = 0; i < linesToAdd.Count; i++)
+            int linesToAddCount = linesToAdd?.Count ?? 0;
+            for (int i = 0; i < linesToAddCount; i++)
             {
                 var item = linesToAdd[i];
                 if (item.Line == null)
@@ -276,7 +293,17 @@ namespace uEmuera.Window
                 }
             }
 
-            if ((dynamicMapViewActive || hasDynamicMapFunctionDelta) && (removeBottomCount > 0 || update))
+            bool dynamicMapDelta = dynamicMapViewActive || hasDynamicMapFunctionDelta;
+            if (dynamicMapDelta && GenericUtils.TryConsumeDynamicMapUserNavigationFollowBottom(
+                linesToAdd, dataOnlyLines, currentScrollInteractionSerial))
+            {
+                // 用户在底部主动点击当前地图按钮后，下一批地图输出应显示最新地点。
+                // 该意图是一次性的，后台动画/普通重绘没有它时仍走 PreserveViewport。
+                userNavigationFollowBottom = true;
+                return EmueraDisplayScrollMode.FollowBottom;
+            }
+
+            if (dynamicMapDelta && (removeBottomCount > 0 || update))
                 return EmueraDisplayScrollMode.PreserveViewport;
 
             // 普通会话/泡茶等输出可能在追加新文本的同时刷新旧行元数据。
@@ -390,9 +417,15 @@ namespace uEmuera.Window
             return -1;
         }
 
-        static bool ShouldReuseRenderedLine(ConsoleDisplayLine current, ConsoleDisplayLine next, out bool refreshDataOnly)
+        static bool ShouldReuseRenderedLine(ConsoleDisplayLine current, ConsoleDisplayLine next,
+            long renderedInputSubmissionSequence, bool hasRenderedInputSubmissionSequence, out bool refreshDataOnly)
         {
             refreshDataOnly = false;
+            // 输入序号不是视觉字段，但动态地图主动切图需要知道此行是否由当前点击产生。
+            // 快照独立于 ConsoleDisplayLine 对象，核心就算原地复用对象也不会掩盖来源变化。
+            if ((hasRenderedInputSubmissionSequence && renderedInputSubmissionSequence != next.InputSubmissionSequence)
+                || (!hasRenderedInputSubmissionSequence && next.InputSubmissionSequence != 0))
+                return false;
             if(ReferenceEquals(current, next))
                 return true;
             if(current == null || next == null)
@@ -564,6 +597,8 @@ namespace uEmuera.Window
         private volatile bool dirty_ = false;
         private int refreshRequestGeneration = 0;
         private int processedRefreshGeneration = 0;
+        private System.Collections.Generic.Dictionary<int, long> renderedInputSubmissionSequences =
+            new System.Collections.Generic.Dictionary<int, long>();
         private bool dynamicMapViewActive = false;
         private int dynamicMapViewBaseLineNo = -1;
         private const int DynamicMapTailSearchLineCount = 32;

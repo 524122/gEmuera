@@ -55,6 +55,8 @@ namespace MinorShift.Emuera.GameView
 		public Color? TextBackgroundColor = null;
 		public bool BitmapCacheEnabled = false;
 		public bool DynamicMapFunctionScoped = false;
+		// 生成此行的用户输入序号。0 表示非用户输入期间的常规输出。
+		public long InputSubmissionSequence = 0;
 		//EmueraConsole parent;
 		ConsoleButtonString[] buttons;
 		DisplayLineAlignment align;

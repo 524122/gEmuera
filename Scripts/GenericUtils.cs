@@ -76,6 +76,8 @@ internal static class GenericUtils
     static int scrollTraceSequence = 0;
     static int scrollTraceCoreLinesRemaining = 0;
     static long dynamicMapLastContextTickMs = long.MinValue;
+    static readonly object dynamicMapUserNavigationFollowBottomLock = new object();
+    static DynamicMapUserNavigationFollowBottomRequest dynamicMapUserNavigationFollowBottomRequest;
     const string ScrollTracePrefix = "[SCROLL_TRACE]";
     const int ScrollTraceCoreBurstLineCount = 120;
     const int MaxLogMessageChars = 8192;
@@ -300,6 +302,8 @@ internal static class GenericUtils
         scrollTraceSequence = 0;
         scrollTraceCoreLinesRemaining = 0;
         dynamicMapLastContextTickMs = long.MinValue;
+        lock (dynamicMapUserNavigationFollowBottomLock)
+            dynamicMapUserNavigationFollowBottomRequest = null;
         _lastPerformanceSampleMs = 0;
         _performanceFrameMsTotal = 0.0;
         _performanceFrameMsMax = 0.0;
@@ -1332,6 +1336,117 @@ internal static class GenericUtils
         long last = Volatile.Read(ref dynamicMapLastContextTickMs);
         int windowMs = Math.Max(0, cfg.DynamicMapContextWindowMs);
         return last != long.MinValue && now - last <= windowMs;
+    }
+
+    // 用户点击地图按钮时，输入线程会为该次提交分配序号。显示桥只接受同序号的地图输出，
+    // 不能用时间窗口猜测，因为动画刷新可能先到，而慢设备的大地图也可能晚到。
+    public static void RequestDynamicMapUserNavigationFollowBottom(long inputSequence, int scrollInteractionSerial)
+    {
+        if (inputSequence <= 0)
+            return;
+        lock (dynamicMapUserNavigationFollowBottomLock)
+        {
+            dynamicMapUserNavigationFollowBottomRequest = new DynamicMapUserNavigationFollowBottomRequest(
+                inputSequence, scrollInteractionSerial);
+        }
+    }
+
+    public static bool TryConsumeDynamicMapUserNavigationFollowBottom(
+        IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines,
+        IReadOnlyList<ConsoleDisplayLine> dataOnlyLines,
+        int scrollInteractionSerial)
+    {
+        DynamicMapUserNavigationFollowBottomRequest request;
+        lock (dynamicMapUserNavigationFollowBottomLock)
+            request = dynamicMapUserNavigationFollowBottomRequest;
+        if (request == null)
+            return false;
+
+        if (request.ScrollInteractionSerial != scrollInteractionSerial)
+        {
+            ClearDynamicMapUserNavigationFollowBottomRequest(request);
+            return false;
+        }
+
+        if (!ContainsDynamicMapInputSequence(lines, request.InputSequence)
+            && !ContainsDynamicMapInputSequence(dataOnlyLines, request.InputSequence))
+            return false;
+
+        return ClearDynamicMapUserNavigationFollowBottomRequest(request);
+    }
+
+    static bool ClearDynamicMapUserNavigationFollowBottomRequest(DynamicMapUserNavigationFollowBottomRequest request)
+    {
+        lock (dynamicMapUserNavigationFollowBottomLock)
+        {
+            if (!ReferenceEquals(dynamicMapUserNavigationFollowBottomRequest, request))
+                return false;
+            dynamicMapUserNavigationFollowBottomRequest = null;
+            return true;
+        }
+    }
+
+    sealed class DynamicMapUserNavigationFollowBottomRequest
+    {
+        public readonly long InputSequence;
+        public readonly int ScrollInteractionSerial;
+
+        public DynamicMapUserNavigationFollowBottomRequest(long inputSequence, int scrollInteractionSerial)
+        {
+            InputSequence = inputSequence;
+            ScrollInteractionSerial = scrollInteractionSerial;
+        }
+    }
+
+    static bool ContainsDynamicMapInputSequence(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, long inputSequence)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapInputSequence(lines[i].Line, inputSequence, 0))
+                return true;
+        }
+        return false;
+    }
+
+    static bool ContainsDynamicMapInputSequence(IReadOnlyList<ConsoleDisplayLine> lines, long inputSequence)
+    {
+        if (lines == null)
+            return false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (LineHasDynamicMapInputSequence(lines[i], inputSequence, 0))
+                return true;
+        }
+        return false;
+    }
+
+    static bool LineHasDynamicMapInputSequence(ConsoleDisplayLine line, long inputSequence, int depth)
+    {
+        if (line == null || depth > 4)
+            return false;
+        if (line.InputSubmissionSequence == inputSequence && line.DynamicMapFunctionScoped)
+            return true;
+        if (line.Buttons == null)
+            return false;
+        for (int i = 0; i < line.Buttons.Length; i++)
+        {
+            var parts = line.Buttons[i]?.StrArray;
+            if (parts == null)
+                continue;
+            for (int j = 0; j < parts.Length; j++)
+            {
+                if (parts[j] is not ConsoleDivPart div || div.Children == null)
+                    continue;
+                for (int k = 0; k < div.Children.Length; k++)
+                {
+                    if (LineHasDynamicMapInputSequence(div.Children[k], inputSequence, depth + 1))
+                        return true;
+                }
+            }
+        }
+        return false;
     }
 
     public static void DynamicMapTrace(string eventId, Func<string> messageFactory, Func<string> dataFactory = null,

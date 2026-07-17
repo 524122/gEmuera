@@ -13,6 +13,12 @@
 - `Scripts/Emuera/Content/GraphicsImage.cs:ClearLowAlpha` 与 `Creator.Method.cs:GraphicsClearLowAlphaMethod`：新增 `GCLEARLOWALPHA(graphicsId, threshold)`，以一次 `GetData/SetData` 清理低 alpha 像素，替代 ERB 逐像素循环；阈值为 `0..255`，WinAPI 绘制模式不可用。
 - 验证入口：根项目使用 `net8.0`（桌面）/`net9.0`（Android），`src/Core/GEmuera.Core.csproj` 对应 `net8.0;net9.0`；`dotnet build`、`dotnet build -p:GodotTargetPlatform=android` 以及 `dotnet run --project tools/core-contracts/CoreContractSmoke.csproj` 分别覆盖宿主编译、Android 编译与 Core 契约冒烟检查。
 
+## 2026-07-17 动态地图主动切图追底
+
+- `Scripts/EmueraContent.cs:OnButtonPressed`、`QuickButtons` 与 Canvas/Control 命中：仅当左键点击当前动态地图来源按钮、且点击前已位于内容底部时，才把追底意图连同当前滚动交互序号传给 `EmueraThread`。按钮来源由实际命中行/快捷按钮元数据传递，旧历史按钮、右/中键和非地图按钮不会登记。
+- `Scripts/EmueraThread.cs`、`ConsoleDisplayLine.InputSubmissionSequence`、`EmueraConsole.ApplyCurrentLineMetadata`：已接收输入在 `inputGate` 内以不可变信封分配单调序号，并从接收至脚本处理完成始终保持占用；期间拒绝后续提交，避免文本与序号错配或双击穿透到下一次输入。输入处理期间生成的显示行保存该序号，使显示桥能精确识别本次点击实际产生的动态地图输出，而不依赖时间窗口。
+- `Scripts/GenericUtils.cs:Request/TryConsumeDynamicMapUserNavigationFollowBottom` 与 `Scripts/uEmuera/Window.cs:DecideScrollModeForDisplayDelta`：只有同输入序号的动态地图差量、且用户滚动交互序号未变化时选择 `FollowBottom`；无意图的 `CLEARLINE`/旧行更新继续选择 `PreserveViewport`，因此动画刷新和用户查看历史时不会被强制拉到底部。`DYNAMIC_MAP.BRIDGE.SUBMIT` 会记录 `user_navigation_follow` 以便 Android 日志确认。
+
 ## 2026-07-09 eraTW/snake 泡茶展开浮层兼容
 - `Scripts/EmueraContent.cs:BuildConsoleButton/CreateTextPart/ConsoleTextPart`：Control 后端按钮文本现在也使用 `ConsoleStyledString.pButtonColor` 和焦点背景绘制 hover/press 视觉，补齐旧节点后端与 Canvas 后端、原生 Emuera 的按钮选中态差异。
 - `Scripts/EmueraContent.cs:GetHtmlDivPosition`：HTML `absolute/absolute-leftbottom` div 遇到负 `Y` 时按 Emuera 的底边 0、向上为负坐标解释；正数仍保留原 left-bottom 距底部解释。用于兼容 eraTW/snake `QOL_USERCOM.ERB` 这类通过 `MOUSEY() - DIV_HEIGHT` 把浮层显示在按钮上方的脚本。

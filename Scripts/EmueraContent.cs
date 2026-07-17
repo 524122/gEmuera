@@ -119,6 +119,7 @@ public partial class EmueraContent : Control
 	const string ViewportAnchoredRelativeDivYMeta = "viewport_anchor_relative_div_y";
 	const string ViewportAnchoredRelativeDivHeightMeta = "viewport_anchor_relative_div_height";
 	const string InlineLineBackgroundDivMeta = "inline_line_background_div";
+	const string DynamicMapButtonMeta = "dynamic_map_button";
 	// Texture pins mirror presentation lifetime: console rows own line pins and
 	// CBG owns background pins. activeTexturePinCollector is scoped to the current
 	// render pass so GetSpriteTexture can remain a pure conversion helper.
@@ -249,10 +250,12 @@ public partial class EmueraContent : Control
 	string contentDragButtonInput;
 	long contentDragButtonGeneration;
 	bool contentDragButtonContentCenterValid = false;
+	bool contentDragButtonDynamicMap = false;
 	ulong contentLastDragTick = 0;
 	bool contentInertiaActive = false;
 	float contentInertiaDeceleration = 900.0f;
 	int contentScrollInteractionSerial = 0;
+	internal int ContentScrollInteractionSerial => contentScrollInteractionSerial;
 	string canvasVisualButtonInput;
 	long canvasVisualButtonGeneration = long.MinValue;
 
@@ -1462,7 +1465,8 @@ public partial class EmueraContent : Control
 					int buttonHeight = GetButtonBottom(button, true) - buttonTop;
 					if (buttonHeight <= 0)
 						buttonHeight = EffectiveLineHeight;
-					var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
+					var btn = BuildConsoleButton(button, buttonTop, buttonHeight,
+						dynamicMapButton: line.DynamicMapFunctionScoped);
 					if (buttonTop < 0 || buttonHeight > EffectiveLineHeight)
 						btn.ZIndex = EscapedConsolePartZIndex;
 					lineControl.AddChild(btn);
@@ -1583,7 +1587,7 @@ public partial class EmueraContent : Control
 
 	void UpdateRenderedButtonMetadata(Control root, ConsoleDisplayLine line)
 	{
-		var buttonData = new List<(string input, long generation)>();
+		var buttonData = new List<(string input, long generation, bool dynamicMapButton)>();
 		CollectRenderedButtonData(line, buttonData);
 		if (buttonData.Count == 0)
 			return;
@@ -1598,10 +1602,11 @@ public partial class EmueraContent : Control
 				continue;
 			control.SetMeta("button_input", buttonData[i].input ?? "");
 			control.SetMeta("generation", buttonData[i].generation);
+			control.SetMeta(DynamicMapButtonMeta, buttonData[i].dynamicMapButton);
 		}
 	}
 
-	void CollectRenderedButtonData(ConsoleDisplayLine line, List<(string input, long generation)> output)
+	void CollectRenderedButtonData(ConsoleDisplayLine line, List<(string input, long generation, bool dynamicMapButton)> output)
 	{
 		if (line?.Buttons == null || output == null)
 			return;
@@ -1610,7 +1615,7 @@ public partial class EmueraContent : Control
 			if (button == null)
 				continue;
 			if (button.IsButton)
-				output.Add((button.Inputs, button.Generation));
+				output.Add((button.Inputs, button.Generation, line.DynamicMapFunctionScoped));
 			if (button.StrArray == null)
 				continue;
 			foreach (var part in button.StrArray)
@@ -1792,7 +1797,8 @@ public partial class EmueraContent : Control
 	}
 
 	// 企业级说明：普通行与 HTML/Div 子行共用同一按钮构建入口，避免触摸命中、焦点、样式和内容裁剪规则在移动端产生分叉。
-	Panel BuildConsoleButton(ConsoleButtonString button, int buttonTop, int buttonHeight, bool allowEscapedPartZ = true)
+	Panel BuildConsoleButton(ConsoleButtonString button, int buttonTop, int buttonHeight, bool allowEscapedPartZ = true,
+		bool dynamicMapButton = false)
 	{
 		if (buttonHeight <= 0)
 			buttonHeight = EffectiveLineHeight;
@@ -1811,6 +1817,7 @@ public partial class EmueraContent : Control
 		btn.MouseExited += () => SetRenderedButtonHover(btn, false);
 		btn.SetMeta("button_input", inputs);
 		btn.SetMeta("generation", generation);
+		btn.SetMeta(DynamicMapButtonMeta, dynamicMapButton);
 
 		var contentBox = new Control();
 		contentBox.MouseFilter = MouseFilterEnum.Ignore;
@@ -1859,6 +1866,20 @@ public partial class EmueraContent : Control
 		catch
 		{
 			return 0;
+		}
+	}
+
+	static bool IsRenderedDynamicMapButton(Control button)
+	{
+		if (button == null || !button.HasMeta(DynamicMapButtonMeta))
+			return false;
+		try
+		{
+			return button.GetMeta(DynamicMapButtonMeta).AsBool();
+		}
+		catch
+		{
+			return false;
 		}
 	}
 
@@ -1940,6 +1961,7 @@ public partial class EmueraContent : Control
 				Rect = bounds,
 				Input = button.Inputs,
 				Generation = button.Generation,
+				DynamicMapButton = line.DynamicMapFunctionScoped,
 				ContentCenter = bounds.Position + bounds.Size * 0.5f,
 			});
 		}
@@ -2461,7 +2483,8 @@ public partial class EmueraContent : Control
 						int buttonHeight = GetButtonBottom(button, true) - buttonTop;
 						if (buttonHeight <= 0)
 							buttonHeight = EffectiveLineHeight;
-						var btn = BuildConsoleButton(button, buttonTop, buttonHeight);
+						var btn = BuildConsoleButton(button, buttonTop, buttonHeight,
+							dynamicMapButton: line.DynamicMapFunctionScoped);
 						if (buttonTop < 0 || buttonHeight > EffectiveLineHeight)
 							btn.ZIndex = EscapedConsolePartZIndex;
 						lineControl.AddChild(btn);
@@ -4147,7 +4170,8 @@ public partial class EmueraContent : Control
 				int buttonHeight = GetButtonBottom(button, true, rowHeight) - buttonTop;
 				if (buttonHeight <= 0)
 					buttonHeight = rowHeight;
-				var btn = BuildConsoleButton(button, buttonTop, buttonHeight, allowEscapedPartZ: false);
+				var btn = BuildConsoleButton(button, buttonTop, buttonHeight, allowEscapedPartZ: false,
+					dynamicMapButton: line.DynamicMapFunctionScoped);
 				row.AddChild(btn);
 			}
 			else
@@ -5550,7 +5574,7 @@ public partial class EmueraContent : Control
 				{
 					foreach (var btn in lineGroups[i].buttons)
 					{
-						quickButtons.AddButton(btn.text, btn.color, btn.code, lastButtonGeneration);
+						quickButtons.AddButton(btn.text, btn.color, btn.code, lastButtonGeneration, btn.dynamicMapButton);
 					}
 					if (i < lineGroups.Count - 1)
 						quickButtons.ShiftLine();
@@ -5563,9 +5587,9 @@ public partial class EmueraContent : Control
 		}
 	}
 
-	List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> CollectCurrentGenerationQuickButtonGroups()
+	List<(int lineNo, List<(string text, Godot.Color color, string code, bool dynamicMapButton)> buttons)> CollectCurrentGenerationQuickButtonGroups()
 	{
-		var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
+		var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code, bool dynamicMapButton)> buttons)>();
 		if (lastButtonGeneration < 0 || lastButtonGeneration > maxRenderedButtonGeneration)
 			return lineGroups;
 		if (!buttonGenerationLineNumbers.TryGetValue(lastButtonGeneration, out var rows) || rows == null)
@@ -5577,7 +5601,7 @@ public partial class EmueraContent : Control
 		{
 			if (!lineObjects.TryGetValue(lineNo, out var line))
 				continue;
-			var lineButtons = new List<(string text, Godot.Color color, string code)>();
+			var lineButtons = new List<(string text, Godot.Color color, string code, bool dynamicMapButton)>();
 			CollectQuickButtons(line, lineButtons);
 			if (lineButtons.Count > 0)
 				lineGroups.Add((lineNo, lineButtons));
@@ -5585,7 +5609,7 @@ public partial class EmueraContent : Control
 		return lineGroups;
 	}
 
-	string BuildQuickButtonGroupsSignature(List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> lineGroups)
+	string BuildQuickButtonGroupsSignature(List<(int lineNo, List<(string text, Godot.Color color, string code, bool dynamicMapButton)> buttons)> lineGroups)
 	{
 		if (lineGroups == null || lineGroups.Count == 0)
 			return "";
@@ -5605,6 +5629,8 @@ public partial class EmueraContent : Control
 						.Append(button.text ?? "")
 						.Append('#')
 						.Append(button.color.ToString())
+						.Append('#')
+						.Append(button.dynamicMapButton ? '1' : '0')
 						.Append(';');
 				}
 			}
@@ -5613,7 +5639,7 @@ public partial class EmueraContent : Control
 		return sb.ToString();
 	}
 
-	string BuildDynamicMapQuickGroupsSummary(List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> lineGroups)
+	string BuildDynamicMapQuickGroupsSummary(List<(int lineNo, List<(string text, Godot.Color color, string code, bool dynamicMapButton)> buttons)> lineGroups)
 	{
 		if (lineGroups == null || lineGroups.Count == 0)
 			return "none";
@@ -5645,7 +5671,7 @@ public partial class EmueraContent : Control
 
 	// Recursively collect command buttons from visible console lines and nested
 	// divs for the quick-button overlay.
-	void CollectQuickButtons(ConsoleDisplayLine line, List<(string text, Godot.Color color, string code)> output)
+	void CollectQuickButtons(ConsoleDisplayLine line, List<(string text, Godot.Color color, string code, bool dynamicMapButton)> output)
 	{
 		if (line?.Buttons == null || output == null)
 			return;
@@ -5656,7 +5682,7 @@ public partial class EmueraContent : Control
 				string text = btn.ToString().Trim();
 				if (string.IsNullOrEmpty(text))
 					text = btn.Title ?? "";
-				output.Add((text, GetQuickButtonColor(btn), btn.Inputs));
+				output.Add((text, GetQuickButtonColor(btn), btn.Inputs, line.DynamicMapFunctionScoped));
 			}
 			foreach (var part in btn.StrArray)
 			{
@@ -5671,14 +5697,14 @@ public partial class EmueraContent : Control
 
 	// Submit input from the quick-button overlay using the same generation guard
 	// as inline console buttons.
-	public void SubmitQuickButtonInput(string input, long generation)
+	public void SubmitQuickButtonInput(string input, long generation, bool dynamicMapButton)
 	{
 		if (quickInputGateActive && quickInputGateGeneration == generation && quickInputGateRevision == displayRevision)
 			return;
 
 		HideQuickUntilNextButtons(generation);
 
-		OnButtonPressed(input, generation);
+		OnButtonPressed(input, generation, dynamicMapButton: dynamicMapButton);
 	}
 
 	// ------------------------------------------------------------------
@@ -5732,7 +5758,8 @@ public partial class EmueraContent : Control
 	// 原生 hover 字段（通道A，ERB MOUSEBUTTON() 读取），未命中则清空两条通道。
 	public bool VirtualCursorUpdateHover(Vector2 globalPosition)
 	{
-		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out _, out var hoverInput, out var hoverGeneration, out _, out _))
+		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out _, out var hoverInput, out var hoverGeneration,
+			out _, out _, out _))
 		{
 			SetCanvasVisualButton(hoverInput, hoverGeneration);
 			GenericUtils.SetPointingButton(hoverInput, hoverGeneration);
@@ -5748,7 +5775,8 @@ public partial class EmueraContent : Control
 	public void VirtualCursorCommitClick(Vector2 globalPosition, int mouseVk)
 	{
 		UpdatePointerPosition(globalPosition);
-		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out var hitButton, out var hitInput, out var hitGeneration, out var contentCenterValid, out _))
+		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out var hitButton, out var hitInput, out var hitGeneration,
+			out var hitDynamicMapButton, out var contentCenterValid, out _))
 		{
 			if (contentCenterValid)
 				UpdatePointerPosition(globalPosition);
@@ -5756,7 +5784,7 @@ public partial class EmueraContent : Control
 				UpdatePointerPositionForButton(hitButton, globalPosition);
 			if (quickButtons != null && quickButtons.IsShow)
 				HideQuickUntilNextButtons(hitGeneration);
-			OnButtonPressed(hitInput, hitGeneration, mouseVk: mouseVk);
+			OnButtonPressed(hitInput, hitGeneration, mouseVk: mouseVk, dynamicMapButton: hitDynamicMapButton);
 		}
 		else
 		{
@@ -5777,6 +5805,7 @@ public partial class EmueraContent : Control
 		contentDragButtonInput = null;
 		contentDragButtonGeneration = 0;
 		contentDragButtonContentCenterValid = false;
+		contentDragButtonDynamicMap = false;
 		contentDragMouseVk = 0x01;
 		contentDragStartPosition = globalPosition;
 		contentDragLastPosition = globalPosition;
@@ -5958,8 +5987,13 @@ public partial class EmueraContent : Control
 
 	// Submit an inline or quick command button to the core. Old generations are
 	// treated as a plain advance, matching emuera's stale-button behavior.
-	void OnButtonPressed(string input, long generation, bool skip = false, int mouseVk = 0x01)
+	void OnButtonPressed(string input, long generation, bool skip = false, int mouseVk = 0x01,
+		bool dynamicMapButton = false)
 	{
+		bool requestDynamicMapFollowBottom = mouseVk == 0x01
+			&& generation == lastButtonGeneration
+			&& IsContentAtBottom()
+			&& dynamicMapButton;
 		RememberCurrentContentScroll();
 		if (GenericUtils.IsScrollTraceActive)
 		{
@@ -5974,7 +6008,23 @@ public partial class EmueraContent : Control
 			EmueraThread.instance.Input("", false, skip);
 			return;
 		}
-		EmueraThread.instance.Input(input, true, skip, mouseVk);
+		if (requestDynamicMapFollowBottom)
+		{
+			// 来源标记由命中按钮/快捷按钮直接传递，不能按 input 文本反查历史行。
+			// 同时携带当前交互序号，用户在脚本完成前主动滑动时会取消这次追底。
+			if (GenericUtils.IsScrollTraceActive)
+				TraceScroll("dynamic_map_navigation_follow_request", () => $"input={GenericUtils.ClipTrace(input, 64)} gen={generation}");
+		}
+		EmueraThread.instance.Input(input, true, skip, mouseVk,
+			requestDynamicMapFollowBottom,
+			requestDynamicMapFollowBottom ? contentScrollInteractionSerial : int.MinValue);
+	}
+
+	bool IsContentAtBottom()
+	{
+		if (scrollContainer == null)
+			return false;
+		return scrollContainer.ScrollVertical >= GetMaxContentVerticalScroll() - ScrollToBottomTolerancePx;
 	}
 
 	// Return to the first scene after confirming the emuera worker is idle.
@@ -6462,7 +6512,7 @@ public partial class EmueraContent : Control
 	// so release can submit the correct generation even after layout changes.
 	void OnContentButtonGuiInput(InputEvent @event, Control btn, string input, long generation)
 	{
-		HandleContentPointerInput(@event, true, btn, input, generation);
+		HandleContentPointerInput(@event, true, btn, input, generation, IsRenderedDynamicMapButton(btn));
 	}
 
 	void SetCanvasVisualButton(string input, long generation)
@@ -6526,7 +6576,8 @@ public partial class EmueraContent : Control
 
 	// Unified pointer handler for mouse, touch emulation, inline buttons, drag
 	// scrolling, inertia, and click-to-advance.
-	bool HandleContentPointerInput(InputEvent @event, bool acceptEvent, Control button = null, string input = null, long generation = 0)
+	bool HandleContentPointerInput(InputEvent @event, bool acceptEvent, Control button = null, string input = null,
+		long generation = 0, bool dynamicMapButton = false)
 	{
 		if (HandleContentTouchGesture(@event, acceptEvent))
 			return true;
@@ -6548,7 +6599,8 @@ public partial class EmueraContent : Control
 
 		if (motion && !contentDragActive)
 		{
-			if (TryFindConsoleButtonAtGlobalPosition(pointerPosition, out _, out var hoverInput, out var hoverGeneration, out _, out _))
+			if (TryFindConsoleButtonAtGlobalPosition(pointerPosition, out _, out var hoverInput, out var hoverGeneration,
+				out _, out _, out _))
 				SetCanvasVisualButton(hoverInput, hoverGeneration);
 			else
 				ClearCanvasVisualButton();
@@ -6567,11 +6619,13 @@ public partial class EmueraContent : Control
 		if (pressed)
 		{
 			bool hitContentCenterValid = false;
-			if (button == null && TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var hitButton, out var hitInput, out var hitGeneration, out hitContentCenterValid, out _))
+			if (button == null && TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var hitButton, out var hitInput,
+				out var hitGeneration, out var hitDynamicMapButton, out hitContentCenterValid, out _))
 			{
 				button = hitButton;
 				input = hitInput;
 				generation = hitGeneration;
+				dynamicMapButton = hitDynamicMapButton;
 			}
 
 			// 桌面:用事件的真实 VK；Android 触控(eventMouseVk<0):默认左键。
@@ -6588,6 +6642,7 @@ public partial class EmueraContent : Control
 			contentDragButtonInput = input;
 			contentDragButtonGeneration = generation;
 			contentDragButtonContentCenterValid = hitContentCenterValid;
+			contentDragButtonDynamicMap = dynamicMapButton;
 			if (contentDragStartedOnButton)
 			{
 				SetCanvasVisualButton(input, generation);
@@ -6672,6 +6727,7 @@ public partial class EmueraContent : Control
 		int pressedButtonMouseVk = contentDragMouseVk;
 		Control pressedButtonControl = null;
 		bool pressedButtonContentCenterValid = false;
+		bool pressedButtonDynamicMap = false;
 		bool advanceTap = false;
 		if (contentDragMoved)
 		{
@@ -6684,6 +6740,7 @@ public partial class EmueraContent : Control
 			pressedButtonGeneration = contentDragButtonGeneration;
 			pressedButtonControl = contentDragButton;
 			pressedButtonContentCenterValid = contentDragButtonContentCenterValid;
+			pressedButtonDynamicMap = contentDragButtonDynamicMap;
 			handled = true;
 		}
 		else if (!contentDragStartedOnButton)
@@ -6716,7 +6773,8 @@ public partial class EmueraContent : Control
 				UpdatePointerPositionForButton(pressedButtonControl, pointerPosition);
 			if (quickButtons != null && quickButtons.IsShow)
 				HideQuickUntilNextButtons(pressedButtonGeneration);
-			OnButtonPressed(pressedButtonInput, pressedButtonGeneration, mouseVk: pressedButtonMouseVk);
+			OnButtonPressed(pressedButtonInput, pressedButtonGeneration, mouseVk: pressedButtonMouseVk,
+				dynamicMapButton: pressedButtonDynamicMap);
 		}
 		else if (advanceTap)
 			TryAdvanceTap(acceptEvent, pressedButtonMouseVk);
@@ -6734,11 +6792,13 @@ public partial class EmueraContent : Control
 
 	// Android 上触摸事件有时只到达 ScrollContainer/root，绕过按钮 Panel.GuiInput。
 	// 这里按当前渲染树反向命中一次，保持主视图按钮和 quick 按钮的输入路径一致。
-	bool TryFindConsoleButtonAtGlobalPosition(Vector2 globalPosition, out Control button, out string input, out long generation, out bool contentCenterValid, out Vector2 contentCenter)
+	bool TryFindConsoleButtonAtGlobalPosition(Vector2 globalPosition, out Control button, out string input, out long generation,
+		out bool dynamicMapButton, out bool contentCenterValid, out Vector2 contentCenter)
 	{
 		button = null;
 		input = null;
 		generation = 0;
+		dynamicMapButton = false;
 		contentCenterValid = false;
 		contentCenter = Vector2.Zero;
 		if (scaledContentRoot == null || !GodotObject.IsInstanceValid(scaledContentRoot))
@@ -6750,12 +6810,16 @@ public partial class EmueraContent : Control
 		{
 			input = hit.Input;
 			generation = hit.Generation;
+			dynamicMapButton = hit.DynamicMapButton;
 			contentCenterValid = true;
 			contentCenter = hit.ContentCenter;
 			return true;
 		}
 		if (TryFindConsoleButtonAtGlobalPosition(scaledContentRoot, globalPosition, out button, out input, out generation))
+		{
+			dynamicMapButton = IsRenderedDynamicMapButton(button);
 			return true;
+		}
 		return false;
 	}
 
@@ -7455,6 +7519,7 @@ public partial class EmueraContent : Control
 		contentDragButtonInput = null;
 		contentDragButtonGeneration = 0;
 		contentDragButtonContentCenterValid = false;
+		contentDragButtonDynamicMap = false;
 		contentDragMouseVk = 0x01;
 		ClearCanvasVisualButton();
 	}
