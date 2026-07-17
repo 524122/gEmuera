@@ -3,6 +3,7 @@ using GEmuera.Core.Session;
 using GEmuera.Core.Runtime;
 using CoreContractSmoke;
 using gEmuera.GodotHost;
+using System.Text;
 
 static void Assert(bool condition, string message)
 {
@@ -786,6 +787,43 @@ Assert(
     "Built-in baseline Snake module did not preserve the complete reviewed port declaration surface.");
 await baselineFacade.DisposeAsync();
 
+var eraFlFacade = LegacySessionFacade.CreateLegacyBaseline(new TestLegacyBackend());
+var eraFlSwitch = await eraFlFacade.SwitchAsync(
+    new SessionSelection("fixture-erafl", "erafl"),
+    null);
+Assert(eraFlSwitch.IsCommitted, "Built-in eraFL profile could not build a candidate.");
+Assert(eraFlFacade.CurrentPlan?.ProfileId == "erafl", "eraFL plan did not preserve its profile id.");
+Assert(
+    eraFlFacade.CurrentPlan?.Dialect.Modules.Select(module => module.ModuleId)
+        .SequenceEqual(new[] { "gemuera.v24", "game.erafl" }) == true,
+    "eraFL plan did not resolve the v24 dependency closure.");
+Assert(
+    eraFlFacade.CurrentPlan?.Dialect.Ports.Count == 5,
+    "eraFL plan did not include all independent typed policy declarations.");
+Assert(
+    eraFlFacade.CurrentPlan?.CapabilityIds.SequenceEqual(new[]
+    {
+        "display.dynamic-map-transaction.v1",
+        "input.pointer-button.v1",
+        "markup.div-v2.v1",
+        "markup.image-dual-src.v1",
+        "resource.dynamic-sprite.v1",
+    }) == true,
+    "eraFL plan did not include the required capability set.");
+Assert(
+    eraFlFacade.CurrentPlan?.SaveProfileId == EraFlCompatibilityModule.SaveProfileId,
+    "eraFL plan did not select its independent save profile.");
+Assert(
+    EraFlCompatibilityModule.IsOmittedDefaultArgument(',')
+        && !EraFlCompatibilityModule.IsOmittedDefaultArgument('1'),
+    "eraFL omitted-argument policy drifted.");
+Assert(
+    EraFlCompatibilityModule.NormalizePointerIntegerSubmission("", 2, true) == "-1"
+        && EraFlCompatibilityModule.NormalizePointerIntegerSubmission("", 1, true) == ""
+        && EraFlCompatibilityModule.NormalizePointerIntegerSubmission("", 2, false) == "",
+    "eraFL pointer blank-integer policy drifted.");
+await eraFlFacade.DisposeAsync();
+
 AssertThrows<ArgumentException>(
     () => planBuilder.Build("snake", new[] { "game.snake" }, new[]
     {
@@ -854,6 +892,110 @@ mutablePorts[0] = new BehaviorPortSnapshot(
     "game.snake",
     "DIA-CALL-PRIVATE-001");
 Assert(isolated.Ports[0].BehaviorKeyId == "call.extra-arguments.v1", "Snapshot retained mutable caller collection.");
+
+var eraflEvidence = new GameCompatibilityProbeEvidence(
+    1,
+    new GameBaseProbeEvidence(9224518, "eraFL", true),
+    new[]
+    {
+        new GameCompatibilityAnchorEvidence("erafl.system-title", true),
+        new GameCompatibilityAnchorEvidence("erafl.init-loader", true),
+    });
+var eraflResolution = BuiltInGameCompatibilityResolver.Resolve(eraflEvidence);
+Assert(eraflResolution.CanAutoSelect, "eraFL evidence was not auto-resolved.");
+Assert(eraflResolution.GameFamilyId == BuiltInGameCompatibilityResolver.EraFlGameFamilyId,
+    "eraFL evidence resolved to the wrong game family.");
+Assert(eraflResolution.ProfileId == BuiltInGameCompatibilityResolver.EraFlProfileId,
+    "eraFL did not select its independent profile.");
+
+var eratwEvidence = new GameCompatibilityProbeEvidence(
+    2,
+    new GameBaseProbeEvidence(7153, "eraThe World【画蛇添足版】", true),
+    new[] { new GameCompatibilityAnchorEvidence("eratw.version", true) });
+var eratwResolution = BuiltInGameCompatibilityResolver.Resolve(eratwEvidence);
+Assert(eratwResolution.CanAutoSelect && eratwResolution.ProfileId == BuiltInGameCompatibilityResolver.SnakeProfileId,
+    "eraTW evidence did not resolve to the Snake profile.");
+
+var ambiguousEvidence = new GameCompatibilityProbeEvidence(
+    3,
+    new GameBaseProbeEvidence(7153, "eraFL", true),
+    new[] { new GameCompatibilityAnchorEvidence("erafl.system-title", true) });
+var ambiguousResolution = BuiltInGameCompatibilityResolver.Resolve(ambiguousEvidence);
+Assert(!ambiguousResolution.CanAutoSelect && ambiguousResolution.Status == GameCompatibilityResolutionStatus.Ambiguous,
+    "Conflicting game identity evidence was silently auto-selected.");
+
+var unknownResolution = BuiltInGameCompatibilityResolver.Resolve(
+    new GameCompatibilityProbeEvidence(
+        4,
+        new GameBaseProbeEvidence(null, "unknown game", true)));
+Assert(!unknownResolution.CanAutoSelect && unknownResolution.Status == GameCompatibilityResolutionStatus.Unknown,
+    "Insufficient identity evidence was auto-selected.");
+
+var probeRoot = Path.Combine(Path.GetTempPath(), "gemuera-compat-probe-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(Path.Combine(probeRoot, "CSV"));
+Directory.CreateDirectory(Path.Combine(probeRoot, "ERB", "SYSTEM"));
+Directory.CreateDirectory(Path.Combine(probeRoot, "ERB", "TRAIN"));
+File.WriteAllText(
+    Path.Combine(probeRoot, "CSV", "GameBase.csv"),
+    "コード,9224518\nタイトル,eraFL\n",
+    Encoding.UTF8);
+File.WriteAllText(
+    Path.Combine(probeRoot, "ERB", "SYSTEM", "NEWGAME.ERB"),
+    "@SYSTEM_TITLE\nPRINTL eraFL\n",
+    Encoding.UTF8);
+File.WriteAllText(
+    Path.Combine(probeRoot, "ERB", "SYSTEM", "FL_INIT_LOADER.ERB"),
+    "@FL_INIT_LOADER\n",
+    Encoding.UTF8);
+File.WriteAllText(
+    Path.Combine(probeRoot, "ERB", "TRAIN", "USERCOM_INPUT.ERB"),
+    "@FL_USERCOM\n",
+    Encoding.UTF8);
+try
+{
+    Assert(GameCompatibilityDetector.TryDetectProfile(probeRoot, out string detectedProbeProfile, out var detectedProbe),
+        "Host probe did not detect the synthetic eraFL fixture.");
+    Assert(detectedProbeProfile == BuiltInGameCompatibilityResolver.EraFlProfileId
+        && detectedProbe.GameFamilyId == BuiltInGameCompatibilityResolver.EraFlGameFamilyId,
+        "Host probe selected the wrong synthetic eraFL profile.");
+}
+finally
+{
+    Directory.Delete(probeRoot, recursive: true);
+}
+
+var eraTwProbeRoot = Path.Combine(Path.GetTempPath(), "gemuera-eratw-probe-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(Path.Combine(eraTwProbeRoot, "ERB", "NEWGAME"));
+File.WriteAllText(
+    Path.Combine(eraTwProbeRoot, "ERB", "DIM.ERH"),
+    "#DIMS CONST eraTW_Version = \"4.981\"\n",
+    Encoding.UTF8);
+File.WriteAllText(
+    Path.Combine(eraTwProbeRoot, "ERB", "SYSTEM.ERB"),
+    "@EVENTFIRST\nCALL NEWGAME\nSIF SAVESTR:version != eraTW_Version\n",
+    Encoding.UTF8);
+File.WriteAllText(
+    Path.Combine(eraTwProbeRoot, "ERB", "NEWGAME", "NEWGAME.ERB"),
+    "@NEWGAME\nSAVESTR:version = %eraTW_Version%\n",
+    Encoding.UTF8);
+File.WriteAllText(
+    Path.Combine(eraTwProbeRoot, "ERB", "TITLE.ERB"),
+    "@SYSTEM_TITLE\nPRINTL %eraTW_Version%\n",
+    Encoding.UTF8);
+try
+{
+    Assert(GameCompatibilityDetector.TryDetectProfile(eraTwProbeRoot, out string detectedEraTwProfile, out var detectedEraTw),
+        "Host probe did not detect the no-GAMEBASE eraTW fixture.");
+    Assert(
+        detectedEraTwProfile == BuiltInGameCompatibilityResolver.SnakeProfileId
+        && detectedEraTw.GameFamilyId == BuiltInGameCompatibilityResolver.EraTwGameFamilyId
+        && detectedEraTw.Confidence == GameCompatibilityConfidence.StrongFallback,
+        "Host probe selected the wrong no-GAMEBASE eraTW profile.");
+}
+finally
+{
+    Directory.Delete(eraTwProbeRoot, recursive: true);
+}
 
 var coreAssembly = typeof(CompatibilityPlanSnapshot).Assembly;
 Assert(

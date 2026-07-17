@@ -18,7 +18,7 @@
 
 1. [Architecture](Architecture.md)：目标、所有权、Autoload、线程和事务。
 2. [GEmueraBaseline](GEmueraBaseline.md)、[EvidenceIndex](EvidenceIndex.md)、[InstructionInventory](InstructionInventory.md)：三层事实和名称库存。
-3. [DialectExtensionSystem](DialectExtensionSystem.md)：v24、Snake 与未来魔改解释器的组合、隔离和扩展契约。
+3. [DialectExtensionSystem](DialectExtensionSystem.md)、[AutomaticGameCompatibilityResolution](AutomaticGameCompatibilityResolution.md)：v24、Snake 与未来魔改解释器的组合、隔离、扩展契约，以及 eraFL/eraTW 的自动识别与兼容计划解析设计。
 4. [DependencyGraph](DependencyGraph.md)、[ProjectStructure](ProjectStructure.md)、[GodotIntegration](GodotIntegration.md)：工程与场景接线。
 5. [MigrationPlan](MigrationPlan.md)、[M0M2ImplementationBaseline](M0M2ImplementationBaseline.md)、[M1CoreRuntimeContractSlice](M1CoreRuntimeContractSlice.md)、[ExecutionContract](ExecutionContract.md)、[ScriptEngine](ScriptEngine.md)：迁移、当前实施范围、已落地合同边界、线程和同步顺序。
 6. [M3CoreExtraction](M3CoreExtraction.md)、[M4ResourceGraphics](M4ResourceGraphics.md)、[M5PlatformComposition](M5PlatformComposition.md)：M3-M5 的 Core、资源和平台组合设计；这些文档不能替代 M0-M2 门禁。

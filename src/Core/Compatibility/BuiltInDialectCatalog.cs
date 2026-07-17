@@ -42,6 +42,9 @@ public static class BuiltInDialectCatalog
                 },
                 portTypeIds: SnakePortTypeIds),
             Array.Empty<IDialectContribution>()));
+        catalog.Register(new DeclaredDialectModule(
+            EraFlCompatibilityModule.CreateDefinition(),
+            Array.Empty<IDialectContribution>()));
         return catalog;
     }
 
@@ -59,6 +62,7 @@ public static class BuiltInDialectCatalog
         catalog.Register(new CompatibilityProfileDefinition(
             "snake",
             new[] { "game.snake" }));
+        catalog.Register(EraFlCompatibilityModule.CreateProfile());
         return catalog;
     }
 

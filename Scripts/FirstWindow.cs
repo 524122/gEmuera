@@ -1,6 +1,7 @@
 using Godot;
 using System.Collections.Generic;
 using System.IO;
+using gEmuera.GodotHost;
 
 public partial class FirstWindow : Control
 {
@@ -10,6 +11,8 @@ public partial class FirstWindow : Control
 	const string LauncherSettingsSection = "launcher";
 	const string LauncherLastGamePathKey = "last_game_path";
 	const string LauncherLastCoreProfileKey = "last_core_profile";
+	const string LauncherAdvancedCompatibilityKey = "advanced_compatibility";
+	const string LauncherManualCoreProfileKey = "manual_core_profile";
 	const int LauncherScrollBarWidth = 24;
 	const int LauncherBaseMarginLeft = 20;
 	const int LauncherBaseMarginTop = 22;
@@ -17,22 +20,24 @@ public partial class FirstWindow : Control
 	const int LauncherBaseMarginBottom = 22;
 	public const string CoreProfileV24Pure = "v24pure";
 	public const string CoreProfileSnake = "snake";
+	public const string CoreProfileEraFl = "erafl";
+	public const string CoreProfileAutomatic = "auto";
 
 	enum LauncherGameCategory
 	{
-		V24Pure,
-		Snake
+		All
 	}
 
 	enum LauncherTab
 	{
-		V24Pure,
-		Snake,
+		All,
 		Announcement
 	}
 
 	public static string SelectedGamePath { get; private set; }
 	public static string SelectedCoreProfileName { get; private set; } = CoreProfileV24Pure;
+	public static bool AdvancedCompatibilityEnabled { get; private set; }
+	public static string ManualCoreProfileName { get; private set; } = CoreProfileAutomatic;
 
 	/// <summary>
 	/// M0 baseline runner-only session injection. The normal launcher never calls this method.
@@ -58,15 +63,16 @@ public partial class FirstWindow : Control
 	Label statusLabel;
 	Label categoryHintLabel;
 	Label announcementStatusLabel;
+	CheckButton advancedCompatibilityToggle;
+	OptionButton compatibilityProfileOption;
 	MarginContainer launcherMargin;
-	Button v24TabButton;
-	Button snakeTabButton;
+	Button allGamesTabButton;
 	Button announcementTabButton;
 	Control gameTabContent;
 	Control announcementTabContent;
 	Tween tabFadeTween;
-	LauncherGameCategory currentCategory = LauncherGameCategory.V24Pure;
-	LauncherTab currentTab = LauncherTab.V24Pure;
+	LauncherGameCategory currentCategory = LauncherGameCategory.All;
+	LauncherTab currentTab = LauncherTab.All;
 	bool androidPermissionCheckPending = false;
 	bool androidPermissionResultReceived = false;
 
@@ -215,12 +221,10 @@ public partial class FirstWindow : Control
 		rail.SizeFlagsVertical = SizeFlags.ExpandFill;
 		rail.AddThemeConstantOverride("separation", 8);
 
-		v24TabButton = CreateRailButton("v24", () => SelectLauncherTab(LauncherTab.V24Pure));
-		snakeTabButton = CreateRailButton("snake", () => SelectLauncherTab(LauncherTab.Snake));
+		allGamesTabButton = CreateRailButton(MultiLanguage.Get("FirstWindow.AllGamesButton", "全部游戏"), () => SelectLauncherTab(LauncherTab.All));
 		announcementTabButton = CreateRailButton(MultiLanguage.Get("FirstWindow.NoticeButton", "公告"), () => SelectLauncherTab(LauncherTab.Announcement));
 
-		rail.AddChild(v24TabButton);
-		rail.AddChild(snakeTabButton);
+		rail.AddChild(allGamesTabButton);
 		rail.AddChild(announcementTabButton);
 
 		var spacer = new Control();
@@ -250,10 +254,8 @@ public partial class FirstWindow : Control
 			return;
 
 		currentTab = tab;
-		if (tab == LauncherTab.Snake)
-			currentCategory = LauncherGameCategory.Snake;
-		else if (tab == LauncherTab.V24Pure)
-			currentCategory = LauncherGameCategory.V24Pure;
+		if (tab == LauncherTab.All)
+			currentCategory = LauncherGameCategory.All;
 
 		bool showingAnnouncement = tab == LauncherTab.Announcement;
 		gameTabContent.Visible = !showingAnnouncement;
@@ -272,8 +274,7 @@ public partial class FirstWindow : Control
 
 	void UpdateTabButtonStyles()
 	{
-		ApplyRailButtonStyle(v24TabButton, currentTab == LauncherTab.V24Pure);
-		ApplyRailButtonStyle(snakeTabButton, currentTab == LauncherTab.Snake);
+		ApplyRailButtonStyle(allGamesTabButton, currentTab == LauncherTab.All);
 		ApplyRailButtonStyle(announcementTabButton, currentTab == LauncherTab.Announcement);
 	}
 
@@ -342,9 +343,9 @@ public partial class FirstWindow : Control
 
 		var body = CreateDialogText(MultiLanguage.Get("FirstWindow.NoticeBody",
 			"游戏放置说明:\n\n"
-			+ "新版蛇 TW 请放入 snake 文件夹下。详细路径: Android 为 /storage/emulated/0/emuera/snake/你的游戏文件夹；Windows 或编辑器测试时，为程序目录或项目目录下的 snake/你的游戏文件夹。放好后从左侧 snake 标签启动，会使用 snake 核心。\n\n"
-			+ "旧版蛇 TW 和其他 era 游戏请放入 emuera 文件夹下。详细路径: Android 为 /storage/emulated/0/emuera/你的游戏文件夹；Windows 或编辑器测试时，为程序目录或项目目录下的你的游戏文件夹。放好后从左侧 v24 标签启动。\n\n"
-			+ "如果出现 v24 无法启动、解析报错、资源路径异常等情况，可以把同一个游戏文件夹移动到 snake 文件夹下，再从 snake 标签启动，尝试放入 snake 核心。\n\n"
+			+ "启动器现在会自动扫描 emuera 目录及其 snake 子目录，选择游戏后根据 GAMEBASE.CSV 和固定 ERB 入口自动识别兼容模式。\n\n"
+			+ "Android 路径为 /storage/emulated/0/emuera/；Windows 或编辑器测试时，可放在程序目录、项目目录或配置的游戏库目录下。\n\n"
+			+ "如果自动识别结果不确定，程序会保留安全的 v24 基线；需要强制指定 profile 时，请使用 runner/诊断入口。\n\n"
 			+ "每个游戏文件夹内通常需要包含 ERB 文件夹，并至少包含 CSV、DAT 或 resources 其中之一。"));
 		content.AddChild(body);
 
@@ -455,6 +456,7 @@ public partial class FirstWindow : Control
 		categoryHintLabel.AddThemeColorOverride("font_color", new Color(0.7f, 0.78f, 0.86f));
 		content.AddChild(categoryHintLabel);
 		UpdateCategoryHint();
+		content.AddChild(CreateCompatibilitySettings());
 
 		gameList = new ItemList();
 		gameList.SizeFlagsVertical = SizeFlags.ExpandFill;
@@ -477,6 +479,127 @@ public partial class FirstWindow : Control
 		content.AddChild(startButton);
 
 		return content;
+	}
+
+	Control CreateCompatibilitySettings()
+	{
+		LoadCompatibilitySettings();
+
+		var settings = new VBoxContainer();
+		settings.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		settings.AddThemeConstantOverride("separation", 6);
+
+		advancedCompatibilityToggle = new CheckButton();
+		advancedCompatibilityToggle.Text = MultiLanguage.Get(
+			"FirstWindow.AdvancedCompatibility",
+			"高级兼容模式");
+		advancedCompatibilityToggle.TooltipText = MultiLanguage.Get(
+			"FirstWindow.AdvancedCompatibilityTooltip",
+			"开启后可手动指定兼容 profile；关闭时使用游戏内容自动识别。");
+		advancedCompatibilityToggle.ButtonPressed = AdvancedCompatibilityEnabled;
+		advancedCompatibilityToggle.CustomMinimumSize = new Vector2(0, 44);
+		advancedCompatibilityToggle.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		advancedCompatibilityToggle.AddThemeFontSizeOverride("font_size", 15);
+		advancedCompatibilityToggle.Toggled += OnAdvancedCompatibilityToggled;
+		settings.AddChild(advancedCompatibilityToggle);
+
+		compatibilityProfileOption = new OptionButton();
+		compatibilityProfileOption.TooltipText = MultiLanguage.Get(
+			"FirstWindow.CompatibilityProfileTooltip",
+			"选择后将在下一次启动游戏时生效。");
+		compatibilityProfileOption.CustomMinimumSize = new Vector2(180, 44);
+		compatibilityProfileOption.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		compatibilityProfileOption.AddThemeFontSizeOverride("font_size", 15);
+		compatibilityProfileOption.AddItem(MultiLanguage.Get("FirstWindow.AutoProfile", "自动识别"));
+		compatibilityProfileOption.AddItem(CoreProfileV24Pure);
+		compatibilityProfileOption.AddItem(CoreProfileSnake);
+		compatibilityProfileOption.AddItem(CoreProfileEraFl);
+		compatibilityProfileOption.Select(GetManualProfileOptionIndex());
+		compatibilityProfileOption.ItemSelected += OnManualProfileSelected;
+		compatibilityProfileOption.Visible = AdvancedCompatibilityEnabled;
+		settings.AddChild(compatibilityProfileOption);
+
+		return settings;
+	}
+
+	void OnAdvancedCompatibilityToggled(bool enabled)
+	{
+		AdvancedCompatibilityEnabled = enabled;
+		if (!enabled)
+			ManualCoreProfileName = CoreProfileAutomatic;
+		SaveCompatibilitySettings();
+		if (compatibilityProfileOption != null)
+			compatibilityProfileOption.Visible = enabled;
+
+		if (IsUsableEraGameDirectory(SelectedGamePath))
+			ApplyAutomaticCoreProfile(
+				SelectedGamePath,
+				enabled ? SelectedCoreProfileName : CoreProfileV24Pure);
+	}
+
+	void OnManualProfileSelected(long index)
+	{
+		ManualCoreProfileName = index switch
+		{
+			1 => CoreProfileV24Pure,
+			2 => CoreProfileSnake,
+			3 => CoreProfileEraFl,
+			_ => CoreProfileAutomatic,
+		};
+		SaveCompatibilitySettings();
+		if (IsUsableEraGameDirectory(SelectedGamePath))
+			ApplyAutomaticCoreProfile(
+				SelectedGamePath,
+				ManualCoreProfileName == CoreProfileAutomatic
+					? CoreProfileV24Pure
+					: SelectedCoreProfileName);
+	}
+
+	static void LoadCompatibilitySettings()
+	{
+		var config = new ConfigFile();
+		if (config.Load(LauncherSettingsPath) != Error.Ok)
+			return;
+
+		AdvancedCompatibilityEnabled = config.GetValue(
+			LauncherSettingsSection,
+			LauncherAdvancedCompatibilityKey,
+			false).AsBool();
+		ManualCoreProfileName = NormalizeManualCoreProfileName(config.GetValue(
+			LauncherSettingsSection,
+			LauncherManualCoreProfileKey,
+			CoreProfileAutomatic).AsString());
+	}
+
+	static void SaveCompatibilitySettings()
+	{
+		var config = new ConfigFile();
+		config.Load(LauncherSettingsPath);
+		config.SetValue(LauncherSettingsSection, LauncherAdvancedCompatibilityKey, AdvancedCompatibilityEnabled);
+		config.SetValue(LauncherSettingsSection, LauncherManualCoreProfileKey, ManualCoreProfileName);
+		config.Save(LauncherSettingsPath);
+	}
+
+	static string NormalizeManualCoreProfileName(string profileName)
+	{
+		if (string.Equals(profileName, CoreProfileV24Pure, System.StringComparison.OrdinalIgnoreCase))
+			return CoreProfileV24Pure;
+		if (string.Equals(profileName, CoreProfileSnake, System.StringComparison.OrdinalIgnoreCase))
+			return CoreProfileSnake;
+		if (string.Equals(profileName, CoreProfileEraFl, System.StringComparison.OrdinalIgnoreCase))
+			return CoreProfileEraFl;
+		return CoreProfileAutomatic;
+	}
+
+	int GetManualProfileOptionIndex()
+	{
+		return ManualCoreProfileName switch
+		{
+			CoreProfileV24Pure => 1,
+			CoreProfileSnake => 2,
+			CoreProfileEraFl => 3,
+			_ => 0,
+		};
 	}
 
 	PanelContainer CreatePanel(Color backgroundColor, Color borderColor, bool shadow = false)
@@ -608,11 +731,9 @@ public partial class FirstWindow : Control
 		if (categoryHintLabel == null)
 			return;
 
-		categoryHintLabel.Text = currentCategory switch
-		{
-			LauncherGameCategory.Snake => MultiLanguage.Get("FirstWindow.SnakeHint", $"snake: 扫描 {GetSnakeRootHint()} 新版蛇 TW 放这里；v24 启动失败时也可以放这里试 snake 核心。"),
-			_ => MultiLanguage.Get("FirstWindow.V24PureHint", $"v24: 扫描 {GetNormalRootHint()}。旧版蛇 TW 和其他 era 游戏放这里，snake 文件夹不会显示。")
-		};
+		categoryHintLabel.Text = MultiLanguage.Get(
+			"FirstWindow.AllGamesHint",
+			$"全部游戏（自动识别）：扫描 {GetNormalRootHint()} 及其 snake 子目录。选择后会根据游戏内容自动匹配兼容模块。");
 	}
 
 	public override void _ExitTree()
@@ -686,7 +807,7 @@ public partial class FirstWindow : Control
 		startButton.Disabled = true;
 
 		var roots = GetScanRoots(currentCategory);
-		bool includeSnake = currentCategory != LauncherGameCategory.V24Pure;
+		bool includeSnake = true;
 
 		var addedPaths = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 		foreach (var root in roots)
@@ -705,13 +826,6 @@ public partial class FirstWindow : Control
 	{
 		var roots = new List<string>();
 		var baseRoots = GetBaseScanRoots();
-
-		if (category == LauncherGameCategory.Snake)
-		{
-			foreach (var root in baseRoots)
-				AddUniqueRoot(roots, root.TrimEnd('/', '\\') + "/snake");
-			return roots;
-		}
 
 		foreach (var root in baseRoots)
 			AddUniqueRoot(roots, root);
@@ -886,13 +1000,16 @@ public partial class FirstWindow : Control
 	public static string ResolveStartupGamePath()
 	{
 		if (IsUsableEraGameDirectory(SelectedGamePath))
+		{
+			ApplyAutomaticCoreProfile(SelectedGamePath, SelectedCoreProfileName);
 			return SelectedGamePath;
+		}
 
 		string saved = LoadLastGamePath();
 		if (IsUsableEraGameDirectory(saved))
 		{
 			SelectedGamePath = saved;
-			SelectedCoreProfileName = LoadLastCoreProfileName();
+			ApplyAutomaticCoreProfile(saved, LoadLastCoreProfileName());
 			return saved;
 		}
 
@@ -901,9 +1018,30 @@ public partial class FirstWindow : Control
 
 	string GetSelectedCoreProfileName(string selectedPath)
 	{
-		if (currentCategory == LauncherGameCategory.Snake)
-			return CoreProfileSnake;
+		if (AdvancedCompatibilityEnabled && ManualCoreProfileName != CoreProfileAutomatic)
+			return NormalizeCoreProfileName(ManualCoreProfileName);
+		if (GameCompatibilityDetector.TryDetectProfile(selectedPath, out string detectedProfile, out _))
+			return NormalizeCoreProfileName(detectedProfile);
+
 		return CoreProfileV24Pure;
+	}
+
+	static void ApplyAutomaticCoreProfile(string gamePath, string fallbackProfile)
+	{
+		if (AdvancedCompatibilityEnabled && ManualCoreProfileName != CoreProfileAutomatic)
+		{
+			SelectedCoreProfileName = NormalizeCoreProfileName(ManualCoreProfileName);
+			SaveLastGamePath(gamePath, SelectedCoreProfileName);
+			return;
+		}
+		if (GameCompatibilityDetector.TryDetectProfile(gamePath, out string detectedProfile, out _))
+		{
+			SelectedCoreProfileName = NormalizeCoreProfileName(detectedProfile);
+			SaveLastGamePath(gamePath, SelectedCoreProfileName);
+			return;
+		}
+
+		SelectedCoreProfileName = NormalizeCoreProfileName(fallbackProfile);
 	}
 
 	static void SetSelectedGamePath(string path, string coreProfileName = CoreProfileV24Pure)
@@ -920,6 +1058,8 @@ public partial class FirstWindow : Control
 	{
 		if (string.Equals(coreProfileName, CoreProfileSnake, System.StringComparison.OrdinalIgnoreCase))
 			return CoreProfileSnake;
+		if (string.Equals(coreProfileName, CoreProfileEraFl, System.StringComparison.OrdinalIgnoreCase))
+			return CoreProfileEraFl;
 		return CoreProfileV24Pure;
 	}
 

@@ -410,8 +410,8 @@ public partial class EmueraContent : Control
 	static int GetDefaultMaxVisibleLines()
 	{
 		if (OS.HasFeature("mobile"))
-			return IsSnakeDisplayProfile() ? DefaultSnakeMobileMaxVisibleLines : DefaultMobileMaxVisibleLines;
-		if (IsSnakeDisplayProfile())
+			return IsExtendedDisplayProfile() ? DefaultSnakeMobileMaxVisibleLines : DefaultMobileMaxVisibleLines;
+		if (IsExtendedDisplayProfile())
 			return DefaultSnakeDesktopMaxVisibleLines;
 		return DefaultMaxVisibleLines;
 	}
@@ -420,7 +420,7 @@ public partial class EmueraContent : Control
 	{
 		// TW/Snake 就寝后会一次输出大量角色信息。旧默认会直接裁掉上方内容，
 		// 因此把旧默认视为未显式调过；Android 只做保守提升，避免手机端内存压力过大。
-		if (!IsSnakeDisplayProfile())
+		if (!IsExtendedDisplayProfile())
 			return value;
 		if (OS.HasFeature("mobile") && value == DefaultMobileMaxVisibleLines)
 			return DefaultSnakeMobileMaxVisibleLines;
@@ -429,11 +429,12 @@ public partial class EmueraContent : Control
 		return value;
 	}
 
-	static bool IsSnakeDisplayProfile()
+	static bool IsExtendedDisplayProfile()
 	{
-		if (Program.IsSnakeProfile)
+		if (Program.IsSnakeProfile || Program.IsEraFlProfile)
 			return true;
-		return string.Equals(FirstWindow.SelectedCoreProfileName, FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase);
+		return GEmuera.Core.Compatibility.EraFlCompatibilityModule.UsesExtendedDisplayHistory(
+			FirstWindow.SelectedCoreProfileName);
 	}
 
 	// emuera still exposes the console viewport through Config.WindowY. Keeping
@@ -5719,6 +5720,14 @@ public partial class EmueraContent : Control
 		return scrollContainer != null ? scrollContainer.GetGlobalRect() : new Rect2(Vector2.Zero, GetViewport().GetVisibleRect().Size);
 	}
 
+	// 虚拟光标重新显示或移动时，视觉坐标和脚本读取的 MOUSEX/MOUSEY 必须一起更新。
+	// 否则新内容会按旧指针位置计算 HTML div，造成视觉光标和游戏内浮层不一致。
+	public void VirtualCursorSynchronizePosition(Vector2 globalPosition)
+	{
+		UpdatePointerPosition(globalPosition);
+		VirtualCursorUpdateHover(globalPosition);
+	}
+
 	// 命中测试：光标当前全局坐标下是否有按钮，命中则驱动 Canvas 高亮（通道B）+
 	// 原生 hover 字段（通道A，ERB MOUSEBUTTON() 读取），未命中则清空两条通道。
 	public bool VirtualCursorUpdateHover(Vector2 globalPosition)
@@ -6243,6 +6252,7 @@ public partial class EmueraContent : Control
 	void OnViewportSizeChanged()
 	{
 		ApplySafeAreaLayout();
+		virtualCursor?.RefreshViewportBounds();
 		QueueScaleBoundsUpdate();
 	}
 

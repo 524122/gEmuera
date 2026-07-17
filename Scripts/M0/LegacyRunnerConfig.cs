@@ -153,7 +153,7 @@ namespace gEmuera.M0
 				throw new InvalidDataException("game_root_must_be_existing_absolute_directory");
 			if (string.IsNullOrWhiteSpace(OutputDirectory) || !Path.IsPathRooted(OutputDirectory))
 				throw new InvalidDataException("output_directory_must_be_absolute");
-			ValidateSupportedProfile(Profile, "profile_must_be_v24pure_or_snake");
+			ValidateSupportedProfile(Profile, "profile_must_be_v24pure_or_snake_or_erafl");
 			if (!string.Equals(SessionIsolationMode, SessionIsolationModeBaseline, StringComparison.OrdinalIgnoreCase)
 				&& !string.Equals(SessionIsolationMode, SessionIsolationModeCanary, StringComparison.OrdinalIgnoreCase))
 				throw new InvalidDataException("session_isolation_mode_must_be_baseline_or_canary");
@@ -216,7 +216,7 @@ namespace gEmuera.M0
 					throw new InvalidDataException("in_process_alternate_game_root_must_be_existing_absolute_directory");
 				ValidateSupportedProfile(
 					InProcessAlternateSession.Profile,
-					"in_process_alternate_profile_must_be_v24pure_or_snake");
+					"in_process_alternate_profile_must_be_v24pure_or_snake_or_erafl");
 
 				string alternateGame = Path.GetFullPath(InProcessAlternateSession.GameRoot)
 					.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
@@ -307,15 +307,18 @@ namespace gEmuera.M0
 		static void ValidateSupportedProfile(string value, string error)
 		{
 			if (!string.Equals(value, global::FirstWindow.CoreProfileV24Pure, StringComparison.OrdinalIgnoreCase)
-				&& !string.Equals(value, global::FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase))
+				&& !string.Equals(value, global::FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase)
+				&& !string.Equals(value, global::FirstWindow.CoreProfileEraFl, StringComparison.OrdinalIgnoreCase))
 				throw new InvalidDataException(error);
 		}
 
 		static string NormalizeProfile(string value)
 		{
-			return string.Equals(value, global::FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase)
-				? global::FirstWindow.CoreProfileSnake
-				: global::FirstWindow.CoreProfileV24Pure;
+			if (string.Equals(value, global::FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase))
+				return global::FirstWindow.CoreProfileSnake;
+			if (string.Equals(value, global::FirstWindow.CoreProfileEraFl, StringComparison.OrdinalIgnoreCase))
+				return global::FirstWindow.CoreProfileEraFl;
+			return global::FirstWindow.CoreProfileV24Pure;
 		}
 	}
 }

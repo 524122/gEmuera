@@ -78,11 +78,12 @@ public partial class PrototypeRuntimeNode : Node
 
 	private void OnRequestToggle()
 	{
-		QueueCommand(token => SwitchProfileAsync(
-			string.Equals(ProfileId, FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase)
-				? FirstWindow.CoreProfileV24Pure
-				: FirstWindow.CoreProfileSnake,
-			token));
+		string nextProfile = string.Equals(ProfileId, FirstWindow.CoreProfileV24Pure, StringComparison.OrdinalIgnoreCase)
+			? FirstWindow.CoreProfileSnake
+			: string.Equals(ProfileId, FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase)
+				? FirstWindow.CoreProfileEraFl
+				: FirstWindow.CoreProfileV24Pure;
+		QueueCommand(token => SwitchProfileAsync(nextProfile, token));
 	}
 
 	private void OnRequestDetach()
@@ -193,10 +194,16 @@ public partial class PrototypeRuntimeNode : Node
 
 	private static SessionSelection CreateSelection(string profile)
 	{
+		string? saveProfile = profile switch
+		{
+			FirstWindow.CoreProfileSnake => "gemuera.snake",
+			FirstWindow.CoreProfileEraFl => GEmuera.Core.Compatibility.EraFlCompatibilityModule.SaveProfileId,
+			_ => "gemuera.v24",
+		};
 		return new SessionSelection(
 			"prototype." + profile,
 			profile,
-			saveProfileId: profile == FirstWindow.CoreProfileSnake ? "gemuera.snake" : "gemuera.v24");
+			saveProfileId: saveProfile);
 	}
 
 	private void RestoreCurrentSessionProjection()
@@ -236,9 +243,11 @@ public partial class PrototypeRuntimeNode : Node
 
 	private static string NormalizeProfile(string profile)
 	{
-		return string.Equals(profile, FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase)
-			? FirstWindow.CoreProfileSnake
-			: FirstWindow.CoreProfileV24Pure;
+		if (string.Equals(profile, FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase))
+			return FirstWindow.CoreProfileSnake;
+		if (string.Equals(profile, FirstWindow.CoreProfileEraFl, StringComparison.OrdinalIgnoreCase))
+			return FirstWindow.CoreProfileEraFl;
+		return FirstWindow.CoreProfileV24Pure;
 	}
 
 	private void EmitStatus(string status)

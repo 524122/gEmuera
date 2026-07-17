@@ -14,6 +14,8 @@
          fast test without pulling Godot into Core. -->
     <Compile Include="..\..\Scripts\GodotHost\LegacySessionLaunchRegistry.cs"
              Link="GodotHost\LegacySessionLaunchRegistry.cs" />
+    <Compile Include="..\..\Scripts\GodotHost\GameContentProbe.cs"
+             Link="GodotHost\GameContentProbe.cs" />
     <Compile Include="..\..\Scripts\GodotHost\LegacyThreadQuiescence.cs"
              Link="GodotHost\LegacyThreadQuiescence.cs" />
   </ItemGroup>

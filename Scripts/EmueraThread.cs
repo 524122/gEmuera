@@ -211,11 +211,13 @@ public class EmueraThread
                     // eraFL(USERCOM_INPUT.ERB) 判定"未点击任何按钮"的条件是 RESULT:0 == -1，
                     // 不是 0——必须补 "-1" 而不是 "0"，否则 RESULT:0==-1 的判断永远不成立。
                     string submitInput = input;
-                    if (originalMouseButton != 0x01 && originalMouseButton != 0
-                        && string.IsNullOrEmpty(submitInput)
-                        && console.InputType == MinorShift.Emuera.GameProc.InputType.IntValue)
+                    if (MinorShift.Emuera.Program.IsEraFlProfile)
                     {
-                        submitInput = "-1";
+                        submitInput = GEmuera.Core.Compatibility.EraFlCompatibilityModule
+                            .NormalizePointerIntegerSubmission(
+                                submitInput,
+                                originalMouseButton,
+                                console.InputType == MinorShift.Emuera.GameProc.InputType.IntValue);
                     }
                     console.PressEnterKey(skipflag, submitInput, originalMouseButton != 0);
                     consumed = true;

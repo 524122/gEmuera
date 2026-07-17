@@ -321,12 +321,21 @@ public sealed class LegacySessionFacade : IAsyncDisposable
         var requestedModules = selection.RequestedModuleIds.Count > 0
             ? selection.RequestedModuleIds
             : _profileCatalog.Resolve(selection.ProfileId).RootModuleIds;
+        var profile = _profileCatalog.Resolve(selection.ProfileId);
+        var ports = selection.Ports.Count > 0
+            ? selection.Ports
+            : profile.DefaultPorts;
+        var capabilities = profile.RequiredCapabilityIds
+            .Concat(selection.CapabilityIds)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
         var compatibility = _planBuilder.Build(
             selection.ProfileId,
             requestedModules,
-            selection.Ports,
-            selection.CapabilityIds,
-            selection.SaveProfileId);
+            ports,
+            capabilities,
+            selection.SaveProfileId ?? profile.DefaultSaveProfileId);
         return ValueTask.FromResult(new SessionCandidate(selection, generation, compatibility));
     }
 

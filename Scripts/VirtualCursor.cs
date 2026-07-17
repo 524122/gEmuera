@@ -23,6 +23,7 @@ public partial class VirtualCursor : CanvasLayer
 	Button middleButton;
 
 	bool enabled = false;
+	bool hasCursorPosition = false;
 	Vector2 cursorGlobalPosition = Vector2.Zero;
 
 	int trackedTouchIndex = -1;
@@ -110,10 +111,15 @@ public partial class VirtualCursor : CanvasLayer
 		layerRoot.Visible = true;
 		ResetGestureState();
 
-		var bounds = GetCursorMovementBounds();
-		cursorGlobalPosition = bounds.Position + bounds.Size * 0.5f;
+		if (!hasCursorPosition)
+		{
+			var bounds = GetCursorMovementBounds();
+			cursorGlobalPosition = bounds.Position + bounds.Size * 0.5f;
+			hasCursorPosition = true;
+		}
 		ClampCursorToMovementBounds();
 		UpdateCursorVisualPosition();
+		EmueraContent.instance?.VirtualCursorSynchronizePosition(cursorGlobalPosition);
 	}
 
 	public void Disable()
@@ -282,7 +288,7 @@ public partial class VirtualCursor : CanvasLayer
 		cursorGlobalPosition += delta;
 		ClampCursorToMovementBounds();
 
-		EmueraContent.instance?.VirtualCursorUpdateHover(cursorGlobalPosition);
+		EmueraContent.instance?.VirtualCursorSynchronizePosition(cursorGlobalPosition);
 		UpdateCursorVisualPosition();
 	}
 
@@ -316,6 +322,17 @@ public partial class VirtualCursor : CanvasLayer
 
 		cursorVisual.GlobalPosition = cursorGlobalPosition;
 		cursorVisual.Visible = true;
+	}
+
+	// 旋转、分屏或系统栏变化时保留已有位置，只将其收回新的可视内容区域。
+	public void RefreshViewportBounds()
+	{
+		if (!enabled)
+			return;
+
+		ClampCursorToMovementBounds();
+		UpdateCursorVisualPosition();
+		EmueraContent.instance?.VirtualCursorSynchronizePosition(cursorGlobalPosition);
 	}
 
 	void CommitClick(int mouseVk)

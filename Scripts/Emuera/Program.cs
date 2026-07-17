@@ -19,6 +19,7 @@ namespace MinorShift.Emuera
 	{
 		V24Pure,
 		Snake,
+		EraFl,
 		SnakeModernMobile,
 	}
 
@@ -262,6 +263,10 @@ namespace MinorShift.Emuera
 		{
 			get { return CoreProfile == EmueraCoreProfile.Snake || CoreProfile == EmueraCoreProfile.SnakeModernMobile; }
 		}
+		public static bool IsEraFlProfile
+		{
+			get { return CoreProfile == EmueraCoreProfile.EraFl; }
+		}
 		public static bool SupportsLazyLoading { get { return true; } }
 		public static bool IsSnakeModernMobileProfile { get { return CoreProfile == EmueraCoreProfile.SnakeModernMobile; } }
 
@@ -499,6 +504,8 @@ namespace MinorShift.Emuera
 			string launcherProfile = global::FirstWindow.SelectedCoreProfileName;
 			if (string.Equals(launcherProfile, global::FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase))
 				return EmueraCoreProfile.Snake;
+			if (string.Equals(launcherProfile, global::FirstWindow.CoreProfileEraFl, StringComparison.OrdinalIgnoreCase))
+				return EmueraCoreProfile.EraFl;
 
 			if (IsModernSnakeCoreRequested(exeDir))
 				return EmueraCoreProfile.SnakeModernMobile;
@@ -514,6 +521,7 @@ namespace MinorShift.Emuera
 			{
 				"v24pure" => EmueraCoreProfile.V24Pure,
 				"snake" => EmueraCoreProfile.Snake,
+				"erafl" => EmueraCoreProfile.EraFl,
 				_ => throw new InvalidOperationException(
 					$"Compatibility plan profile '{profileId}' is not supported by the legacy bridge.")
 			};

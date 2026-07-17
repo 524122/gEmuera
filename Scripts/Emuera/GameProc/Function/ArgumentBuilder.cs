@@ -991,7 +991,8 @@ namespace MinorShift.Emuera.GameProc.Function
                     return new ExpressionArgument(null);
                 // eraFL 的 "INPUTS ,1" 表示省略第一个默认值参数，后面的值是旧式选项。
                 // 若把 ",1" 当成默认字符串，空白区域右键会提交非空 RESULTS，导致状态页切换条件失败。
-                if (!st.EOS && st.Current == ',')
+                if (Program.IsEraFlProfile && !st.EOS
+                    && GEmuera.Core.Compatibility.EraFlCompatibilityModule.IsOmittedDefaultArgument(st.Current))
                     return new ExpressionArgument(null);
                 StrFormWord sfwt = LexicalAnalyzer.AnalyseFormattedString(st, FormStrEndWith.EoL, false);
                 if (!st.EOS)

@@ -484,7 +484,7 @@ namespace MinorShift.Emuera.Content
 
 		private static bool UseLazyResourceIndex
 		{
-			get { return Program.IsSnakeProfile; }
+			get { return Program.IsSnakeProfile || Program.IsEraFlProfile; }
 		}
 
 		private static void BuildLazyResourceIndex(List<string> csvFiles)

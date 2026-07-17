@@ -55,7 +55,10 @@ namespace MinorShift.Emuera
 				compatibilityPlan = null;
 				return;
 			}
-			if (!string.Equals(plan.ProfileId, Program.IsSnakeProfile ? "snake" : "v24pure", StringComparison.Ordinal))
+			string expectedProfile = Program.IsSnakeProfile
+				? "snake"
+				: Program.IsEraFlProfile ? "erafl" : "v24pure";
+			if (!string.Equals(plan.ProfileId, expectedProfile, StringComparison.Ordinal))
 				throw new InvalidOperationException("Parser plan profile does not match the selected legacy profile.");
 			var startupPlan = Program.CurrentCompatibilityPlan;
 			if (startupPlan == null || !string.Equals(startupPlan.CanonicalHash, plan.CanonicalHash, StringComparison.Ordinal))
