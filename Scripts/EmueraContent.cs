@@ -118,6 +118,7 @@ public partial class EmueraContent : Control
 	const string ViewportAnchoredRelativeDivXMeta = "viewport_anchor_relative_div_x";
 	const string ViewportAnchoredRelativeDivYMeta = "viewport_anchor_relative_div_y";
 	const string ViewportAnchoredRelativeDivHeightMeta = "viewport_anchor_relative_div_height";
+	const string InlineLineBackgroundDivMeta = "inline_line_background_div";
 	// Texture pins mirror presentation lifetime: console rows own line pins and
 	// CBG owns background pins. activeTexturePinCollector is scoped to the current
 	// render pass so GetSpriteTexture can remain a pure conversion helper.
@@ -172,6 +173,7 @@ public partial class EmueraContent : Control
 	{
 		public MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage Layer;
 		public Texture2D SourceTexture;
+		public string AnimatedWebpPath;
 		public Rect2 SourceRegion;
 		public Vector2 Position;
 		public Vector2 Size;
@@ -180,6 +182,15 @@ public partial class EmueraContent : Control
 		public bool FlipX;
 		public bool FlipY;
 		public Color Modulate;
+	}
+
+	struct SpriteAnimeFrameLayoutInfo
+	{
+		public bool IsValid;
+		public int OffsetX;
+		public int OffsetY;
+		public int SourceWidth;
+		public int SourceHeight;
 	}
 
 	// Batched display updates defer expensive follow-up work until a group of
@@ -910,6 +921,7 @@ public partial class EmueraContent : Control
 	{
 		GenericUtils.ClearPointingButton();
 		ClearCanvasVisualButton();
+		DisposeAndroidSpriteAnimeFrameTextures();
 		if (lineContainer != null)
 		{
 			foreach(var child in lineContainer.GetChildren())
@@ -948,6 +960,7 @@ public partial class EmueraContent : Control
 		GetViewport().SizeChanged -= OnViewportSizeChanged;
 		ResetLineTexturePins();
 		ReleaseCbgTexturePins();
+		DisposeAndroidSpriteAnimeFrameTextures();
 		if (instance == this)
 			instance = null;
 	}
@@ -1439,6 +1452,7 @@ public partial class EmueraContent : Control
 		try
 		{
 			AddLineBackground(line, lineControl, lineHeight);
+			maxLineRight = System.Math.Max(maxLineRight, AddInlineLineBackgroundDivs(line, lineControl, 0));
 			foreach(var button in line.Buttons)
 			{
 				if(button.IsButton)
@@ -1873,6 +1887,10 @@ public partial class EmueraContent : Control
 			return;
 		if (node is ConsoleTextPart textPart)
 			textPart.SetSelected(selected);
+		else if (node is ConsoleColorRectPart colorRectPart)
+			colorRectPart.SetSelected(selected);
+		else if (node is EmueraImage imagePart)
+			imagePart.SetSelected(selected);
 		foreach (var child in node.GetChildren())
 			SetControlButtonSelected(child, selected);
 	}
@@ -2377,6 +2395,35 @@ public partial class EmueraContent : Control
 		lineControl.AddChild(bg);
 	}
 
+	int AddInlineLineBackgroundDivs(ConsoleDisplayLine line, Control lineControl, int relX)
+	{
+		if (line?.Buttons == null || lineControl == null)
+			return 0;
+
+		int right = 0;
+		foreach (var button in line.Buttons)
+		{
+			if (button?.StrArray == null)
+				continue;
+			foreach (var part in button.StrArray)
+			{
+				if (part is not ConsoleDivPart div || !IsInlineLineBackgroundDiv(div))
+					continue;
+
+				var wrapper = BuildDivControl(div, relX);
+				// eraTW/snake 的角色列表在行尾输出负 xpos 的空 div 作为条纹背景。
+				// 这类背景必须先作为本行底图加入，再绘制文字/按钮；不能依赖负 ZIndex，
+				// 否则在 Godot 的 Control/Panel 层级中可能被父节点或兄弟节点压到不可见。
+				wrapper.ZIndex = 0;
+				wrapper.MouseFilter = MouseFilterEnum.Ignore;
+				wrapper.SetMeta(InlineLineBackgroundDivMeta, true);
+				lineControl.AddChild(wrapper);
+				right = System.Math.Max(right, Mathf.CeilToInt(wrapper.Position.X + wrapper.Size.X));
+			}
+		}
+		return right;
+	}
+
 	internal void SetHtmlIsland(ConsoleDisplayLine[] lines)
 	{
 		if (htmlIslandContainer == null || lines == null)
@@ -2404,6 +2451,7 @@ public partial class EmueraContent : Control
 				lineControl.MouseFilter = MouseFilterEnum.Pass;
 				lineControl.ClipContents = false;
 				AddLineBackground(line, lineControl, lineHeight);
+				AddInlineLineBackgroundDivs(line, lineControl, 0);
 				foreach (var button in line.Buttons)
 				{
 					if (button.IsButton)
@@ -3705,6 +3753,8 @@ public partial class EmueraContent : Control
 	// relX is used for button/div-local coordinates.
 	int AddPartToContainer(AConsoleDisplayPart part, Control container, int relX, bool allowEscapedPartZ = true)
 	{
+		if (part is ConsoleDivPart inlineBackgroundDiv && IsInlineLineBackgroundDiv(inlineBackgroundDiv))
+			return EffectiveLineHeight;
 		if(part is ConsoleStyledString css)
 		{
 			if (string.IsNullOrEmpty(css.Str))
@@ -3742,8 +3792,13 @@ public partial class EmueraContent : Control
 				sprite = AppContents.GetSprite(cip.ResourceName);
 			}
 
-			var texture = GetSpriteTexture(sprite);
-			if (texture == null && ShouldUseRawImageResourceFallback(cip.ResourceName, sprite))
+			string animatedWebpPath = GetAnimatedWebpSourcePath(sprite);
+			// 行内 <img> 与 CBG 是两条独立渲染链。动画 WebP 不能等待 Godot
+			// 的静态 WebP 解码结果，否则 GetSpriteTexture 返回空时会退化成 spacer，
+			// 导致图片节点和 Control 内的逐帧贴图路径都不会被创建。
+			SpriteAnimeFrameLayoutInfo animeFrameLayout = default;
+			var texture = animatedWebpPath == null ? GetSpriteTexture(sprite, out animeFrameLayout) : null;
+			if (texture == null && animatedWebpPath == null && ShouldUseRawImageResourceFallback(cip.ResourceName, sprite))
 			{
 				string resName = cip.ResourceName;
 				var tryPaths = new List<string>
@@ -3808,8 +3863,14 @@ public partial class EmueraContent : Control
 					GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] All fallback paths failed for \"{resName}\"");
 				}
 			}
-			if (texture != null)
+			if (texture != null || animatedWebpPath != null)
 			{
+				int sourceWidth = texture?.GetWidth() ?? sprite?.DestBaseSize.Width ?? 1;
+				int sourceHeight = texture?.GetHeight() ?? sprite?.DestBaseSize.Height ?? 1;
+				if (sourceWidth <= 0)
+					sourceWidth = 1;
+				if (sourceHeight <= 0)
+					sourceHeight = 1;
 				int w, imgH;
 				if (cip.dest_rect.Width > 0 && cip.dest_rect.Height > 0)
 				{
@@ -3821,19 +3882,19 @@ public partial class EmueraContent : Control
 				{
 					// Width specified, compute height from aspect ratio
 					w = cip.dest_rect.Width;
-					imgH = texture.GetHeight() > 0 ? texture.GetHeight() * w / texture.GetWidth() : w;
+					imgH = sourceHeight * w / sourceWidth;
 				}
-				else if (cip.dest_rect.Height > 0 && texture.GetHeight() > 0)
+				else if (cip.dest_rect.Height > 0)
 				{
 					// Height specified, compute width from aspect ratio (matches constructor logic)
 					imgH = cip.dest_rect.Height;
-					w = texture.GetWidth() * imgH / texture.GetHeight();
+					w = sourceWidth * imgH / sourceHeight;
 				}
 				else
 				{
 					// No dimensions specified, use natural size
-					w = texture.GetWidth() > 0 ? texture.GetWidth() : 32;
-					imgH = texture.GetHeight() > 0 ? texture.GetHeight() : 32;
+					w = sourceWidth;
+					imgH = sourceHeight;
 				}
 				// Ensure rendered width matches layout-allocated width to prevent gaps/overlaps
 				if (cip.Width > 0 && cip.Width != w)
@@ -3855,13 +3916,33 @@ public partial class EmueraContent : Control
 				{
 					emuImg.SourceTexture = texture;
 				}
-				emuImg.DrawOffset = GetSpriteHtmlDrawOffset(sprite, cip.ResourceName, w, imgH);
-				emuImg.DrawSize = GetSpriteHtmlDrawSize(sprite, cip.ResourceName, w, imgH);
+				emuImg.DrawOffset = GetSpriteHtmlDrawOffset(sprite, cip.ResourceName, w, imgH, animeFrameLayout);
+				emuImg.DrawSize = GetSpriteHtmlDrawSize(sprite, cip.ResourceName, w, imgH, animeFrameLayout);
 				emuImg.Position = GetHtmlImagePosition(cip, relX);
 				emuImg.Size = new Vector2(w, imgH);
 				emuImg.FlipX = cip.FlipX;
 				emuImg.FlipY = cip.FlipY;
 				emuImg.SetColorMatrix(cip.ColorMatrix);
+				var normalSource = new EmueraImage.ImageSourceState(
+					emuImg.SourceTexture,
+					emuImg.SourceRegion,
+					animatedWebpPath,
+					emuImg.DrawOffset,
+					emuImg.DrawSize);
+				EmueraImage.ImageSourceState selectedSource = default;
+				CanvasImageRenderInfo selectedInfo = default;
+				bool hasSelectedSource = !string.IsNullOrEmpty(cip.ButtonResourceName)
+					&& TryResolveCanvasImage(cip, relX, true, out selectedInfo);
+				if (hasSelectedSource)
+				{
+					selectedSource = new EmueraImage.ImageSourceState(
+						selectedInfo.SourceTexture,
+						selectedInfo.SourceRegion,
+						selectedInfo.AnimatedWebpPath,
+						selectedInfo.DrawOffset,
+						selectedInfo.DrawSize);
+				}
+				emuImg.ConfigureButtonSources(normalSource, selectedSource, hasSelectedSource);
 				if (allowEscapedPartZ && ImageEscapesLine(cip))
 					emuImg.ZIndex = EscapedConsolePartZIndex;
 				// Inline images are absolutely positioned inside a fixed-height Emuera line.
@@ -3892,11 +3973,8 @@ public partial class EmueraContent : Control
 			{
 				if (!rectShape.HasRenderableRect)
 					return rectShape.Bottom;
-				var colorRect = new ColorRect();
-				colorRect.MouseFilter = MouseFilterEnum.Ignore;
+				var colorRect = new ConsoleColorRectPart(rectShape.pColor.ToGodotColor(), rectShape.pButtonColor.ToGodotColor());
 				SetFixedControlSize(colorRect, new Vector2(rectShape.RenderWidth, rectShape.RenderHeight));
-				var sc = rectShape.pColor;
-				colorRect.Color = sc.ToGodotColor();
 				colorRect.Position = new Vector2(rectShape.PointX - relX + rectShape.RenderX, rectShape.RenderY);
 				container.AddChild(colorRect);
 				return rectShape.Bottom;
@@ -3947,7 +4025,7 @@ public partial class EmueraContent : Control
 		wrapper.Position = GetHtmlDivPosition(div, relX);
 		wrapper.Size = new Vector2(div.DivWidth, div.DivHeight);
 		wrapper.CustomMinimumSize = new Vector2(div.DivWidth, div.DivHeight);
-		wrapper.ZIndex = GetGodotZIndexForHtmlDepth(div.Depth);
+		wrapper.ZIndex = GetGodotZIndexForHtmlDiv(div);
 		if (ShouldAnchorRelativeDivToViewport(div))
 			MarkViewportAnchoredRelativeDiv(wrapper, div);
 
@@ -4057,6 +4135,8 @@ public partial class EmueraContent : Control
 		row.MouseFilter = MouseFilterEnum.Pass;
 		row.ClipContents = false;
 		row.Position = new Vector2(0, yOffset);
+
+		AddInlineLineBackgroundDivs(line, row, 0);
 
 		foreach (var button in line.Buttons)
 		{
@@ -4201,6 +4281,34 @@ public partial class EmueraContent : Control
 		return System.Math.Max(1, HtmlDivZIndexBase - depth);
 	}
 
+	int GetGodotZIndexForHtmlDiv(ConsoleDivPart div)
+	{
+		// eraTW/snake 的角色列表会在每一行文本之后追加一个 depth=1 的空 div 作为条纹背景。
+		// 这类 div 必须压在本行文字和 PRINT_RECT 槽条后面；否则 Godot 的子节点绘制顺序会让背景盖住整行数据。
+		// 大尺寸/带子内容/带盒模型的状态栏与浮层 div 仍走正向基准，保留 2026-07-07 修复的跨行覆盖语义。
+		if (IsInlineLineBackgroundDiv(div))
+			return -1;
+		return GetGodotZIndexForHtmlDepth(div?.Depth ?? 0);
+	}
+
+	bool IsInlineLineBackgroundDiv(ConsoleDivPart div)
+	{
+		if (div == null
+			|| !div.IsRelative
+			|| div.Display != DisplayMode.Relative
+			|| div.Depth <= 0
+			|| !div.BackgroundColor.HasValue
+			|| div.StyledBox != null
+			|| div.Y != 0
+			|| div.DivHeight <= 0)
+			return false;
+		if (div.Children != null && div.Children.Length > 0)
+			return false;
+
+		int inlineHeightLimit = System.Math.Max(EffectiveLineHeight, Config.FontSize) + 2;
+		return div.DivHeight <= inlineHeightLimit;
+	}
+
 	// Resolve absolute/relative image placement for HTML-style output.
 	Vector2 GetHtmlImagePosition(ConsoleImagePart imagePart, int relX)
 	{
@@ -4250,12 +4358,24 @@ public partial class EmueraContent : Control
 		return TryGetSpriteHtmlBasePosition(single, resourceName, out _);
 	}
 
-	static Vector2 GetSpriteHtmlDrawOffset(ASprite sprite, string resourceName, int width, int height)
+	static Vector2 GetSpriteHtmlDrawOffset(ASprite sprite, string resourceName, int width, int height,
+		SpriteAnimeFrameLayoutInfo animeFrameLayout)
 	{
 		if (width == 0 || height == 0)
 			return Vector2.Zero;
 		if (sprite == null)
 			return Vector2.Zero;
+
+		if (sprite is SpriteAnime && animeFrameLayout.IsValid)
+		{
+			if (sprite.DestBaseSize.Width == 0 || sprite.DestBaseSize.Height == 0)
+				return Vector2.Zero;
+			// SpriteAnime 的帧偏移是相对动画基准画布的位置。必须与动画自身的
+			// DestBasePosition 合并后缩放，才能保持原生 GraphicsDraw 的布局语义。
+			return new Vector2(
+				(sprite.DestBasePosition.X + animeFrameLayout.OffsetX) * width / (float)sprite.DestBaseSize.Width,
+				(sprite.DestBasePosition.Y + animeFrameLayout.OffsetY) * height / (float)sprite.DestBaseSize.Height);
+		}
 
 		if (!TryGetSpriteHtmlBasePosition(sprite, resourceName, out var basePosition))
 			return Vector2.Zero;
@@ -4276,10 +4396,19 @@ public partial class EmueraContent : Control
 			basePosition.Y * height / (float)sprite.DestBaseSize.Height);
 	}
 
-	static Vector2 GetSpriteHtmlDrawSize(ASprite sprite, string resourceName, int width, int height)
+	static Vector2 GetSpriteHtmlDrawSize(ASprite sprite, string resourceName, int width, int height,
+		SpriteAnimeFrameLayoutInfo animeFrameLayout)
 	{
 		if (width == 0 || height == 0)
 			return new Vector2(width, height);
+		if (sprite is SpriteAnime && animeFrameLayout.IsValid
+			&& sprite.DestBaseSize.Width > 0 && sprite.DestBaseSize.Height > 0
+			&& animeFrameLayout.SourceWidth > 0 && animeFrameLayout.SourceHeight > 0)
+		{
+			return new Vector2(
+				animeFrameLayout.SourceWidth * width / (float)sprite.DestBaseSize.Width,
+				animeFrameLayout.SourceHeight * height / (float)sprite.DestBaseSize.Height);
+		}
 		if (sprite is ASpriteSingle single
 			&& ShouldUseSpriteHtmlCanvas(single, resourceName))
 		{
@@ -4312,10 +4441,65 @@ public partial class EmueraContent : Control
 	// backed outputs are tracked for the active render scope before returning so
 	// cache cleanup cannot dispose a texture still assigned to a visible Control.
 	// AtlasTexture is used when a frame only references a source rectangle.
-	Texture2D GetSpriteTexture(ASprite sprite)
+	Texture2D GetSpriteTexture(ASprite sprite, out SpriteAnimeFrameLayoutInfo animeFrameLayout)
 	{
+		animeFrameLayout = default;
 		if (sprite == null)
 			return null;
+
+		// SpriteAnime.Bitmap 返回当前帧所属的整张源图集。动画必须先解析当前帧，
+		// 否则下方 BitmapTexture 快速路径会直接返回整张图集并跳过 srcRect 裁剪。
+		if (sprite is SpriteAnime anime)
+		{
+			AbstractImage baseImage;
+			uEmuera.Drawing.Rectangle srcRect;
+			uEmuera.Drawing.Point offset;
+			if (anime.GetCurrentFrameInfo(out baseImage, out srcRect, out offset))
+			{
+				// 同一次渲染只读取一次当前帧，避免后台计时推进时纹理裁剪、偏移和尺寸跨帧。
+				animeFrameLayout = new SpriteAnimeFrameLayoutInfo
+				{
+					IsValid = true,
+					OffsetX = offset.X,
+					OffsetY = offset.Y,
+					SourceWidth = srcRect.Width,
+					SourceHeight = srcRect.Height,
+				};
+				if (baseImage is GraphicsImage gImg && gImg.godotImage != null)
+				{
+					var texture = GetGraphicsImageDisplayTexture(gImg);
+					if (texture == null)
+						return null;
+					if (srcRect.X == 0 && srcRect.Y == 0 &&
+						srcRect.Width == texture.GetWidth() &&
+						srcRect.Height == texture.GetHeight())
+					{
+						return texture;
+					}
+					return CreateAtlasTextureForDisplay(sprite, texture, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
+				}
+				if (baseImage?.Bitmap is uEmuera.Drawing.BitmapTexture androidBitmap
+					&& UseAndroidSpriteAnimeFrameTexture)
+				{
+					// Android 只上传当前小帧。不能在这里读取 ti.texture，否则会先创建整张
+					// 8000px 图集的 ImageTexture，再由 AtlasTexture 裁剪，仍会触发实机限制。
+					return GetAndroidSpriteAnimeFrameTexture(anime, androidBitmap, srcRect);
+				}
+				if (baseImage?.Bitmap != null)
+				{
+					var bmp = baseImage.Bitmap;
+					var ti = GetDisplayTextureInfoForBitmap(bmp);
+					if (ti != null && !ti.IsPlaceholder && ti.texture != null)
+					{
+						TrackTexturePin(ti);
+						return ti.GetAtlasTexture(
+							BuildAtlasCacheKey(sprite, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height),
+							new Rect2(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height));
+					}
+				}
+			}
+			return null;
+		}
 
 		if (sprite.Bitmap is uEmuera.Drawing.BitmapTexture bt)
 		{
@@ -4391,42 +4575,19 @@ public partial class EmueraContent : Control
 			}
 		}
 
-		if (sprite is SpriteAnime anime)
-		{
-			AbstractImage baseImage;
-			uEmuera.Drawing.Rectangle srcRect;
-			uEmuera.Drawing.Point offset;
-			if (anime.GetCurrentFrameInfo(out baseImage, out srcRect, out offset))
-			{
-				if (baseImage is GraphicsImage gImg && gImg.godotImage != null)
-				{
-					var texture = GetGraphicsImageDisplayTexture(gImg);
-					if (texture == null)
-						return null;
-					if (srcRect.X == 0 && srcRect.Y == 0 &&
-						srcRect.Width == texture.GetWidth() &&
-						srcRect.Height == texture.GetHeight())
-					{
-						return texture;
-					}
-					return CreateAtlasTextureForDisplay(sprite, texture, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
-				}
-				if (baseImage?.Bitmap != null)
-				{
-					var bmp = baseImage.Bitmap;
-					var ti = GetDisplayTextureInfoForBitmap(bmp);
-					if (ti != null && !ti.IsPlaceholder && ti.texture != null)
-					{
-						TrackTexturePin(ti);
-						return ti.GetAtlasTexture(
-							BuildAtlasCacheKey(sprite, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height),
-							new Rect2(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height));
-					}
-				}
-			}
-		}
-
 		return null;
+	}
+
+	// CSV 的普通 .webp 资源通常仍按静态图片处理。只有完整引用、带 ANIM chunk 的
+	// 文件才交给 EmueraImage 的逐帧贴图路径，避免裁剪 sprite 或普通 WebP 改变原有显示语义。
+	static string GetAnimatedWebpSourcePath(ASprite sprite)
+	{
+		if (sprite is not ASpriteSingle single
+			|| single.Bitmap is not uEmuera.Drawing.BitmapTexture bitmap
+			|| single.SrcRectangle.X != 0 || single.SrcRectangle.Y != 0
+			|| single.SrcRectangle.Width != bitmap.Width || single.SrcRectangle.Height != bitmap.Height)
+			return null;
+		return AnimatedWebpSpriteFrames.IsAnimatedWebp(bitmap.path) ? bitmap.path : null;
 	}
 
 	Texture2D GetGraphicsImageDisplayTexture(GraphicsImage image)
@@ -4830,8 +4991,13 @@ public partial class EmueraContent : Control
 				if (cbg.Img == null || !cbg.Img.IsCreated)
 					continue;
 
-				var texture = GetSpriteTexture(cbg.Img);
-				if (texture == null)
+				string animatedWebpPath = GetAnimatedWebpSourcePath(cbg.Img);
+				// 动画 WebP 由后台解码器提供帧纹理，并由 EmueraImage 逐帧替换自身贴图。不能先等待
+				// Image.LoadWebpFromBuffer 的静态首帧，否则 Godot 不支持该文件时会在
+				// 此处提前跳过整层，导致动画样例只剩右侧的静态对照图。
+				SpriteAnimeFrameLayoutInfo animeFrameLayout = default;
+				var texture = animatedWebpPath == null ? GetSpriteTexture(cbg.Img, out animeFrameLayout) : null;
+				if (texture == null && animatedWebpPath == null)
 					continue;
 
 				var entry = new CbgRenderEntry
@@ -4850,10 +5016,13 @@ public partial class EmueraContent : Control
 				}
 				bool flipX = cbg.width < 0;
 				bool flipY = cbg.height < 0;
-				int w = cbg.width != 0 ? System.Math.Abs(cbg.width) : (cbg.Img.DestBaseSize.Width > 0 ? cbg.Img.DestBaseSize.Width : texture.GetWidth());
-				int h = cbg.height != 0 ? System.Math.Abs(cbg.height) : (cbg.Img.DestBaseSize.Height > 0 ? cbg.Img.DestBaseSize.Height : texture.GetHeight());
-				entry.DrawOffset = GetSpriteHtmlDrawOffset(cbg.Img, cbg.Img.Name, w, h);
-				entry.DrawSize = GetSpriteHtmlDrawSize(cbg.Img, cbg.Img.Name, w, h);
+				int sourceWidth = cbg.Img.DestBaseSize.Width > 0 ? cbg.Img.DestBaseSize.Width : texture?.GetWidth() ?? 1;
+				int sourceHeight = cbg.Img.DestBaseSize.Height > 0 ? cbg.Img.DestBaseSize.Height : texture?.GetHeight() ?? 1;
+				int w = cbg.width != 0 ? System.Math.Abs(cbg.width) : sourceWidth;
+				int h = cbg.height != 0 ? System.Math.Abs(cbg.height) : sourceHeight;
+				entry.DrawOffset = GetSpriteHtmlDrawOffset(cbg.Img, cbg.Img.Name, w, h, animeFrameLayout);
+				entry.DrawSize = GetSpriteHtmlDrawSize(cbg.Img, cbg.Img.Name, w, h, animeFrameLayout);
+				entry.AnimatedWebpPath = animatedWebpPath;
 				entry.Position = GetCbgLayerPosition(cbg, currentScrollY);
 				entry.Size = new Vector2(w, h);
 				entry.FlipX = flipX;
@@ -4900,6 +5069,7 @@ public partial class EmueraContent : Control
 			emuImg.FlipY = entry.FlipY;
 			emuImg.Modulate = entry.Modulate;
 			emuImg.SetColorMatrix(entry.Layer.colorMatrix);
+			emuImg.SetAnimatedWebpSource(entry.AnimatedWebpPath);
 			emuImg.Visible = true;
 			renderedCbgLayers.Add(entry.Layer);
 		}
@@ -6161,6 +6331,7 @@ public partial class EmueraContent : Control
 	// always-on pieces are O(1) so Android frame time remains predictable.
 	public override void _Process(double delta)
 	{
+		AnimatedWebpSpriteFrames.ProcessPendingFrameUploads(OS.HasFeature("mobile"));
 		ProcessPendingContentPinchZoom();
 		ProcessContentInertia((float)delta);
 		ProcessContentScrollCorrection();
@@ -6170,6 +6341,7 @@ public partial class EmueraContent : Control
 		RefreshCbgFollowScrollPositions();
 		RefreshCbgAnimationPauseState();
 		RefreshCanvasImageAnimations();
+		CleanupAndroidSpriteAnimeFrameTextures();
 		RefreshQuickInputGate();
 		RefreshUiDiagnosticOverlay();
 		ProcessAsyncTextureRefreshes();
@@ -6212,18 +6384,19 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < count; i++)
 		{
 			var sprite = renderedCbgLayers[i].Img;
+			var node = cbgNodes[i];
+			if (node == null)
+				continue;
+			var nodeRect = node.GetGlobalRect();
+			bool visible = nodeRect.Intersects(viewRect);
 			if (sprite is MinorShift.Emuera.Content.SpriteAnime anime)
 			{
-				var node = cbgNodes[i];
-				if (node == null)
-					continue;
-				var nodeRect = node.GetGlobalRect();
-				bool visible = nodeRect.Intersects(viewRect);
 				if (visible)
 					anime.ResumeAnimation();
 				else
 					anime.PauseAnimation();
 			}
+			node.SetAnimatedWebpPaused(!visible);
 		}
 	}
 
@@ -6288,8 +6461,11 @@ public partial class EmueraContent : Control
 		if (canvasVisualButtonGeneration == generation
 			&& string.Equals(canvasVisualButtonInput ?? "", input, StringComparison.Ordinal))
 			return;
+		string previousInput = canvasVisualButtonInput;
+		long previousGeneration = canvasVisualButtonGeneration;
 		canvasVisualButtonInput = input;
 		canvasVisualButtonGeneration = generation;
+		RefreshCanvasImageOverlaySelection(previousInput, previousGeneration, input, generation);
 		QueueCanvasVisualRedraw();
 	}
 
@@ -6297,8 +6473,11 @@ public partial class EmueraContent : Control
 	{
 		if (canvasVisualButtonGeneration == long.MinValue && string.IsNullOrEmpty(canvasVisualButtonInput))
 			return;
+		string previousInput = canvasVisualButtonInput;
+		long previousGeneration = canvasVisualButtonGeneration;
 		canvasVisualButtonInput = null;
 		canvasVisualButtonGeneration = long.MinValue;
+		RefreshCanvasImageOverlaySelection(previousInput, previousGeneration, null, long.MinValue);
 		QueueCanvasVisualRedraw();
 	}
 
@@ -7441,63 +7620,40 @@ public partial class EmueraContent : Control
 
 	static bool TryGetSolidBlockElementRect(char value, float cellWidth, float lineHeight, float fontHeight, out Rect2 rect)
 	{
+		// 不再把 U+2580-U+259F Block Elements 合成为 Godot 矩形。
+		// eraTW 的老虎机等 AA 画面依赖 MS Gothic 字形本身的细缝、抗锯齿和纵横比例；
+		// 这里如果手动画 Rect，布局虽然对齐，但会把字形变成硬边色块，和原生 Emuera 差异很大。
+		// 横向占位仍由 Utils.CheckHalfSize 决定，因此 PRINT_COLORBAR/ASCII Art 的列推进保持不变。
 		rect = default;
-		cellWidth = Mathf.Max(1.0f, cellWidth);
-		lineHeight = Mathf.Max(1.0f, lineHeight);
-		float pad = lineHeight >= 8.0f ? 1.0f : 0.0f;
-		float glyphHeight = Mathf.Clamp(fontHeight > 0.0f ? fontHeight : lineHeight, 1.0f, Mathf.Max(1.0f, lineHeight - pad * 2.0f));
-		float glyphTop = Mathf.Round((lineHeight - glyphHeight) * 0.5f);
-		float maxGlyphTop = Mathf.Max(pad, lineHeight - pad - glyphHeight);
-		glyphTop = Mathf.Clamp(glyphTop, pad, maxGlyphTop);
-		float glyphBottom = Mathf.Min(lineHeight - pad, glyphTop + glyphHeight);
-		float glyphBodyHeight = Mathf.Max(1.0f, glyphBottom - glyphTop);
-
-		// TW 的体力/气力/精力、快C/快V 等条形图用 U+2585/U+2584 这类实体块。
-		// 宽度仍由 Utils.CheckHalfSize 决定以保证横向相连；这里只把字形限制在当前行网格内，
-		// 避免 Godot 字体 fallback 把块字形画到相邻行，造成竖向黏连。
-		if (value >= '\u2581' && value <= '\u2588')
-		{
-			int eighths = value - '\u2580';
-			float height = value == '\u2588'
-				? glyphBodyHeight
-				: Mathf.Max(1.0f, glyphBodyHeight * eighths / 8.0f);
-			float y = glyphBottom - height;
-			rect = new Rect2(0, y, cellWidth, height);
-			return true;
-		}
-		if (value == '\u2580')
-		{
-			float height = Mathf.Max(1.0f, glyphBodyHeight * 0.5f);
-			rect = new Rect2(0, glyphTop, cellWidth, height);
-			return true;
-		}
-		if (value == '\u2594')
-		{
-			float height = Mathf.Max(1.0f, glyphBodyHeight / 8.0f);
-			rect = new Rect2(0, glyphTop, cellWidth, height);
-			return true;
-		}
-		if (value >= '\u2589' && value <= '\u258F')
-		{
-			int eighths = 8 - (value - '\u2588');
-			float width = Mathf.Max(1.0f, cellWidth * eighths / 8.0f);
-			rect = new Rect2(0, glyphTop, width, glyphBodyHeight);
-			return true;
-		}
-		if (value == '\u2590')
-		{
-			float width = Mathf.Max(1.0f, cellWidth * 0.5f);
-			rect = new Rect2(cellWidth - width, glyphTop, width, glyphBodyHeight);
-			return true;
-		}
-		if (value == '\u2595')
-		{
-			float width = Mathf.Max(1.0f, cellWidth / 8.0f);
-			rect = new Rect2(cellWidth - width, glyphTop, width, glyphBodyHeight);
-			return true;
-		}
-
 		return false;
+	}
+
+	static bool IsBlockElementChar(char value)
+	{
+		return value >= '\u2580' && value <= '\u259F';
+	}
+
+	sealed partial class ConsoleColorRectPart : ColorRect
+	{
+		readonly Color normalColor;
+		readonly Color selectedColor;
+		bool selected;
+
+		public ConsoleColorRectPart(Color normalColor, Color selectedColor)
+		{
+			this.normalColor = normalColor;
+			this.selectedColor = selectedColor;
+			Color = normalColor;
+			MouseFilter = MouseFilterEnum.Ignore;
+		}
+
+		public void SetSelected(bool value)
+		{
+			if (selected == value)
+				return;
+			selected = value;
+			Color = selected ? selectedColor : normalColor;
+		}
 	}
 
 	sealed partial class ConsoleTextPart : Control
@@ -7627,11 +7783,15 @@ public partial class EmueraContent : Control
 				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), drawColor);
 				return;
 			}
-			// 每个字符仍按 emuera 的网格起点绘制，但不能再按单元格宽度裁剪字形。
+			// 每个字符仍按 emuera 的网格起点绘制。箱线字符不能按单元格宽度裁剪字形，
 			// Godot 字体 fallback 下，DRAWLINE/箱线字符的实际 glyph 往往宽于半角格；
 			// 若逐格裁剪会出现横线缺失。片段边界继续由本 Control 的 ClipContents 统一限制。
+			// 但 U+2580-U+259F 块字符在 TW 老虎机中被当作连续半角像素块使用，若也放宽到整段宽度，
+			// 一个 ▉ 会横向盖到后续 ; 背景格，所以下面仅对 Block Elements 收紧到当前格宽。
 			string glyph = value.ToString();
-			float drawWidth = System.Math.Max(1.0f, System.Math.Max(cellWidth, Size.X - x));
+			float drawWidth = IsBlockElementChar(value)
+				? System.Math.Max(1.0f, cellWidth)
+				: System.Math.Max(1.0f, System.Math.Max(cellWidth, Size.X - x));
 			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, fontSize, drawColor);
 			if (bold)
 				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, drawColor);

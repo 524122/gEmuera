@@ -25,6 +25,7 @@ public partial class EmueraContent
 	struct CanvasImageRenderInfo
 	{
 		public Texture2D SourceTexture;
+		public string AnimatedWebpPath;
 		public Rect2 SourceRegion;
 		public Vector2 Position;
 		public Vector2 Size;
@@ -38,6 +39,7 @@ public partial class EmueraContent
 	{
 		public EmueraImage Node;
 		public ConsoleImagePart Image;
+		public ConsoleButtonString Button;
 		public int LineNo;
 		public int RelX;
 		public float LineY;
@@ -232,20 +234,23 @@ public partial class EmueraContent
 			foreach (var part in button.StrArray)
 			{
 				if (part is ConsoleImagePart image && NeedsCanvasImageOverlay(image))
-					AddCanvasImageOverlay(line.LineNo, image, 0, imageOverlays);
+					AddCanvasImageOverlay(line.LineNo, image, button, 0, imageOverlays);
 				else if (part is ConsoleDivPart div && CanUseCanvasDivOverlay(div))
 					AddCanvasDivOverlay(line.LineNo, div, 0, divOverlays);
 			}
 		}
 	}
 
-	ASprite ResolveCanvasImageSprite(ConsoleImagePart image)
+	ASprite ResolveCanvasImageSprite(ConsoleImagePart image, bool isSelecting = false)
 	{
 		if (image == null)
 			return null;
-		ASprite sprite = image.Image;
-		if (sprite == null && !string.IsNullOrEmpty(image.ResourceName))
-			sprite = AppContents.GetSprite(image.ResourceName);
+		string resourceName = isSelecting && !string.IsNullOrEmpty(image.ButtonResourceName)
+			? image.ButtonResourceName
+			: image.ResourceName;
+		ASprite sprite = isSelecting && image.ImageBackground != null ? image.ImageBackground : image.Image;
+		if (sprite == null && !string.IsNullOrEmpty(resourceName))
+			sprite = AppContents.GetSprite(resourceName);
 		return sprite;
 	}
 
@@ -261,9 +266,9 @@ public partial class EmueraContent
 			&& !failedTextureSearches.Contains(resourceName);
 	}
 
-	void AddCanvasImageOverlay(int lineNo, ConsoleImagePart image, int relX, List<CanvasImageOverlay> overlays)
+	void AddCanvasImageOverlay(int lineNo, ConsoleImagePart image, ConsoleButtonString button, int relX, List<CanvasImageOverlay> overlays)
 	{
-		if (!TryResolveCanvasImage(image, relX, out var info))
+		if (!TryResolveCanvasImage(image, relX, false, out var info))
 			return;
 
 		var emuImg = new EmueraImage();
@@ -288,10 +293,12 @@ public partial class EmueraContent
 		{
 			Node = emuImg,
 			Image = image,
+			Button = button,
 			LineNo = lineNo,
 			RelX = relX,
 			LineY = 0,
-			IsAnimation = ResolveCanvasImageSprite(image) is SpriteAnime,
+			IsAnimation = ResolveCanvasImageSprite(image) is SpriteAnime
+				|| ResolveCanvasImageSprite(image, true) is SpriteAnime,
 			EscapesLine = escapesLine,
 		};
 		UpdateCanvasImageOverlay(overlay, 0);
@@ -303,9 +310,16 @@ public partial class EmueraContent
 		if (image == null)
 			return false;
 		var sprite = ResolveCanvasImageSprite(image);
+		var selectedSprite = ResolveCanvasImageSprite(image, true);
 		return image.ColorMatrix != null
 			|| image.Display != DisplayMode.Relative
-			|| sprite is SpriteAnime;
+			|| sprite is SpriteAnime
+			|| selectedSprite is SpriteAnime
+			// Canvas 自绘只能处理已经存在的静态 Texture2D。动画 WebP 的当前帧
+			// 由 EmueraImage._Process 切换，因此即使是普通 relative <img> 也必须
+			// 建立 overlay；否则 SourceTexture 为空时整张动态图会被静默跳过。
+			|| GetAnimatedWebpSourcePath(sprite) != null
+			|| GetAnimatedWebpSourcePath(selectedSprite) != null;
 	}
 
 	bool CanUseCanvasDivOverlay(ConsoleDivPart div)
@@ -363,7 +377,7 @@ public partial class EmueraContent
 			node.Position = GetHtmlDivPosition(overlay.Div, overlay.RelX) + new Vector2(0, lineY);
 		node.Size = new Vector2(overlay.Div.DivWidth, overlay.Div.DivHeight);
 		node.CustomMinimumSize = node.Size;
-		node.ZIndex = GetGodotZIndexForHtmlDepth(overlay.Div.Depth);
+		node.ZIndex = GetGodotZIndexForHtmlDiv(overlay.Div);
 		node.Visible = IsCanvasOverlayRectVisible(new Rect2(node.Position, node.Size), visible);
 	}
 
@@ -377,17 +391,20 @@ public partial class EmueraContent
 		var node = overlay.Node;
 		if (node == null || !GodotObject.IsInstanceValid(node))
 			return;
-			if (!TryResolveCanvasImage(overlay.Image, overlay.RelX, out var info))
+		bool isSelecting = IsCanvasButtonVisuallySelected(overlay.Button);
+			if (!TryResolveCanvasImage(overlay.Image, overlay.RelX, isSelecting, out var info))
 			{
 				// XRay/HTML 差分图刷新时，新帧可能还在异步解码。已有节点继续显示旧纹理，
 				// 等新纹理解析成功后再替换，避免刷新瞬间露出空白或白色图块。
 				node.Visible = node.SourceTexture != null && IsCanvasOverlayRectVisible(GetCanvasImageOverlayRect(node), visible);
 				return;
 			}
-		node.SourceTexture = info.SourceTexture;
-		node.SourceRegion = info.SourceRegion;
-		node.DrawOffset = info.DrawOffset;
-		node.DrawSize = info.DrawSize;
+		node.SetImageSource(new EmueraImage.ImageSourceState(
+			info.SourceTexture,
+			info.SourceRegion,
+			info.AnimatedWebpPath,
+			info.DrawOffset,
+			info.DrawSize));
 		node.Position = info.Position + new Vector2(0, lineY);
 		node.Size = info.Size;
 		node.FlipX = info.FlipX;
@@ -396,23 +413,80 @@ public partial class EmueraContent
 		node.Visible = IsCanvasOverlayRectVisible(GetCanvasImageOverlayRect(node), visible);
 	}
 
+	// Canvas 图片 overlay 不参与 Control 节点树的 MouseEntered/MouseExited 递归。
+	// hover 身份改变时借助现有 generation→行索引，只刷新旧、新按钮所在行的图片，
+	// 避免鼠标移动热路径全量扫描所有历史控制台行。
+	void RefreshCanvasImageOverlaySelection(string previousInput, long previousGeneration, string currentInput, long currentGeneration)
+	{
+		if (!UseCanvasRenderBackend || canvasImageOverlayNodes.Count == 0)
+			return;
+		Rect2 visible = GetVisibleCanvasContentRange();
+		RefreshCanvasImageOverlaySelectionForButton(previousInput, previousGeneration, visible);
+		if (currentGeneration != previousGeneration
+			|| !string.Equals(currentInput ?? "", previousInput ?? "", StringComparison.Ordinal))
+		{
+			RefreshCanvasImageOverlaySelectionForButton(currentInput, currentGeneration, visible);
+		}
+	}
+
+	void RefreshCanvasImageOverlaySelectionForButton(string input, long generation, Rect2 visible)
+	{
+		if (generation == long.MinValue
+			|| !buttonGenerationLineNumbers.TryGetValue(generation, out var lineNumbers)
+			|| lineNumbers == null)
+			return;
+		foreach (int lineNo in lineNumbers)
+		{
+			if (!canvasImageOverlayNodes.TryGetValue(lineNo, out var overlays) || overlays == null)
+				continue;
+			for (int i = 0; i < overlays.Count; i++)
+			{
+				var overlay = overlays[i];
+				if (overlay.Button == null
+					|| overlay.Button.Generation != generation
+					|| !string.Equals(overlay.Button.Inputs ?? "", input ?? "", StringComparison.Ordinal))
+					continue;
+				UpdateCanvasImageOverlay(overlay, overlay.LineY, visible);
+			}
+		}
+	}
+
 	bool TryResolveCanvasImage(ConsoleImagePart image, int relX, out CanvasImageRenderInfo info)
+	{
+		return TryResolveCanvasImage(image, relX, false, out info);
+	}
+
+	bool TryResolveCanvasImage(ConsoleImagePart image, int relX, bool isSelecting, out CanvasImageRenderInfo info)
 	{
 		info = default;
 		if (image == null)
 			return false;
 
-		ASprite sprite = ResolveCanvasImageSprite(image);
+		string resourceName = isSelecting && !string.IsNullOrEmpty(image.ButtonResourceName)
+			? image.ButtonResourceName
+			: image.ResourceName;
+		ASprite sprite = ResolveCanvasImageSprite(image, isSelecting);
 
-		var texture = GetSpriteTexture(sprite);
-		if (texture == null
-			&& ShouldUseRawImageResourceFallback(image.ResourceName, sprite))
+		string animatedWebpPath = GetAnimatedWebpSourcePath(sprite);
+		// Canvas 的图片会在需要时转为 EmueraImage overlay；动画资源必须在这里
+		// 直接保留该 overlay，不能把静态纹理解码失败误判为整个图片不可显示。
+		SpriteAnimeFrameLayoutInfo animeFrameLayout = default;
+		var texture = animatedWebpPath == null ? GetSpriteTexture(sprite, out animeFrameLayout) : null;
+		if (texture == null && animatedWebpPath == null
+			&& ShouldUseRawImageResourceFallback(resourceName, sprite))
 		{
-			texture = ResolveCanvasTextureByResourceName(image.ResourceName);
+			texture = ResolveCanvasTextureByResourceName(resourceName);
 		}
 
-		if (texture == null)
+		if (texture == null && animatedWebpPath == null)
 			return false;
+
+		int sourceWidth = texture?.GetWidth() ?? sprite?.DestBaseSize.Width ?? 1;
+		int sourceHeight = texture?.GetHeight() ?? sprite?.DestBaseSize.Height ?? 1;
+		if (sourceWidth <= 0)
+			sourceWidth = 1;
+		if (sourceHeight <= 0)
+			sourceHeight = 1;
 
 		int w;
 		int imgH;
@@ -424,17 +498,17 @@ public partial class EmueraContent
 		else if (image.dest_rect.Width > 0)
 		{
 			w = image.dest_rect.Width;
-			imgH = texture.GetHeight() > 0 ? texture.GetHeight() * w / texture.GetWidth() : w;
+			imgH = sourceHeight * w / sourceWidth;
 		}
-		else if (image.dest_rect.Height > 0 && texture.GetHeight() > 0)
+		else if (image.dest_rect.Height > 0)
 		{
 			imgH = image.dest_rect.Height;
-			w = texture.GetWidth() * imgH / texture.GetHeight();
+			w = sourceWidth * imgH / sourceHeight;
 		}
 		else
 		{
-			w = texture.GetWidth() > 0 ? texture.GetWidth() : 32;
-			imgH = texture.GetHeight() > 0 ? texture.GetHeight() : 32;
+			w = sourceWidth;
+			imgH = sourceHeight;
 		}
 
 		if (image.Width > 0 && image.Width != w)
@@ -457,11 +531,12 @@ public partial class EmueraContent
 		}
 		info.Position = GetHtmlImagePosition(image, relX);
 		info.Size = new Vector2(w, imgH);
-		info.DrawOffset = GetSpriteHtmlDrawOffset(sprite, image.ResourceName, w, imgH);
-		info.DrawSize = GetSpriteHtmlDrawSize(sprite, image.ResourceName, w, imgH);
+		info.DrawOffset = GetSpriteHtmlDrawOffset(sprite, resourceName, w, imgH, animeFrameLayout);
+		info.DrawSize = GetSpriteHtmlDrawSize(sprite, resourceName, w, imgH, animeFrameLayout);
 		info.FlipX = image.FlipX;
 		info.FlipY = image.FlipY;
-		return info.SourceTexture != null;
+		info.AnimatedWebpPath = animatedWebpPath;
+		return info.SourceTexture != null || info.AnimatedWebpPath != null;
 	}
 
 	Texture2D ResolveCanvasTextureByResourceName(string resName)
@@ -672,7 +747,7 @@ public partial class EmueraContent
 				var node = imageOverlays[i].Node;
 				if (node == null || !GodotObject.IsInstanceValid(node))
 					continue;
-				if (node.SourceTexture == null)
+				if (node.SourceTexture == null && !node.HasAnimatedWebpSource)
 				{
 					node.Visible = false;
 					continue;
@@ -804,6 +879,8 @@ public partial class EmueraContent
 				canvasAnimatedImageOverlayKeys.RemoveAt(i);
 				continue;
 			}
+			if (ResolveCanvasImageSprite(overlay.Image, IsCanvasButtonVisuallySelected(overlay.Button)) is not SpriteAnime)
+				continue;
 			if (IsCanvasImageOverlayVisibleOrNear(overlay))
 				UpdateCanvasImageOverlayAnimationFrame(overlay);
 		}
@@ -1125,7 +1202,7 @@ public partial class EmueraContent
 			}
 			if (part is ConsoleImagePart image)
 			{
-				DrawImagePart(image, lineY, relX);
+				DrawImagePart(image, lineY, relX, isSelecting);
 				return;
 			}
 			if (part is ConsoleDivPart)
@@ -1210,7 +1287,9 @@ public partial class EmueraContent
 				float cellWidth = nextDrawX - drawX;
 				// 逐字符绘制只负责保持 emuera 的半角/全角格点起点，裁剪仍由整段宽度决定。
 				// 若按单元格宽度裁剪，Godot 字体 fallback 下的箱线/空白敏感字符会出现缺笔或整字丢失。
-				float drawWidth = Mathf.Max(cellWidth, x + width - drawX);
+				float drawWidth = IsBlockElementChar(text[i])
+					? cellWidth
+					: Mathf.Max(cellWidth, x + width - drawX);
 				DrawGridChar(font, text[i], drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
 				exactX = nextExactX;
 				drawX = nextDrawX;
@@ -1231,11 +1310,11 @@ public partial class EmueraContent
 				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), owner.FontSize, color);
 		}
 
-		void DrawImagePart(ConsoleImagePart image, float lineY, int relX)
+		void DrawImagePart(ConsoleImagePart image, float lineY, int relX, bool isSelecting)
 		{
 			if (owner.NeedsCanvasImageOverlay(image))
 				return;
-			if (!owner.TryResolveCanvasImage(image, relX, out var info))
+			if (!owner.TryResolveCanvasImage(image, relX, isSelecting, out var info))
 				return;
 			var drawSize = info.DrawSize.X > 0 && info.DrawSize.Y > 0 ? info.DrawSize : info.Size;
 			var destRect = new Rect2(info.Position + new Vector2(0, lineY) + info.DrawOffset, drawSize);

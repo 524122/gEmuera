@@ -240,6 +240,15 @@ project.godot
           输出文本、按钮、图片、音频和输入交互
 ```
 
+## 2026-07-17 合并后老虎机与动态立绘恢复
+
+- `Scripts/Emuera/GameProc/LogicalLineParser.cs:ShouldPreserveRawPrintArgument/IsRawPrintableArgumentBuilder`：`PRINT`/`PRINTFORM` 系裸文本与格式文本命令在首个命令分隔空白后保留剩余原文，使连续空格和以 `;` 开头的老虎机 AA 背景不再被空白跳过或注释解析吞掉；命令后紧邻 `;` 的正常注释语义保持不变。
+- `Scripts/EmueraContent.cs:TryGetSolidBlockElementRect/IsBlockElementChar` 与 Canvas/Control 两条 `DrawGridChar`：U+2580-U+259F 继续按半角格推进，但交由字体绘制真实字形，并把绘制宽度限制在当前格，兼容 eraTW 使用 MS Gothic 的老虎机 AA 比例和连续块字符边界。
+- `Scripts/AnimatedWebpSpriteFrames.cs`、`Scripts/EmueraImage.cs`：带 `ANIM` chunk 的完整 WebP 由 SkiaSharp 后台解码，主线程限量上传帧纹理；`EmueraImage` 在自身 `_Process` 中替换 `ImageTexture`，继续拥有裁剪、翻转、ColorMatrix 与层级，并通过 `ConfigureButtonSources/SetSelected` 切换 HTML `src/srcb` 静态或动态立绘。
+- `Scripts/EmueraContent.cs`、`Scripts/EmueraContent.Canvas.cs`：Control 行内图、Canvas overlay 和 CBG 在完整动画 WebP 尚无静态纹理时仍创建布局节点并等待首帧；Canvas 在 `src` 或 `srcb` 任一方为动画时建立 overlay，并只刷新关联按钮行。传统 CSV `ANIME`/`SpriteAnime` 则先取得同一帧快照，再统一应用源矩形、偏移和目标尺寸。
+- `Scripts/EmueraContent.AndroidSpriteAnime.cs`：Android 对 AS06 8000px 图集只从 `TextureInfo.image` 拷贝当前 500x500/300x300 帧，并复用单张小 `ImageTexture.Update`；缓存目标 16 项或约 32 MiB，超限时回收 30 秒未触达项，`Clear/_ExitTree` 全量释放。桌面端仍使用图集 `AtlasTexture`。
+- 恢复来源：这些实现原保存在合并前 stash `ef1c06c`；本次以 `a3084a8` 和该 stash 做三方整合，保留合并后的 dev 架构、自动识别和 eraFL 本地改动，不修改任何游戏 ERB/CSV/WebP/存档。
+
 ## 2026-07-02 动态地图模拟器侧适配
 
 - `config.toml` / `RuntimeDiagnosticsConfig`：新增 `[logging].dynamic_map` 简短开关和 `[debug.dynamic_map]` 专项参数，默认关闭；开启后记录动态地图刷新证据，不影响默认性能。
@@ -311,7 +320,9 @@ project.godot
 | `Scripts/EmueraThread.cs` | `EmueraThread` | 后台执行 Emuera 核心；把 Godot 输入转成阻塞式 console 输入。 | `Start`, `End`, `Running`, `Input` |
 | `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退；在移动端读取 Godot display safe area，将主内容、CBG、系统菜单和浮层限制到安全区，并按安全宽度动态更新 Android `WindowX/DrawableWidth`；主控制台缩放时按实际溢出动态启用横向滚动，缩回推荐/安全宽度后清除多余横向偏移；刷新 CBG/SETIMAGELAYER 时遇到占位或本帧上传失败纹理会保留旧角色层节点，避免临时白图替换正常立绘。 | `_Ready`, `GetSafeViewportRect`, `ApplySafeAreaLayout`, `ConfigureContentScrollContainer`, `NormalizeContentHorizontalScroll`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
 | `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制，并复刻原核心按钮选中/焦点背景/BackLog 普通文字颜色语义；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表并用 `hitRectBuckets` 缩小扫描范围，未命中时再回退 overlay/旧控件树；普通移动端默认保留 240 行，Snake/TW 移动端默认 600 行并迁移旧 240 默认，普通桌面默认 360 行，Snake/TW 桌面默认 1500 行并迁移旧 360 默认；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
-| `Scripts/EmueraImage.cs` | `EmueraImage : Control` | 绘制 `Texture2D` / `AtlasTexture` 的控件，支持 ColorMatrix material。 | `SetColorMatrix`, `_Draw` |
+| `Scripts/AnimatedWebpSpriteFrames.cs` | `AnimatedWebpFrameSequence`, `AnimatedWebpSpriteFrames` | 完整动画 WebP 检测、SkiaSharp 后台帧解码、共享引用计数和 Godot 主线程限量纹理上传。 | `IsAnimatedWebp`, `Acquire`, `Release`, `ProcessPendingFrameUploads` |
+| `Scripts/EmueraContent.AndroidSpriteAnime.cs` | partial `EmueraContent` | Android 传统 CSV `SpriteAnime` 当前帧小纹理提取、复用、预算清理与生命周期释放，避免上传超大完整图集。 | `GetAndroidSpriteAnimeFrameTexture`, `CleanupAndroidSpriteAnimeFrameTextures`, `DisposeAndroidSpriteAnimeFrameTextures` |
+| `Scripts/EmueraImage.cs` | `EmueraImage : Control`, `ImageSourceState` | 绘制纹理、播放完整动画 WebP，并切换 HTML `src/srcb` 两套静态或动态图片源；支持 ColorMatrix、裁剪与翻转。 | `ConfigureButtonSources`, `SetSelected`, `SetAnimatedWebpSource`, `SetColorMatrix`, `_Process`, `_Draw` |
 | `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放；在 `[debug.performance_sampling]` 开启时低频聚合普通帧与 Canvas 控制台渲染采样。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `SamplePerformanceFrame`, `SampleConsoleRenderFrame`, `ExportDiagnosticPackage`, `RestartGame` |
 | `Scripts/FirstWindow.cs` | `FirstWindow : Control` | 启动器；扫描 `era*` 游戏目录，切换语言/核心 profile，进入主场景；启动器外边距跟随 display safe area，避免横屏前摄/挖孔遮挡。 | `_Ready`, `ApplyLauncherSafeArea`, `_ExitTree`, `_Notification`, `ResolveStartupGamePath` |
 | `Scripts/SpriteManager.cs` | `SpriteManager`, `TextureInfo`, `SpriteInfo` | 图片/精灵纹理缓存；AtlasTexture 管理；文件图片后台 I/O/解码请求；主线程限流接收解码结果并创建纹理；透明占位纹理带 `IsPlaceholder` 标记并按节流重试，真实纹理完成后可覆盖占位缓存，避免外部存储偶发读失败污染角色图层。 | `Init`, `GetSprite`, `GetTextureInfo`, `TryGetTextureInfoCached`, `RequestTextureInfoAsync`, `GetTextureInfoOtherThread`, `UpdateOtherThreads`, `TextureLoadVersion`, `UpdateCleanup`, `ForceClear` |
@@ -462,7 +473,7 @@ project.godot
 | `HeaderFileLoader.cs` | `HeaderFileLoader` | 读取头文件/定义。 | header 加载入口 |
 | `SelectCaseJumpTable.cs` | `SelectCaseJumpTable` | Snake 兼容的 `SELECTCASE` 常量分支跳转表；对整数/字符串/小数常量 `CASE` 建表，范围、比较和运行期表达式回退顺序扫描。 | `TryBuild`, `Lookup` |
 | `LogicalLine.cs` | `LogicalLine`, `InstructionLine`, `FunctionLabelLine`, `GotoLabelLine` | ERB 逻辑行模型；函数标签记录 `LOCAL/LOCALS/LOCALF/ARG/ARGS/ARGF` 尺寸，`FunctionLabelLine.MethodType` 以 `EraType` 保存 `#FUNCTION/#FUNCTIONS/#FUNCTIONF` 返回类型。 | `FunctionLabelLine`, `InstructionLine`, label/goto 访问 |
-| `LogicalLineParser.cs` | `LogicalLineParser` | 将文本行解析为 `LogicalLine`；支持 `#FUNCTIONF`、`#LOCALFSIZE`、`#REFF` 和 Snake 小数私有变量兼容解析。 | `ParseSharpLine`, `ParseLine`, `ParseLabelLine` |
+| `LogicalLineParser.cs` | `LogicalLineParser` | 将文本行解析为 `LogicalLine`；支持 `#FUNCTIONF`、`#LOCALFSIZE`、`#REFF`、Snake 小数私有变量，并保留 `PRINT/PRINTFORM` 裸参数中的连续空白和文本分号。 | `ParseSharpLine`, `ParseLine`, `ParseLabelLine`, `ShouldPreserveRawPrintArgument` |
 | `LabelDictionary.cs` | `LabelDictionary` | 函数 label、事件 label、`$` label 索引；事件 label 合并 `LOCAL/LOCALS/LOCALF` 最大尺寸并同步 ARGF 尺寸。 | `AddLabel`, `SortLabels`, `GetEventLabels`, `GetNonEventLabel`, `GetLabelDollar` |
 | `InputRequest.cs` | `InputRequest`, `InputType` | 输入请求类型和值约束，`NoFocus` 标记用于 NF 定时输入。 | 构造和字段 |
 | `UserDefinedFunction.cs` | `UserDefinedFunctionData` | 用户定义函数元数据。 | 构造和参数类型 |
