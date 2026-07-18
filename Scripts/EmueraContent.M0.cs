@@ -51,13 +51,10 @@ public partial class EmueraContent
 		int nestedDivCount = 0;
 		int srcCount = 0;
 		int srcbCount = 0;
-		int dynamicMapCount = 0;
 		foreach (var line in lineObjects.Values)
 		{
 			if (line == null)
 				continue;
-			if (line.DynamicMapFunctionScoped || line.BitmapCacheEnabled)
-				dynamicMapCount++;
 			CollectM0FeatureCounts(line, 0, ref divCount, ref nestedDivCount, ref srcCount, ref srcbCount);
 		}
 
@@ -65,8 +62,8 @@ public partial class EmueraContent
 		observation.FeatureCoverage.NestedDiv.SetObserved(nestedDivCount, "nested retained legacy ConsoleDivPart nodes", "no nested div reached by this replay");
 		observation.FeatureCoverage.Src.SetObserved(srcCount, "retained legacy ConsoleImagePart src values", "no image src reached by this replay");
 		observation.FeatureCoverage.Srcb.SetObserved(srcbCount, "retained legacy ConsoleImagePart srcb values", "no image srcb reached by this replay");
-		observation.FeatureCoverage.DynamicMap.SetObserved(dynamicMapCount,
-			"retained dynamic-map/bitmap-cache lines", "no dynamic-map line reached by this replay");
+		observation.FeatureCoverage.DynamicMap.SetObserved(0,
+			"dynamic-map recognition disabled", "dynamic-map recognition disabled");
 
 		CaptureM0ControlHitEvidence(observation);
 		if (UseCanvasRenderBackend)
@@ -210,7 +207,7 @@ public partial class EmueraContent
 		string expectedValue, long expectedGeneration)
 	{
 		bool found = TryFindConsoleButtonAtGlobalPosition(point, out _, out string actualValue, out long actualGeneration,
-			out _, out _, out _);
+			out _, out _);
 		observation.Hits.Add(new LegacyDisplayHitEvidence
 		{
 			Backend = UseCanvasRenderBackend ? "canvas" : "controls",

@@ -1,23 +1,59 @@
 # CODE_MAP
 
+## 2026-07-18 Android 静态大图集子区域裁剪
+
+- `Scripts/EmueraContent.cs:GetSpriteTexture`：Android 渲染静态 `ASpriteSingle` 时，若底图超过 4096px 且 sprite 只引用其中一个源矩形，会在访问 `TextureInfo.texture` 前改走小图块纹理。避免整图被降到 4096px 后，CSV 仍按原始坐标创建 `AtlasTexture`，从而在 `x > 4096` 的区域采样出横条或错误内容。
+- `Scripts/EmueraContent.AndroidSpriteAnime.cs`：原有 Android `SpriteAnime` 小帧缓存扩展为动画帧与静态图集子区域共用的裁剪缓存。CPU 侧保留原图用于 `BlitRect`，GPU 只上传实际的源矩形；缓存上限维持 16 项或约 32 MiB，离屏项按 30 秒未使用回收。裁剪失败时受 `[logging].image` 的 texture 开关记录 `IMAGE.ATLAS.CROP_FAIL`。
+- 边界：完整大图仍沿用既有降尺度上传路径；桌面端、尺寸不超过 4096px 的图集和游戏 ERB/CSV 语义均不变。
+
+## 2026-07-18 原生日志图片与形状标签保留
+
+- `Scripts/Emuera/GameView/AConsoleDisplayPart.cs`、`ConsoleButtonString.cs`、`ConsoleDisplayLine.cs` 与 `ConsoleDivPart.cs`：新增仅供 `OutputLog` 使用的 `ToLogString` 链路。普通 `ToString` 仍保持屏幕文本/调试摘要语义；嵌套 div 子行也走日志序列化，避免其中的图片或形状再次被省略。
+- `Scripts/Emuera/GameView/ConsoleImagePart.cs`：无论图片是否已成功加载，都保存原始 `<img>` 标签（`src/srcb/height/width/ypos/xpos/display/cm`）供日志导出；不改变实际贴图、尺寸计算或失败时的屏幕回退文本。
+- `Scripts/Emuera/GameView/ConsoleShapePart.cs` 与 `HtmlManager.cs:tagAnalyze(shape)`：在 Godot 非 UNITY 路径继续保持屏幕不显示 shape 替代文本，但为日志保存 `<shape>` 标签、原始参数/单位（包括 `px`）和颜色。
+- `Scripts/Emuera/GameView/EmueraConsole.Print.cs:outputLog`：写出显示行时改用 `ToLogString()`，使 `emuera_*.log` 的图片和 shape 记录与原生 Emuera 的输出格式一致。
+
 ## 2026-07-17 合并 dev：Core/M0 会话边界与 ERB 图像扩展
 
 - `project.godot`：新增 `AppBootstrap` 与 `PlatformGateway` autoload，并启用 `prototype_runtime`、`typed_ports`、`pixel_store` 标记；它们负责宿主启动和平台能力入口，不能把这套标记误解为已替换 legacy Emuera 执行器。
 - `src/Core/Compatibility/`、`src/Core/Session/`、`src/Core/Ports/`：纯 C# 的兼容计划、会话协调和端口契约层。`Program.ConfigureCompatibilityPlan` / `ClearCompatibilityPlan` 是它到 legacy 运行时的边界；当前实际 ERB handler 仍在 `Scripts/Emuera/`，不应把 Core 描述符当作增量注册表直接修改。
-- `src/Core/Compatibility/GameCompatibilityResolver.cs`：无路径的游戏身份证据 DTO 与确定性内建规则；代码 `9224518` + eraFL 锚点选择独立 `erafl` profile，代码 `7153` + eraTW 标题/锚点选择 `snake`，冲突和证据不足不自动覆盖调用方选择。它不读取文件、不执行 ERB。
+- `src/Core/Compatibility/GameCompatibilityResolver.cs`：无路径的游戏身份证据 DTO 与确定性内建规则；代码 `9224518` + eraFL 锚点可解析到独立 `erafl` profile，代码 `7153` + eraTW 标题/锚点可解析到 `snake`。当前正常启动器不调用它，不读取文件、不执行 ERB。
 - `src/Core/Compatibility/EraFlCompatibilityModule.cs`：独立 `game.erafl@1.0.0` 计划输入；集中声明 v24 依赖、`gemuera.erafl` save profile、五个 typed policy port、五个 capability，以及省略参数、空白指针整数和扩展显示历史等窄策略入口。
 - `Scripts/GodotHost/LegacySessionBackend.cs`、`LegacySessionLaunchRegistry.cs`、`LegacyThreadQuiescence.cs`：M0/M1 会话启动、停止和隔离入口。排查切换游戏、后台线程未退出或旧渲染任务泄漏时，先看 `EmueraMain.ResetCanarySessionState`、两个渲染组件的 `ResetCanarySessionState` 与 `EmueraContent.ClearForCanarySessionTransition`。
-- `Scripts/GodotHost/GameContentProbe.cs`：Host 侧有界读取 `CSV/GAMEBASE.CSV`、`ERB/SYSTEM/NEWGAME.ERB`、eraFL 固定入口和 `ERB/DIM.ERH`，将证据交给 Core；不做递归全量扫描、能力推断或代码加载。
-- `Scripts/FirstWindow.cs:GetSelectedCoreProfileName/ApplyAutomaticCoreProfile`：正常启动器只展示“全部游戏（自动识别）”，扫描普通根目录及 `snake` 子目录；选择后调用 Host probe，可靠 eraTW 证据自动切 Snake，可靠 eraFL 证据自动切独立 `erafl`，未知/冲突使用安全基线或显式回退。主界面“高级兼容模式”开启后才显示手动 profile 菜单，并将设置持久化到 `launcher.cfg`。
+- `Scripts/GodotHost/GameContentProbe.cs`：Host 侧有界读取 `CSV/GAMEBASE.CSV`、`ERB/SYSTEM/NEWGAME.ERB`、eraFL 固定入口和 `ERB/DIM.ERH`，将证据交给 Core；当前仅供 Core 契约/诊断路径使用，正常启动器不调用它。
+- `Scripts/FirstWindow.cs:LauncherGameEntry/ScanV24Root/ScanCompatibilityDirectory`：正常启动器保留 `v24` / `snake` 双标签；`v24` 固定枚举库根的直接游戏目录，以及 `compat/<profile>/<game>`，`snake` 固定枚举 `snake/<game>`。每个列表项携带路径、目录路由 profile 与来源，点击时直接把该 profile 交给启动边界；`compat` profile 必须为小写、通过 Core allowlist，且拒绝 `v24pure`/`snake` 保留 lane。扫描不读取 GAMEBASE、ERB 或资源内容，未知/非法目录 fail closed。高级兼容模式仍可显式覆盖本次启动 profile。
 - `Scripts/M0/`：legacy runner 的输入回放、显示观察、trace 与报告设施，仅供 fixture/验证链使用；普通桌面与 Android 游戏启动仍走 `FirstWindow` -> `EmueraMain` -> `EmueraThread` -> `Program.Main`。
 - `Scripts/Emuera/Content/GraphicsImage.cs:ClearLowAlpha` 与 `Creator.Method.cs:GraphicsClearLowAlphaMethod`：新增 `GCLEARLOWALPHA(graphicsId, threshold)`，以一次 `GetData/SetData` 清理低 alpha 像素，替代 ERB 逐像素循环；阈值为 `0..255`，WinAPI 绘制模式不可用。
 - 验证入口：根项目使用 `net8.0`（桌面）/`net9.0`（Android），`src/Core/GEmuera.Core.csproj` 对应 `net8.0;net9.0`；`dotnet build`、`dotnet build -p:GodotTargetPlatform=android` 以及 `dotnet run --project tools/core-contracts/CoreContractSmoke.csproj` 分别覆盖宿主编译、Android 编译与 Core 契约冒烟检查。
 
-## 2026-07-17 动态地图主动切图追底
+## 2026-07-17 删除动态地图识别与专用追底
 
-- `Scripts/EmueraContent.cs:OnButtonPressed`、`QuickButtons` 与 Canvas/Control 命中：仅当左键点击当前动态地图来源按钮、且点击前已位于内容底部时，才把追底意图连同当前滚动交互序号传给 `EmueraThread`。按钮来源由实际命中行/快捷按钮元数据传递，旧历史按钮、右/中键和非地图按钮不会登记。
-- `Scripts/EmueraThread.cs`、`ConsoleDisplayLine.InputSubmissionSequence`、`EmueraConsole.ApplyCurrentLineMetadata`：已接收输入在 `inputGate` 内以不可变信封分配单调序号，并从接收至脚本处理完成始终保持占用；期间拒绝后续提交，避免文本与序号错配或双击穿透到下一次输入。输入处理期间生成的显示行保存该序号，使显示桥能精确识别本次点击实际产生的动态地图输出，而不依赖时间窗口。
-- `Scripts/GenericUtils.cs:Request/TryConsumeDynamicMapUserNavigationFollowBottom` 与 `Scripts/uEmuera/Window.cs:DecideScrollModeForDisplayDelta`：只有同输入序号的动态地图差量、且用户滚动交互序号未变化时选择 `FollowBottom`；无意图的 `CLEARLINE`/旧行更新继续选择 `PreserveViewport`，因此动画刷新和用户查看历史时不会被强制拉到底部。`DYNAMIC_MAP.BRIDGE.SUBMIT` 会记录 `user_navigation_follow` 以便 Android 日志确认。
+- `Scripts/Emuera/GameProc/Process.State.cs`：删除对 `DRAW_MAP`、`DRAW_COLOREDMAP`、`FIELDMAP` 等函数名的调用栈识别；引擎不再给输出行判定“这是动态地图”。
+- `Scripts/Emuera/GameView/ConsoleDisplayLine.cs`、`EmueraConsole.Print.cs` 与 `Scripts/EmueraThread.cs`：删除动态地图函数作用域、输入序号和用户导航追底意图的显示元数据及跨线程传递，普通按钮输入仍按原有的单槽输入门提交。
+- `Scripts/EmueraContent.cs`、`QuickButtons.cs` 与 Canvas/Control 命中：删除按钮上的地图来源标记；按钮、虚拟光标和右/中键仍使用同一通用输入链路。
+- `Scripts/uEmuera/Window.cs:DecideScrollModeForDisplayDelta`：不再按地图视图、函数作用域或按钮来源选择滚动策略。真实新增行使用 `FollowBottom`，仅删除底部、重绘或数据刷新使用 `PreserveViewport`；这套规则对地图、状态页和普通页面一视同仁。
+- `Scripts/GenericUtils.cs`：删除地图上下文、尾部识别和一次性追底请求。保留的 `DYNAMIC_MAP.*` 仅是默认关闭的诊断配置，不再参与渲染、输入或滚动决策。下方 2026-07-03 的地图识别/专用追底记录均为历史方案。
+- `EmueraConsole.BitmapCacheEnabledForNextLine` 继续保留为 `BITMAP_CACHE_ENABLE` 的兼容入口：只提示整帧重写，不保存地图缓存，也不用于地图识别。
+
+## 2026-07-17 动态地图显示桥后缀快照优化
+
+- `Scripts/uEmuera/partial/EmueraConsole.cs:GetDisplayLinesSnapshotForuEmuera(minimumLineNo, ...)`：显示桥按 Godot 当前最小保留行号二分定位核心显示列表后缀，只复制仍可能参与更新和点击的行；Snake 手机端通常从最多 5000 行核心历史降到约 600 行 Godot 保留区间。清屏、行号回绕、空洞或序列异常会自动回退完整快照，保证兼容行为。
+- `Scripts/uEmuera/Window.cs:Update`：行级 diff 和数据刷新只遍历后缀快照；`console_count` 继续保留核心总行数用于清空判断。动态地图尾部识别和专用桥接日志已随识别链删除。
+- 后缀快照优化保留；滚动决策现由 2026-07-17 的通用差量规则负责，不再存在用户主动追底或地图动画专用分支。
+
+## 2026-07-17 Android 动态地图 TINPUT 定时精度修复
+
+- `Scripts/uEmuera/Forms.cs:Timer.GetNextWaitMilliseconds`：兼容定时器公开最近到期等待时间；启用定时器时重置起始 tick。没有活动定时器时仍使用调用方的低频等待，有 `TINPUT`/重绘定时器时按其 `Interval` 唤醒。
+- `Scripts/EmueraThread.cs:Work/WakeForTimerSchedule`：输入等待不再固定每 100ms 才执行唯一的 `Timer.Update()`；工作线程按最近活动定时器等待，并在输入与超时同时出现时优先消费输入。普通 INPUT 没有活动定时器时仍最多等待 100ms，不会持续 10ms 空转。
+- `Scripts/Emuera/GameView/EmueraConsole.cs:NeedSetTimer` 与 `Scripts/uEmuera/Window.cs:Update`：显示桥实际挂载延迟的 `TINPUT` 定时器后立即唤醒工作线程，让新定时器参与下一次 10ms 调度。Snake 动态地图的 `TINPUT 1000/FPS` 不再被 100ms 输入轮询硬限制为约 10 FPS。
+- 本修复不修改 ERB 的 FPS/动画种子、Canvas 绘制、地图缓存、历史行或滚动策略。Android 最终帧率仍受地图脚本计算和 Canvas 字符绘制成本限制，需以实机结果判断是否继续优化渲染端。
+
+## 2026-07-17 动态地图缓存残留删除
+
+- `Scripts/Emuera/GameView/ConsoleDisplayLine.cs`、`EmueraConsole.Print.cs`：物理删除永远为 false 的 `BitmapCacheEnabled` 行字段及其逐行赋值，不再让显示行携带任何地图缓存状态。
+- `Scripts/GenericUtils.cs`、`Scripts/uEmuera/Window.cs`、`Scripts/EmueraContent.M0.cs`：删除缓存字段对应的动态地图判定、视觉 diff、诊断 `bmp` 字段和 M0 统计分支；后续动态地图函数作用域识别也已删除。
+- `EmueraConsole.BitmapCacheEnabledForNextLine` 仅作为 ERB `BITMAP_CACHE_ENABLE` 的只写兼容入口保留。传入 true 只登记“当前正在整帧重写”，让 `INPUT/TINPUT/WAIT` 一次提交完整地图；它不保存行、位图、纹理或缓存块，传入 false 不产生状态。
+- 图片纹理缓存、字体测量缓存和 Android SpriteAnime 帧纹理复用属于通用渲染资源管理，不是动态地图缓存，本次不修改。
 
 ## 2026-07-09 eraTW/snake 泡茶展开浮层兼容
 - `Scripts/EmueraContent.cs:BuildConsoleButton/CreateTextPart/ConsoleTextPart`：Control 后端按钮文本现在也使用 `ConsoleStyledString.pButtonColor` 和焦点背景绘制 hover/press 视觉，补齐旧节点后端与 Canvas 后端、原生 Emuera 的按钮选中态差异。
@@ -36,7 +72,7 @@
 ## 2026-07-09 动态地图打开卡顿优化与清理实验移除
 
 - `EmueraContent.cs`：移除未启用的动态地图旧行激进清理实验代码，不再保留 `DynamicMapAggressiveTrimEnabled` 开关、专用清理入口和 `TrimOldDynamicMapLines` 方法；普通 `MaxVisibleLines` overflow 清理仍保持原逻辑。
-- `ConsoleDisplayLine.cs` / `EmueraConsole.cs:BitmapCacheEnabledForNextLine` / `GenericUtils.LineHasDynamicMapBitmapContext`：删除动态地图 `BitmapCacheEnabled` 行缓存状态；`BITMAP_CACHE_ENABLE` 脚本 API 保留为空操作兼容入口，传入 true 时仍触发 rewrite-in-progress 刷新提示，但不再给输出行保存缓存标记。旧 `LineHasDynamicMapBitmapContext` 入口仅委托 `DynamicMapFunctionScoped`，2026-07-02 记录中的 BitmapCache 块识别方案已废弃。
+- `ConsoleDisplayLine.cs` / `EmueraConsole.cs:BitmapCacheEnabledForNextLine` / `GenericUtils.LineHasDynamicMapBitmapContext`：删除动态地图 `BitmapCacheEnabled` 行缓存状态；`BITMAP_CACHE_ENABLE` 脚本 API 保留为兼容入口，传入 true 时仍触发 rewrite-in-progress 刷新提示，但不再给输出行保存缓存标记。旧 `LineHasDynamicMapBitmapContext` 入口仅委托 `DynamicMapFunctionScoped`，2026-07-02 记录中的 BitmapCache 块识别方案已废弃。
 - `EmueraContent.cs:lineVisualExtents / visualLayoutContentHeight`：打开动态地图/状态页时不再每次扫描全部历史 retained lines 计算内容宽高；行注册和 data-only 刷新时缓存可视边界，布局 dirty 时顺手计算真实 `lineTop + visualBottom`，避免把靠前地图行的大 div 溢出高度错误叠到整段历史输出末尾，造成滚到底部后一大片黑屏。
 - `EmueraContent.cs:buttonGenerationLineNumbers / CollectCurrentGenerationQuickButtonGroups`：快捷按钮刷新从遍历全部 `lineObjects` 改为按当前 `lastButtonGeneration` 精确取候选行，降低动态地图历史输出越积越多后的打开卡顿。
 - 风险说明：本轮不再尝试删除旧地图行，只优化尺寸与快捷按钮索引，因此不会引入旧行误删风险；若后续仍要做历史地图行裁剪，需要重新评估 `DynamicMapFunctionScoped` 与 bitmap context 的误判边界。
@@ -199,7 +235,7 @@ eraFL 用 `INPUTS , 1`（StrValue 等待）读取点击，`USERCOM_INPUT.ERB` �
 ## 2026-07-02 动态地图刷新合并补充
 
 - `EmueraConsole.RefreshStrings` / `deleteLine` / `BitmapCacheEnabledForNextLine`：动态地图或状态面板进入 `CLEARLINE`、`BITMAP_CACHE_ENABLE 1...0` 区域重画时，Running 中的普通 `RefreshStrings(false)` 会先合并，不向 Godot UI 提交半成品；进入 `INPUT/TINPUT/WAIT` 或显式 `RefreshStrings(true)` 时一次提交完整显示列表，避免 Android 看到“旧菜单 -> 半张地图 -> 地图主体”的循环中间帧。
-- `PrintStringBuffer` / `EmueraConsole.PrintHtml`：`BITMAP_CACHE_ENABLE` 改为区域上下文，开启后直到脚本关闭前产生的普通文本行与 `HTML_PRINT` 行都会带 `BitmapCacheEnabled` 标记；这与 TW 动态地图脚本的成对使用方式一致，也让 UI 侧动态地图诊断和复用判断有连续块依据。
+- **历史方案，已由 2026-07-17 缓存残留删除取代**：`PrintStringBuffer` / `EmueraConsole.PrintHtml` 曾让 `BITMAP_CACHE_ENABLE` 区域的普通文本行与 `HTML_PRINT` 行携带 `BitmapCacheEnabled` 标记；当前字段和传播链均已删除。
 - `EmueraContent.QueueDisplayFollowUp`：当显示差异明确传入 `scrollToBottom=false` 时，会取消尚未完成的滚到底任务并记录当前视口位置，再执行布局边界更新；避免动态地图刷新被上一轮普通输出残留的 pending scroll 拉到底部。
 
 更新时间：2026-06-07
@@ -257,14 +293,14 @@ project.godot
 - `Scripts/AnimatedWebpSpriteFrames.cs`、`Scripts/EmueraImage.cs`：带 `ANIM` chunk 的完整 WebP 由 SkiaSharp 后台解码，主线程限量上传帧纹理；`EmueraImage` 在自身 `_Process` 中替换 `ImageTexture`，继续拥有裁剪、翻转、ColorMatrix 与层级，并通过 `ConfigureButtonSources/SetSelected` 切换 HTML `src/srcb` 静态或动态立绘。
 - `Scripts/EmueraContent.cs`、`Scripts/EmueraContent.Canvas.cs`：Control 行内图、Canvas overlay 和 CBG 在完整动画 WebP 尚无静态纹理时仍创建布局节点并等待首帧；Canvas 在 `src` 或 `srcb` 任一方为动画时建立 overlay，并只刷新关联按钮行。传统 CSV `ANIME`/`SpriteAnime` 则先取得同一帧快照，再统一应用源矩形、偏移和目标尺寸。
 - `Scripts/EmueraContent.AndroidSpriteAnime.cs`：Android 对 AS06 8000px 图集只从 `TextureInfo.image` 拷贝当前 500x500/300x300 帧，并复用单张小 `ImageTexture.Update`；缓存目标 16 项或约 32 MiB，超限时回收 30 秒未触达项，`Clear/_ExitTree` 全量释放。桌面端仍使用图集 `AtlasTexture`。
-- 恢复来源：这些实现原保存在合并前 stash `ef1c06c`；本次以 `a3084a8` 和该 stash 做三方整合，保留合并后的 dev 架构、自动识别和 eraFL 本地改动，不修改任何游戏 ERB/CSV/WebP/存档。
+- 恢复来源：这些实现原保存在合并前 stash `ef1c06c`；本次以 `a3084a8` 和该 stash 做三方整合，保留合并后的 dev 架构与 eraFL 本地改动，不修改任何游戏 ERB/CSV/WebP/存档。后续启动器自动识别已被目录路由替代。
 
 ## 2026-07-02 动态地图模拟器侧适配
 
 - `config.toml` / `RuntimeDiagnosticsConfig`：新增 `[logging].dynamic_map` 简短开关和 `[debug.dynamic_map]` 专项参数，默认关闭；开启后记录动态地图刷新证据，不影响默认性能。
-- `GenericUtils`：新增 `DYNAMIC_MAP.*` 结构化日志入口，按 `BitmapCacheEnabled` 与短时间上下文窗口筛选动态地图刷新，输出尾部行、按钮 generation、BitmapCache 标记和截断文本。
+- **历史方案，已废弃**：`GenericUtils` 的 `DYNAMIC_MAP.*` 日志曾按 `BitmapCacheEnabled` 与短时间窗口筛选并输出 BitmapCache 标记；当前只使用 `DynamicMapFunctionScoped` 上下文，不再输出缓存字段。
 - `uEmuera/Window.Update`：在核心显示列表提交到 Godot UI 前判断本次差异是否为纯追加；删除尾部、更新已有行或重绘当前屏幕时传入 `scrollToBottom=false`，避免动态地图/状态面板刷新被当作普通文本追加而自动滚到底。显示差异不再只依赖 `ConsoleDisplayLine` 对象引用相等，而是按 `LineNo` 与视觉内容结构比较；视觉未变的纯显示行会复用既有节点，视觉未变但包含命令按钮的行会进入 data-only 刷新，只更新按钮输入数据与 Canvas 命中区。
-- `uEmuera/Window.Update`：动态地图尾部出现连续多行 `BitmapCacheEnabled` 地图块时，会进入 UI 侧动态地图窗口，只向 Godot 显示层提交最后一段地图块及其后续选项行；这不会修改 Emuera 核心 `displayLineList`，用于避免命令菜单、地图追加和地图主体在 Android 上循环切换。
+- **历史方案，已废弃**：`uEmuera/Window.Update` 曾按连续 `BitmapCacheEnabled` 行识别地图块；当前不再裁剪 Godot 显示视图，也不再存在缓存块标记，只用函数栈作用域识别动态地图上下文。
 - `GenericUtils.ApplyTextChanges` / `EmueraContent.ApplyTextChanges`：显示差异新增 `scrollToBottom` 与 `dataOnlyLines` 契约；普通追加仍滚到底，重绘/替换批次只刷新布局和缩放边界并保留当前视口；data-only 行不重建 Control/Canvas 节点，用于先把动态地图变化与选项行刷新拆开。
 - `EmueraContent.AddLine` / `EmueraContent.Canvas.AddCanvasLine`：按行替换已有内容时会先注销旧行资源；Canvas 行更新会释放旧 overlay 与纹理 pin 后再注册新行，避免从“整段删除重建”改为“单行更新”后留下旧节点。
 - `EmueraContent.SetLastButtonGeneration` / `QuickButtons.UpdateButtonGeneration`：快捷按钮先收集完整按钮组，再按按钮顺序与内容生成签名；内容签名未变时复用现有按钮节点，只更新快捷按钮输入 generation，减少 Android 动态地图刷新时的底部按钮闪烁。
@@ -331,10 +367,10 @@ project.godot
 | `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退；在移动端读取 Godot display safe area，将主内容、CBG、系统菜单和浮层限制到安全区，并按安全宽度动态更新 Android `WindowX/DrawableWidth`；主控制台缩放时按实际溢出动态启用横向滚动，缩回推荐/安全宽度后清除多余横向偏移；刷新 CBG/SETIMAGELAYER 时遇到占位或本帧上传失败纹理会保留旧角色层节点，避免临时白图替换正常立绘；eraFL 使用扩展显示历史容量策略。 | `_Ready`, `GetSafeViewportRect`, `ApplySafeAreaLayout`, `ConfigureContentScrollContainer`, `NormalizeContentHorizontalScroll`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
 | `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制，并复刻原核心按钮选中/焦点背景/BackLog 普通文字颜色语义；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表并用 `hitRectBuckets` 缩小扫描范围，未命中时再回退 overlay/旧控件树；普通移动端默认保留 240 行，Snake/TW 移动端默认 600 行并迁移旧 240 默认，普通桌面默认 360 行，Snake/TW 桌面默认 1500 行并迁移旧 360 默认；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
 | `Scripts/AnimatedWebpSpriteFrames.cs` | `AnimatedWebpFrameSequence`, `AnimatedWebpSpriteFrames` | 完整动画 WebP 检测、SkiaSharp 后台帧解码、共享引用计数和 Godot 主线程限量纹理上传。 | `IsAnimatedWebp`, `Acquire`, `Release`, `ProcessPendingFrameUploads` |
-| `Scripts/EmueraContent.AndroidSpriteAnime.cs` | partial `EmueraContent` | Android 传统 CSV `SpriteAnime` 当前帧小纹理提取、复用、预算清理与生命周期释放，避免上传超大完整图集。 | `GetAndroidSpriteAnimeFrameTexture`, `CleanupAndroidSpriteAnimeFrameTextures`, `DisposeAndroidSpriteAnimeFrameTextures` |
+| `Scripts/EmueraContent.AndroidSpriteAnime.cs` | partial `EmueraContent` | Android 传统 CSV `SpriteAnime` 当前帧及静态 `ASpriteSingle` 大图集子区域的小纹理提取、复用、预算清理与生命周期释放，避免上传超大完整图集后再按原坐标裁切。 | `GetAndroidSpriteAnimeFrameTexture`, `TryGetAndroidStaticAtlasRegionTexture`, `CleanupAndroidSpriteAnimeFrameTextures`, `DisposeAndroidSpriteAnimeFrameTextures` |
 | `Scripts/EmueraImage.cs` | `EmueraImage : Control`, `ImageSourceState` | 绘制纹理、播放完整动画 WebP，并切换 HTML `src/srcb` 两套静态或动态图片源；支持 ColorMatrix、裁剪与翻转。 | `ConfigureButtonSources`, `SetSelected`, `SetAnimatedWebpSource`, `SetColorMatrix`, `_Process`, `_Draw` |
 | `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放；在 `[debug.performance_sampling]` 开启时低频聚合普通帧与 Canvas 控制台渲染采样。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `SamplePerformanceFrame`, `SampleConsoleRenderFrame`, `ExportDiagnosticPackage`, `RestartGame` |
-| `Scripts/FirstWindow.cs` | `FirstWindow : Control` | 启动器；主界面只提供“全部游戏（自动识别）”入口，扫描普通根目录及 `snake` 子目录，按受限内容证据自动选择 v24/Snake/eraFL profile，未知时保留安全基线；“高级兼容模式”开启后显示手动 profile 菜单，并持久化 launcher 设置；启动器外边距跟随 display safe area，避免横屏前摄/挖孔遮挡。 | `_Ready`, `ApplyLauncherSafeArea`, `_ExitTree`, `_Notification`, `ResolveStartupGamePath`, `GetSelectedCoreProfileName`, `ApplyAutomaticCoreProfile`, `CreateCompatibilitySettings` |
+| `Scripts/FirstWindow.cs` | `FirstWindow : Control`, `LauncherGameEntry` | 启动器；左侧保留 `v24` / `snake` 双标签。v24 固定扫描普通根目录的直接游戏和 `compat/<profile>/<game>`，snake 固定扫描 `snake/<game>`；列表项本身拥有 path/profile/source，正常模式不会从 UI 标签或游戏内容反推 profile。compat profile 由冻结的 Core allowlist 校验，未知、大小写错误和保留 lane 均拒绝；高级兼容模式可显式覆盖本次启动 profile。启动器外边距跟随 display safe area，避免横屏前摄/挖孔遮挡。 | `_Ready`, `ApplyLauncherSafeArea`, `_ExitTree`, `_Notification`, `ScanGames`, `ScanCompatibilityDirectory`, `GetSelectedCoreProfileName`, `CreateCompatibilitySettings` |
 | `Scripts/SpriteManager.cs` | `SpriteManager`, `TextureInfo`, `SpriteInfo` | 图片/精灵纹理缓存；AtlasTexture 管理；文件图片后台 I/O/解码请求；主线程限流接收解码结果并创建纹理；透明占位纹理带 `IsPlaceholder` 标记并按节流重试，真实纹理完成后可覆盖占位缓存，避免外部存储偶发读失败污染角色图层。 | `Init`, `GetSprite`, `GetTextureInfo`, `TryGetTextureInfoCached`, `RequestTextureInfoAsync`, `GetTextureInfoOtherThread`, `UpdateOtherThreads`, `TextureLoadVersion`, `UpdateCleanup`, `ForceClear` |
 | `Scripts/ColorMatrixGPU.cs` | `ColorMatrixGPU` | ColorMatrix shader material 创建、缓存、LRU、uniform 设置。 | `CreateMaterial`, `GetSharedMaterial`, `GetMatrixKey`, `SetMatrixUniforms`, `CreateCompositMaterial` |
 | `Scripts/QuickButtons.cs` | `QuickButtons : CanvasLayer` | 快捷按钮浮层；显示当前可选输入，处理点击/触摸。 | `_Ready`, `_Process`, `_Input`, `AddButton`, `Clear`, `ShiftLine`, `SetInputEnabled` |
@@ -382,7 +418,7 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `Emuera/Program.cs` | `Program`, `EmueraCoreProfile` | 原 Emuera 入口；设置目录、核心 profile、配置、窗口、Process。 | `Main`, `AppendSnakeStartupErrorLog`, `DetectCoreProfile`, `ConfigureModernMobileCoreAdapters` |
+| `Emuera/Program.cs` | `Program`, `EmueraCoreProfile` | 原 Emuera 入口；设置目录、核心 profile、配置、窗口、Process。普通启动严格消费启动器已选的 `v24pure`、`snake` 或 `erafl` profile，不再从游戏目录 marker 自动切换核心。 | `Main`, `AppendSnakeStartupErrorLog`, `DetectCoreProfile`, `ConfigureModernMobileCoreAdapters` |
 | `Emuera/GlobalStatic.cs` | `GlobalStatic` | 核心全局对象注册和重置；保存插件存在标志。 | `Reset`, `ExistPlugin` 及静态字段 |
 
 ### Scripts/Emuera/Config

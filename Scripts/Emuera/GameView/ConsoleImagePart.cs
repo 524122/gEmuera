@@ -38,6 +38,9 @@ namespace MinorShift.Emuera.GameView
 			PositionX = raw_xpos.isPx ? raw_xpos.num : (raw_xpos.num * Config.FontSize / 100);
 			ColorMatrixVariableName = colorMatrixVariableName;
 			ColorMatrix = ResolveColorMatrix(colorMatrixVariableName);
+			// 成功加载的图片不会设置 AltText，但原生输出日志仍会保留 <img> 标签。
+			// 单独保存日志文本，避免改变屏幕渲染和普通 ToString() 的兼容语义。
+			LogText = BuildLogText(ResourceName, ButtonResourceName, raw_height, raw_width, raw_ypos, raw_xpos, display, colorMatrixVariableName);
 
 			// Compute desired dimensions from HTML attributes regardless of whether sprite exists.
 			// This allows external renderers to size the image correctly even when loading dynamically.
@@ -213,10 +216,17 @@ namespace MinorShift.Emuera.GameView
 //#pragma warning restore CS0649 // フィールド 'ConsoleImagePart.ia' は割り当てられません。常に既定値 null を使用します。
 		public readonly string ResourceName;
 		public readonly string ButtonResourceName;
+		public readonly string LogText;
 		public override int Top { get { return top; } }
 		public override int Bottom { get { return bottom; } }
 
 		public override bool CanDivide { get { return false; } }
+
+		public override string ToLogString()
+		{
+			return LogText;
+		}
+
 		public override void SetWidth(StringMeasure sm, float subPixel)
 		{
 			if (this.Error)
@@ -252,6 +262,58 @@ namespace MinorShift.Emuera.GameView
 				default:
 					return "relative";
 			}
+		}
+
+		static string BuildLogText(string resourceName, string buttonResourceName, MixedNum rawHeight, MixedNum rawWidth, MixedNum rawYPos, MixedNum rawXPos, DisplayMode display, string colorMatrixVariableName)
+		{
+			StringBuilder sb = new StringBuilder();
+			sb.Append("<img src='");
+			sb.Append(resourceName ?? "");
+			if (buttonResourceName != null)
+			{
+				sb.Append("' srcb='");
+				sb.Append(buttonResourceName);
+			}
+			if (rawHeight.num != 0)
+			{
+				sb.Append("' height='");
+				sb.Append(rawHeight.num.ToString());
+				if (rawHeight.isPx)
+					sb.Append("px");
+			}
+			if (rawWidth.num != 0)
+			{
+				sb.Append("' width='");
+				sb.Append(rawWidth.num.ToString());
+				if (rawWidth.isPx)
+					sb.Append("px");
+			}
+			if (rawYPos.num != 0)
+			{
+				sb.Append("' ypos='");
+				sb.Append(rawYPos.num.ToString());
+				if (rawYPos.isPx)
+					sb.Append("px");
+			}
+			if (rawXPos.num != 0)
+			{
+				sb.Append("' xpos='");
+				sb.Append(rawXPos.num.ToString());
+				if (rawXPos.isPx)
+					sb.Append("px");
+			}
+			if (display != DisplayMode.Relative)
+			{
+				sb.Append("' display='");
+				sb.Append(DisplayModeToHtml(display));
+			}
+			if (!string.IsNullOrEmpty(colorMatrixVariableName))
+			{
+				sb.Append("' cm='");
+				sb.Append(colorMatrixVariableName);
+			}
+			sb.Append("'>");
+			return sb.ToString();
 		}
 
 		static bool TryResolveDynamicImageWidth(string resourceName, int targetHeight, out int width, out float subPixel)

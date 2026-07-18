@@ -21,14 +21,6 @@ namespace MinorShift.Emuera.GameView
 
 		private readonly PrintStringBuffer printBuffer;
 		readonly StringMeasure stringMeasure = new StringMeasure();
-		long currentInputSubmissionSequence = 0;
-
-		// EmueraThread 在一次用户输入被核心消费期间设置该序号。
-		// 输出行保留来源，供 Godot 显示桥把“主动切图”与动画刷新精确区分。
-		internal void SetCurrentInputSubmissionSequence(long sequence)
-		{
-			currentInputSubmissionSequence = sequence > 0 ? sequence : 0;
-		}
 
 		public void ClearDisplay()
 		{
@@ -39,7 +31,6 @@ namespace MinorShift.Emuera.GameView
 				lineNo = 0;
 				lastDrawnLineNo = -1;
 			}
-			BitmapCacheEnabledForNextLine = false;
 			ConsumeDisplayRewriteRefresh();
 			verticalScrollBarUpdate();
 			window.Refresh();//OnPaint発行
@@ -126,28 +117,19 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (lineList == null)
 				return;
-			bool dynamicMapFunctionScoped = IsDynamicMapOutputScopeActive;
 			for (int i = 0; i < lineList.Length; i++)
 			{
 				if (lineList[i] == null)
 					continue;
-				ApplyCurrentLineMetadata(lineList[i], dynamicMapFunctionScoped);
+				ApplyCurrentLineMetadata(lineList[i]);
 			}
 		}
 
 		internal void ApplyCurrentLineMetadata(ConsoleDisplayLine line)
 		{
-			ApplyCurrentLineMetadata(line, IsDynamicMapOutputScopeActive);
-		}
-
-		private void ApplyCurrentLineMetadata(ConsoleDisplayLine line, bool dynamicMapFunctionScoped)
-		{
 			if (line == null)
 				return;
 			line.TextBackgroundColor = TextBackgroundColor;
-			line.BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
-			line.DynamicMapFunctionScoped = dynamicMapFunctionScoped;
-			line.InputSubmissionSequence = currentInputSubmissionSequence;
 			if (line.Buttons == null)
 				return;
 			for (int i = 0; i < line.Buttons.Length; i++)
@@ -160,7 +142,7 @@ namespace MinorShift.Emuera.GameView
 					if (parts[j] is ConsoleDivPart div && div.Children != null)
 					{
 						for (int k = 0; k < div.Children.Length; k++)
-							ApplyCurrentLineMetadata(div.Children[k], dynamicMapFunctionScoped);
+							ApplyCurrentLineMetadata(div.Children[k]);
 					}
 				}
 			}
@@ -793,7 +775,7 @@ namespace MinorShift.Emuera.GameView
 					}
 					foreach (ConsoleDisplayLine line in lines)
 				{
-					writer.WriteLine(line.ToString());
+					writer.WriteLine(line.ToLogString());
 				}
 			}
 			catch (Exception)

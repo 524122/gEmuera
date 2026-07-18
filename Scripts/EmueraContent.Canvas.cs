@@ -19,7 +19,6 @@ public partial class EmueraContent
 		public Rect2 Rect;
 		public string Input;
 		public long Generation;
-		public bool DynamicMapButton;
 		public Vector2 ContentCenter;
 	}
 
@@ -1095,7 +1094,6 @@ public partial class EmueraContent
 						Rect = hitRect,
 						Input = button.Inputs,
 						Generation = button.Generation,
-						DynamicMapButton = line.DynamicMapFunctionScoped,
 						ContentCenter = hitRect.Position + hitRect.Size * 0.5f,
 					});
 					stats.RebuiltHitRects++;

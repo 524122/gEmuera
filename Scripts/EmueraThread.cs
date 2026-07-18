@@ -7,6 +7,7 @@ using gEmuera.GodotHost;
 public class EmueraThread
 {
     const int StopJoinTimeoutMilliseconds = 2000;
+    const int IdleInputWaitMilliseconds = 100;
 
     public static EmueraThread instance { get { return instance_; } }
     static EmueraThread instance_ = new EmueraThread();
@@ -91,8 +92,7 @@ public class EmueraThread
         return false;
     }
 
-    public void Input(string c, bool from_button, bool skip = false, int mouseButton = 0,
-        bool requestDynamicMapFollowBottom = false, int dynamicMapScrollInteractionSerial = int.MinValue)
+    public void Input(string c, bool from_button, bool skip = false, int mouseButton = 0)
     {
         var console = MinorShift.Emuera.GlobalStatic.Console;
         if(console == null)
@@ -117,18 +117,15 @@ public class EmueraThread
             }
             return;
         }
-        long submissionSequence = 0;
         bool accepted = false;
         lock (inputGate)
         {
-            // 输入文本、鼠标键、跳过标记和显示来源序号必须作为一个整体交给工作线程。
+            // 输入文本、鼠标键和跳过标记必须作为一个整体交给工作线程。
             // 单槽尚未被取走时拒绝后续提交，避免连续点击把旧输入替换成新输入，
-            // 也保证序号与脚本实际消费的输入严格一一对应。
+            // 并让按钮动作只在脚本实际消费一次。
             if (pendingInput == null)
             {
-                submissionSequence = ++inputSubmissionSequence;
-                pendingInput = new PendingInput(c, skip, mouseButton, from_button, submissionSequence,
-                    requestDynamicMapFollowBottom, dynamicMapScrollInteractionSerial);
+                pendingInput = new PendingInput(c, skip, mouseButton, from_button);
                 accepted = true;
             }
         }
@@ -192,10 +189,22 @@ public class EmueraThread
 
             while((nextInput = TakePendingInput()) == null)
             {
-                // Block efficiently until Input() is called or a short timeout expires
-                inputEvent.Wait(100);
+                int waitMilliseconds = uEmuera.Forms.Timer.GetNextWaitMilliseconds(IdleInputWaitMilliseconds);
+                inputEvent.Wait(waitMilliseconds);
                 if(!running)
                     return;
+
+                // 输入优先于同一时刻到期的 TINPUT，避免用户点击被超时结果抢先消费。
+                nextInput = TakePendingInput();
+                if (nextInput != null)
+                    break;
+
+                // 定时器由 Godot 主线程挂载时也会唤醒这里。复位后再次检查输入，
+                // 防止 Input() 恰好发生在第一次检查与 Reset() 之间而丢失唤醒。
+                inputEvent.Reset();
+                nextInput = TakePendingInput();
+                if (nextInput != null)
+                    break;
                 uEmuera.Forms.Timer.Update();
             }
 
@@ -205,13 +214,6 @@ public class EmueraThread
                 string originalInput = nextInput.Value;
                 int originalMouseButton = nextInput.MouseButton;
                 bool originalFromButton = nextInput.FromButton;
-                long originalInputSubmissionSequence = nextInput.SubmissionSequence;
-                if (nextInput.RequestDynamicMapFollowBottom)
-                {
-                    GenericUtils.RequestDynamicMapUserNavigationFollowBottom(
-                        originalInputSubmissionSequence,
-                        nextInput.DynamicMapScrollInteractionSerial);
-                }
                 string codeBefore = null;
                 if (gEmuera.M0.LegacyTrace.IsEnabled)
                 {
@@ -236,7 +238,6 @@ public class EmueraThread
                 if (GenericUtils.IsInputTraceEnabled("consume"))
                     GenericUtils.InputTrace("INPUT.CONSUME", () => "input consume", () => $"skip={skipflag} mouse={originalMouseButton}");
                 bool consumed = false;
-                console.SetCurrentInputSubmissionSequence(originalInputSubmissionSequence);
                 try
                 {
                     if(originalMouseButton != 0)
@@ -259,7 +260,6 @@ public class EmueraThread
                 }
                 finally
                 {
-                    console.SetCurrentInputSubmissionSequence(0);
                     if (gEmuera.M0.LegacyTrace.IsEnabled)
                     {
                         gEmuera.M0.LegacyTrace.TryRecordInput("consumption_finished", gEmuera.M0.LegacyTraceThreadOwner.LegacyVm,
@@ -294,7 +294,6 @@ public class EmueraThread
     bool debugmode;
     volatile bool running;
     volatile bool skipflag;
-    long inputSubmissionSequence;
     PendingInput pendingInput;
 
     sealed class PendingInput
@@ -303,20 +302,13 @@ public class EmueraThread
         public readonly bool Skip;
         public readonly int MouseButton;
         public readonly bool FromButton;
-        public readonly long SubmissionSequence;
-        public readonly bool RequestDynamicMapFollowBottom;
-        public readonly int DynamicMapScrollInteractionSerial;
 
-        public PendingInput(string value, bool skip, int mouseButton, bool fromButton, long submissionSequence,
-            bool requestDynamicMapFollowBottom, int dynamicMapScrollInteractionSerial)
+        public PendingInput(string value, bool skip, int mouseButton, bool fromButton)
         {
             Value = value;
             Skip = skip;
             MouseButton = mouseButton;
             FromButton = fromButton;
-            SubmissionSequence = submissionSequence;
-            RequestDynamicMapFollowBottom = requestDynamicMapFollowBottom;
-            DynamicMapScrollInteractionSerial = dynamicMapScrollInteractionSerial;
         }
     }
 
@@ -372,6 +364,11 @@ public class EmueraThread
             // End may have completed after Input captured the old event. The
             // input belongs to a stopped session and must not revive it.
         }
+    }
+
+    internal void WakeForTimerSchedule()
+    {
+        SignalInputEvent();
     }
 
     static string FormatCurrentCoreLineForTrace()

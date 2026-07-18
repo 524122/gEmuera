@@ -289,10 +289,10 @@ public partial class QuickButtons : CanvasLayer
 		RequestPanelSizeUpdate(true);
 	}
 
-	public void AddButton(string text, Godot.Color color, string code, long generation, bool dynamicMapButton)
+	public void AddButton(string text, Godot.Color color, string code, long generation)
 	{
 		var btn = AcquireButton();
-		ConfigureButton(btn, text, color, code, generation, dynamicMapButton);
+		ConfigureButton(btn, text, color, code, generation);
 		currentRow.AddChild(btn);
 		buttons.Add(btn);
 		MarkQuickContentSizeDirty();
@@ -359,7 +359,7 @@ public partial class QuickButtons : CanvasLayer
 		return btn;
 	}
 
-	void ConfigureButton(Panel btn, string text, Godot.Color color, string code, long generation, bool dynamicMapButton)
+	void ConfigureButton(Panel btn, string text, Godot.Color color, string code, long generation)
 	{
 		btn.MouseFilter = quickInputEnabled ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
 		StyleQuickButton(btn, color);
@@ -381,7 +381,6 @@ public partial class QuickButtons : CanvasLayer
 		string inputCode = code;
 		btn.SetMeta("input_code", inputCode);
 		btn.SetMeta("input_generation", generation);
-		btn.SetMeta("input_dynamic_map", dynamicMapButton);
 	}
 
 	void OnQuickButtonGuiInput(InputEvent @event, Control btn)
@@ -556,10 +555,8 @@ public partial class QuickButtons : CanvasLayer
 			if (quickInputEnabled)
 			{
 				long generation = 0;
-				bool dynamicMapButton = false;
 				TryGetInt64Meta(activeButton, "input_generation", out generation);
-				TryGetBoolMeta(activeButton, "input_dynamic_map", out dynamicMapButton);
-				EmueraContent.instance?.SubmitQuickButtonInput(inputCode, generation, dynamicMapButton);
+				EmueraContent.instance?.SubmitQuickButtonInput(inputCode, generation);
 			}
 		}
 		else if (dragMoved)

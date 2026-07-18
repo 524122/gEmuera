@@ -59,7 +59,7 @@ namespace MinorShift.Emuera
 		{
 
 			ExeDir = Sys.ExeDir;
-			var detectedProfile = DetectCoreProfile(ExeDir);
+			var detectedProfile = DetectCoreProfile();
 			var boundPlan = CurrentCompatibilityPlan;
 			CoreProfile = boundPlan == null
 				? detectedProfile
@@ -496,23 +496,17 @@ namespace MinorShift.Emuera
 
 		public static uint StartTime { get; private set; }
 
-		private static EmueraCoreProfile DetectCoreProfile(string exeDir)
+		private static EmueraCoreProfile DetectCoreProfile()
 		{
-			if (string.IsNullOrEmpty(exeDir))
-				return EmueraCoreProfile.V24Pure;
-
 			string launcherProfile = global::FirstWindow.SelectedCoreProfileName;
-			if (string.Equals(launcherProfile, global::FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase))
-				return EmueraCoreProfile.Snake;
-			if (string.Equals(launcherProfile, global::FirstWindow.CoreProfileEraFl, StringComparison.OrdinalIgnoreCase))
-				return EmueraCoreProfile.EraFl;
-
-			if (IsModernSnakeCoreRequested(exeDir))
-				return EmueraCoreProfile.SnakeModernMobile;
-			if (IsLegacySnakeCoreRequested(exeDir))
-				return EmueraCoreProfile.Snake;
-
-			return EmueraCoreProfile.V24Pure;
+			return launcherProfile switch
+			{
+				global::FirstWindow.CoreProfileV24Pure => EmueraCoreProfile.V24Pure,
+				global::FirstWindow.CoreProfileSnake => EmueraCoreProfile.Snake,
+				global::FirstWindow.CoreProfileEraFl => EmueraCoreProfile.EraFl,
+				_ => throw new InvalidOperationException(
+					$"Compatibility profile '{launcherProfile}' is not supported by the legacy bridge.")
+			};
 		}
 
 		private static EmueraCoreProfile ResolveCompatibilityProfile(string profileId)
@@ -525,35 +519,6 @@ namespace MinorShift.Emuera
 				_ => throw new InvalidOperationException(
 					$"Compatibility plan profile '{profileId}' is not supported by the legacy bridge.")
 			};
-		}
-
-		private static bool IsLegacySnakeCoreRequested(string exeDir)
-		{
-			try
-			{
-				string normalized = uEmuera.Utils.NormalizePath(exeDir);
-				return uEmuera.Utils.FileExists(Path.Combine(normalized, "snake_core.txt"))
-					|| uEmuera.Utils.FileExists(Path.Combine(normalized, "legacy_snake_core.txt"));
-			}
-			catch
-			{
-			}
-			return false;
-		}
-
-		private static bool IsModernSnakeCoreRequested(string exeDir)
-		{
-			try
-			{
-				string normalized = uEmuera.Utils.NormalizePath(exeDir);
-				if (uEmuera.Utils.FileExists(Path.Combine(normalized, "modern_core.txt"))
-					|| uEmuera.Utils.FileExists(Path.Combine(normalized, "snake_modern_core.txt")))
-					return true;
-			}
-			catch
-			{
-			}
-			return false;
 		}
 
 	}

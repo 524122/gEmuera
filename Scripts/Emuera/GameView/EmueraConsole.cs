@@ -1215,13 +1215,15 @@ namespace MinorShift.Emuera.GameView
 			timer_nextDisplayTime = timer_startTime + 100;
 
 		}
-        public void NeedSetTimer()
+        public bool NeedSetTimer()
         {
             if(need_settimer)
             {
                 need_settimer = false;
                 setTimer();
+                return true;
             }
+            return false;
         }
 
 		//汎用
@@ -2062,17 +2064,12 @@ namespace MinorShift.Emuera.GameView
         }
 
 		public uEmuera.Drawing.Color? TextBackgroundColor { get; set; }
-		internal bool IsDynamicMapOutputScopeActive
-		{
-			get { return emuera?.State?.IsInDynamicMapFunctionScope() == true; }
-		}
 		public bool BitmapCacheEnabledForNextLine
 		{
-			get { return false; }
 			set
 			{
-				// 动态地图缓存先按用户要求禁用：保留 BITMAP_CACHE_ENABLE API 和刷新提示，
-				// 但不再记录输出行缓存状态，避免后续显示层按缓存块处理。
+				// ERB 兼容入口必须保留，否则现有游戏会因未知指令中断。
+				// 这里只把成对的 BITMAP_CACHE_ENABLE 当作整帧重写提示，不保存任何缓存状态。
 				if (value)
 					MarkDisplayRewriteInProgress();
 			}

@@ -51,7 +51,7 @@
 
 `M0-DIA-10` 只新增 `v24pure` 和 `snake` 的 source-only profile→legacy enum→DIA-02 projection 预检，分别固定为 290/358 与 326/360。它能防止 catalog 顺序、请求来源或 requested generation 意外改变语义 hash，也会明确拒绝没有独立投影的 `SnakeModernMobile`。这不是运行时 `CompatibilityPlan`、多会话隔离或多版本解释器发布完成：`currentRuntimeIsolation=Failed`、`parserVmConsumption=NotConsumed`、`compatibilityPlanRuntime=NotImplemented`、`m1Eligibility=Blocked` 仍是阻断条件；必须继续取得 M1 façade/generation/rollback、D2 frozen registry、ownership/alias/replacement 和两侧行为 fixture 证据。
 
-`M0-DIA-11` 进一步固定旧选择路径，但不能降低上述门槛：当前 launcher `snake` 优先于所有 marker，modern marker 才会进入 `SnakeModernMobile`，而 launcher/M0 runner 根本不提供该 profile。marker 文件只是旧代码的本地选择线索，不是游戏身份、内容 hash 或可信 manifest；未来多版本 resolver 必须显式处理伪造、冲突、缺失 capability、陈旧 generation 和回退，不得把 marker 当作自动兼容授权。
+`M0-DIA-11` 记录的是旧 marker 选择路径，不能降低上述门槛，也不再是正常启动器行为：当前启动器仅按 `<root>/<game>`、`snake/<game>`、`compat/<profile>/<game>` 的固定目录路由选择 profile，`Program.DetectCoreProfile` 不再读取 marker 改写该选择。目录不是可信内容 manifest；未来多版本 resolver 仍必须显式处理伪造、冲突、缺失 capability、陈旧 generation 和回退，不能把 marker 或内容探测重新当作自动兼容授权。
 
 `M0-DIA-12` 在此基础上增加了版本化 `CompatibilityPack` 声明契约，但仍只验证离线 catalog：`v24pure` 只能声明内置 `gemuera.v24`，`snake` 只能额外声明 `game.snake`；`legacy.current.*` 只是旧测试投影的 support ID，不能被分发。契约拒绝未知 module、`SnakeModernMobile`、DLL/类型/脚本/路径/URL 等可执行载荷及缺失 capability 字段。当前 capability arrays 必须显式存在但为空，内容绑定=`NotBound`、存档/fixture=`Uncovered`、分发=`Blocked`；它不读取游戏目录或 game manifest，绝不是可信 fingerprint、runtime resolver 或可运行的 `CompatibilityPlan`。
 

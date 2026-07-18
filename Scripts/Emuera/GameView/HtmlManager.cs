@@ -1399,10 +1399,11 @@ namespace MinorShift.Emuera.GameView
 
 				case "shape":
 					{
-						if (wc == null)
-							throw new CodeEE("<" + tag + ">タグに属性が設定されていません");
-						int[] param = null;
-						string type = null;
+					if (wc == null)
+						throw new CodeEE("<" + tag + ">タグに属性が設定されていません");
+					int[] param = null;
+					string logParamText = null;
+					string type = null;
 						int color = -1;
 						int bcolor = -1;
 						while (!wc.EOL)
@@ -1434,10 +1435,11 @@ namespace MinorShift.Emuera.GameView
 									type = attrValue;
 									break;
 								case "param":
-									if (param != null)
-										throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
-									{
-										string[] tokens = attrValue.Split(',');
+							if (param != null)
+								throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
+							{
+								logParamText = attrValue;
+								string[] tokens = attrValue.Split(',');
 										param = new int[tokens.Length];
 										for (int i = 0; i < tokens.Length; i++)
 										{
@@ -1464,7 +1466,7 @@ namespace MinorShift.Emuera.GameView
 						{
 							b = Color.FromRgbInt(bcolor);
 						}
-						return ConsoleShapePart.CreateShape(type, param, c, b, color >= 0);
+						return ConsoleShapePart.CreateShape(type, param, c, b, color >= 0, logParamText);
 					}
 				case "button":
 				case "nonbutton":

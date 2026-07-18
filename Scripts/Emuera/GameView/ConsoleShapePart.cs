@@ -10,7 +10,7 @@ namespace MinorShift.Emuera.GameView
 {
 	abstract class ConsoleShapePart : AConsoleColoredPart
 	{
-		static public ConsoleShapePart CreateShape(string shapeType, int[] param, Color color, Color bcolor, bool colorchanged)
+		static public ConsoleShapePart CreateShape(string shapeType, int[] param, Color color, Color bcolor, bool colorchanged, string logParamText = null)
 		{
 			string type = shapeType.ToLower();
 			colorchanged = colorchanged || color != Config.ForeColor;
@@ -91,6 +91,9 @@ namespace MinorShift.Emuera.GameView
 			}
 			ret.AltText = "";
 #endif
+			// Godot 的非 UNITY 显示路径故意不在屏幕上打印 shape 的替代文本，
+			// 但输出日志需要与原生 Emuera 一样保留原始标签。
+			ret.LogText = BuildLogText(type, param, color, bcolor, colorchanged, logParamText);
             ret.Color = color;
 			ret.ButtonColor = bcolor;
 			ret.colorChanged = colorchanged;
@@ -108,6 +111,49 @@ namespace MinorShift.Emuera.GameView
 				return "";
 			return AltText;
 		}
+
+		public override string ToLogString()
+		{
+			return LogText ?? AltText ?? "";
+		}
+
+		static string BuildLogText(string type, int[] param, Color color, Color bcolor, bool colorchanged, string logParamText)
+		{
+			StringBuilder sb = new StringBuilder();
+			sb.Append("<shape type='");
+			sb.Append(type);
+			sb.Append("' param='");
+			if (!string.IsNullOrEmpty(logParamText))
+			{
+				sb.Append(logParamText);
+			}
+			else
+			{
+				for (int i = 0; i < param.Length; i++)
+				{
+					sb.Append(param[i].ToString());
+					if (i < param.Length - 1)
+						sb.Append(", ");
+				}
+			}
+			sb.Append("'");
+			if (colorchanged)
+			{
+				sb.Append(" color='");
+				sb.Append(HtmlManager.GetColorToString(color));
+				sb.Append("'");
+			}
+			if (bcolor != Config.FocusColor)
+			{
+				sb.Append(" bcolor='");
+				sb.Append(HtmlManager.GetColorToString(bcolor));
+				sb.Append("'");
+			}
+			sb.Append(">");
+			return sb.ToString();
+		}
+
+		public string LogText { get; private set; }
 	}
 	
 	internal sealed class ConsoleRectangleShapePart : ConsoleShapePart

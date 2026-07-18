@@ -14,6 +14,31 @@ namespace uEmuera.Forms
 
     public class Timer : IDisposable
     {
+        /// <summary>
+        /// 返回工作线程下一次检查兼容定时器前最多可等待的毫秒数。
+        /// 没有活动定时器时保留调用方给出的低频等待，避免普通 INPUT 空转；
+        /// 有 TINPUT/动画定时器时则按最近到期时间唤醒，不能被输入轮询周期限制精度。
+        /// </summary>
+        public static int GetNextWaitMilliseconds(int fallbackMilliseconds)
+        {
+            int waitMilliseconds = Math.Max(0, fallbackMilliseconds);
+            uint currTick = WinmmTimer.TickCount;
+            var iter = timers.GetEnumerator();
+            while (iter.MoveNext())
+            {
+                var timer = iter.Current;
+                if (!timer.Enabled)
+                    continue;
+
+                int interval = Math.Max(1, timer.Interval);
+                uint elapsed = currTick - timer.last_tick;
+                if (elapsed >= interval)
+                    return 0;
+                waitMilliseconds = Math.Min(waitMilliseconds, interval - (int)elapsed);
+            }
+            return waitMilliseconds;
+        }
+
         public static void Update()
         {
             var curr_tick = WinmmTimer.TickCount;
@@ -37,12 +62,22 @@ namespace uEmuera.Forms
             timers.Add(this);
         }
 
-        public bool Enabled { get; set; }
+        volatile bool enabled;
+        public bool Enabled
+        {
+            get { return enabled; }
+            set
+            {
+                if (value && !enabled)
+                    last_tick = WinmmTimer.TickCount;
+                enabled = value;
+            }
+        }
         public int Interval { get; set; }
         public object Tag { get; set; }
 
         public event EventHandler Tick;
-        public uint last_tick = 0;
+        public volatile uint last_tick = 0;
 
         public void Start()
         {}

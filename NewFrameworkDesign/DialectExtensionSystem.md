@@ -43,7 +43,7 @@ Emuera 生态并不是一个只需跟随单一上游版本的封闭解释器生�
 | 术语 | 含义 | 示例 |
 | --- | --- | --- |
 | `DialectModule` | 编译期受信任、贡献解释器语义的模块 | `emuera.upstream.1808`、`gemuera.v24`、`game.snake` |
-| `CompatibilityPack` | 游戏包或应用数据库提供的有界声明数据，不含可执行代码 | 选择模块、要求 capability、设置允许的 typed policy |
+| `CompatibilityPack` | 早期静态契约/实验数据，不含可执行代码；不作为当前正常启动器的 profile 来源 | 迁移证据与离线组合验证 |
 | `DialectPlan` | 候选加载期间解析并冻结的解释器注册表和行为策略 | 指令表、函数表、变量 schema、错误策略 |
 | `CompatibilityPlan` | `DialectPlan` 加存档 profile、资源策略和脚本可观察 runtime capability 的会话计划 | Snake + float codec + SQL capability |
 | `RuntimeCapability` | 平台或 Bridge 可提供的受控能力 | SQLite、文件枚举、Android 虚拟光标 |
@@ -248,9 +248,9 @@ Parser、VM、SaveService 等只接收自己需要的窄视图，例如 `IInstru
 方言选择发生在候选 `GameSession` 构造中，绝不写进全局 `Program.CoreProfile`：
 
 ```text
-bounded content scan
- → calculate content identity/fingerprints
- → collect user pin + product rules + package manifest + probes
+fixed-depth launcher directory scan
+ → create LauncherGameEntry(path, profileId, source)
+ → validate profileId against the frozen profile catalog
  → resolve module DAG and versions
  → bind platform/runtime capabilities
  → build registries and typed policies
@@ -260,52 +260,25 @@ bounded content scan
  → short atomic session commit
 ```
 
-证据优先级：
+正常启动的 profile 来源只有显式目录路由：
 
-1. 用户在应用侧按内容 hash 固定的 profile；用户可查看并撤销。
-2. 产品内置、带来源与测试报告的精确游戏 fingerprint 规则。
-3. 游戏包内的声明 manifest；它是不可信请求，只能选择 allowlist 中的模块/值。
-4. 有界 feature probe；只报告观察到的语法/资源/存档特征。
-5. 保守基线；没有证据时不自动启用宽松规则。
+1. `emuera/<game>` 选择 `v24pure`。
+2. `emuera/snake/<game>` 选择 `snake`。
+3. `emuera/compat/<profile-id>/<game>` 选择经过 allowlist 校验的 `<profile-id>`。
+4. 用户显式开启的高级覆盖只作用于当前游戏或当前会话，不得成为所有游戏共享的全局 profile。
 
-`snake_core.txt` 之类 marker 只能作为低置信 hint，不足以单独覆盖用户选择或精确 fingerprint。检测结果冲突/置信度不足时，候选停在 `NeedsCompatibilityChoice`：UI 展示差异，当前已运行会话保持不变。选择另一 profile 等同于重新构建新候选，禁止在运行中热换注册表。
+正常启动不读取 GAMEBASE、标题、ERB/ERH 锚点、marker 或 capability 特征来猜测 profile。未知目录 profile 直接停止候选并显示错误，不能静默回退 v24。选择另一 profile 仍等同于重新构建新候选，禁止在运行中热换注册表。
 
-## CompatibilityPack schema
+完整目录契约、UI 合并规则、固定扫描深度、错误策略与 Android 路径见 [DirectoryCompatibilityRouting](DirectoryCompatibilityRouting.md)。
 
-游戏包可包含数据型 manifest；应用也维护按内容 hash 绑定的兼容数据库。示例：
+## 目录路由安全边界
 
-```json
-{
-  "schema": "emuera.compat/v1",
-  "gameId": "snake.example",
-  "contentFingerprint": "sha256:...",
-  "modules": [
-    { "id": "gemuera.v24", "version": "[1.2,2.0)" },
-    { "id": "game.snake", "version": "2.1.0" }
-  ],
-  "requiredCapabilities": [
-    "value.float.v1",
-    "input.nofocus.v1",
-    "data.sqlite.v1"
-  ],
-  "optionalCapabilities": ["input.hotkey-state.v1"],
-  "saveProfile": "gemuera.snake.float-v1",
-  "policies": {
-    "call.extra-arguments.v1": "<fixture-validated decision>",
-    "parser.startup-fault.v1": "<fixture-validated decision>"
-  },
-  "fixtureProfile": "SN-v24-2026-01"
-}
-```
-
-安全要求：
-
-- schema、文件、字段、字符串、模块数和依赖深度有硬上限并计入 MemoryBudget。
-- manifest 不接受程序集路径、类型名、脚本表达式、任意正则、任意文件路径或网络 URL。
-- module id、BehaviorKey 和 policy value 必须来自当前构建的 allowlist/schema。
-- 包内 fingerprint 只能作为自述，resolver 必须自己计算内容身份。
-- 用户 override 保存在应用数据目录并以真实 content hash 为键，不回写游戏目录。
-- manifest 请求不可用/禁用 capability 时报告 `MissingCapability`，不能静默换成近似语义。
+- `compat` 下第一层只解释为 profile id，不解释为 module、程序集、类型、URL 或任意路径。
+- profile id 必须符合稳定标识符语法，并存在于首个会话前冻结的 catalog。
+- 游戏目录不能声明 module 数组、capability、typed policy、save profile 或版本范围。
+- profile 目录数量、每个 profile 的游戏数量、总条目和扫描深度都有硬上限。
+- `v24pure` 与 `snake` 是 launcher lane 保留 profile，不通过 `compat` 重复暴露。
+- 目录路由只选择预编译的受信任 profile；移动端不加载外部程序集。
 
 ## 版本与可重现性
 
@@ -323,24 +296,25 @@ bounded content scan
 
 ## GameSession 所有权与 Godot 组合
 
-`GameSession` 唯一拥有冻结的 `CompatibilityPlan`。候选 builder 是唯一修改者；提交后 Parser/VM/Save/Resource 只能读取。View 只得到脱敏摘要：模块、版本、来源、置信度、缺失 capability、plan hash 和警告，不直接修改策略。
+`GameSession` 唯一拥有冻结的 `CompatibilityPlan`。候选 builder 是唯一修改者；提交后 Parser/VM/Save/Resource 只能读取。View 只得到脱敏摘要：模块、版本、目录路由来源、缺失 capability、plan hash 和警告，不直接修改策略。
 
 Godot 层遵循“调用向下、信号向上”：
 
-- `CompatibilityPanel` 发出用户选择 intent。
+- `FirstWindow` 根据固定目录路由产生携带 path/profile 的游戏条目。
+- `CompatibilityPanel` 只在高级模式下发出当前游戏/会话覆盖 intent。
 - `MainOrchestrator` 调用 `SessionCoordinator.SwitchGameAsync(selection, override)`。
-- Resolver/Core 返回 typed `ResolutionReport`，不发 Godot signal。
+- Core 验证显式 profile 并返回 typed plan/build result，不发 Godot signal。
 - `SessionCoordinator` 只有在完整候选通过后提交。
 - UI 不通过 Autoload 改全局 profile；切换选择总是新 generation。
 
-兼容 UI 至少显示：检测到的模块及来源、置信度、缺失/冲突 capability、存档 profile、是否存在安全降级、plan hash。高级覆盖要提供“恢复自动检测”和“按当前游戏 hash 固定”选项，不能用一个含糊的“Snake mode”复选框隐藏全部语义。
+兼容 UI 在高级模式下至少显示：目录来源、显式 profile、最终模块、缺失/冲突 capability、存档 profile 和 plan hash。正常界面只保留 `v24` / `snake` lane，不为 eraFL 或未来 profile 增加顶层按钮，也不提供“恢复自动检测”入口。
 
 ## 与外部插件的安全隔离
 
 | 机制 | 是否执行第三方代码 | 平台 | 默认 | 用途 |
 | --- | --- | --- | --- | --- |
 | 内置 DialectModule | 否；代码随应用编译并评审 | 全平台/AOT | allowlist | 解释器语义 |
-| CompatibilityPack | 否；受 schema 限制的数据 | 全平台 | 可读取、严格验证 | 选择/配置内置模块 |
+| CompatibilityPack | 否；受 schema 限制的数据 | 全平台 | 正常启动不读取 | 迁移证据与离线组合实验 |
 | RuntimeCapability binding | 否；应用内置 port | 按平台 | capability allowlist | SQL、文件、输入等 |
 | ExternalPlugin DLL | 是，完整进程权限 | 仅桌面候选 | 禁用 | 无法声明化的受信任扩展 |
 
@@ -357,7 +331,7 @@ Godot 层遵循“调用向下、信号向上”：
 | D2 冻结注册表 | 把现有标准/v24/Snake 注册函数改为候选构建贡献；先保持旧 handler | v24-only 表不含 Snake-only key；注册快照差分 | 旧静态字典 |
 | D3 typed policies | 逐个替换 CALL 参数、解析错误、私有参数、资源和刷新分支 | 每替换一个运行 v24+Snake 两侧 fixture | adapter 继续提供旧布尔值 |
 | D4 去全局化 | Parser/VM/Resource/View 不再读取 `Program.CoreProfile` | Roslyn/文本架构守卫为零；多会话测试 | D1 adapter |
-| D5 Resolver/UI | 加 fingerprint、manifest、用户 pin、冲突报告 | 模糊/伪造/缺能力/切换竞态测试 | 手动选择旧 profile |
+| D5 Directory Route/UI | 加固定深度 `compat/<profile>/<game>` 路由、条目 profile 元数据和错误报告 | v24/snake/compat、未知 profile、路径层级、切换竞态测试 | 关闭 compat 扫描，只保留旧 lane |
 | D6 新魔改模板 | 发布模块模板、contract kit 和审核清单 | 至少一个非 Snake 示例证明组合能力 | 仅内置现有模块 |
 
 D0–D2 关闭前冻结“稳定类型与接口”章节为设计草案：除 `LegacySessionFacade` 所需的只读 plan snapshot、registry snapshot 和测试 DTO 外，不得批量实现 catalog/resolver/policy manager。D0 的库存与归属证据先证明真正需要哪些 BehaviorKey，并把上游同名、当前模块候选和未决项分开；D2 的未选择模块不变性先证明拆分降低了复杂度。任何新接口必须能指出唯一 owner、唯一可观察差异和至少一个两侧 fixture，否则留在文档而不进入代码。
@@ -376,12 +350,12 @@ D0 的“30 个命中行/10 个文件”只是当前静态起点，还要审计�
 6. 每个新增指令/函数覆盖 parse、execute、返回、错误、等待/完成模式和边界参数。
 7. 每个 typed policy 覆盖基线值、扩展值和未声明值拒绝。
 8. dependency missing/version mismatch/cycle、duplicate、illegal replacement、capability conflict 均稳定失败。
-9. resolver 覆盖用户 pin、fingerprint、伪造 manifest、弱 marker、模糊检测和 stale generation。
+9. 目录路由覆盖普通根、snake、compat、未知 profile、非法层级、大小写差异、路径去重和 stale generation。
 10. SaveProfile/plan 变化覆盖备份、拒绝、sidecar 丢失和错误 codec 不污染当前会话。
 11. Android AOT/export 验证 built-in catalog 完整，无运行时 assembly/type 扫描。
 12. lookup/plan build benchmark 不超过批准阈值；执行 hot path 无逐模块扫描。
 
-组合测试只覆盖产品声明支持的组合、依赖边和高风险 pairwise，不承诺穷举所有理论排列。任何 manifest 中出现的正式组合必须有固定 fixture profile。最重要的元属性是：**向构建中加入一个模块，不得改变未选择该模块的会话**。
+组合测试只覆盖产品声明支持的组合、依赖边和高风险 pairwise，不承诺穷举所有理论排列。任何允许通过 `compat/<profile>` 选择的正式组合必须有固定 fixture profile。最重要的元属性是：**向构建中加入一个模块，不得改变未选择该模块的会话**。
 
 ## 架构守卫
 
@@ -395,7 +369,7 @@ D0 的“30 个命中行/10 个文件”只是当前静态起点，还要审计�
 - `GameSession.Compatibility` 深不可变，运行期无 setter/reload。
 - 模块程序集不得引用 GodotSharp；平台 binding 不能向 Core 暴露 Node/Variant。
 - 移动构建的 module catalog 由显式代码/源生成器产生，不使用反射枚举。
-- compatibility manifest parser 只能绑定 allowlisted schema，不接受任意类型或回调。
+- compatibility 目录解析器只能产生 allowlisted profile id，不接受 module 列表、任意类型、回调或路径。
 - 任何新增模块 PR 必须提供 base-profile invariance report、模块 registry diff 和 fixture report。
 
 ## 验收状态
@@ -428,7 +402,7 @@ M0-DIA-17 [行为 fixture 契约](generated/dialect-behavior-fixture-contracts.j
 
 DIA-17 严格拒绝 fixture/source hash 漂移、未知/重复 BehaviorKey、提前声明 Captured，以及 policy value、method signature、DTO、assembly/type/path/script/URL 等运行时载荷。其 10 项均为 `Planned`/`Uncovered`/`NotImplemented`/`BlockedByFixture`，report set hash 为 `6f32a360...73eb1`。因此它既不是 C# interface、policy manager、resolver 或 `CompatibilityPlan`，也不提供 Parser/VM 输入、运行时 capability 或多版本分发资格；只让后续 D3 API review 无法绕过两侧行为证据。
 
-进入解释器替换前至少需要：D0 完整库存、D1 会话计划外壳、D2 v24/Snake 冻结注册快照、v24 基线不变性测试，以及一个由 manifest 选择但不执行第三方代码的端到端候选加载报告。
+进入解释器替换前至少需要：D0 完整库存、D1 会话计划外壳、D2 v24/Snake 冻结注册快照、v24 基线不变性测试，以及一个由显式 `compat/<profile>` 目录路由选择内建 profile 的端到端候选加载报告。
 The plan-identity bridge, descriptor-consumption boundary and StackList canary reset added on 2026-07-15 change only the static evidence identities. DIA-01 still records 97 branch hits (parser-boundary references remain classified provenance); the session inventory now has 14 observed central reset sites with inventory hash `a7451ff2...6572b`. DIA-03 through DIA-17 were regenerated in dependency order. Current hashes are pinned in `EvidenceIndex.md` (`DIA-01=a30d210f...ccdc2`, `DIA-03=d347bdd7...2fa9`, `DIA-04=2f9995f8...80e2`, `DIA-05=18f2e9f4...223e`, `DIA-06=16f8ecab...2717`, `DIA-07=a665945d...e749`, `DIA-08=169ca816...f65c`, `DIA-09=bc2b5470...bfdf`, `DIA-10=d5cc089f...256b`, `DIA-11=0960994b...bd71d`, `DIA-12=e9ffd094...8c46`, `DIA-13=766c3f84...98c4`, `DIA-14=beedf972...c6b`, `DIA-15=2213bf38...e012`, `DIA-16=2b7361ad...ea75`, `DIA-17=1fed13e5...73c4`); earlier numeric/hash prose is historical and does not override the generated reports. The current IdentifierDictionary route projection narrows lookup to selected descriptors when a non-empty plan is supplied, while legacy handlers remain the behavior owner.
 
 The subsequent `IdentifierDictionary` route adapter regenerated DIA-08 and DIA-09 once more: current generated hashes are DIA-08 contract `e1f84151...98056` and DIA-09 visibility `755289bb...40ba29`. Earlier `169ca...`/`bc2b...` shorthand remains historical provenance only.
