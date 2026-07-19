@@ -506,6 +506,14 @@ namespace MinorShift.Emuera.GameProc
 				ReturnF(null);
 				return;
 			}
+			TryFinalizeEraFlGMapLoad(called);
+			if (TryRecoverEraFlQuestStartRoom(called, ret, out long recoveredRoomIndex))
+			{
+				ret = recoveredRoomIndex;
+				// RETURN 指令在进入 ProcessState 前已经写入 RESULT；同步回写，确保调用方读到恢复后的下标。
+				if (GlobalStatic.VEvaluator != null)
+					GlobalStatic.VEvaluator.RESULT = recoveredRoomIndex;
+			}
 			//sequential = false;//いずれにしろ順列ではない。
 			//呼び出し元は全部スクリプト処理
 			//if (functionList.Count == 0)
@@ -608,7 +616,469 @@ namespace MinorShift.Emuera.GameProc
 			}
             lineCount++;
             //ShfitNextLine();
-            return;
+			return;
+		}
+
+		/// <summary>
+		/// eraFL 的任务脚本会先以标签查找起点，再把返回的房间下标交给地图读写函数。
+		/// 当标签查询异常返回 -1、但当前任务地图仍有唯一 [ROOM_ID:200] 起点时，在
+		/// 这里恢复正确下标，避免把 -1 推入后续二维数组访问。只接受默认查找模式，
+		/// 不影响显式随机、存档数据查找或其它 profile 的普通“找不到标签”语义。
+		/// </summary>
+		private bool TryRecoverEraFlQuestStartRoom(
+			CalledFunction called,
+			Int64 returnedRoomIndex,
+			out Int64 recoveredRoomIndex)
+		{
+			recoveredRoomIndex = returnedRoomIndex;
+			if (!Program.IsEraFlProfile || called == null || called.IsEvent || called.IsJump
+				|| returnedRoomIndex != -1 || called.TopLabel == null
+				|| !IsEraFlFunction(
+					called,
+					global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TaskStartRoomLookupFunction))
+			{
+				return false;
+			}
+
+			// RETURN 仍位于当前函数的私有参数出栈之前，直接读取活动调用帧最可靠。
+			// 进入函数时保存的快照只作为异常路径后备，避免预解析模板、嵌套调用或
+			// 旧调用入口没有完成捕获时，让精确的 eraFL 起点恢复静默失效。
+			EraFlQuestStartLookupContext lookup;
+			if (!TryReadEraFlQuestStartLookupFromActiveFrame(called, out lookup))
+				lookup = called.EraFlQuestStartLookup;
+			if (!lookup.IsCaptured || lookup.Random != 0 || lookup.FromSavedata != 0)
+			{
+				return false;
+			}
+
+			// GMAP 必须先从已导入 DT 补完 node 数据；普通 MAP 则直接在运行时
+			// 二维数组中确认唯一的 ROOM_ID:200。
+			string[,] mapData = TryGetEraFlMapDataArray();
+
+			if (string.Equals(
+				lookup.QuestType,
+				global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapQuestType,
+				StringComparison.Ordinal))
+			{
+				Int64 mapCount = 1;
+				if (!TryReadGlobalInteger("QST_MAPNUM", out mapCount) || mapCount <= 0)
+					mapCount = 1;
+				if (!TryPopulateEraFlGMapRoomData(lookup.MapId, mapCount, mapData))
+					TryPopulateEraFlGMapRoomDataFromFiles(lookup.MapId, mapData);
+			}
+
+			return global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+				called.FunctionName,
+				returnedRoomIndex,
+				lookup.RequestedRoomTag,
+				lookup.MapId,
+				lookup.QuestType,
+				mapData,
+				out recoveredRoomIndex);
+		}
+
+		/// <summary>
+		/// eraFL 的 QST_LOAD_MAPDATA 返回后，游戏马上按标签查找任务起点。
+		/// 在这个明确边界完成 GMAP 实体化，使正常 ERB 查询自行成功；RETURN 处的
+		/// -1 恢复只保留为最后防线。DT 桥为空时才读取同一份 schema/XML 文件回退。
+		/// </summary>
+		private void TryFinalizeEraFlGMapLoad(CalledFunction called)
+		{
+			if (!Program.IsEraFlProfile || called == null || called.IsEvent || called.IsJump
+				|| !IsEraFlFunction(called, "QST_LOAD_MAPDATA"))
+			{
+				return;
+			}
+
+			string questType;
+			if (!TryReadEraFlQuestTypeFromCaller(out questType))
+				TryReadGlobalString("QST_QUEST_TYPE", out questType);
+			if (!string.Equals(
+				questType,
+				global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapQuestType,
+				StringComparison.Ordinal))
+			{
+				return;
+			}
+
+			string[,] mapData = TryGetEraFlMapDataArray();
+			if (mapData == null)
+			{
+				console.PrintError("[ERAFL_COMPAT] GMAP实体化失败: _DIC_HO_MAPDATA不可用");
+				return;
+			}
+
+			Int64 mapCount = 1;
+			if (!TryReadGlobalInteger("QST_MAPNUM", out mapCount) || mapCount <= 0)
+				mapCount = 1;
+			mapCount = Math.Min(mapCount, mapData.GetLength(0));
+			for (Int64 mapId = 0; mapId < mapCount; mapId++)
+			{
+				if (TryPopulateEraFlGMapRoomData(mapId, mapCount, mapData)
+					|| TryPopulateEraFlGMapRoomDataFromFiles(mapId, mapData))
+				{
+					continue;
+				}
+				console.PrintError("[ERAFL_COMPAT] GMAP实体化失败: map=" + mapId.ToString()
+					+ "，DT与schema/XML均未提供完整节点");
+			}
+		}
+
+		private static bool IsEraFlFunction(CalledFunction called, string functionName)
+		{
+			return called != null && (string.Equals(called.FunctionName, functionName, StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(called.TopLabel?.LabelName, functionName, StringComparison.OrdinalIgnoreCase));
+		}
+
+		private static string[,] TryGetEraFlMapDataArray()
+		{
+			VariableToken token = GlobalStatic.IdentifierDictionary?
+				.GetVariableToken("_DIC_HO_MAPDATA", null, false);
+			if (token == null || !token.IsString || !token.IsArray2D
+				|| token.IsReference || token.IsCharacterData)
+			{
+				return null;
+			}
+			return token.GetArray() as string[,];
+		}
+
+		/// <summary>
+		/// 从仍处于活动状态的 HO_FIND_ROOM_BY_TAG 调用帧读取实际参数。
+		/// MAP_ID 在函数体内已把默认 -1 解析为当前地图；任务类型优先取外层
+		/// QST_INIT_QUEST_DATA 的实参，避免同名全局变量被清理或覆盖后误判为普通 MAP。
+		/// </summary>
+		private bool TryReadEraFlQuestStartLookupFromActiveFrame(
+			CalledFunction called,
+			out EraFlQuestStartLookupContext lookup)
+		{
+			lookup = default;
+			VariableTerm[] arguments = called?.TopLabel?.Arg;
+			if (arguments == null || arguments.Length < 4
+				|| arguments[0] == null || !arguments[0].IsString
+				|| arguments[1] == null || !arguments[1].IsInteger
+				|| arguments[2] == null || !arguments[2].IsInteger
+				|| arguments[3] == null || !arguments[3].IsInteger)
+			{
+				return false;
+			}
+
+			try
+			{
+				string requestedRoomTag = arguments[0].GetStrValue(GlobalStatic.EMediator);
+				Int64 random = arguments[1].GetIntValue(GlobalStatic.EMediator);
+				Int64 mapId = arguments[2].GetIntValue(GlobalStatic.EMediator);
+				Int64 fromSavedata = arguments[3].GetIntValue(GlobalStatic.EMediator);
+				if (mapId == -1 && !TryReadGlobalInteger("HO_有効マップID", out mapId))
+					return false;
+
+				string questType;
+				if (!TryReadEraFlQuestTypeFromCaller(out questType))
+					TryReadGlobalString("QST_QUEST_TYPE", out questType);
+
+				lookup = new EraFlQuestStartLookupContext(
+					requestedRoomTag,
+					random,
+					mapId,
+					fromSavedata,
+					questType);
+				return true;
+			}
+			catch (Exception)
+			{
+				return false;
+			}
+		}
+
+		private bool TryReadEraFlQuestTypeFromCaller(out string questType)
+		{
+			questType = null;
+			for (int i = functionList.Count - 2; i >= 0; i--)
+			{
+				CalledFunction caller = functionList[i];
+				if (caller == null || caller.TopLabel == null
+					|| !string.Equals(caller.FunctionName, "QST_INIT_QUEST_DATA", StringComparison.Ordinal)
+					|| caller.TopLabel.Arg == null || caller.TopLabel.Arg.Length < 2
+					|| caller.TopLabel.Arg[1] == null || !caller.TopLabel.Arg[1].IsString)
+				{
+					continue;
+				}
+
+				try
+				{
+					questType = caller.TopLabel.Arg[1].GetStrValue(GlobalStatic.EMediator);
+					return !string.IsNullOrEmpty(questType);
+				}
+				catch (Exception)
+				{
+					return false;
+				}
+			}
+			return false;
+		}
+
+		/// <summary>
+		/// eraFL 的 GMAP 脚本先把 XML 导入 DataTable，再通过 ERB 循环回填房间字典。
+		/// 单地图绘制固定读取 GMAPDATA，多地图绘制读取 GMAPDATA_&lt;mapId&gt;；因此不能
+		/// 只补房间字典。这里会从当前可信表复制并注册两个名字，文件读取仍由回退处理。
+		/// </summary>
+		private static bool TryPopulateEraFlGMapRoomData(Int64 mapId, Int64 mapCount, string[,] mapData)
+		{
+			if (mapData == null || mapId < 0 || mapId >= mapData.GetLength(0))
+				return false;
+
+			System.Data.DataTable table = null;
+			string perMapTableName = "GMAPDATA_" + mapId.ToString();
+			// 多地图加载完成后，GMAPDATA 只保留最后一次导入内容，不能拿它补其它 mapId。
+			// 单地图则优先信绘图函数实际读取的全局表，不完整时才使用分表恢复。
+			if (mapCount <= 1)
+			{
+				RuntimeDataStore.DataTables.TryGetValue("GMAPDATA", out table);
+				if (!TryReadEraFlGMapNodes(table, out _))
+					RuntimeDataStore.DataTables.TryGetValue(perMapTableName, out table);
+			}
+			else
+			{
+				RuntimeDataStore.DataTables.TryGetValue(perMapTableName, out table);
+			}
+
+			if (!TryReadEraFlGMapNodes(table,
+				out IReadOnlyList<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData> nodes))
+			{
+				return false;
+			}
+			return TryMaterializeEraFlGMapRuntimeData(mapId, mapData, table, nodes);
+		}
+
+		/// <summary>
+		/// 校验地图绘制和房间实体化共同需要的列，并读取 Core 兼容模块消费的精简节点。
+		/// id/POS_X/POS_Y 虽不写入房间字典，却是 DT_SELECT 与节点按钮定位的硬依赖。
+		/// </summary>
+		private static bool TryReadEraFlGMapNodes(
+			System.Data.DataTable table,
+			out IReadOnlyList<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData> nodes)
+		{
+			nodes = Array.Empty<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData>();
+			if (table == null || table.Rows.Count == 0
+				|| !table.Columns.Contains("id")
+				|| !table.Columns.Contains("NODE_ID")
+				|| !table.Columns.Contains("NODE_NAME")
+				|| !table.Columns.Contains("POS_X")
+				|| !table.Columns.Contains("POS_Y")
+				|| !table.Columns.Contains("PATH_LIST"))
+			{
+				return false;
+			}
+
+			var parsed = new List<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData>(table.Rows.Count);
+			try
+			{
+				foreach (System.Data.DataRow row in table.Rows)
+				{
+					if (row == null || row["id"] == DBNull.Value || row["NODE_ID"] == DBNull.Value
+						|| row["POS_X"] == DBNull.Value || row["POS_Y"] == DBNull.Value)
+					{
+						return false;
+					}
+					_ = Convert.ToInt64(row["id"]);
+					_ = Convert.ToInt64(row["POS_X"]);
+					_ = Convert.ToInt64(row["POS_Y"]);
+					parsed.Add(new global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData(
+						Convert.ToInt64(row["NODE_ID"]),
+						row["NODE_NAME"] == DBNull.Value ? "" : Convert.ToString(row["NODE_NAME"]),
+						row["PATH_LIST"] == DBNull.Value ? "" : Convert.ToString(row["PATH_LIST"])));
+				}
+			}
+			catch (Exception)
+			{
+				return false;
+			}
+
+			nodes = parsed.AsReadOnly();
+			return true;
+		}
+
+		/// <summary>
+		/// 先准备完整的独立表副本，再原子补房间字典并发布两个 DT 名称。
+		/// 两个名称不能共享同一实例，否则后续 DT_CLEAR 全局临时表会同时清空分表。
+		/// </summary>
+		private static bool TryMaterializeEraFlGMapRuntimeData(
+			Int64 mapId,
+			string[,] mapData,
+			System.Data.DataTable sourceTable,
+			IReadOnlyList<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData> nodes)
+		{
+			System.Data.DataTable globalTable = null;
+			System.Data.DataTable perMapTable = null;
+			try
+			{
+				globalTable = sourceTable.Copy();
+				globalTable.TableName = "GMAPDATA";
+				RuntimeDataStore.NormalizeDataTable(globalTable);
+				perMapTable = sourceTable.Copy();
+				perMapTable.TableName = "GMAPDATA_" + mapId.ToString();
+				RuntimeDataStore.NormalizeDataTable(perMapTable);
+			}
+			catch (Exception)
+			{
+				globalTable?.Dispose();
+				perMapTable?.Dispose();
+				return false;
+			}
+
+			if (!global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TryPopulateGMapRoomData(
+				mapId,
+				mapData,
+				nodes))
+			{
+				globalTable.Dispose();
+				perMapTable.Dispose();
+				return false;
+			}
+
+			RuntimeDataStore.DataTables["GMAPDATA"] = globalTable;
+			RuntimeDataStore.DataTables[perMapTable.TableName] = perMapTable;
+			return true;
+		}
+
+		/// <summary>
+		/// 仅在游戏自己的 DT 桥没有留下可用节点时回退。路径取自 eraFL 已设置的
+		/// QST_GMAPDATA_PATH/FILENAME，解析规则仍由 game.erafl Core 模块负责。
+		/// </summary>
+		private static bool TryPopulateEraFlGMapRoomDataFromFiles(Int64 mapId, string[,] mapData)
+		{
+			if (mapData == null || mapId < 0 || mapId >= mapData.GetLength(0)
+				|| !TryReadGlobalString("QST_GMAPDATA_PATH", 0, out string relativeDirectory)
+				|| string.IsNullOrWhiteSpace(relativeDirectory)
+				|| !TryReadGlobalString("QST_GMAPDATA_FILENAME", mapId, out string fileName))
+			{
+				return false;
+			}
+			if (string.IsNullOrWhiteSpace(fileName)
+				&& !TryReadGlobalString("QST_GMAPDATA_FILENAME", 0, out fileName))
+			{
+				return false;
+			}
+
+			string xmlName = fileName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+				? fileName
+				: fileName + ".xml";
+			if (!TryResolveEraFlGameFile(System.IO.Path.Combine(relativeDirectory, xmlName), out string dataPath)
+				|| !TryResolveEraFlGameFile(System.IO.Path.Combine("XML", "mapdata_schema.xml"), out string schemaPath))
+			{
+				return false;
+			}
+
+			try
+			{
+				string schemaXml = System.IO.File.ReadAllText(schemaPath, System.Text.Encoding.UTF8);
+				string dataXml = System.IO.File.ReadAllText(dataPath, System.Text.Encoding.UTF8);
+				if (!global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TryParseGMapDataTableFromXml(
+					schemaXml,
+					dataXml,
+					out System.Data.DataTable table,
+					out IReadOnlyList<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData> nodes))
+				{
+					return false;
+				}
+				try
+				{
+					return TryMaterializeEraFlGMapRuntimeData(mapId, mapData, table, nodes);
+				}
+				finally
+				{
+					table.Dispose();
+				}
+			}
+			catch (Exception)
+			{
+				return false;
+			}
+		}
+
+		private static bool TryResolveEraFlGameFile(string relativePath, out string fullPath)
+		{
+			fullPath = null;
+			if (string.IsNullOrWhiteSpace(relativePath) || string.IsNullOrWhiteSpace(Program.ExeDir))
+				return false;
+			try
+			{
+				string baseDirectory = System.IO.Path.GetFullPath(Program.ExeDir);
+				if (!baseDirectory.EndsWith(System.IO.Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+					baseDirectory += System.IO.Path.DirectorySeparatorChar;
+				string candidate = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDirectory, relativePath));
+				if (!candidate.StartsWith(baseDirectory, StringComparison.OrdinalIgnoreCase)
+					|| !System.IO.File.Exists(candidate))
+				{
+					return false;
+				}
+				fullPath = candidate;
+				return true;
+			}
+			catch (Exception)
+			{
+				return false;
+			}
+		}
+
+		private static void CaptureEraFlQuestStartLookup(
+			CalledFunction call,
+			UserDefinedFunctionArgument srcArgs)
+		{
+			if (!Program.IsEraFlProfile || call == null || srcArgs == null || call.IsEvent || call.IsJump
+				|| !string.Equals(
+					call.FunctionName,
+					global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TaskStartRoomLookupFunction,
+					StringComparison.Ordinal)
+				|| srcArgs.Arguments.Length < 4)
+			{
+				return;
+			}
+
+			Int64 mapId = srcArgs.TransporterInt[2];
+			if (mapId == -1 && !TryReadGlobalInteger("HO_有効マップID", out mapId))
+				return;
+			TryReadGlobalString("QST_QUEST_TYPE", out string questType);
+
+			call.EraFlQuestStartLookup = new EraFlQuestStartLookupContext(
+				srcArgs.TransporterStr[0],
+				srcArgs.TransporterInt[1],
+				mapId,
+				srcArgs.TransporterInt[3],
+				questType);
+		}
+
+		private static bool TryReadGlobalInteger(string variableName, out Int64 value)
+		{
+			value = 0;
+			VariableToken token = GlobalStatic.IdentifierDictionary?
+				.GetVariableToken(variableName, null, false);
+			if (token == null || !token.IsInteger || !token.IsArray1D
+				|| token.IsReference || token.IsCharacterData)
+			{
+				return false;
+			}
+			value = token.GetIntValue(GlobalStatic.EMediator, new Int64[] { 0 });
+			return true;
+		}
+
+		private static bool TryReadGlobalString(string variableName, out string value)
+		{
+			return TryReadGlobalString(variableName, 0, out value);
+		}
+
+		private static bool TryReadGlobalString(string variableName, Int64 index, out string value)
+		{
+			value = null;
+			VariableToken token = GlobalStatic.IdentifierDictionary?
+				.GetVariableToken(variableName, null, false);
+			if (token == null || !token.IsString || !token.IsArray1D
+				|| token.IsReference || token.IsCharacterData
+				|| index < 0 || index >= token.GetLength())
+			{
+				return false;
+			}
+			value = token.GetStrValue(GlobalStatic.EMediator, new Int64[] { index });
+			return true;
 		}
 
 		public void IntoFunction(CalledFunction call, UserDefinedFunctionArgument srcArgs, ExpressionMediator exm)
@@ -638,6 +1108,7 @@ namespace MinorShift.Emuera.GameProc
             {
                 //引数の値を確定させる
                 srcArgs.SetTransporter(exm);
+				CaptureEraFlQuestStartLookup(call, srcArgs);
             }
 			ExecutionContext context = new ExecutionContext(call.TopLabel, CurrentContext);
 			PushContext(context);

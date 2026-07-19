@@ -918,8 +918,8 @@ namespace gEmuera.Diagnostics
                 1, 5000, 1,
                 () => config.AndroidStorageMaxPathRecords,
                 value => config.AndroidStorageMaxPathRecords = value);
-            AddCheck("[debug.performance_sampling] enabled", "性能采样",
-                "按固定间隔记录 FPS、帧时间、队列和 ring buffer 摘要。默认关闭。",
+            AddCheck("[logging] performance", "性能采样",
+                "按固定间隔记录 PERF.SAMPLE，并记录 Canvas 绘制和命中表重建的独立 CPU 回调采样。默认关闭。",
                 () => config.PerformanceSamplingEnabled,
                 value => config.PerformanceSamplingEnabled = value);
             AddInt("[debug.performance_sampling] sample_interval_ms", "采样间隔 ms",

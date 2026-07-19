@@ -52,6 +52,8 @@ public partial class EmueraImage : Control
 		get => _sourceTexture;
 		set
 		{
+			if (_sourceTexture == value)
+				return;
 			_sourceTexture = value;
 			QueueRedraw();
 		}
@@ -64,6 +66,8 @@ public partial class EmueraImage : Control
 		get => _sourceRegion;
 		set
 		{
+			if (_sourceRegion == value)
+				return;
 			_sourceRegion = value;
 			QueueRedraw();
 		}
@@ -74,6 +78,8 @@ public partial class EmueraImage : Control
 		get => _drawOffset;
 		set
 		{
+			if (_drawOffset == value)
+				return;
 			_drawOffset = value;
 			QueueRedraw();
 		}
@@ -84,6 +90,8 @@ public partial class EmueraImage : Control
 		get => _drawSize;
 		set
 		{
+			if (_drawSize == value)
+				return;
 			_drawSize = value;
 			QueueRedraw();
 		}
@@ -94,6 +102,8 @@ public partial class EmueraImage : Control
 		get => _flipX;
 		set
 		{
+			if (_flipX == value)
+				return;
 			_flipX = value;
 			QueueRedraw();
 		}
@@ -104,6 +114,8 @@ public partial class EmueraImage : Control
 		get => _flipY;
 		set
 		{
+			if (_flipY == value)
+				return;
 			_flipY = value;
 			QueueRedraw();
 		}
@@ -117,6 +129,8 @@ public partial class EmueraImage : Control
 	{
 		if (cm == null)
 		{
+			if (!_hasColorMatrixKey && Material == null)
+				return;
 			Material = null;
 			_hasColorMatrixKey = false;
 			return;

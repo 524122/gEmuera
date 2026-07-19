@@ -3,6 +3,8 @@ using GEmuera.Core.Session;
 using GEmuera.Core.Runtime;
 using CoreContractSmoke;
 using gEmuera.GodotHost;
+using System.Data;
+using System.IO;
 using System.Text;
 
 static void Assert(bool condition, string message)
@@ -818,10 +820,192 @@ Assert(
         && !EraFlCompatibilityModule.IsOmittedDefaultArgument('1'),
     "eraFL omitted-argument policy drifted.");
 Assert(
+    EraFlCompatibilityModule.IsPointerInputMetadataOption("1")
+        && EraFlCompatibilityModule.IsPointerInputMetadataOption(" 1 ")
+        && !EraFlCompatibilityModule.IsPointerInputMetadataOption("")
+        && !EraFlCompatibilityModule.IsPointerInputMetadataOption("0")
+        && !EraFlCompatibilityModule.IsPointerInputMetadataOption("1,2"),
+    "eraFL INPUTS pointer metadata option policy drifted.");
+Assert(
     EraFlCompatibilityModule.NormalizePointerIntegerSubmission("", 2, true) == "-1"
         && EraFlCompatibilityModule.NormalizePointerIntegerSubmission("", 1, true) == ""
         && EraFlCompatibilityModule.NormalizePointerIntegerSubmission("", 2, false) == "",
     "eraFL pointer blank-integer policy drifted.");
+Assert(
+    EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(1, true)
+        && EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(2, true)
+        && EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(4, true)
+        && !EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(0, true)
+        && !EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(1, false),
+    "eraFL pointer blank-string policy drifted.");
+Assert(
+    EraFlCompatibilityModule.NormalizePointerButtonResult(1) == 1
+        && EraFlCompatibilityModule.NormalizePointerButtonResult(2) == 2
+        && EraFlCompatibilityModule.NormalizePointerButtonResult(4) == 3,
+    "eraFL pointer button result mapping drifted.");
+var eraFlQuestMap = new string[2, 4];
+eraFlQuestMap[0, 1] = "[ROOM_ID:2000]";
+eraFlQuestMap[1, 2] = "[ROOM_ID:200][ROOM_PATH:1,]";
+Assert(
+    EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 1, eraFlQuestMap, out var recoveredQuestStart)
+        && recoveredQuestStart == 2,
+    "eraFL task-start recovery did not return the current map's room index.");
+Assert(
+    !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", 7, "任务開始地点", 1, eraFlQuestMap, out var retainedQuestStart)
+        && retainedQuestStart == 7,
+    "eraFL task-start recovery rewrote a successful room lookup.");
+Assert(
+    !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "OTHER_FIND_ROOM", -1, "任务開始地点", 1, eraFlQuestMap, out _)
+    && !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "其它标签", 1, eraFlQuestMap, out _)
+    && !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 2, eraFlQuestMap, out _)
+    && !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 0, eraFlQuestMap, out _),
+    "eraFL task-start recovery escaped its exact function, tag, or map-data boundary.");
+var ambiguousEraFlQuestMap = new string[1, 2];
+ambiguousEraFlQuestMap[0, 0] = "[ROOM_ID:200]";
+ambiguousEraFlQuestMap[0, 1] = "[ROOM_ID:200][ROOM_PATH:1,]";
+Assert(
+    !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 0, ambiguousEraFlQuestMap, out var ambiguousQuestStart)
+        && ambiguousQuestStart == -1,
+    "eraFL task-start recovery guessed between multiple start rooms.");
+var eraFlGMapWithoutRoomId = new string[1, 2];
+eraFlGMapWithoutRoomId[0, 0] = "[EVENT_LIST:0,][ROOM_NAME:城镇入口][ROOM_PATH:1,]";
+Assert(
+    !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 0, "GMAP", eraFlGMapWithoutRoomId, out _),
+    "eraFL GMAP task-start recovery accepted an unmaterialized node zero.");
+Assert(
+    !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 0, "MAP", eraFlGMapWithoutRoomId, out _),
+    "eraFL GMAP node-zero fallback escaped into ordinary MAP quests.");
+Assert(
+    !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", -1, "GMAP", null, out _),
+    "eraFL GMAP task-start recovery guessed without runtime map data.");
+var emptyEraFlGMap = new string[1, 1];
+Assert(
+    !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 0, "GMAP", emptyEraFlGMap, out _),
+    "eraFL GMAP task-start recovery accepted an empty node-zero slot.");
+var eraFlGMapNodes = new[]
+{
+    new EraFlCompatibilityModule.GMapNodeData(1, "林荫道", "0,2,"),
+    new EraFlCompatibilityModule.GMapNodeData(0, "城镇入口", "1,"),
+};
+var eraFlXmlTable = new DataTable("GMAPDATA");
+var eraFlXmlId = eraFlXmlTable.Columns.Add("id", typeof(long));
+eraFlXmlTable.Columns.Add("NODE_ID", typeof(short));
+eraFlXmlTable.Columns.Add("NODE_NAME", typeof(string));
+eraFlXmlTable.Columns.Add("POS_X", typeof(short));
+eraFlXmlTable.Columns.Add("POS_Y", typeof(short));
+eraFlXmlTable.Columns.Add("NODE_ICON", typeof(string));
+eraFlXmlTable.Columns.Add("NODE_COLOR", typeof(short));
+eraFlXmlTable.Columns.Add("PATH_LIST", typeof(string));
+eraFlXmlTable.Columns.Add("EVENT_LIST", typeof(string));
+eraFlXmlTable.PrimaryKey = new[] { eraFlXmlId };
+eraFlXmlTable.Rows.Add(10L, (short)1, "林荫道", (short)420, (short)100, DBNull.Value, DBNull.Value, "0,2,", DBNull.Value);
+eraFlXmlTable.Rows.Add(11L, (short)0, "城镇入口", (short)520, (short)40, DBNull.Value, DBNull.Value, "1,", DBNull.Value);
+string eraFlSchemaXml;
+string eraFlDataXml;
+using (var writer = new StringWriter())
+{
+    eraFlXmlTable.WriteXmlSchema(writer);
+    eraFlSchemaXml = writer.ToString();
+}
+using (var writer = new StringWriter())
+{
+    eraFlXmlTable.WriteXml(writer);
+    eraFlDataXml = writer.ToString();
+}
+Assert(
+    EraFlCompatibilityModule.TryParseGMapDataTableFromXml(
+        eraFlSchemaXml,
+        eraFlDataXml,
+        out var parsedEraFlGMapTable,
+        out var parsedEraFlGMapTableNodes)
+        && parsedEraFlGMapTable is not null
+        && parsedEraFlGMapTable.TableName == "GMAPDATA"
+        && parsedEraFlGMapTable.Columns.Contains("POS_X")
+        && parsedEraFlGMapTable.Columns.Contains("POS_Y")
+        && parsedEraFlGMapTable.Rows.Count == 2
+        && Convert.ToInt64(parsedEraFlGMapTable.Rows[1]["POS_X"]) == 520
+        && Convert.ToInt64(parsedEraFlGMapTable.Rows[1]["POS_Y"]) == 40
+        && parsedEraFlGMapTableNodes.Count == 2,
+    "eraFL GMAP schema/XML fallback discarded the complete drawing table.");
+parsedEraFlGMapTable?.Dispose();
+Assert(
+    EraFlCompatibilityModule.TryParseGMapNodesFromXml(
+        eraFlSchemaXml,
+        eraFlDataXml,
+        out var parsedEraFlGMapNodes)
+        && parsedEraFlGMapNodes.Count == 2
+        && parsedEraFlGMapNodes[1].NodeId == 0
+        && parsedEraFlGMapNodes[1].NodeName == "城镇入口"
+        && parsedEraFlGMapNodes[1].PathList == "1,",
+    "eraFL GMAP schema/XML fallback did not parse the node contract.");
+Assert(
+    !EraFlCompatibilityModule.TryParseGMapNodesFromXml("<bad>", "<bad>", out _),
+    "eraFL GMAP schema/XML fallback accepted malformed XML.");
+var eraFlRoomOnlyXmlTable = new DataTable("GMAPDATA");
+eraFlRoomOnlyXmlTable.Columns.Add("NODE_ID", typeof(short));
+eraFlRoomOnlyXmlTable.Columns.Add("NODE_NAME", typeof(string));
+eraFlRoomOnlyXmlTable.Columns.Add("PATH_LIST", typeof(string));
+eraFlRoomOnlyXmlTable.Rows.Add((short)0, "入口", "1,");
+string eraFlRoomOnlySchemaXml;
+string eraFlRoomOnlyDataXml;
+using (var writer = new StringWriter())
+{
+    eraFlRoomOnlyXmlTable.WriteXmlSchema(writer);
+    eraFlRoomOnlySchemaXml = writer.ToString();
+}
+using (var writer = new StringWriter())
+{
+    eraFlRoomOnlyXmlTable.WriteXml(writer);
+    eraFlRoomOnlyDataXml = writer.ToString();
+}
+Assert(
+    EraFlCompatibilityModule.TryParseGMapNodesFromXml(
+        eraFlRoomOnlySchemaXml,
+        eraFlRoomOnlyDataXml,
+        out var eraFlRoomOnlyNodes)
+        && eraFlRoomOnlyNodes.Count == 1
+        && !EraFlCompatibilityModule.TryParseGMapDataTableFromXml(
+            eraFlRoomOnlySchemaXml,
+            eraFlRoomOnlyDataXml,
+            out _,
+            out _),
+    "eraFL room-only node parsing and complete drawing-table validation were not separated.");
+Assert(
+    EraFlCompatibilityModule.TryPopulateGMapRoomData(0, eraFlGMapWithoutRoomId, eraFlGMapNodes)
+        && eraFlGMapWithoutRoomId[0, 0].Contains("[EVENT_LIST:0,]", StringComparison.Ordinal)
+        && eraFlGMapWithoutRoomId[0, 0].Contains("[ROOM_NAME:城镇入口]", StringComparison.Ordinal)
+        && eraFlGMapWithoutRoomId[0, 0].Contains("[ROOM_PATH:1,]", StringComparison.Ordinal)
+        && eraFlGMapWithoutRoomId[0, 0].Contains("[ROOM_ID:200]", StringComparison.Ordinal)
+        && eraFlGMapWithoutRoomId[0, 1].Contains("[ROOM_ID:201]", StringComparison.Ordinal),
+    "eraFL GMAP DT bridge did not materialize the runtime room dictionary.");
+Assert(
+    EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+        "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 0, "GMAP", eraFlGMapWithoutRoomId, out var recoveredGMapNodeZero)
+        && recoveredGMapNodeZero == 0,
+    "eraFL GMAP task-start recovery rejected a materialized node zero.");
+var duplicateEraFlGMap = new string[1, 2];
+Assert(
+    !EraFlCompatibilityModule.TryPopulateGMapRoomData(
+        0,
+        duplicateEraFlGMap,
+        new[]
+        {
+            new EraFlCompatibilityModule.GMapNodeData(0, "入口A", "1,"),
+            new EraFlCompatibilityModule.GMapNodeData(0, "入口B", "1,"),
+        })
+        && duplicateEraFlGMap[0, 0] == null,
+    "eraFL GMAP DT bridge partially mutated an invalid node set.");
 await eraFlFacade.DisposeAsync();
 
 AssertThrows<ArgumentException>(

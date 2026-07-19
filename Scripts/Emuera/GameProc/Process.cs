@@ -332,6 +332,15 @@ namespace MinorShift.Emuera.GameProc
 			GlobalStatic.ctrlZ.Add(s);
 			vEvaluator.RESULTS = s;
 		}
+		public void InputStringWithPointerMetadata(string s)
+		{
+			// eraFL 的 INPUTS ,1 兼容：多数界面仍读取 RESULTS:0，战斗技能则读取 RESULTS:1。
+			// 两个槽位必须在一次提交中同步写入，并且 ctrl-Z 输入历史只能记录一次。
+			GlobalStatic.ctrlZ.Add(s);
+			vEvaluator.RESULTS = s;
+			if (vEvaluator.RESULTS_ARRAY.Length > 1)
+				vEvaluator.RESULTS_ARRAY[1] = s;
+		}
 		public void InputString(long idx, string i)
 		{
 			if (GlobalStatic.ctrlZ != null)

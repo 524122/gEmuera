@@ -283,7 +283,7 @@ namespace gEmuera.Diagnostics
         public bool AndroidStorageLogScopedStorage { get; set; } = true;
         public int AndroidStorageMaxPathRecords { get; set; } = 64;
 
-        // ---------- debug.performance_sampling ----------
+        // ---------- [logging].performance 映射的运行时采样 ----------
         public bool PerformanceSamplingEnabled { get; set; } = false;
         public int PerformanceSamplingIntervalMs { get; set; } = 1000;
         public bool PerformanceSamplingIncludeFps { get; set; } = true;

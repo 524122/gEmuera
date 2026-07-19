@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using MinorShift.Emuera;
 using MinorShift.Emuera.Content;
 using MinorShift.Emuera.GameView;
@@ -198,6 +199,16 @@ public partial class EmueraContent
 	{
 		if (part == null)
 			return;
+		if (part is ConsoleStyledString styled)
+		{
+			consoleRenderSurface?.PrepareTextRenderPlan(styled, styled.Str);
+			return;
+		}
+		if (part is ConsoleErrorShapePart errorShape)
+		{
+			consoleRenderSurface?.PrepareTextRenderPlan(errorShape, errorShape.AltText ?? errorShape.Str ?? "");
+			return;
+		}
 		if (part is ConsoleImagePart image)
 		{
 			TryResolveCanvasImage(image, 0, out _);
@@ -319,7 +330,10 @@ public partial class EmueraContent
 			// 由 EmueraImage._Process 切换，因此即使是普通 relative <img> 也必须
 			// 建立 overlay；否则 SourceTexture 为空时整张动态图会被静默跳过。
 			|| GetAnimatedWebpSourcePath(sprite) != null
-			|| GetAnimatedWebpSourcePath(selectedSprite) != null;
+			|| GetAnimatedWebpSourcePath(selectedSprite) != null
+			// 逻辑行高度不会为图片溢出扩张；静态相对图片跨行时也必须进入 overlay，
+			// 才能在源行离开可视行范围后继续按真实绘制矩形裁剪和刷新可见性。
+			|| ImageEscapesLine(image);
 	}
 
 	bool CanUseCanvasDivOverlay(ConsoleDivPart div)
@@ -923,12 +937,17 @@ public partial class EmueraContent
 		readonly EmueraContent owner;
 		readonly List<ConsoleButtonHit> hitRects = new List<ConsoleButtonHit>(128);
 		readonly Dictionary<int, List<int>> hitRectBuckets = new Dictionary<int, List<int>>();
+		readonly Stack<List<int>> hitRectBucketPool = new Stack<List<int>>();
+		readonly List<int> escapedHitLineNumbers = new List<int>();
+		readonly ConditionalWeakTable<AConsoleDisplayPart, ConsoleTextRenderPlanEntry> textRenderPlans = new ConditionalWeakTable<AConsoleDisplayPart, ConsoleTextRenderPlanEntry>();
+		readonly IComparer<int> escapedHitLineComparer;
 		bool hitRectsDirty = true;
 		int lastScrollX = int.MinValue;
 		int lastScrollY = int.MinValue;
 		Vector2 lastViewportSize = Vector2.Zero;
 		float lastScale = -1;
 		const float HitBucketHeight = 64.0f;
+		const int MaxPooledHitRectBucketLists = 128;
 
 		struct ConsoleRenderStats
 		{
@@ -939,10 +958,105 @@ public partial class EmueraContent
 			public int RebuiltHitRects;
 		}
 
+		sealed class EscapedHitLineComparer : IComparer<int>
+		{
+			readonly EmueraContent owner;
+
+			public EscapedHitLineComparer(EmueraContent owner)
+			{
+				this.owner = owner;
+			}
+
+			public int Compare(int left, int right)
+			{
+				int leftIndex = owner != null && owner.lineLayoutIndexByLineNo.TryGetValue(left, out int resolvedLeft)
+					? resolvedLeft
+					: int.MaxValue;
+				int rightIndex = owner != null && owner.lineLayoutIndexByLineNo.TryGetValue(right, out int resolvedRight)
+					? resolvedRight
+					: int.MaxValue;
+				int comparison = leftIndex.CompareTo(rightIndex);
+				return comparison != 0 ? comparison : left.CompareTo(right);
+			}
+		}
+
+		sealed class ConsoleTextRenderPlanEntry
+		{
+			string source;
+			ConsoleTextRenderPlan plan;
+
+			public ConsoleTextRenderPlan Get(string currentSource)
+			{
+				currentSource ??= string.Empty;
+				// ConsoleStyledString.DivideAt 会替换 Str。按字符串引用失效，避免把裁剪前文本用于新片段。
+				if (plan == null || !ReferenceEquals(source, currentSource))
+				{
+					source = currentSource;
+					plan = new ConsoleTextRenderPlan(currentSource);
+				}
+				return plan;
+			}
+		}
+
+		sealed class ConsoleTextRenderPlan
+		{
+			// 仅为出现过的字符分配字符串；数组避免每格都执行 char.ToString() 和字典查找。
+			static readonly string[] GridGlyphTexts = new string[char.MaxValue + 1];
+
+			public string Text { get; }
+			public bool UsesGridDrawing { get; }
+
+			public ConsoleTextRenderPlan(string source)
+			{
+				Text = uEmuera.Utils.StripZeroWidth(source) ?? string.Empty;
+				UsesGridDrawing = ShouldUseGridDrawing(Text);
+				if (UsesGridDrawing)
+				{
+					for (int i = 0; i < Text.Length; i++)
+						_ = GetGlyph(i);
+				}
+			}
+
+			public string GetGlyph(int index)
+			{
+				char value = Text[index];
+				return GridGlyphTexts[value] ??= value.ToString();
+			}
+
+			static bool ShouldUseGridDrawing(string value)
+			{
+				for (int i = 0; i < value.Length; i++)
+				{
+					char c = value[i];
+					if (uEmuera.Utils.CheckZeroWidth(c))
+						continue;
+					if (char.IsWhiteSpace(c) || IsGridSensitiveChar(c))
+						return true;
+				}
+				return false;
+			}
+
+			static bool IsGridSensitiveChar(char c)
+			{
+				return (c >= '\u2500' && c <= '\u257F')
+					|| (c >= '\u2580' && c <= '\u259F')
+					|| (c >= '\u25A0' && c <= '\u25FF')
+					|| (c >= '\u2800' && c <= '\u28FF')
+					|| c == '\u3000';
+			}
+		}
+
 		public ConsoleRenderSurface(EmueraContent owner)
 		{
 			this.owner = owner;
+			escapedHitLineComparer = new EscapedHitLineComparer(owner);
 			TextureFilter = TextureFilterEnum.Nearest;
+		}
+
+		public void PrepareTextRenderPlan(AConsoleDisplayPart part, string source)
+		{
+			if (part != null)
+				GetTextRenderPlan(part, source);
 		}
 
 		public void MarkDirty()
@@ -1029,41 +1143,78 @@ public partial class EmueraContent
 		{
 			var stats = new ConsoleRenderStats();
 			if (rebuildHits)
-			{
-				hitRects.Clear();
-				hitRectBuckets.Clear();
-			}
+				ClearHitRects();
 			if (owner == null || owner.lineNumbers.Count == 0)
 				return stats;
 
 			var visible = owner.GetVisibleCanvasContentRange();
-			if (!owner.TryGetVisibleCanvasLineLayoutRange(visible, out int firstIndex, out int lastIndex))
-				return stats;
-			stats.VisibleRows = lastIndex - firstIndex + 1;
-			for (int i = firstIndex; i <= lastIndex; i++)
+			bool hasVisibleRange = owner.TryGetVisibleCanvasLineLayoutRange(visible, out int firstIndex, out int lastIndex);
+			if (hasVisibleRange)
 			{
-				var entry = owner.lineLayoutEntries[i];
-				int lineNo = entry.LineNo;
-				if (owner.IsCanvasOverlayLine(lineNo))
+				stats.VisibleRows = lastIndex - firstIndex + 1;
+				for (int i = firstIndex; i <= lastIndex; i++)
 				{
-					stats.OverlayRows++;
-					continue;
-				}
-				if (owner.lineObjects.TryGetValue(lineNo, out var line))
-				{
-					stats.CanvasRows++;
-					bool usedCachedHits = false;
-					if (rebuildHits)
-						usedCachedHits = AddCachedLineHitRects(lineNo, entry.Top, ref stats);
-					if (rebuildHits && !draw && usedCachedHits)
+					var entry = owner.lineLayoutEntries[i];
+					int lineNo = entry.LineNo;
+					if (owner.IsCanvasOverlayLine(lineNo))
+					{
+						stats.OverlayRows++;
 						continue;
-					DrawLine(lineNo, line, entry.Top, entry.Size, draw, rebuildHits, ref stats);
+					}
+					if (owner.lineObjects.TryGetValue(lineNo, out var line))
+					{
+						stats.CanvasRows++;
+						bool usedCachedHits = false;
+						if (rebuildHits)
+							usedCachedHits = AddCachedLineHitRects(lineNo, entry.Top, false, visible, ref stats);
+						if (rebuildHits && !draw && usedCachedHits)
+							continue;
+						DrawLine(lineNo, line, entry.Top, entry.Size, draw, rebuildHits, false, visible, ref stats);
+					}
 				}
 			}
+			if (rebuildHits)
+				AddEscapedOverlayHitRects(visible, firstIndex, lastIndex, ref stats);
 			return stats;
 		}
 
-		void DrawLine(int lineNo, ConsoleDisplayLine line, float y, Vector2 size, bool draw, bool rebuildHits, ref ConsoleRenderStats stats)
+		void AddEscapedOverlayHitRects(Rect2 visible, int firstVisibleIndex, int lastVisibleIndex, ref ConsoleRenderStats stats)
+		{
+			escapedHitLineNumbers.Clear();
+			if (owner == null || owner.canvasRowsWithEscapedOverlays.Count == 0)
+				return;
+			foreach (int lineNo in owner.canvasRowsWithEscapedOverlays)
+			{
+				if (!owner.lineLayoutIndexByLineNo.TryGetValue(lineNo, out int layoutIndex)
+					|| layoutIndex < 0
+					|| layoutIndex >= owner.lineLayoutEntries.Count
+					|| (layoutIndex >= firstVisibleIndex && layoutIndex <= lastVisibleIndex))
+					continue;
+				escapedHitLineNumbers.Add(lineNo);
+			}
+
+			// HashSet 的槽位顺序会随裁剪和重建变化；按逻辑行顺序注册，
+			// 让 TryHitGlobal 的逆序扫描继续稳定地优先命中后绘制的同层按钮。
+			escapedHitLineNumbers.Sort(escapedHitLineComparer);
+			for (int i = 0; i < escapedHitLineNumbers.Count; i++)
+			{
+				int lineNo = escapedHitLineNumbers[i];
+				if (!owner.lineLayoutIndexByLineNo.TryGetValue(lineNo, out int layoutIndex)
+					|| layoutIndex < 0
+					|| layoutIndex >= owner.lineLayoutEntries.Count
+					|| owner.IsCanvasOverlayLine(lineNo)
+					|| !owner.lineObjects.TryGetValue(lineNo, out var line))
+					continue;
+
+				var entry = owner.lineLayoutEntries[layoutIndex];
+				if (AddCachedLineHitRects(lineNo, entry.Top, true, visible, ref stats))
+					continue;
+				DrawLine(lineNo, line, entry.Top, entry.Size, false, true, true, visible, ref stats);
+			}
+		}
+
+		void DrawLine(int lineNo, ConsoleDisplayLine line, float y, Vector2 size, bool draw, bool rebuildHits,
+			bool restrictHitRectsToVisible, Rect2 visible, ref ConsoleRenderStats stats)
 		{
 			if (line == null)
 				return;
@@ -1089,6 +1240,8 @@ public partial class EmueraContent
 						buttonHeight = owner.EffectiveLineHeight;
 					var bounds = owner.GetButtonVisualBounds(button, buttonTop, buttonHeight, button.PointX, button.PointX);
 					var hitRect = new Rect2(bounds.Position + new Vector2(0, y), bounds.Size);
+					if (restrictHitRectsToVisible && !visible.Intersects(hitRect, true))
+						continue;
 					AddHitRect(new ConsoleButtonHit
 					{
 						Rect = hitRect,
@@ -1113,7 +1266,7 @@ public partial class EmueraContent
 			}
 		}
 
-		bool AddCachedLineHitRects(int lineNo, float lineY, ref ConsoleRenderStats stats)
+		bool AddCachedLineHitRects(int lineNo, float lineY, bool restrictHitRectsToVisible, Rect2 visible, ref ConsoleRenderStats stats)
 		{
 			if (owner == null || !owner.canvasLineButtonHits.TryGetValue(lineNo, out var lineHits) || lineHits == null)
 				return false;
@@ -1123,6 +1276,8 @@ public partial class EmueraContent
 				var hit = lineHits[i];
 				hit.Rect = new Rect2(hit.Rect.Position + offset, hit.Rect.Size);
 				hit.ContentCenter += offset;
+				if (restrictHitRectsToVisible && !visible.Intersects(hit.Rect, true))
+					continue;
 				AddHitRect(hit);
 				stats.RebuiltHitRects++;
 			}
@@ -1139,11 +1294,28 @@ public partial class EmueraContent
 			{
 				if (!hitRectBuckets.TryGetValue(bucket, out var indexes))
 				{
-					indexes = new List<int>();
+					indexes = GetPooledHitRectBucket();
 					hitRectBuckets[bucket] = indexes;
 				}
 				indexes.Add(index);
 			}
+		}
+
+		void ClearHitRects()
+		{
+			hitRects.Clear();
+			foreach (var indexes in hitRectBuckets.Values)
+			{
+				indexes.Clear();
+				if (hitRectBucketPool.Count < MaxPooledHitRectBucketLists)
+					hitRectBucketPool.Push(indexes);
+			}
+			hitRectBuckets.Clear();
+		}
+
+		List<int> GetPooledHitRectBucket()
+		{
+			return hitRectBucketPool.Count > 0 ? hitRectBucketPool.Pop() : new List<int>();
 		}
 
 		static int GetHitBucket(float y)
@@ -1221,9 +1393,21 @@ public partial class EmueraContent
 			}
 			if (part is ConsoleErrorShapePart errShape)
 			{
-				DrawText(errShape.AltText ?? errShape.Str ?? "", Config.ForeColor.ToGodotColor(), Config.Font, false,
+				DrawText(GetTextRenderPlan(errShape, errShape.AltText ?? errShape.Str ?? ""), Config.ForeColor.ToGodotColor(), Config.Font, false,
 					part.PointX - relX, lineY, Mathf.Max(part.Width, owner.EffectiveLineHeight));
 			}
+		}
+
+		ConsoleTextRenderPlan GetTextRenderPlan(AConsoleDisplayPart part, string source)
+		{
+			if (part == null)
+				return new ConsoleTextRenderPlan(source ?? string.Empty);
+			if (!textRenderPlans.TryGetValue(part, out var entry))
+			{
+				entry = new ConsoleTextRenderPlanEntry();
+				textRenderPlans.Add(part, entry);
+			}
+			return entry.Get(source);
 		}
 
 		void DrawStyledString(ConsoleStyledString css, float lineY, int relX, bool isSelecting, bool isBackLog)
@@ -1254,20 +1438,18 @@ public partial class EmueraContent
 			}
 			else if (isBackLog && !css.pColorChanged)
 				color = Config.LogColor;
-			DrawText(css.Str, color.ToGodotColor(), css.Font, css.Font?.Bold == true, x, lineY, width);
+			DrawText(GetTextRenderPlan(css, css.Str), color.ToGodotColor(), css.Font, css.Font?.Bold == true, x, lineY, width);
 		}
 
-		void DrawText(string text, Color color, EmuFont emuFont, bool bold, float x, float lineY, float width)
+		void DrawText(ConsoleTextRenderPlan plan, Color color, EmuFont emuFont, bool bold, float x, float lineY, float width)
 		{
 			Font font = owner.ResolveConsoleFont(emuFont);
-			if (font == null || string.IsNullOrEmpty(text))
+			if (font == null || plan == null || string.IsNullOrEmpty(plan.Text))
 				return;
-			text = uEmuera.Utils.StripZeroWidth(text) ?? "";
-			if (string.IsNullOrEmpty(text))
-				return;
+			string text = plan.Text;
 			float fontHeight = font.GetHeight(owner.FontSize);
 			float baseline = GetTextBaseline(font, owner.FontSize, owner.EffectiveLineHeight, fontHeight);
-			if (!ShouldUseGridDrawing(text))
+			if (!plan.UsesGridDrawing)
 			{
 				DrawString(font, new Vector2(x, lineY + baseline), text, HorizontalAlignment.Left,
 					Mathf.Max(1.0f, width), owner.FontSize, color);
@@ -1290,20 +1472,19 @@ public partial class EmueraContent
 				float drawWidth = IsBlockElementChar(text[i])
 					? cellWidth
 					: Mathf.Max(cellWidth, x + width - drawX);
-				DrawGridChar(font, text[i], drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
+				DrawGridChar(font, text[i], plan.GetGlyph(i), drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
 		}
 
-		void DrawGridChar(Font font, char value, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
+		void DrawGridChar(Font font, char value, string glyph, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
 		{
 			if (TryGetSolidBlockElementRect(value, cellWidth, owner.EffectiveLineHeight, fontHeight, out var blockRect))
 			{
 				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), color);
 				return;
 			}
-			string glyph = value.ToString();
 			float drawWidth = Mathf.Max(1.0f, cellWidth);
 			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, owner.FontSize, color);
 			if (bold)
@@ -1343,26 +1524,5 @@ public partial class EmueraContent
 			return Mathf.Round((height - fontHeight) * 0.5f + ascent);
 		}
 
-		static bool ShouldUseGridDrawing(string value)
-		{
-			for (int i = 0; i < value.Length; i++)
-			{
-				char c = value[i];
-				if (uEmuera.Utils.CheckZeroWidth(c))
-					continue;
-				if (char.IsWhiteSpace(c) || IsGridSensitiveChar(c))
-					return true;
-			}
-			return false;
-		}
-
-		static bool IsGridSensitiveChar(char c)
-		{
-			return (c >= '\u2500' && c <= '\u257F')
-				|| (c >= '\u2580' && c <= '\u259F')
-				|| (c >= '\u25A0' && c <= '\u25FF')
-				|| (c >= '\u2800' && c <= '\u28FF')
-				|| c == '\u3000';
-		}
 	}
 }

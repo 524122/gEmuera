@@ -1,5 +1,22 @@
 # CODE_MAP
 
+## 2026-07-19 eraFL 战斗鼠标三键输入
+
+- `Scripts/EmueraContent.cs:HandleContentPointerInput/TryAdvanceTap/VirtualCursorCommitClick`：按钮命中始终优先于空白推进；eraFL 的 `INPUTS` 字符串等待额外允许空白左键提交空字符串和鼠标码 1。战斗界面因此保持“左键技能按钮切换锁定、右键技能按钮选择/使用、空白左键进入下一步”的脚本协议。
+- `Scripts/EmueraThread.cs:Work` 与 `src/Core/Compatibility/EraFlCompatibilityModule.cs:NormalizePointerButtonResult`：保留宿主内部中键 VK `0x04`，写入 eraFL `RESULT:1` 前转换为脚本约定的中键码 3，使默认中键自动战斗快捷键生效；v24/Snake 不应用该转换。
+- `Scripts/Emuera/GameProc/Function/ArgumentBuilder.cs`、`Argument.cs`、`InputRequest.cs`、`Instraction.Child.cs`：eraFL 的 `INPUTS ,1` 不再只丢弃第二参数，而是把鼠标扩展标记从解析结果传到当前等待请求。`Scripts/Emuera/GameProc/Process.cs:InputStringWithPointerMetadata` 与 `Scripts/Emuera/GameView/EmueraConsole.cs:doInputToEmueraProgram` 在真实指针提交时一次写入 `RESULTS:0/1`、只记录一次输入历史，并隐藏 `[INPUT_FROM:...]` 内部按钮值；键盘输入、普通 `INPUTS` 和其它 profile 保持原路径。
+
+## 2026-07-19 地图刷新显示桥与 CBG 重复提交优化
+
+- `Scripts/Emuera/GameView/EmueraConsole.cs:TryGetCBGListSnapshot` 与 `Scripts/GenericUtils.cs:RefreshCBG`：CBG 列表改为按展示 revision 提交。列表结构变化、`GraphicsImage.DisplayRevision` 变化或 `SpriteAnime` 当前帧需要更新时才复制图层并入 Godot UI 队列；静态背景不会因为地图文本的高频刷新重复 pin 纹理或失效同一批 CanvasItem。`SpriteAnime` 必须持续提交，不能被 revision 去重冻结。
+- `Scripts/EmueraContent.cs:ApplyCbgRenderEntry` 与 `Scripts/EmueraImage.cs`：复用 CBG 节点时仅写入发生变化的纹理、裁剪、位置、尺寸、翻转、调制和 ColorMatrix，图片属性同值写入也会短路 `QueueRedraw()`；保留异步纹理未就绪时继续显示旧 CBG 的兼容行为。
+- `Scripts/uEmuera/Window.cs:Update`、`Scripts/EmueraContent.cs:ApplyTextChanges`、`Scripts/GenericUtils.cs:SampleDisplayBridge`：`[logging].performance=true` 时低频输出 `PERF.DISPLAY_BRIDGE`，分开统计显示快照、行级 diff、实际 UI 应用、Control fallback 行构建/替换和 CBG 提交数量。默认关闭；`config.toml` 默认关闭图片诊断，避免高频图片地图被日志放大。
+
+## 2026-07-19 eraFL GMAP 运行时数据与任务起点兼容
+
+- `src/Core/Compatibility/EraFlCompatibilityModule.cs:TryParseGMapDataTableFromXml/TryPopulateGMapRoomData/TryRecoverQuestStartRoomIndex`：XML 回退分别保留“精简房间节点”和“完整绘图 DataTable”两种契约；完整表必须包含 `id/NODE_ID/NODE_NAME/POS_X/POS_Y/PATH_LIST`，避免只恢复房间名却丢失地图按钮坐标。GMAP 节点先原子补入 `_DIC_HO_MAPDATA`，node 0/其它节点写入 `ROOM_ID=200/201`；确认 node 0 已实体化后才能恢复起点 0。普通 MAP 仍必须存在唯一 `[ROOM_ID:200]`，错误函数、标签、任务类型、重复/越界节点或多个候选均 fail closed。
+- `Scripts/Emuera/GameProc/Process.State.cs:ProcessState.IntoFunction/Return` 与 `Process.CalledFunction.cs:EraFlQuestStartLookupContext`：`QST_LOAD_MAPDATA` 返回时同时完成房间实体化和绘图 DT 发布。单地图优先消费绘图实际读取的 `GMAPDATA`，缺失时可从 `GMAPDATA_<mapId>` 恢复；多地图只信对应分表，禁止把最后一次导入的全局临时表误配给其它地图。可信内存表或安全读取的 schema/XML 都会复制为彼此独立的 `GMAPDATA` 与 `GMAPDATA_<mapId>`，防止后续 `DT_CLEAR` 联动清空。`HO_FIND_ROOM_BY_TAG` 的 `-1` 恢复仍是最后防线，优先读取活动调用帧与外层任务类型；整个路径只在 eraFL GMAP 边界运行，不影响 v24/Snake。
+
 ## 2026-07-18 Android 静态大图集子区域裁剪
 
 - `Scripts/EmueraContent.cs:GetSpriteTexture`：Android 渲染静态 `ASpriteSingle` 时，若底图超过 4096px 且 sprite 只引用其中一个源矩形，会在访问 `TextureInfo.texture` 前改走小图块纹理。避免整图被降到 4096px 后，CSV 仍按原始坐标创建 `AtlasTexture`，从而在 `x > 4096` 的区域采样出横条或错误内容。
@@ -18,7 +35,7 @@
 - `project.godot`：新增 `AppBootstrap` 与 `PlatformGateway` autoload，并启用 `prototype_runtime`、`typed_ports`、`pixel_store` 标记；它们负责宿主启动和平台能力入口，不能把这套标记误解为已替换 legacy Emuera 执行器。
 - `src/Core/Compatibility/`、`src/Core/Session/`、`src/Core/Ports/`：纯 C# 的兼容计划、会话协调和端口契约层。`Program.ConfigureCompatibilityPlan` / `ClearCompatibilityPlan` 是它到 legacy 运行时的边界；当前实际 ERB handler 仍在 `Scripts/Emuera/`，不应把 Core 描述符当作增量注册表直接修改。
 - `src/Core/Compatibility/GameCompatibilityResolver.cs`：无路径的游戏身份证据 DTO 与确定性内建规则；代码 `9224518` + eraFL 锚点可解析到独立 `erafl` profile，代码 `7153` + eraTW 标题/锚点可解析到 `snake`。当前正常启动器不调用它，不读取文件、不执行 ERB。
-- `src/Core/Compatibility/EraFlCompatibilityModule.cs`：独立 `game.erafl@1.0.0` 计划输入；集中声明 v24 依赖、`gemuera.erafl` save profile、五个 typed policy port、五个 capability，以及省略参数、空白指针整数和扩展显示历史等窄策略入口。
+- `src/Core/Compatibility/EraFlCompatibilityModule.cs`：独立 `game.erafl@1.0.0` 计划输入；集中声明 v24 依赖、`gemuera.erafl` save profile、五个 typed policy port、五个 capability，以及省略参数、空白指针整数/字符串、鼠标结果码归一化和扩展显示历史等窄策略入口。
 - `Scripts/GodotHost/LegacySessionBackend.cs`、`LegacySessionLaunchRegistry.cs`、`LegacyThreadQuiescence.cs`：M0/M1 会话启动、停止和隔离入口。排查切换游戏、后台线程未退出或旧渲染任务泄漏时，先看 `EmueraMain.ResetCanarySessionState`、两个渲染组件的 `ResetCanarySessionState` 与 `EmueraContent.ClearForCanarySessionTransition`。
 - `Scripts/GodotHost/GameContentProbe.cs`：Host 侧有界读取 `CSV/GAMEBASE.CSV`、`ERB/SYSTEM/NEWGAME.ERB`、eraFL 固定入口和 `ERB/DIM.ERH`，将证据交给 Core；当前仅供 Core 契约/诊断路径使用，正常启动器不调用它。
 - `Scripts/FirstWindow.cs:LauncherGameEntry/ScanV24Root/ScanCompatibilityDirectory`：正常启动器保留 `v24` / `snake` 双标签；`v24` 固定枚举库根的直接游戏目录，以及 `compat/<profile>/<game>`，`snake` 固定枚举 `snake/<game>`。每个列表项携带路径、目录路由 profile 与来源，点击时直接把该 profile 交给启动边界；`compat` profile 必须为小写、通过 Core allowlist，且拒绝 `v24pure`/`snake` 保留 lane。扫描不读取 GAMEBASE、ERB 或资源内容，未知/非法目录 fail closed。高级兼容模式仍可显式覆盖本次启动 profile。
@@ -88,9 +105,9 @@
 
 ## 2026-07-08 eraFL `INPUTS ,1` 空白右键状态切换兼容
 
-- `ArgumentBuilder.cs:SP_INPUTS_ArgumentBuilder`：`INPUTS`/`ONEINPUTS` 在跳过空白后若首字符为逗号，按“第一个默认值参数省略”处理，直接返回无默认值参数，不再把 `,1` 解析成默认字符串。
-- 根因：eraFL `ERB/TRAIN/USERCOM_INPUT.ERB` 使用 `INPUTS , 1` 读取点击；空白区域右键应提交 `RESULT:1==2` 且 `RESULTS==""`，随后脚本把 `RESULT:0` 置为 `-1` 并触发地图/状态页切换。旧解析会把 `,1` 当成默认字符串，空输入被替换成非空 `RESULTS`，导致切换条件失败。
-- 影响范围：只改变 `INPUTS`/`ONEINPUTS` 首参数省略写法的解析语义；显式默认字符串（如 `INPUTS "x"`）不变。后续若出现“空白区域点击有鼠标键码但脚本条件不触发”，优先检查 `SP_INPUTS_ArgumentBuilder`、`EmueraConsole.PressEnterKey` 的默认值替换，以及 `EmueraThread.Input` 写入 `RESULT_ARRAY[1]` 的链路。
+- `ArgumentBuilder.cs:SP_INPUTS_ArgumentBuilder`：`INPUTS`/`ONEINPUTS` 在跳过空白后若首字符为逗号，按“第一个默认值参数省略”处理；eraFL 当前只接受已验证的扩展选项 `1`，并在 `ExpressionArgument.EnablePointerInputMetadata` 保留该语义。
+- 根因：eraFL `ERB/TRAIN/USERCOM_INPUT.ERB` 使用 `INPUTS , 1` 读取点击；空白区域右键应提交 `RESULT:1==2` 且 `RESULTS==""`，随后脚本把 `RESULT:0` 置为 `-1` 并触发地图/状态页切换。战斗 `CLOSE_COMBAT_INPUT.ERB` 还会从 `RESULTS:1` 读取技能按钮值，因此解析层不能只忽略 `,1`，提交层必须同时保留 `RESULTS:0` 和 `RESULTS:1`。
+- 影响范围：只改变 eraFL profile 下 `INPUTS ,1`/`ONEINPUTS ,1` 的解析和真实指针提交语义；显式默认字符串（如 `INPUTS "x"`）、键盘文本输入及其它 profile 不变。后续若出现“有鼠标键码但脚本按钮分支不触发”，优先检查 `SP_INPUTS_ArgumentBuilder`、`InputRequest.EnablePointerInputMetadata`、`EmueraConsole.doInputToEmueraProgram`、`Process.InputStringWithPointerMetadata` 与 `EmueraThread.Input` 写入 `RESULT_ARRAY[1]` 的链路。
 
 ## 2026-07-08 统一鼠标三键抽象 + VirtualMousePad
 
@@ -363,13 +380,13 @@ project.godot
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
 | `Scripts/EmueraMain.cs` | `EmueraMain : Node`, `GpuWorkItem`, `TextRenderItem` | 主场景入口；初始化配置映射、UI 根节点、线程和 GPU/文本渲染队列。 | `_Ready`, `_Process`, `_ExitTree`, `Run`, `Clear`, `Restart`, `GpuSubmitColorMatrix`, `SubmitTextRender` |
-| `Scripts/EmueraThread.cs` | `EmueraThread` | 后台执行 Emuera 核心；把 Godot 输入转成阻塞式 console 输入。eraFL profile 通过独立策略把空白右/中键整数等待转换为 `-1`，其它 profile 保持原空字符串语义。 | `Start`, `End`, `Running`, `Input` |
-| `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退；在移动端读取 Godot display safe area，将主内容、CBG、系统菜单和浮层限制到安全区，并按安全宽度动态更新 Android `WindowX/DrawableWidth`；主控制台缩放时按实际溢出动态启用横向滚动，缩回推荐/安全宽度后清除多余横向偏移；刷新 CBG/SETIMAGELAYER 时遇到占位或本帧上传失败纹理会保留旧角色层节点，避免临时白图替换正常立绘；eraFL 使用扩展显示历史容量策略。 | `_Ready`, `GetSafeViewportRect`, `ApplySafeAreaLayout`, `ConfigureContentScrollContainer`, `NormalizeContentHorizontalScroll`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `PlaySoundFile`, `PlayBgmFile`, `SetContentScale`, `_Input` |
-| `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制，并复刻原核心按钮选中/焦点背景/BackLog 普通文字颜色语义；ColorMatrix、`SpriteAnime`、非相对定位图片以少量 `EmueraImage` 局部 overlay 混合渲染；相对定位 `ConsoleDivPart` 复用旧 Control 构建为局部 overlay，absolute div 仍整行回退；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control、图片 overlay 或 div overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，内容、滚动、缩放或视口变化时只标记 dirty，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前才按需重建命中表并用 `hitRectBuckets` 缩小扫描范围，未命中时再回退 overlay/旧控件树；普通移动端默认保留 240 行，Snake/TW 移动端默认 600 行并迁移旧 240 默认，普通桌面默认 360 行，Snake/TW 桌面默认 1500 行并迁移旧 360 默认；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
+| `Scripts/EmueraThread.cs` | `EmueraThread` | 后台执行 Emuera 核心；把 Godot 输入转成阻塞式 console 输入。eraFL profile 通过独立策略把空白右/中键整数等待转换为 `-1`，并在写入 `RESULT:1` 前把中键 VK `0x04` 转为脚本鼠标码 3；其它 profile 保持原输入语义。 | `Start`, `End`, `Running`, `Input` |
+| `Scripts/EmueraContent.cs` | `EmueraContent : Control`, `UiDiagnosticOverlay` | Godot UI/输入/音频核心；创建控制台视口、可切换渲染后端、输入栏、快速按钮、缩放、诊断覆盖层，并保留旧 Control 行渲染作为回退；在移动端读取 Godot display safe area，将主内容、CBG、系统菜单和浮层限制到安全区，并按安全宽度动态更新 Android `WindowX/DrawableWidth`；主控制台缩放时按实际溢出动态启用横向滚动，缩回推荐/安全宽度后清除多余横向偏移；刷新 CBG/SETIMAGELAYER 时遇到占位或本帧上传失败纹理会保留旧角色层节点，避免临时白图替换正常立绘；按钮命中优先于空白推进，eraFL 字符串输入等待支持空白左键提交；eraFL 使用扩展显示历史容量策略。 | `_Ready`, `GetSafeViewportRect`, `ApplySafeAreaLayout`, `ConfigureContentScrollContainer`, `NormalizeContentHorizontalScroll`, `AddLine`, `AddLines`, `ApplyTextChanges`, `UpdateDisplay`, `RefreshCBG`, `VirtualCursorCommitClick`, `TryAdvanceTap`, `SetContentScale`, `_Input` |
+| `Scripts/EmueraContent.Canvas.cs` | partial `EmueraContent`, `ConsoleRenderSurface`, `ConsoleRenderBackend` | 控制台 Canvas 自绘后端；普通文本/按钮/shape/常规图片按可视区绘制，并复刻原核心按钮选中/焦点背景/BackLog 普通文字颜色语义；ColorMatrix、`SpriteAnime`、非相对定位或跨逻辑行的静态图片以少量 `EmueraImage` 局部 overlay 混合渲染；所有含 `ConsoleDivPart` 的行维持整行 Control 回退，不启用 Canvas div overlay；Canvas 维护行布局 prefix 快照并用二分查找可视行范围，批量输出期间延迟刷新 overlay 行位置；overlay 行定位通过 `canvasRowsWithPositionedNodes` 只刷新实际存在整行 fallback Control 或图片 overlay 的行，避免每次遍历全部历史布局行；overlay 可见性通过“当前可见行/上一轮可见行/逃逸行”目标集合刷新，逃逸 overlay 继续按真实矩形裁剪；动画 overlay 维护 `(LineNo, Index)` 候选 key，避免 `_Process` 扫描历史全部图片 overlay；按钮 hit rect 在 Canvas 行注册时缓存到 `canvasLineButtonHits`，普通 Canvas `_Draw()` 不扫描按钮结构，实际点击进入 `TryHitGlobal` 前按稳定逻辑行顺序重建可视行及逃逸 overlay 源行的命中表，`hitRectBuckets` 复用列表缩小扫描与分配，未命中时再回退旧控件树；普通移动端默认保留 240 行，Snake/TW 移动端默认 600 行并迁移旧 240 默认，普通桌面默认 360 行，Snake/TW 桌面默认 1500 行并迁移旧 360 默认；`Display.ConsoleRenderBackend=controls` 可切回旧节点后端。 | `CanRenderLineOnCanvas`, `AddCanvasLine`, `NotifyConsoleRenderContentChanged`, `TryGetVisibleCanvasLineLayoutRange`, `RefreshCanvasOverlayRows`, `RefreshCanvasOverlayVisibility`, `RefreshCanvasImageAnimations`, `ConsoleRenderSurface._Draw`, `TryHitGlobal` |
 | `Scripts/AnimatedWebpSpriteFrames.cs` | `AnimatedWebpFrameSequence`, `AnimatedWebpSpriteFrames` | 完整动画 WebP 检测、SkiaSharp 后台帧解码、共享引用计数和 Godot 主线程限量纹理上传。 | `IsAnimatedWebp`, `Acquire`, `Release`, `ProcessPendingFrameUploads` |
 | `Scripts/EmueraContent.AndroidSpriteAnime.cs` | partial `EmueraContent` | Android 传统 CSV `SpriteAnime` 当前帧及静态 `ASpriteSingle` 大图集子区域的小纹理提取、复用、预算清理与生命周期释放，避免上传超大完整图集后再按原坐标裁切。 | `GetAndroidSpriteAnimeFrameTexture`, `TryGetAndroidStaticAtlasRegionTexture`, `CleanupAndroidSpriteAnimeFrameTextures`, `DisposeAndroidSpriteAnimeFrameTextures` |
 | `Scripts/EmueraImage.cs` | `EmueraImage : Control`, `ImageSourceState` | 绘制纹理、播放完整动画 WebP，并切换 HTML `src/srcb` 两套静态或动态图片源；支持 ColorMatrix、裁剪与翻转。 | `ConfigureButtonSources`, `SetSelected`, `SetAnimatedWebpSource`, `SetColorMatrix`, `_Process`, `_Draw` |
-| `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放；在 `[debug.performance_sampling]` 开启时低频聚合普通帧与 Canvas 控制台渲染采样。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `SetBackgroundColor`, `PlaySoundFile`, `SamplePerformanceFrame`, `SampleConsoleRenderFrame`, `ExportDiagnosticPackage`, `RestartGame` |
+| `Scripts/GenericUtils.cs` | `GenericUtils`, `EmueraLogLevel`, `EmueraLogCategory`, `SnakeAudioInfo` | Emuera 核心到 Godot 的静态桥；日志总开关、诊断热路径闸门、UI 队列、文本输出、音频、输入回放；`RefreshCBG` 按 CBG 展示 revision 入队，避免静态背景随文本重复提交；在 `[logging].performance` 开启时低频聚合普通帧、Canvas 控制台渲染和显示桥采样，并把 `_Draw()`、命中表重建和 Control fallback 应用成本分开输出。 | `InitializeLogging`, `IsLogEnabled`, `IsScrollTraceActive`, `FlushUI`, `AddText`, `ApplyTextChanges`, `RefreshCBG`, `SetBackgroundColor`, `PlaySoundFile`, `SamplePerformanceFrame`, `SampleConsoleRenderFrame`, `SampleDisplayBridge`, `ExportDiagnosticPackage`, `RestartGame` |
 | `Scripts/FirstWindow.cs` | `FirstWindow : Control`, `LauncherGameEntry` | 启动器；左侧保留 `v24` / `snake` 双标签。v24 固定扫描普通根目录的直接游戏和 `compat/<profile>/<game>`，snake 固定扫描 `snake/<game>`；列表项本身拥有 path/profile/source，正常模式不会从 UI 标签或游戏内容反推 profile。compat profile 由冻结的 Core allowlist 校验，未知、大小写错误和保留 lane 均拒绝；高级兼容模式可显式覆盖本次启动 profile。启动器外边距跟随 display safe area，避免横屏前摄/挖孔遮挡。 | `_Ready`, `ApplyLauncherSafeArea`, `_ExitTree`, `_Notification`, `ScanGames`, `ScanCompatibilityDirectory`, `GetSelectedCoreProfileName`, `CreateCompatibilitySettings` |
 | `Scripts/SpriteManager.cs` | `SpriteManager`, `TextureInfo`, `SpriteInfo` | 图片/精灵纹理缓存；AtlasTexture 管理；文件图片后台 I/O/解码请求；主线程限流接收解码结果并创建纹理；透明占位纹理带 `IsPlaceholder` 标记并按节流重试，真实纹理完成后可覆盖占位缓存，避免外部存储偶发读失败污染角色图层。 | `Init`, `GetSprite`, `GetTextureInfo`, `TryGetTextureInfoCached`, `RequestTextureInfoAsync`, `GetTextureInfoOtherThread`, `UpdateOtherThreads`, `TextureLoadVersion`, `UpdateCleanup`, `ForceClear` |
 | `Scripts/ColorMatrixGPU.cs` | `ColorMatrixGPU` | ColorMatrix shader material 创建、缓存、LRU、uniform 设置。 | `CreateMaterial`, `GetSharedMaterial`, `GetMatrixKey`, `SetMatrixUniforms`, `CreateCompositMaterial` |
@@ -406,7 +423,7 @@ project.godot
 | `uEmuera/Application.cs` | `Application` | Windows Forms `Application` 兼容桩。 | `EnableVisualStyles`, `SetCompatibleTextRenderingDefault`, `Run` |
 | `uEmuera/Drawing.cs` | `Bitmap`, `BitmapTexture`, `Graphics`, `Color`, `Font`, `Rectangle`, `Point`, `Size` | `System.Drawing` 替代层；包装 Godot Image/Texture、颜色、字体、几何类型；`BitmapTexture` 遇到占位缓存时允许 `SpriteManager` 按节流异步重试真实纹理。 | `Bitmap.Save`, `BitmapTexture`, `Color.FromArgb`, `Color.ToGodotColor`, `Rectangle.Intersect` |
 | `uEmuera/Forms.cs` | `Timer`, `MessageBox`, `ScrollBar`, `ToolTip`, `PictureBox`, `TextBox` | `System.Windows.Forms` 替代层；Timer 由 Godot loop 手动 Update。 | `Timer.Update`, `MessageBox.Show`, `ToolTip.SetToolTip` |
-| `uEmuera/Window.cs` | `MainWindow`, `DebugDialog` | 原主窗体兼容桩，桥接 `EmueraConsole` 和 `Process`。 | `MainWindow.Init`, `Update`, `Refresh`, `WaitForRefreshProcessed`, `Reboot` |
+| `uEmuera/Window.cs` | `MainWindow`, `DebugDialog` | 原主窗体兼容桩，桥接 `EmueraConsole` 和 `Process`；`Update` 负责显示后缀快照、行级 diff、CBG revision 提交，并在性能采样开启时记录快照和 diff 耗时。 | `MainWindow.Init`, `Update`, `Refresh`, `WaitForRefreshProcessed`, `Reboot` |
 | `uEmuera/Utils.cs` | `Logger`, `Utils` | 文件系统、编码、资源扫描、显示宽度、路径规范化工具；Godot 文件 API 下的通配符枚举在单次目录扫描内复用 Regex 匹配，保持原通配符语义并避免按文件重复构造匹配器；`ResourcePrepare` 读取资源 CSV 时只扫描头部字段，避免为每行创建完整 `string[]`。 | `SHIFTJIS_to_UTF8`, `NormalizePath`, `FileExists`, `GetFilePaths`, `GetDisplayLength`, `ResourcePrepare` |
 | `uEmuera/Properties.cs` | `ResourceManager`, `Resources` | 原资源访问兼容。 | `GetString` |
 | `uEmuera/VisualBasic.cs` | `Strings`, `VbStrConv` | VB 字符串转换兼容。 | `StrConv` |
@@ -542,7 +559,7 @@ project.godot
 
 | 文件 | 主要类型 | 职责 | 关键入口/函数 |
 |---|---|---|---|
-| `EmueraConsole.cs` | partial `EmueraConsole`, `DisplayLineList`, `ClientBackGroundImage` | 控制台状态、输入等待、NF 等待态、CBG/图片层、鼠标/键盘、调试、重载；保存 v24 渲染控制 API 和 `HOTKEY_STATE` 的脚本可见状态。 | `Initialize`, `WaitInput`, `IsWaitInputState`, `PressEnterKey`, `RefreshStrings`, `CBG_SetImage`, `SetImageLayer`, `SetSnakeTextDrawingMode`, `HotkeyStateInitialize`, `TryEvaluateHotkey`, `ReloadErb`, `Dispose` |
+| `EmueraConsole.cs` | partial `EmueraConsole`, `DisplayLineList`, `ClientBackGroundImage` | 控制台状态、输入等待、NF 等待态、CBG/图片层、鼠标/键盘、调试、重载；CBG 通过展示 revision 识别列表结构、`GraphicsImage` 像素和 `SpriteAnime` 帧变化，避免静态背景重复提交；保存 v24 渲染控制 API 和 `HOTKEY_STATE` 的脚本可见状态。 | `Initialize`, `WaitInput`, `IsWaitInputState`, `PressEnterKey`, `RefreshStrings`, `TryGetCBGListSnapshot`, `CBG_SetImage`, `SetImageLayer`, `SetSnakeTextDrawingMode`, `HotkeyStateInitialize`, `TryEvaluateHotkey`, `ReloadErb`, `Dispose` |
 | `EmueraConsole.Print.cs` | partial `EmueraConsole` | 打印文本、HTML、按钮、图片、形状、日志输出；维护 `IsLineEnd`、`LINECOUNT`、`CLEARLINE` 的逻辑行语义和 `PrintC/PrintButtonC` 像素制表。 | `Print`, `PrintC`, `PrintButtonC`, `PrintHtml`, `PrintImg`, `PrintShape`, `PrintButton`, `PrintFlush`, `deleteLine`, `OutputLog`, `PopDisplayingLines` |
 | `ConsoleDisplayLine.cs` | `ConsoleDisplayLine` | 一行显示内容，包含多个按钮/片段。 | `DrawTo`, `GDIDrawTo`, `ShiftPositionX`, `ChangeStr` |
 | `ConsoleButtonString.cs` | `ConsoleButtonString` | 一个可点击/可输入的显示段，包含多个 display part。 | `DivideAt`, `CalcWidth`, `CalcPointX`, `DrawTo` |
@@ -634,13 +651,13 @@ project.godot
 |---|---|
 | 文本行添加/删除/刷新 | `GenericUtils.AddText`, `GenericUtils.ApplyTextChanges`, `EmueraContent.AddLine`, `EmueraContent.Canvas.AddCanvasLine`, `EmueraContent.UpdateDisplay` |
 | 控制台打印语义 | `EmueraConsole.Print`, `PrintHtml`, `PrintButton`, `PrintFlush` |
-| HTML 标签支持 | `HtmlManager.Html2DisplayLine`, `HtmlManager.tagAnalyze`, `ConsoleDivPart`；Canvas 后端相对 div overlay 见 `CanUseCanvasDivOverlay`、`UpdateCanvasDivOverlay`、`FlushCanvasOverlayRowsIfNeeded`、`RefreshCanvasOverlayVisibility`，逃逸 div 行索引用 `canvasRowsWithEscapedOverlays` |
-| 行内图片/形状 | `ConsoleImagePart`, `ConsoleShapePart`, `EmueraContent.AddLine`, `ConsoleRenderSurface.DrawImagePart`；Canvas 后端复杂图片 overlay 见 `NeedsCanvasImageOverlay`、`UpdateCanvasImageOverlay`、`FlushCanvasOverlayRowsIfNeeded`、`RefreshCanvasOverlayVisibility`、`RefreshCanvasImageAnimations`，动画候选索引用 `canvasAnimatedImageOverlayKeys` |
-| CBG/背景/图片层 | `EmueraConsole.CBG_*`, `SetImageLayer`, `EmueraContent.RefreshCBG` |
+| HTML 标签支持 | `HtmlManager.Html2DisplayLine`, `HtmlManager.tagAnalyze`, `ConsoleDivPart`；Canvas 后端保持所有 div 行整行回退到 Control，`CanUseCanvasDivOverlay` 仅保留为未启用的兼容边界 |
+| 行内图片/形状 | `ConsoleImagePart`, `ConsoleShapePart`, `EmueraContent.AddLine`, `ConsoleRenderSurface.DrawImagePart`；Canvas 后端复杂图片及跨逻辑行的静态相对图片 overlay 见 `NeedsCanvasImageOverlay`、`UpdateCanvasImageOverlay`、`FlushCanvasOverlayRowsIfNeeded`、`RefreshCanvasOverlayVisibility`、`RefreshCanvasImageAnimations`，逃逸图按钮命中会在重建时补查其源行，动画候选索引用 `canvasAnimatedImageOverlayKeys` |
+| CBG/背景/图片层 | `EmueraConsole.CBG_*`, `TryGetCBGListSnapshot`, `SetImageLayer`, `GenericUtils.RefreshCBG`, `EmueraContent.RefreshCBG`；静态 CBG 只在展示 revision 变化时提交，`SpriteAnime` 仍随显示刷新更新 |
 | 快捷按钮 | `QuickButtons.AddButton`, `QuickButtons.SetInputEnabled`, `EmueraContent.SubmitQuickButtonInput` |
 | 屏幕输入面板 | `Inputpad.UpdateInputType`, `ShowPad`, `HidePad` |
 | 缩放 | `Scalepad.SetScale`, `EmueraContent.SetContentScale`, `EmueraContent.NormalizeContentHorizontalScroll`, `ResolutionHelper.Apply` |
-| Canvas 性能采样 | `ConsoleRenderSurface._Draw`, `ConsoleRenderSurface.RebuildHitRectsOnly`, `GenericUtils.SampleConsoleRenderFrame`；开启 `[debug.performance_sampling]` 后输出 `PERF.CONSOLE_RENDER`，包含 `draw_ms_avg/p95/max`、可视行、Canvas 行、overlay 行、part、hit rect 和节点规模快照；普通绘制窗口与点击前 hit-only 重建窗口分开统计，命中重建使用行级按钮矩形缓存与垂直桶索引，`PERF.*` 在 Godot/logcat 镜像中保留 `data` 字段 |
+| Canvas/显示桥性能采样 | `ConsoleRenderSurface._Draw`, `ConsoleRenderSurface.RebuildHitRectsOnly`, `GenericUtils.SampleConsoleRenderFrame`, `SampleDisplayBridge`；开启 `[logging].performance` 后输出 `PERF.CONSOLE_RENDER` 与 `PERF.DISPLAY_BRIDGE`，其中 `draw_*` 仅表示 `_Draw()` 的 CPU callback，`hit_rebuild_*` 仅表示点击前命中表重建的 CPU callback，显示桥另含快照、diff、UI 应用、Control fallback 和 CBG 提交量；命中重建使用行级按钮矩形缓存、逃逸图源行补查和复用的垂直桶索引，`PERF.*` 在 Godot/logcat 镜像中保留 `data` 字段 |
 
 ### 图片/精灵/ColorMatrix
 
@@ -687,7 +704,7 @@ project.godot
 | 运行期配置 | `RuntimeDiagnosticsConfig`, `RuntimeDiagnosticsConfigLoader`, `RuntimeDiagnosticsConfigWriter` |
 | 输入回放 | `InputReplayBuffer`, `GenericUtils.CaptureInputReplay` |
 | 诊断浮窗 | `RuntimeDiagnosticsPanel.AttachFloatingTo` |
-| 性能采样 | `GenericUtils.SamplePerformanceFrame`, `GenericUtils.SampleConsoleRenderFrame`；`PERF.SAMPLE` 记录 FPS/帧耗时/UI 队列/纹理队列，`PERF.CONSOLE_RENDER` 记录 Canvas 控制台可视绘制与命中表重建窗口数据；`PERF.*` 镜像输出会附带 `data` 便于直接 grep logcat |
+| 性能采样 | `GenericUtils.SamplePerformanceFrame`, `GenericUtils.SampleConsoleRenderFrame`, `GenericUtils.SampleDisplayBridge`；`PERF.SAMPLE` 记录 FPS/帧耗时/UI 队列/纹理队列，`PERF.CONSOLE_RENDER` 分别记录 Canvas `_Draw()` 与命中表重建的 CPU callback，`PERF.DISPLAY_BRIDGE` 记录显示快照、diff、UI 应用、Control fallback 和 CBG 提交窗口数据；`PERF.*` 镜像输出会附带 `data` 便于直接 grep logcat |
 
 ## 常见修改定位
 

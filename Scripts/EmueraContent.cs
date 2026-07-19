@@ -1532,6 +1532,7 @@ public partial class EmueraContent : Control
 		lineControl.SetMeta("line_no", line.LineNo);
 		RegisterLine(line.LineNo, line, lineControl, lineSize);
 		RegisterLineTexturePins(line.LineNo, newTexturePins);
+		GenericUtils.RecordDisplayFallbackLineBuild(hasExistingLine);
 		if (asyncTexturePendingDuringRender)
 			asyncTexturePendingLineNos.Add(line.LineNo);
 		else
@@ -2257,6 +2258,8 @@ public partial class EmueraContent : Control
 	internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines,
 		bool update, int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
 	{
+		bool sampleDisplayBridge = GenericUtils.IsPerformanceSamplingEnabled;
+		ulong applyStartUsec = sampleDisplayBridge ? Time.GetTicksUsec() : 0;
 		bool scrollToBottom = scrollMode == EmueraDisplayScrollMode.FollowBottom;
 		bool changed = false;
 		batchingDisplayLines = true;
@@ -2308,6 +2311,8 @@ public partial class EmueraContent : Control
 		if (GenericUtils.IsScrollTraceActive)
 			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} dataOnly={dataOnlyLines?.Count ?? 0} changed={changed} update={update} scrollMode={scrollMode} autoScroll={scrollToBottom} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
 		SetLastButtonGeneration(lastButtonGeneration);
+		if (sampleDisplayBridge)
+			GenericUtils.RecordDisplayApplyBatch((Time.GetTicksUsec() - applyStartUsec) / 1000.0);
 	}
 
 	void QueueDisplayFollowUp(bool scrollToBottom = true)
@@ -5019,23 +5024,42 @@ public partial class EmueraContent : Control
 		{
 			var entry = entries[i];
 			var emuImg = GetOrCreateCbgNode(i);
-			emuImg.SourceTexture = entry.SourceTexture;
-			emuImg.SourceRegion = entry.SourceRegion;
-			emuImg.DrawOffset = entry.DrawOffset;
-			emuImg.DrawSize = entry.DrawSize;
-			emuImg.Position = entry.Position;
-			emuImg.Size = entry.Size;
-			emuImg.FlipX = entry.FlipX;
-			emuImg.FlipY = entry.FlipY;
-			emuImg.Modulate = entry.Modulate;
-			emuImg.SetColorMatrix(entry.Layer.colorMatrix);
-			emuImg.SetAnimatedWebpSource(entry.AnimatedWebpPath);
-			emuImg.Visible = true;
+			ApplyCbgRenderEntry(emuImg, entry);
 			renderedCbgLayers.Add(entry.Layer);
 		}
 		cbgTexturePins = newCbgTexturePins;
 		lastCbgScrollVertical = currentScrollY;
 		TrimCbgNodes(entries.Count);
+	}
+
+	// CBG 的节点按索引复用。即使动态图层要求重新检查纹理，也不要给属性未变的节点
+	// 重复写入相同值，否则每个 setter 都会让 Godot 重新标记 CanvasItem 并放大地图刷新成本。
+	static void ApplyCbgRenderEntry(EmueraImage image, CbgRenderEntry entry)
+	{
+		if (image == null)
+			return;
+		if (image.SourceTexture != entry.SourceTexture)
+			image.SourceTexture = entry.SourceTexture;
+		if (image.SourceRegion != entry.SourceRegion)
+			image.SourceRegion = entry.SourceRegion;
+		if (image.DrawOffset != entry.DrawOffset)
+			image.DrawOffset = entry.DrawOffset;
+		if (image.DrawSize != entry.DrawSize)
+			image.DrawSize = entry.DrawSize;
+		if (image.Position != entry.Position)
+			image.Position = entry.Position;
+		if (image.Size != entry.Size)
+			image.Size = entry.Size;
+		if (image.FlipX != entry.FlipX)
+			image.FlipX = entry.FlipX;
+		if (image.FlipY != entry.FlipY)
+			image.FlipY = entry.FlipY;
+		if (image.Modulate != entry.Modulate)
+			image.Modulate = entry.Modulate;
+		image.SetColorMatrix(entry.Layer?.colorMatrix);
+		image.SetAnimatedWebpSource(entry.AnimatedWebpPath);
+		if (!image.Visible)
+			image.Visible = true;
 	}
 
 	// Convert emuera CBG z-depth rules into a Godot position. Positive z-depth
@@ -6654,12 +6678,13 @@ public partial class EmueraContent : Control
 		{
 			var console = GlobalStatic.Console;
 			bool isNonLeftClick = pressedButtonMouseVk != 0x01;
-			// 左クリック: EnterKey/AnyKey 待ちのみ advance。
-			// 右/中クリック: INPUT 数値入力待ち中も advance（ゲームが RESULT:1==2 で右クリック検知）。
+			// 左クリック: 通常は EnterKey/AnyKey、eraFL では INPUTS の空白入力も advance。
+			// 右/中クリック: INPUT 待ち中も送信し、ゲーム側が RESULT:1 で用途を判定する。
 			advanceTap = console != null && (
 				console.IsWaitingEnterKey || console.IsWaitAnyKey ||
 				(isNonLeftClick && console.IsWaitingInput) ||
-				ShouldSubmitBlankLeftClickDefault(console, pressedButtonMouseVk));
+				ShouldSubmitBlankLeftClickDefault(console, pressedButtonMouseVk) ||
+				ShouldSubmitEraFlBlankPointerString(console, pressedButtonMouseVk));
 			handled = advanceTap;
 			restoreQuickInputGate = advanceTap;
 		}
@@ -7369,18 +7394,20 @@ public partial class EmueraContent : Control
 		return Mathf.CeilToInt(overflow);
 	}
 
-	// Submit an empty input when the console is waiting for enter/any key.
-	// mouseVk: 右/中键时以 from_button=true 送入，让 RESULT_ARRAY[1] 写入正确按键码。
+	// Submit an empty input for enter/any-key waits and profile-approved pointer input loops.
+	// mouseVk: 以 from_button=true 送入时由 EmueraThread 写入对应的 RESULT_ARRAY[1] 鼠标码。
 	bool TryAdvanceTap(bool acceptEvent, int mouseVk = 0x01)
 	{
 		var console = GlobalStatic.Console;
 		bool isNonLeft = mouseVk != 0x01;
-		// 左键：仅 EnterKey/AnyKey 等待时 advance。
-		// 右/中键：IsWaitingInput（含 INPUT 数值等待）也 advance，让游戏通过 RESULT:1 检测右键。
+		// 左键：通常只推进 EnterKey/AnyKey；eraFL 的 INPUTS 鼠标循环额外允许空白输入。
+		// 右/中键：INPUT 等待也送入，让游戏通过 RESULT:1 区分技能、快捷键等用途。
 		if (console == null)
 			return false;
 		bool submitBlankLeftDefault = ShouldSubmitBlankLeftClickDefault(console, mouseVk);
-		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInput) && !submitBlankLeftDefault)
+		bool submitEraFlBlankString = ShouldSubmitEraFlBlankPointerString(console, mouseVk);
+		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInput)
+			&& !submitBlankLeftDefault && !submitEraFlBlankString)
 			return false;
 
 		uint nowTick = MinorShift._Library.WinmmTimer.TickCount;
@@ -7393,10 +7420,19 @@ public partial class EmueraContent : Control
 		// 右键/中键を空エリアでタップした場合は from_button=true で送信。
 		// これにより EmueraThread の IsWaitingInputSomething ガードを通過し、
 		// RESULT_ARRAY[1] に正しいボタンコードが書き込まれる。
-		bool fromButton = mouseVk != 0x01 || submitBlankLeftDefault;
+		bool fromButton = mouseVk != 0x01 || submitBlankLeftDefault || submitEraFlBlankString;
 		EmueraThread.instance.Input("", fromButton, skipFlag, fromButton ? mouseVk : 0);
 		lastClickTick = nowTick;
 		return true;
+	}
+
+	static bool ShouldSubmitEraFlBlankPointerString(MinorShift.Emuera.GameView.EmueraConsole console, int mouseVk)
+	{
+		return Program.IsEraFlProfile
+			&& GEmuera.Core.Compatibility.EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(
+				mouseVk,
+				console != null && console.IsWaitingInput
+					&& console.InputType == MinorShift.Emuera.GameProc.InputType.StrValue);
 	}
 
 	static bool ShouldSubmitBlankLeftClickDefault(MinorShift.Emuera.GameView.EmueraConsole console, int mouseVk)

@@ -240,8 +240,16 @@ public class EmueraThread
                 bool consumed = false;
                 try
                 {
-                    if(originalMouseButton != 0)
-                        MinorShift.Emuera.GlobalStatic.Process?.InputInteger(1, originalMouseButton);
+                    int resultMouseButton = originalMouseButton;
+                    if (MinorShift.Emuera.Program.IsEraFlProfile)
+                    {
+                        // Godot/Win32 的中键 VK 是 0x04，但 eraFL 的 RESULT:1 鼠标协议是
+                        // 1=左、2=右、3=中。两者不能共用同一个数值。
+                        resultMouseButton = GEmuera.Core.Compatibility.EraFlCompatibilityModule
+                            .NormalizePointerButtonResult(originalMouseButton);
+                    }
+                    if(resultMouseButton != 0)
+                        MinorShift.Emuera.GlobalStatic.Process?.InputInteger(1, resultMouseButton);
                     // 右/中键点击空区域时 input=""，IntValue 状态下 PressEnterKey 无法解析空字符串会直接
                     // return false，导致等待不推进、脚本永远读不到 RESULT:1。
                     // eraFL(USERCOM_INPUT.ERB) 判定"未点击任何按钮"的条件是 RESULT:0 == -1，
@@ -252,7 +260,7 @@ public class EmueraThread
                         submitInput = GEmuera.Core.Compatibility.EraFlCompatibilityModule
                             .NormalizePointerIntegerSubmission(
                                 submitInput,
-                                originalMouseButton,
+                                resultMouseButton,
                                 console.InputType == MinorShift.Emuera.GameProc.InputType.IntValue);
                     }
                     console.PressEnterKey(skipflag, submitInput, originalMouseButton != 0);

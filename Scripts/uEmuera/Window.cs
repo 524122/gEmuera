@@ -5,6 +5,7 @@ using MinorShift.Emuera.GameProc;
 using MinorShift.Emuera.GameView;
 using MinorShift._Library;
 using System.Threading;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace uEmuera.Window
 {
@@ -125,9 +126,14 @@ namespace uEmuera.Window
 
             int prev = GenericUtils.GetTextMaxLineNo();
             int min_lineno = GenericUtils.GetTextMinLineNo();
+            bool sampleDisplayBridge = GenericUtils.IsPerformanceSamplingEnabled;
+            long snapshotStartTimestamp = sampleDisplayBridge ? Stopwatch.GetTimestamp() : 0;
             var displayLines = console_.GetDisplayLinesSnapshotForuEmuera(
                 min_lineno, out int console_count, out _);
             int snapshotCount = displayLines.Length;
+            double snapshotElapsedMs = sampleDisplayBridge
+                ? GetElapsedMilliseconds(snapshotStartTimestamp)
+                : 0.0;
             if(console_count == 0)
             {
                 if(console_.IsInProcess)
@@ -146,6 +152,7 @@ namespace uEmuera.Window
             int removeBottomCount = 0;
             System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd = null;
             System.Collections.Generic.List<ConsoleDisplayLine> linesToRefreshData = null;
+            long diffStartTimestamp = sampleDisplayBridge ? Stopwatch.GetTimestamp() : 0;
             int newMaxLineNo = GetSnapshotMaxLineNo(displayLines);
             bool fullReset = prev >= 0 && min_lineno >= 0 && newMaxLineNo >= 0 && newMaxLineNo < min_lineno;
 
@@ -200,13 +207,28 @@ namespace uEmuera.Window
                 linesToAdd, linesToRefreshData);
 
             GenericUtils.ApplyTextChanges(removeBottomCount, linesToAdd, need_update_flag, console_.LastButtonGeneration, scrollMode, linesToRefreshData);
+            double diffElapsedMs = sampleDisplayBridge
+                ? GetElapsedMilliseconds(diffStartTimestamp)
+                : 0.0;
 
             GenericUtils.ShowIsInProcess(false);
-            GenericUtils.RefreshCBG(console_);
+            bool cbgSubmitted = GenericUtils.RefreshCBG(console_);
+            if (sampleDisplayBridge)
+            {
+                GenericUtils.SampleDisplayBridge(snapshotElapsedMs, diffElapsedMs, snapshotCount, removeBottomCount,
+                    linesToAdd?.Count ?? 0, linesToRefreshData?.Count ?? 0, cbgSubmitted);
+            }
             if (console_.NeedSetTimer())
                 EmueraThread.instance.WakeForTimerSchedule();
             last_process_tic = 0;
             Volatile.Write(ref processedRefreshGeneration, Volatile.Read(ref refreshRequestGeneration));
+        }
+
+        static double GetElapsedMilliseconds(long startTimestamp)
+        {
+            if (startTimestamp <= 0)
+                return 0.0;
+            return (Stopwatch.GetTimestamp() - startTimestamp) * 1000.0 / Stopwatch.Frequency;
         }
 
         static EmueraDisplayScrollMode DecideScrollModeForDisplayDelta(int previousMaxLineNo, int removeBottomCount, bool update,
