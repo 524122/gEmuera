@@ -5,6 +5,7 @@ using MinorShift.Emuera.GameProc;
 using MinorShift.Emuera.GameView;
 using MinorShift._Library;
 using System.Threading;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace uEmuera.Window
 {
@@ -123,12 +124,18 @@ namespace uEmuera.Window
 
             GenericUtils.SetBackgroundColor(console_.bgColor);
 
-            var displayLines = console_.GetDisplayLinesSnapshotForuEmuera();
-            var console_count = displayLines.Length;
+            int prev = GenericUtils.GetTextMaxLineNo();
+            int min_lineno = GenericUtils.GetTextMinLineNo();
+            bool sampleDisplayBridge = GenericUtils.IsPerformanceSamplingEnabled;
+            long snapshotStartTimestamp = sampleDisplayBridge ? Stopwatch.GetTimestamp() : 0;
+            var displayLines = console_.GetDisplayLinesSnapshotForuEmuera(
+                min_lineno, out int console_count, out _);
+            int snapshotCount = displayLines.Length;
+            double snapshotElapsedMs = sampleDisplayBridge
+                ? GetElapsedMilliseconds(snapshotStartTimestamp)
+                : 0.0;
             if(console_count == 0)
             {
-                dynamicMapViewActive = false;
-                dynamicMapViewBaseLineNo = -1;
                 if(console_.IsInProcess)
                 {
                     dirty_ = true;
@@ -145,23 +152,7 @@ namespace uEmuera.Window
             int removeBottomCount = 0;
             System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd = null;
             System.Collections.Generic.List<ConsoleDisplayLine> linesToRefreshData = null;
-            int prev = GenericUtils.GetTextMaxLineNo();
-            int min_lineno = GenericUtils.GetTextMinLineNo();
-            int displayStartIndex = 0;
-            if(TryFindDynamicMapWindowStart(displayLines, out int dynamicMapStartIndex))
-            {
-                int mapBaseLineNo = displayLines[dynamicMapStartIndex].LineNo;
-                // 这里只保留动态地图上下文标记，不再裁剪 Godot 显示视图。
-                // 历史内容继续参与行级 diff，进入地图后仍可向上查看前文；
-                // 动态地图内完全停用“把视口拉回选项区”的补偿，避免查看历史时被刷新拉回底部。
-                dynamicMapViewActive = true;
-                dynamicMapViewBaseLineNo = mapBaseLineNo;
-            }
-            else if(dynamicMapViewActive)
-            {
-                dynamicMapViewActive = false;
-                dynamicMapViewBaseLineNo = -1;
-            }
+            long diffStartTimestamp = sampleDisplayBridge ? Stopwatch.GetTimestamp() : 0;
             int newMaxLineNo = GetSnapshotMaxLineNo(displayLines);
             bool fullReset = prev >= 0 && min_lineno >= 0 && newMaxLineNo >= 0 && newMaxLineNo < min_lineno;
 
@@ -179,7 +170,7 @@ namespace uEmuera.Window
                 }
             }
 
-            for(int i = displayStartIndex; i < console_count; i++)
+            for(int i = 0; i < snapshotCount; i++)
             {
                 var line = displayLines[i];
                 if(line == null)
@@ -212,59 +203,48 @@ namespace uEmuera.Window
                 linesToAdd.Add((line, isUpdate));
             }
 
-            bool hasDynamicMapFunctionDelta = GenericUtils.ContainsDynamicMapFunctionScope(linesToAdd);
             EmueraDisplayScrollMode scrollMode = DecideScrollModeForDisplayDelta(prev, removeBottomCount, need_update_flag,
-                linesToAdd, dynamicMapViewActive, hasDynamicMapFunctionDelta);
-            bool scrollToBottom = scrollMode == EmueraDisplayScrollMode.FollowBottom;
-
-            if (GenericUtils.IsDynamicMapLineSnapshotTraceEnabled)
-            {
-                bool hasBitmapContext = GenericUtils.ContainsDynamicMapBitmapContext(linesToAdd)
-                    || GenericUtils.ContainsDynamicMapBitmapContextTail(displayLines);
-                if (GenericUtils.ShouldTraceDynamicMap(hasBitmapContext))
-                {
-                    GenericUtils.DynamicMapTrace("DYNAMIC_MAP.BRIDGE.SUBMIT",
-                        () => "dynamic map bridge display diff",
-                        () => "console_count=" + console_count
-                            + " remove_bottom=" + removeBottomCount
-                            + " add=" + (linesToAdd?.Count ?? 0)
-                            + " data_only=" + (linesToRefreshData?.Count ?? 0)
-                            + " view_start=" + displayStartIndex
-                            + " map_view=" + dynamicMapViewActive
-                            + " map_base=" + dynamicMapViewBaseLineNo
-                            + " map_delta=" + hasDynamicMapFunctionDelta
-                            + " update=" + need_update_flag
-                            + " scroll_mode=" + scrollMode
-                            + " auto_scroll=" + scrollToBottom
-                            + " prev_max=" + prev
-                            + " last_button_generation=" + console_.LastButtonGeneration
-                            + " has_bitmap_context=" + hasBitmapContext
-                            + " tail=" + GenericUtils.BuildDynamicMapLineTailSummary(displayLines)
-                            + " incoming=" + GenericUtils.BuildDynamicMapDeltaLineSummary(linesToAdd));
-                }
-            }
+                linesToAdd, linesToRefreshData);
 
             GenericUtils.ApplyTextChanges(removeBottomCount, linesToAdd, need_update_flag, console_.LastButtonGeneration, scrollMode, linesToRefreshData);
+            double diffElapsedMs = sampleDisplayBridge
+                ? GetElapsedMilliseconds(diffStartTimestamp)
+                : 0.0;
 
             GenericUtils.ShowIsInProcess(false);
-            GenericUtils.RefreshCBG(console_);
-            console_.NeedSetTimer();
+            bool cbgSubmitted = GenericUtils.RefreshCBG(console_);
+            if (sampleDisplayBridge)
+            {
+                GenericUtils.SampleDisplayBridge(snapshotElapsedMs, diffElapsedMs, snapshotCount, removeBottomCount,
+                    linesToAdd?.Count ?? 0, linesToRefreshData?.Count ?? 0, cbgSubmitted);
+            }
+            if (console_.NeedSetTimer())
+                EmueraThread.instance.WakeForTimerSchedule();
             last_process_tic = 0;
             Volatile.Write(ref processedRefreshGeneration, Volatile.Read(ref refreshRequestGeneration));
         }
 
-        static EmueraDisplayScrollMode DecideScrollModeForDisplayDelta(int previousMaxLineNo, int removeBottomCount, bool update,
-            System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd, bool dynamicMapViewActive,
-            bool hasDynamicMapFunctionDelta)
+        static double GetElapsedMilliseconds(long startTimestamp)
         {
-            // 动态地图、状态面板一类内容通常通过删除底部旧行再重画当前屏幕来刷新。
+            if (startTimestamp <= 0)
+                return 0.0;
+            return (Stopwatch.GetTimestamp() - startTimestamp) * 1000.0 / Stopwatch.Frequency;
+        }
+
+        static EmueraDisplayScrollMode DecideScrollModeForDisplayDelta(int previousMaxLineNo, int removeBottomCount, bool update,
+            System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd,
+            System.Collections.Generic.List<ConsoleDisplayLine> dataOnlyLines)
+        {
+            // 状态面板等页面通常通过删除底部旧行再重画当前屏幕来刷新。
             // 这不是“追加新文本”，因此不能触发 ScrollContainer 自动滚到底；否则 Android 会在重绘时把视口拖走。
-            // 但第一次进入地图或普通新文本追加仍应允许追到底部，否则会出现需要手动滑到底的问题。
-            if (linesToAdd == null || linesToAdd.Count == 0)
+            // 只有确实新增了显示行时才追底，避免把内容类型识别重新耦合回滚动策略。
+            if ((linesToAdd == null || linesToAdd.Count == 0)
+                && (dataOnlyLines == null || dataOnlyLines.Count == 0))
                 return EmueraDisplayScrollMode.PreserveViewport;
 
             bool hasAppendAfterPreviousMax = false;
-            for (int i = 0; i < linesToAdd.Count; i++)
+            int linesToAddCount = linesToAdd?.Count ?? 0;
+            for (int i = 0; i < linesToAddCount; i++)
             {
                 var item = linesToAdd[i];
                 if (item.Line == null)
@@ -276,11 +256,8 @@ namespace uEmuera.Window
                 }
             }
 
-            if ((dynamicMapViewActive || hasDynamicMapFunctionDelta) && (removeBottomCount > 0 || update))
-                return EmueraDisplayScrollMode.PreserveViewport;
-
             // 普通会话/泡茶等输出可能在追加新文本的同时刷新旧行元数据。
-            // 只要不是动态地图重绘，并且确实出现了新行，就按普通 Emuera 输出追到底部。
+            // 只要确实出现了新行，就按普通 Emuera 输出追到底部。
             if (hasAppendAfterPreviousMax)
                 return EmueraDisplayScrollMode.FollowBottom;
 
@@ -288,94 +265,6 @@ namespace uEmuera.Window
                 return EmueraDisplayScrollMode.PreserveViewport;
 
             return EmueraDisplayScrollMode.PreserveViewport;
-        }
-
-        static bool TryFindDynamicMapWindowStart(ConsoleDisplayLine[] lines, out int startIndex)
-        {
-            startIndex = -1;
-            if(lines == null || lines.Length == 0)
-                return false;
-
-            int lastBitmapIndex = -1;
-            int searchStart = Math.Max(0, lines.Length - DynamicMapTailSearchLineCount);
-            for(int i = lines.Length - 1; i >= searchStart; i--)
-            {
-                if(GenericUtils.LineHasDynamicMapBitmapContext(lines[i]))
-                {
-                    lastBitmapIndex = i;
-                    break;
-                }
-            }
-            if(lastBitmapIndex < 0)
-                return false;
-
-            int firstBitmapIndex = lastBitmapIndex;
-            while(firstBitmapIndex > 0 && GenericUtils.LineHasDynamicMapBitmapContext(lines[firstBitmapIndex - 1]))
-                firstBitmapIndex--;
-
-            int bitmapLineCount = lastBitmapIndex - firstBitmapIndex + 1;
-            if(bitmapLineCount < 6)
-                return false;
-
-            if(!LooksLikeMapWindow(lines, firstBitmapIndex, lastBitmapIndex, bitmapLineCount))
-                return false;
-
-            startIndex = firstBitmapIndex;
-            return true;
-        }
-
-        static bool LooksLikeMapWindow(ConsoleDisplayLine[] lines, int firstBitmapIndex, int lastBitmapIndex, int bitmapLineCount)
-        {
-            int commandCount = 0;
-            for(int i = firstBitmapIndex; i <= lastBitmapIndex; i++)
-                commandCount += CountCommandButtons(lines[i], 0);
-
-            if(bitmapLineCount >= 12 && commandCount >= 2)
-                return true;
-
-            int start = Math.Max(0, firstBitmapIndex - 3);
-            int end = Math.Min(lines.Length - 1, lastBitmapIndex + 8);
-            for(int i = start; i <= end; i++)
-            {
-                string text = lines[i]?.ToString() ?? "";
-                if(text.IndexOf("地图", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("地圖", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("地図", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("所在地", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("当前位置", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("現在地", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("察觉", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("察覺", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("察知", StringComparison.Ordinal) >= 0)
-                    return commandCount > 0 || bitmapLineCount >= 8;
-            }
-            return false;
-        }
-
-        static int CountCommandButtons(ConsoleDisplayLine line, int depth)
-        {
-            if(line?.Buttons == null || depth > 4)
-                return 0;
-            int count = 0;
-            for(int i = 0; i < line.Buttons.Length; i++)
-            {
-                var button = line.Buttons[i];
-                if(button == null)
-                    continue;
-                if(button.IsButton)
-                    count++;
-                if(button.StrArray == null)
-                    continue;
-                for(int j = 0; j < button.StrArray.Length; j++)
-                {
-                    if(button.StrArray[j] is ConsoleDivPart div && div.Children != null)
-                    {
-                        for(int k = 0; k < div.Children.Length; k++)
-                            count += CountCommandButtons(div.Children[k], depth + 1);
-                    }
-                }
-            }
-            return count;
         }
 
         static int GetSnapshotMaxLineNo(ConsoleDisplayLine[] lines)
@@ -437,8 +326,6 @@ namespace uEmuera.Window
                 || current.IsLogicalLine != next.IsLogicalLine
                 || current.IsTemporary != next.IsTemporary
                 || current.IsLineEnd != next.IsLineEnd
-                || current.BitmapCacheEnabled != next.BitmapCacheEnabled
-                || current.DynamicMapFunctionScoped != next.DynamicMapFunctionScoped
                 || current.Align != next.Align
                 || current.TextBackgroundColor != next.TextBackgroundColor)
                 return false;
@@ -564,10 +451,6 @@ namespace uEmuera.Window
         private volatile bool dirty_ = false;
         private int refreshRequestGeneration = 0;
         private int processedRefreshGeneration = 0;
-        private bool dynamicMapViewActive = false;
-        private int dynamicMapViewBaseLineNo = -1;
-        private const int DynamicMapTailSearchLineCount = 32;
-
         public int RefreshRequestGeneration
         {
             get { return Volatile.Read(ref refreshRequestGeneration); }

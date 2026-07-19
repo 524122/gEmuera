@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-legacy-runner-config-1.0.0.json",
+  "title": "gEmuera M0 Legacy Runner Config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "gameRoot", "profile", "outputDirectory", "inputs"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "gameRoot": { "type": "string" },
+    "profile": { "enum": ["v24pure", "snake"] },
+    "sessionIsolationMode": { "enum": ["baseline", "canary"] },
+    "inProcessSessionCycle": { "enum": ["disabled", "aba", "cross-aba"] },
+    "inProcessSessionSwitchCount": { "type": "integer", "minimum": 2, "maximum": 100 },
+    "inProcessAlternateSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gameRoot", "profile"],
+      "properties": {
+        "gameRoot": { "type": "string" },
+        "profile": { "enum": ["v24pure", "snake"] }
+      }
+    },
+    "outputDirectory": { "type": "string" },
+    "maxRuntimeMs": { "type": "integer", "minimum": 1000, "maximum": 600000 },
+    "initialWaitTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 600000 },
+    "settleFrames": { "type": "integer", "minimum": 1, "maximum": 120 },
+    "displaySettleFrames": { "type": "integer", "minimum": 1, "maximum": 120 },
+    "displayBackend": { "enum": ["controls", "canvas"] },
+    "captureScreenshot": { "type": "boolean" },
+    "viewportWidth": { "type": "integer", "minimum": 320, "maximum": 7680 },
+    "viewportHeight": { "type": "integer", "minimum": 240, "maximum": 4320 },
+    "maxDisplayBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 },
+    "traceEnabled": { "type": "boolean" },
+    "maxTraceEvents": { "type": "integer", "minimum": 100, "maximum": 5000000 },
+    "randomSeed": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value"],
+        "properties": {
+          "value": { "type": "string" },
+          "fromButton": { "type": "boolean" },
+          "skip": { "type": "boolean" },
+          "mouseButton": { "enum": [0, 1, 2, 4] },
+          "waitTimeoutMs": { "type": "integer", "minimum": 100 },
+          "expectedInputType": { "enum": ["EnterKey", "AnyKey", "IntValue", "StrValue"] },
+          "expectedButtonGeneration": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+        }
+      }
+    }
+  }
+}

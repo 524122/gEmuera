@@ -10,6 +10,7 @@ using System.Threading;
 public sealed partial class EmueraGpuRenderComponent : Node
 {
     static readonly ConcurrentQueue<EmueraMain.GpuWorkItem> workQueue = new ConcurrentQueue<EmueraMain.GpuWorkItem>();
+    static EmueraGpuRenderComponent currentInstance;
     static int workIdCounter = 0;
 
     SubViewport gpuViewport;
@@ -21,6 +22,36 @@ public sealed partial class EmueraGpuRenderComponent : Node
 
     public static bool GpuReady { get; private set; } = false;
     public static int QueuedWorkCount => workQueue.Count;
+
+    /// <summary>
+    /// Completes queued requests with a harmless fallback image before a
+    /// canary session transition.  The component may outlive the legacy view,
+    /// so its static queue needs the same boundary as EmueraMain's queue.
+    /// </summary>
+    internal static void ResetCanarySessionState()
+    {
+        while (workQueue.TryDequeue(out var item))
+        {
+            item.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
+            item.Completed.Set();
+        }
+        currentInstance?.ResetPendingRenderState();
+        GpuReady = false;
+    }
+
+    void ResetPendingRenderState()
+    {
+        if (pendingGpuItem != null)
+        {
+            pendingGpuItem.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
+            pendingGpuItem.Completed.Set();
+            pendingGpuItem = null;
+        }
+        gpuWaitingForRender = false;
+        gpuRenderFrameCount = 0;
+        if (gpuViewport != null)
+            gpuViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+    }
 
     public static EmueraMain.GpuWorkItem Submit(Godot.Image src, Godot.Rect2I region, float[][] colorMatrix)
     {
@@ -39,6 +70,11 @@ public sealed partial class EmueraGpuRenderComponent : Node
     {
         if (ShouldUseGpuRenderer())
             GpuReady = true;
+    }
+
+    public override void _Ready()
+    {
+        currentInstance = this;
     }
 
     public void ProcessQueue()
@@ -79,6 +115,8 @@ public sealed partial class EmueraGpuRenderComponent : Node
             CompleteWithCpuFallback(queuedItem);
 
         GpuReady = false;
+        if (currentInstance == this)
+            currentInstance = null;
     }
 
     void SetupGpuRenderer()

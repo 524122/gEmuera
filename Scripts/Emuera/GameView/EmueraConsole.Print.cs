@@ -31,7 +31,6 @@ namespace MinorShift.Emuera.GameView
 				lineNo = 0;
 				lastDrawnLineNo = -1;
 			}
-			BitmapCacheEnabledForNextLine = false;
 			ConsumeDisplayRewriteRefresh();
 			verticalScrollBarUpdate();
 			window.Refresh();//OnPaint発行
@@ -118,27 +117,19 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (lineList == null)
 				return;
-			bool dynamicMapFunctionScoped = IsDynamicMapOutputScopeActive;
 			for (int i = 0; i < lineList.Length; i++)
 			{
 				if (lineList[i] == null)
 					continue;
-				ApplyCurrentLineMetadata(lineList[i], dynamicMapFunctionScoped);
+				ApplyCurrentLineMetadata(lineList[i]);
 			}
 		}
 
 		internal void ApplyCurrentLineMetadata(ConsoleDisplayLine line)
 		{
-			ApplyCurrentLineMetadata(line, IsDynamicMapOutputScopeActive);
-		}
-
-		private void ApplyCurrentLineMetadata(ConsoleDisplayLine line, bool dynamicMapFunctionScoped)
-		{
 			if (line == null)
 				return;
 			line.TextBackgroundColor = TextBackgroundColor;
-			line.BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
-			line.DynamicMapFunctionScoped = dynamicMapFunctionScoped;
 			if (line.Buttons == null)
 				return;
 			for (int i = 0; i < line.Buttons.Length; i++)
@@ -151,7 +142,7 @@ namespace MinorShift.Emuera.GameView
 					if (parts[j] is ConsoleDivPart div && div.Children != null)
 					{
 						for (int k = 0; k < div.Children.Length; k++)
-							ApplyCurrentLineMetadata(div.Children[k], dynamicMapFunctionScoped);
+							ApplyCurrentLineMetadata(div.Children[k]);
 					}
 				}
 			}
@@ -784,7 +775,7 @@ namespace MinorShift.Emuera.GameView
 					}
 					foreach (ConsoleDisplayLine line in lines)
 				{
-					writer.WriteLine(line.ToString());
+					writer.WriteLine(line.ToLogString());
 				}
 			}
 			catch (Exception)
@@ -812,13 +803,16 @@ namespace MinorShift.Emuera.GameView
 			if (!baseDir.EndsWith(Path.DirectorySeparatorChar.ToString()) && !baseDir.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
 				baseDir += Path.DirectorySeparatorChar;
 
-			if (string.IsNullOrEmpty(filename))
+			bool runnerDefaultLogRedirected = Program.TryResolveM0RunnerDefaultOutputLogPath(filename, out string runnerDefaultLogPath);
+			if (runnerDefaultLogRedirected)
+				filename = runnerDefaultLogPath;
+			else if (string.IsNullOrEmpty(filename))
 				filename = Path.Combine(baseDir, "emuera.log");
 			else if (!Path.IsPathRooted(filename))
 				filename = Path.Combine(baseDir, filename);
 			filename = Path.GetFullPath(filename);
 
-            if (!filename.StartsWith(baseDir, StringComparison.CurrentCultureIgnoreCase))
+			if (!runnerDefaultLogRedirected && !filename.StartsWith(baseDir, StringComparison.CurrentCultureIgnoreCase))
             {
                 MessageBox.Show("ログファイルは実行ファイル以下のディレクトリにのみ保存できます", "ログ出力失敗");
                 return false;
@@ -828,7 +822,10 @@ namespace MinorShift.Emuera.GameView
 			{
 				if (window.Created)
 				{
-					PrintSystemLine("※※※ログファイルを" + filename + "に出力しました※※※");
+					string displayFilename = runnerDefaultLogRedirected
+						? Path.Combine(baseDir, "emuera.log")
+						: filename;
+					PrintSystemLine("※※※ログファイルを" + displayFilename + "に出力しました※※※");
 					RefreshStrings(true);
 				}
 				return true;

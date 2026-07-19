@@ -1,6 +1,11 @@
 # gEmuera 运行时日志/诊断配置
 # enabled=true 默认保留轻量 ring buffer，保存日志按钮可导出 gemuera_*.log。
 # 如需完全关闭日志/诊断系统，可改为 enabled=false。
+[migration]
+# M1 会话隔离 canary：默认关闭时保留 M0 的 GlobalStatic/EmueraThread 启动链。
+# 改动后请重启；它不代表 Parser/VM 已消费 CompatibilityPlan。
+session_isolation = false
+
 [logging]
 enabled = true
 
@@ -12,5 +17,6 @@ dynamic_map = false
 resource = false
 load_save = false
 android_storage = false
+# true 时记录 PERF.SAMPLE；Canvas 控制台还会分别记录 _Draw 与命中表重建的 CPU 回调采样。
 performance = false
 statement_recognition = false

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Text;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameData;
@@ -11,6 +12,7 @@ using System.IO;
 using MinorShift.Emuera.GameProc.Function;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift._Library;
+using GEmuera.Core.Compatibility;
 
 namespace MinorShift.Emuera
 {
@@ -127,6 +129,10 @@ namespace MinorShift.Emuera
 		Dictionary<string, VariableLocal> localvarTokenDic;
 		Dictionary<string, FunctionIdentifier> instructionDic;
 		Dictionary<string, FunctionMethod> methodDic;
+		IReadOnlyDictionary<string, FunctionIdentifier> compatibilityInstructionDic;
+		IReadOnlyDictionary<string, FunctionMethod> compatibilityMethodDic;
+		IReadOnlyList<string> legacyInstructionNames;
+		IReadOnlyList<string> legacyFunctionNames;
 		Dictionary<string, UserDefinedRefMethod> refmethodDic;
 		public List<UserDefinedCharaVariableToken> CharaDimList = new List<UserDefinedCharaVariableToken>();
 		#region initialize
@@ -157,6 +163,10 @@ namespace MinorShift.Emuera
 			varTokenDic = varData.GetVarTokenDicClone();
 			localvarTokenDic = varData.GetLocalvarTokenDic();
 			methodDic = FunctionMethodCreator.GetMethodList();
+			legacyInstructionNames = new ReadOnlyCollection<string>(
+				new List<string>(instructionDic.Keys));
+			legacyFunctionNames = new ReadOnlyCollection<string>(
+				new List<string>(methodDic.Keys));
 			refmethodDic = new Dictionary<string, UserDefinedRefMethod>();
 
 			foreach(KeyValuePair<string, FunctionMethod> pair in methodDic)
@@ -299,7 +309,7 @@ namespace MinorShift.Emuera
 						warnLevel = 2;
 						break;
 					case DefinedNameType.SystemInstrument:
-						if (methodDic.ContainsKey(varName))
+						if (IsCompatibilityMethodVisible(varName))
 						{
 							errMes = "変数名" + varName + "はEmueraの式中関数名として使われています";
 							warnLevel = 1;
@@ -410,7 +420,7 @@ namespace MinorShift.Emuera
 						warnLevel = 2;
 						return;
 					case DefinedNameType.SystemInstrument:
-						if (methodDic.ContainsKey(varName))
+						if (IsCompatibilityMethodVisible(varName))
 						{
 							break;
 						}
@@ -580,16 +590,54 @@ namespace MinorShift.Emuera
 		{
             if (string.IsNullOrEmpty(str))
                 return null;
-			if (instructionDic.TryGetValue(str, out FunctionIdentifier ret))
+			var lookup = compatibilityInstructionDic ?? instructionDic;
+			if (lookup.TryGetValue(str, out FunctionIdentifier ret))
 				return ret;
 			else
 				return null;
 		}
 
+		internal IEnumerable<string> GetLegacyInstructionNames()
+		{
+			return legacyInstructionNames;
+		}
+
+		internal IEnumerable<string> GetLegacyFunctionNames()
+		{
+			return legacyFunctionNames;
+		}
+
+		/// <summary>
+		/// Narrows legacy lookup to the immutable descriptor surface selected by
+		/// the startup plan. The legacy FunctionIdentifier/FunctionMethod objects
+		/// remain the behavior owners; this boundary only chooses which existing
+		/// handlers are reachable by the parser.
+		/// </summary>
+		internal void BindCompatibilityPlan(CompatibilityPlan plan)
+		{
+			if (plan == null)
+				throw new ArgumentNullException(nameof(plan));
+
+			if (plan.Dialect.Instructions.Count == 0 && plan.Dialect.Functions.Count == 0)
+			{
+				compatibilityInstructionDic = null;
+				compatibilityMethodDic = null;
+				return;
+			}
+
+			var route = CompatibilityDescriptorRoute<FunctionIdentifier, FunctionMethod>.Create(
+				plan,
+				instructionDic,
+				methodDic);
+			compatibilityInstructionDic = route.Instructions;
+			compatibilityMethodDic = route.Functions;
+		}
+
 		public List<string> GetOverloadedList(LabelDictionary labelDic)
 		{
 			List<string> list = new List<string>();
-			foreach (KeyValuePair<string, FunctionMethod> pair in methodDic)
+			var methods = compatibilityMethodDic ?? methodDic;
+			foreach (KeyValuePair<string, FunctionMethod> pair in methods)
 			{
 				FunctionLabelLine func = labelDic.GetNonEventLabel(pair.Key);
 				if (func == null)
@@ -645,19 +693,26 @@ namespace MinorShift.Emuera
 						return ret;
 					}
 					//1.721 #FUNCTIONが定義されていない関数は組み込み関数を上書きしない方向に。 PANCTION.ERBのRANDとか。
-					if (!methodDic.ContainsKey(codeStr))
+					if (!IsCompatibilityMethodVisible(codeStr))
 						throw new CodeEE("#FUNCTIONが定義されていない関数(" + func.Position.Filename + ":" + func.Position.LineNo + "行目)を式中で呼び出そうとしました");
 				}
 			}
 			if (userDefinedOnly)
 				return null;
 			FunctionMethod method = null;
-			if (!methodDic.TryGetValue(codeStr, out method))
+			var methods = compatibilityMethodDic ?? methodDic;
+			if (!methods.TryGetValue(codeStr, out method))
 				return null;
 			string errmes = method.CheckArgumentType(codeStr, arguments);
 			if (errmes != null)
 				throw new CodeEE(errmes);
 			return new FunctionMethodTerm(method, arguments);
+		}
+
+		private bool IsCompatibilityMethodVisible(string name)
+		{
+			var methods = compatibilityMethodDic ?? methodDic;
+			return methods.ContainsKey(name);
 		}
 
 		//1756 作成中途

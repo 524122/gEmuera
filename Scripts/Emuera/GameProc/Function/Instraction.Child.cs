@@ -746,6 +746,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				ExpressionArgument arg = (ExpressionArgument)func.Argument;
 				InputRequest req = new InputRequest();
 				req.InputType = InputType.StrValue;
+				req.EnablePointerInputMetadata = arg.EnablePointerInputMetadata;
 				if (arg.Term != null)
 				{
 					string def;
@@ -809,6 +810,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				InputRequest req = new InputRequest();
 				req.InputType = InputType.StrValue;
 				req.OneInput = true;
+				req.EnablePointerInputMetadata = arg.EnablePointerInputMetadata;
 				if (arg.Term != null)
 				{
 					string def;

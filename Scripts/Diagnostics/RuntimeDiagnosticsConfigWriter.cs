@@ -40,6 +40,10 @@ namespace gEmuera.Diagnostics
             var sb = new StringBuilder(512);
             sb.AppendLine("# gEmuera 运行时日志/诊断配置");
             sb.AppendLine("# enabled=false 表示日志/诊断系统完全关闭。");
+            sb.AppendLine("# migration.session_isolation 仅在下次启动时生效；默认 false 保持 M0 旧启动链。");
+            sb.AppendLine("[migration]");
+            sb.AppendLine("session_isolation = " + Bool(c.MigrationSessionIsolationEnabled));
+            sb.AppendLine();
             sb.AppendLine("[logging]");
             sb.AppendLine("enabled = " + Bool(c.LoggingEnabled));
             sb.AppendLine();

@@ -53,8 +53,6 @@ namespace MinorShift.Emuera.GameView
 		readonly public bool IsTemporary = false;
 		public bool IsLineEnd = true;
 		public Color? TextBackgroundColor = null;
-		public bool BitmapCacheEnabled = false;
-		public bool DynamicMapFunctionScoped = false;
 		//EmueraConsole parent;
 		ConsoleButtonString[] buttons;
 		DisplayLineAlignment align;
@@ -182,6 +180,16 @@ namespace MinorShift.Emuera.GameView
 			StringBuilder builder = new StringBuilder();
 			for(var i=0; i<buttons.Length; ++i)
 				builder.Append(buttons[i].ToString());
+			return builder.ToString();
+		}
+
+		public string ToLogString()
+		{
+			if (buttons == null)
+				return "";
+			StringBuilder builder = new StringBuilder();
+			for (int i = 0; i < buttons.Length; ++i)
+				builder.Append(buttons[i]?.ToLogString());
 			return builder.ToString();
 		}
 	}

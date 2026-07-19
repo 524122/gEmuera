@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.instruction-signature-resolution",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-03",
+  "sourceDescriptorSetHash": "d347bdd7bfbff61ee11504b30e5d5acaa1ab4c7a04482ac272f8db6115ba2fa9",
+  "rules": [
+    { "ruleId": "call.form", "handlerType": "CALL_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^.*FORM$", "selectedArgumentSchema": "FunctionArgType.SP_CALLFORM", "expectedMatchCount": 6, "rationale": "CALL_Instruction 构造参数 form=true 的公开键均以 FORM 结尾。" },
+    { "ruleId": "call.plain", "handlerType": "CALL_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^(?!.*FORM$).+$", "selectedArgumentSchema": "FunctionArgType.SP_CALL", "expectedMatchCount": 6, "rationale": "CALL_Instruction 构造参数 form=false 的公开键不以 FORM 结尾。" },
+    { "ruleId": "callf.form", "handlerType": "CALLF_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^.*FORMF$", "selectedArgumentSchema": "FunctionArgType.SP_CALLFORMF", "expectedMatchCount": 2, "rationale": "CALLF_Instruction 的 form=true 公开键以 FORMF 结尾。" },
+    { "ruleId": "callf.plain", "handlerType": "CALLF_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^(?!.*FORMF$).+$", "selectedArgumentSchema": "FunctionArgType.SP_CALLF", "expectedMatchCount": 2, "rationale": "CALLF_Instruction 的 form=false 公开键不以 FORMF 结尾。" },
+    { "ruleId": "debugprint.form", "handlerType": "DEBUGPRINT_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^DEBUGPRINTFORM.*$", "selectedArgumentSchema": "FunctionArgType.FORM_STR_NULLABLE", "expectedMatchCount": 2, "rationale": "DEBUGPRINT 构造参数 form=true 对应 DEBUGPRINTFORM 前缀。" },
+    { "ruleId": "debugprint.plain", "handlerType": "DEBUGPRINT_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^DEBUGPRINT(?:L)?$", "selectedArgumentSchema": "FunctionArgType.STR_NULLABLE", "expectedMatchCount": 2, "rationale": "普通 DEBUGPRINT/DEBUGPRINTL 使用未格式化字符串参数。" },
+    { "ruleId": "goto.form", "handlerType": "GOTO_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^.*FORM$", "selectedArgumentSchema": "FunctionArgType.SP_CALLFORM", "expectedMatchCount": 3, "rationale": "GOTO_Instruction 构造参数 form=true 的公开键均以 FORM 结尾。" },
+    { "ruleId": "goto.plain", "handlerType": "GOTO_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^(?!.*FORM$).+$", "selectedArgumentSchema": "FunctionArgType.SP_CALL", "expectedMatchCount": 3, "rationale": "GOTO_Instruction 构造参数 form=false 的公开键不以 FORM 结尾。" },
+    { "ruleId": "print.form", "handlerType": "PRINT_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^PRINT(?:SINGLE)?FORM(?:C|LC)?(?:K)?(?:D)?(?:N|L|W)?$", "selectedArgumentSchema": "FunctionArgType.FORM_STR_NULLABLE", "expectedMatchCount": 19, "rationale": "PRINT 构造器在去除可选 SINGLE 后遇到 FORM（但非 FORMS）选择格式化可空字符串。" },
+    { "ruleId": "print.string-expression", "handlerType": "PRINT_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^PRINT(?:SINGLE)?(?:S|FORMS)(?:K)?(?:D)?(?:N|L|W)?$", "selectedArgumentSchema": "FunctionArgType.STR_EXPRESSION", "expectedMatchCount": 26, "rationale": "PRINT 的 S/FORMS 变体先解析字符串表达式；FORMS 的二次格式化属于执行行为。" },
+    { "ruleId": "print.text", "handlerType": "PRINT_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^PRINT(?:SINGLE)?(?:C|LC)?(?:K)?(?:D)?(?:N|L|W)?$", "selectedArgumentSchema": "FunctionArgType.STR_NULLABLE", "expectedMatchCount": 19, "rationale": "不带 V/S/FORMS/FORM 的 PRINT 变体使用普通可空字符串。" },
+    { "ruleId": "print.values", "handlerType": "PRINT_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^PRINT(?:SINGLE)?V(?:K)?(?:D)?(?:N|L|W)?$", "selectedArgumentSchema": "FunctionArgType.SP_PRINTV", "expectedMatchCount": 13, "rationale": "PRINT 的 V 变体使用多值 SP_PRINTV 参数构建器。" },
+    { "ruleId": "ref.by-name", "handlerType": "REF_Instruction", "matchKind": "Exact", "pattern": "REFBYNAME", "selectedArgumentSchema": "FunctionArgType.SP_REFBYNAME", "expectedMatchCount": 1, "rationale": "REFBYNAME 注册时构造参数 byname=true。" },
+    { "ruleId": "ref.direct", "handlerType": "REF_Instruction", "matchKind": "Exact", "pattern": "REF", "selectedArgumentSchema": "FunctionArgType.SP_REF", "expectedMatchCount": 1, "rationale": "REF 注册时构造参数 byname=false。" },
+    { "ruleId": "repeat.for", "handlerType": "REPEAT_Instruction", "matchKind": "Exact", "pattern": "FOR", "selectedArgumentSchema": "FunctionArgType.SP_FOR_NEXT", "expectedMatchCount": 1, "rationale": "FOR 注册时构造参数 fornext=true。" },
+    { "ruleId": "repeat.repeat", "handlerType": "REPEAT_Instruction", "matchKind": "Exact", "pattern": "REPEAT", "selectedArgumentSchema": "FunctionArgType.INT_EXPRESSION", "expectedMatchCount": 1, "rationale": "REPEAT 注册时构造参数 fornext=false。" },
+    { "ruleId": "returnform.active", "handlerType": "RETURNFORM_Instruction", "matchKind": "Exact", "pattern": "RETURNFORM", "selectedArgumentSchema": "FunctionArgType.FORM_STR", "expectedMatchCount": 1, "rationale": "当前活动赋值为 FORM_STR；FORM_STR_ANY 只存在于注释掉的旧代码。" },
+    { "ruleId": "strlen.form", "handlerType": "STRLEN_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^STRLENFORM(?:U)?$", "selectedArgumentSchema": "FunctionArgType.FORM_STR_NULLABLE", "expectedMatchCount": 2, "rationale": "STRLEN 构造参数 argisform=true 对应 STRLENFORM 前缀。" },
+    { "ruleId": "strlen.plain", "handlerType": "STRLEN_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^STRLEN(?:U)?$", "selectedArgumentSchema": "FunctionArgType.STR_NULLABLE", "expectedMatchCount": 2, "rationale": "普通 STRLEN/STRLENU 使用未格式化可空字符串。" }
+  ]
+}

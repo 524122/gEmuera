@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-plan-preflight-catalog-1.0.0.json",
+  "title": "gEmuera M0 dialect plan preflight catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage", "sourceRegistrySnapshotWorkPackage", "sourceSessionInventoryWorkPackage", "supportedSelectionSources", "profiles", "unsupportedLegacyCoreProfiles"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "catalogId": {"type": "string", "minLength": 1},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "sourceWorkPackage": {"const": "M0-DIA-10"},
+    "sourceRegistrySnapshotWorkPackage": {"const": "M0-DIA-02"},
+    "sourceSessionInventoryWorkPackage": {"const": "M0-SES-01"},
+    "supportedSelectionSources": {
+      "type": "array", "minItems": 3, "uniqueItems": true,
+      "items": {"enum": ["StaticContract", "LegacyLauncherManual", "M0RunnerFixture"]}
+    },
+    "profiles": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/profile"}},
+    "unsupportedLegacyCoreProfiles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/unsupportedProfile"}}
+  },
+  "$defs": {
+    "profile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["profileId", "legacyCoreProfileEnum", "registryProjectionId", "expected"],
+      "properties": {
+        "profileId": {"enum": ["v24pure", "snake"]},
+        "legacyCoreProfileEnum": {"enum": ["V24Pure", "Snake"]},
+        "registryProjectionId": {"enum": ["v24", "snake"]},
+        "expected": {"$ref": "#/$defs/expected"}
+      }
+    },
+    "expected": {
+      "type": "object", "additionalProperties": false,
+      "required": ["instructionCount", "expressionFunctionCount", "selectedTestProjectionModuleIds"],
+      "properties": {
+        "instructionCount": {"type": "integer", "minimum": 0},
+        "expressionFunctionCount": {"type": "integer", "minimum": 0},
+        "selectedTestProjectionModuleIds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "unsupportedProfile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["legacyCoreProfileEnum", "status", "reason"],
+      "properties": {
+        "legacyCoreProfileEnum": {"const": "SnakeModernMobile"},
+        "status": {"const": "Uncovered"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

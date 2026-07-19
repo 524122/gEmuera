@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-instruction-signature-resolution-catalog-1.0.0.json",
+  "title": "gEmuera M0 instruction signature resolution catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage", "sourceDescriptorSetHash", "rules"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "catalogId": { "type": "string", "minLength": 1 },
+    "catalogVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "sourceWorkPackage": { "const": "M0-DIA-03" },
+    "sourceDescriptorSetHash": { "$ref": "#/$defs/sha256" },
+    "rules": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/rule" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleId", "handlerType", "matchKind", "pattern", "selectedArgumentSchema", "expectedMatchCount", "rationale"],
+      "properties": {
+        "ruleId": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$" },
+        "handlerType": { "type": "string", "minLength": 1 },
+        "matchKind": { "enum": ["Exact", "PublicKeyRegex"] },
+        "pattern": { "type": "string", "minLength": 1 },
+        "selectedArgumentSchema": { "type": "string", "minLength": 1 },
+        "expectedMatchCount": { "type": "integer", "minimum": 1 },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

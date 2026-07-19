@@ -3686,7 +3686,36 @@ namespace MinorShift.Emuera.GameData.Function
 				return 1;
 			}
 		}
-		
+
+		/// <summary>
+		/// GCLEARLOWALPHA(int ID, int alphaThreshold)
+		/// アルファ値がalphaThreshold以下の画素を一括で透明黒(0x0)にする。
+		/// ERBの画像_僅少アルファ除去が行っていたFOR二重ループ+GGETCOLOR/GSETCOLOR
+		/// 逐画素呼び出しを、GraphicsImage.ClearLowAlphaのバイト配列一括処理に置き換えるための原語。
+		/// </summary>
+		public sealed class GraphicsClearLowAlphaMethod : FunctionMethod
+		{
+			public GraphicsClearLowAlphaMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
+				CanRestructure = false;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+					throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+				GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+				if (!g.IsCreated)
+					return 0;
+				Int64 threshold64 = arguments[1].GetIntValue(exm);
+				if (threshold64 < 0 || threshold64 > 255)
+					throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodDefaultArgumentOutOfRange0, Name, threshold64, 2));
+				g.ClearLowAlpha((int)threshold64);
+				return 1;
+			}
+		}
+
 		public sealed class GraphicsSetBrushMethod : FunctionMethod
 		{
 			public GraphicsSetBrushMethod()
@@ -4746,6 +4775,12 @@ namespace MinorShift.Emuera.GameData.Function
 		}
 
 		static readonly short[] keytoggle = new short[256];
+
+		internal static void ResetCanarySessionState()
+		{
+			Array.Clear(keytoggle, 0, keytoggle.Length);
+		}
+
 		private sealed class GetKeyStateMethod : FunctionMethod
 		{
 			public GetKeyStateMethod()

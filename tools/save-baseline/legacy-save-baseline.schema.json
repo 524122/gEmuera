@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-legacy-save-baseline-1.0.0.json",
+  "title": "gEmuera M0 legacy save baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion","workPackage","generatedAtUtc","executionStatus","gateStatus","blockerCode","result","catalogId","catalogVersion","catalogHash","saveBaselineSetHash","sourceFiles","protocolCounts","header","fileTypes","dataTypes","sparseMarkers","profileConflict","legacyMutationEvidence","fixtureEvidence","saveProfileRuntime","candidateParseCommit","m1Eligibility","uncovered"],
+  "properties": {
+    "schemaVersion":{"const":"1.0.0"},"workPackage":{"const":"M0-SAV-01"},"generatedAtUtc":{"type":"string","format":"date-time"},"executionStatus":{"const":"InProgress"},"gateStatus":{"const":"Blocked"},"blockerCode":{"const":"EvidenceMissing"},"result":{"const":"Partial"},
+    "catalogId":{"type":"string","minLength":1},"catalogVersion":{"type":"string","pattern":"^[0-9]+\\.[0-9]+\\.[0-9]+$"},"catalogHash":{"type":"string","pattern":"^[0-9a-f]{64}$"},"saveBaselineSetHash":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "sourceFiles":{"type":"array","minItems":5,"maxItems":5},"protocolCounts":{"type":"object","additionalProperties":false,"required":["sourceFileCount","fileTypeCount","dataTypeCount","sparseMarkerCount","profileCandidateCount","legacyMutationEvidenceCount"],"properties":{"sourceFileCount":{"const":5},"fileTypeCount":{"const":4},"dataTypeCount":{"const":19},"sparseMarkerCount":{"const":11},"profileCandidateCount":{"const":2},"legacyMutationEvidenceCount":{"const":2}}},
+    "header":{"type":"object"},"fileTypes":{"type":"array","minItems":4,"maxItems":4},"dataTypes":{"type":"array","minItems":19,"maxItems":19},"sparseMarkers":{"type":"array","minItems":11,"maxItems":11},"profileConflict":{"type":"object"},"legacyMutationEvidence":{"type":"array","minItems":2,"maxItems":2},
+    "fixtureEvidence":{"type":"object"},"saveProfileRuntime":{"type":"object"},"candidateParseCommit":{"type":"object"},"m1Eligibility":{"type":"object"},"uncovered":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}
+  }
+}

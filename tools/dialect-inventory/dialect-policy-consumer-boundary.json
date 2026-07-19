@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.dialect-policy-consumer-boundary",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-14",
+  "sourceInventoryWorkPackage": "M0-DIA-01",
+  "sourceDeclarationVocabularyWorkPackage": "M0-DIA-13",
+  "sourceInventoryHash": "a30d210fb0273323b17c9553e7a9e9bda9879e1c6d1478ffb8ff8325c67ccdc2",
+  "sourceDeclarationVocabularyHash": "766c3f843f39749010d61b693b1fbef41164ef04bff2ac27e1469e193d5d98c4",
+  "expectedBehaviorKeyCount": 10,
+  "expectedDecisionBoundaryCount": 10,
+  "expectedSourceClassificationBindingCount": 14,
+  "expectedSourceFileBindingCount": 16,
+  "boundaries": [
+    {"behaviorKeyId":"call.extra-arguments.v1","consumerContractId":"policy.call.extra-arguments.v1","decisionOwner":"IExtraArgumentPolicy","sourceBindings":[{"classificationId":"call-extra-arguments-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"call.private-argument-shape.v1","consumerContractId":"policy.call.private-argument-shape.v1","decisionOwner":"IPrivateArgumentShapePolicy","sourceBindings":[{"classificationId":"private-argument-shape-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"display.history-capacity.v1","consumerContractId":"bridge.display.history-capacity.v1","decisionOwner":"effective display configuration projection","sourceBindings":[{"classificationId":"content-selected-profile-fallback","role":"DecisionConsumer"},{"classificationId":"content-snake-profile-id","role":"DecisionConsumer"},{"classificationId":"view-history-capacity-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"display.refresh-timing.v1","consumerContractId":"bridge.display.refresh-timing.v1","decisionOwner":"display timing policy consumed by Bridge","sourceBindings":[{"classificationId":"console-refresh-timing-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"function.snake-fallen-state.v1","consumerContractId":"catalog.expression.snake-fallen-state.v1","decisionOwner":"frozen expression function catalog","sourceBindings":[{"classificationId":"snake-fallen-function-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"instruction.scoped-variable-registration.v1","consumerContractId":"catalog.instruction.scoped-variable-registration.v1","decisionOwner":"frozen DialectPlan instruction catalog builder","sourceBindings":[{"classificationId":"scoped-variable-config-schema","role":"ConfigurationInput"},{"classificationId":"scoped-variable-registration-guard","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"parser.startup-fault.v1","consumerContractId":"policy.parser.startup-fault.v1","decisionOwner":"IStartupFaultPolicy","sourceBindings":[{"classificationId":"startup-fault-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"parser.user-variable-resolution.v1","consumerContractId":"policy.parser.user-variable-resolution.v1","decisionOwner":"IUserVariableResolutionPolicy","sourceBindings":[{"classificationId":"expression-user-variable-policy","role":"DecisionConsumer"},{"classificationId":"header-user-variable-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"parser.warning-routing.v1","consumerContractId":"policy.parser.warning-routing.v1","decisionOwner":"parser diagnostics sink policy","sourceBindings":[{"classificationId":"parser-warning-routing-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"},
+    {"behaviorKeyId":"resource.lazy-index.v1","consumerContractId":"policy.resource.lazy-index.v1","decisionOwner":"resource behavior consumer","sourceBindings":[{"classificationId":"resource-lazy-index-policy","role":"DecisionConsumer"}],"boundaryDraftStatus":"BoundaryDraftOnly","runtimeStatus":"NotImplemented"}
+  ]
+}

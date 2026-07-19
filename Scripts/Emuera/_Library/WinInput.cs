@@ -124,6 +124,23 @@ namespace MinorShift._Library
 			}
 		}
 
+		/// <summary>
+		/// Clears compatibility input state between canary sessions.  In
+		/// particular, virtual key pulses and toggle/latch values must not be
+		/// observed by the first input wait of the next game.
+		/// </summary>
+		internal static void ResetCanarySessionState()
+		{
+			lock (syncRoot)
+			{
+				keyStateCache.Clear();
+				virtualPressedUntilMs.Clear();
+				pressedStates.Clear();
+				toggleStates.Clear();
+				keyLatch.Clear();
+			}
+		}
+
 		public static short GetKeyState(int nVirtKey)
 		{
 			lock (syncRoot)

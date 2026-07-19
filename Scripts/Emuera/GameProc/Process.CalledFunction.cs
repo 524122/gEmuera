@@ -122,6 +122,35 @@ namespace MinorShift.Emuera.GameProc
 	}
 
 	/// <summary>
+	/// eraFL 任务起点查询的调用帧快照。参数必须在进入函数时固定，不能等到 RETURN 时
+	/// 再读取会随嵌套调用变化的私有变量。
+	/// </summary>
+	internal readonly struct EraFlQuestStartLookupContext
+	{
+		public EraFlQuestStartLookupContext(
+			string requestedRoomTag,
+			Int64 random,
+			Int64 mapId,
+			Int64 fromSavedata,
+			string questType)
+		{
+			IsCaptured = true;
+			RequestedRoomTag = requestedRoomTag;
+			Random = random;
+			MapId = mapId;
+			FromSavedata = fromSavedata;
+			QuestType = questType;
+		}
+
+		public bool IsCaptured { get; }
+		public string RequestedRoomTag { get; }
+		public Int64 Random { get; }
+		public Int64 MapId { get; }
+		public Int64 FromSavedata { get; }
+		public string QuestType { get; }
+	}
+
+	/// <summary>
 	/// 現在呼び出し中の関数
 	/// 预解析缓存的 CalledFunction 只能作为模板使用。
 	/// 实际执行时 returnAddress、IsJump、VariadicArgCount 等会随调用帧变化，
@@ -389,6 +418,7 @@ namespace MinorShift.Emuera.GameProc
 		public bool IsJump { get; set; }
 		public bool Finished { get; private set; }
 		public int VariadicArgCount { get; set; }
+		public EraFlQuestStartLookupContext EraFlQuestStartLookup { get; set; }
 		public LogicalLine ReturnAddress
 		{
 			get { return returnAddress; }

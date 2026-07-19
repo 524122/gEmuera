@@ -1,23 +1,21 @@
 using Godot;
 
 /// <summary>
-/// 虚拟光标：Android 触摸板模式的可见、可拖动移动光标。
-/// 展开后单指拖动=移动光标（相对位移），短按=左键，长按=右键，常驻"M"按钮=中键。
-/// CanvasLayer(Layer=92)として EmueraContent の子に追加。
-/// 光标本体 MouseFilter=Ignore，不参与任何点击判定，只做视觉展示。
-/// 所有命中测试、hover 同步、点击提交均调用 EmueraContent 公开的转发方法。
+/// Android 端虚拟光标：单指拖动移动光标，短按提交左键，长按未移动提交右键，
+/// 长按后继续拖动则进入真实滑动模式，复用 EmueraContent 的滚动链路。
 /// </summary>
 public partial class VirtualCursor : CanvasLayer
 {
-	const int VK_LEFT   = 0x01;
-	const int VK_RIGHT  = 0x02;
+	const int VK_LEFT = 0x01;
+	const int VK_RIGHT = 0x02;
 	const int VK_MIDDLE = 0x04;
 
-	const float CursorMoveSensitivity = 1.0f;  // 触摸位移 → 光标位移灵敏度系数
-	const float LongPressDuration = 0.45f;     // 长按阈值（秒）
-	const float DragThreshold = 10.0f;         // 总位移超过此值视为"移动"，不触发点击
-	const int MiddleButtonSize = 48;           // 常驻中键按钮尺寸
-	const int TopMargin = 68;                  // 中键按钮顶部边距（避开菜单栏）
+	const float CursorMoveSensitivity = 1.0f;
+	const float LongPressDuration = 0.45f;
+	const float DragThreshold = 10.0f;
+	const float MinDragDeltaSquared = 0.0001f;
+	const int MiddleButtonSize = 48;
+	const int TopMargin = 68;
 	const int RightMargin = 8;
 
 	Control layerRoot;
@@ -25,17 +23,17 @@ public partial class VirtualCursor : CanvasLayer
 	Button middleButton;
 
 	bool enabled = false;
-	Vector2 cursorGlobalPosition = Vector2.Zero; // 光标当前坐标（屏幕全局坐标，不跟随内容滚动/缩放）
+	bool hasCursorPosition = false;
+	Vector2 cursorGlobalPosition = Vector2.Zero;
 
-	// 手势状态
 	int trackedTouchIndex = -1;
 	Vector2 gestureStartGlobal = Vector2.Zero;
 	Vector2 gestureLastGlobal = Vector2.Zero;
 	float gestureElapsed = 0f;
 	bool gestureMoved = false;
 	bool gestureLongPressTriggered = false;
-
-	Control lastHoverButton = null;
+	bool gestureHadDragSample = false;
+	bool gestureLongPressSlideActive = false;
 
 	public override void _Ready()
 	{
@@ -66,7 +64,6 @@ public partial class VirtualCursor : CanvasLayer
 
 	void BuildMiddleButton()
 	{
-		// 半透明背景容器
 		var container = new PanelContainer();
 		container.CustomMinimumSize = new Vector2(MiddleButtonSize + 8, MiddleButtonSize + 8);
 		container.AnchorLeft = 1f;
@@ -105,11 +102,7 @@ public partial class VirtualCursor : CanvasLayer
 
 	void OnMiddleButtonPressed()
 	{
-		var content = EmueraContent.instance;
-		if (content == null)
-			return;
-		// 光标存储的是屏幕全局坐标，直接用于中键提交
-		content.VirtualCursorCommitClick(cursorGlobalPosition, VK_MIDDLE);
+		EmueraContent.instance?.VirtualCursorCommitClick(cursorGlobalPosition, VK_MIDDLE);
 	}
 
 	public void Enable()
@@ -117,14 +110,16 @@ public partial class VirtualCursor : CanvasLayer
 		enabled = true;
 		layerRoot.Visible = true;
 		ResetGestureState();
-		// 初始位置：屏幕中心（不依赖游戏内容加载状态）
-		var viewport = GetViewport();
-		if (viewport != null)
+
+		if (!hasCursorPosition)
 		{
-			var viewportRect = viewport.GetVisibleRect();
-			cursorGlobalPosition = viewportRect.Position + viewportRect.Size * 0.5f;
+			var bounds = GetCursorMovementBounds();
+			cursorGlobalPosition = bounds.Position + bounds.Size * 0.5f;
+			hasCursorPosition = true;
 		}
+		ClampCursorToMovementBounds();
 		UpdateCursorVisualPosition();
+		EmueraContent.instance?.VirtualCursorSynchronizePosition(cursorGlobalPosition);
 	}
 
 	public void Disable()
@@ -137,26 +132,18 @@ public partial class VirtualCursor : CanvasLayer
 
 	public bool IsEnabled => enabled;
 
-	// EmueraContent.HandleContentPointerInput 调用：虚拟光标模式开启时，
-	// 单指按下/拖动/释放统一交给这里处理（移动光标 + 手势判定）。
 	public bool HandleGesture(InputEvent @event, bool acceptEvent)
 	{
 		if (!enabled)
 			return false;
 
-		// 桌面测试：支持鼠标左键拖动（模拟触摸）
 		if (@event is InputEventMouseButton mb && mb.ButtonIndex == MouseButton.Left)
 		{
 			if (mb.Pressed)
 			{
 				if (trackedTouchIndex < 0)
 				{
-					trackedTouchIndex = 0; // 鼠标用固定 index
-					gestureStartGlobal = mb.GlobalPosition;
-					gestureLastGlobal = mb.GlobalPosition;
-					gestureElapsed = 0f;
-					gestureMoved = false;
-					gestureLongPressTriggered = false;
+					BeginGesture(0, mb.GlobalPosition);
 					if (acceptEvent)
 						AcceptEvent(@event);
 					return true;
@@ -164,13 +151,7 @@ public partial class VirtualCursor : CanvasLayer
 			}
 			else if (trackedTouchIndex == 0)
 			{
-				// 释放：判断是否触发点击
-				if (!gestureMoved && !gestureLongPressTriggered)
-				{
-					// 短按 = 左键
-					CommitClick(VK_LEFT);
-				}
-				ResetGestureState();
+				ReleaseGesture();
 				if (acceptEvent)
 					AcceptEvent(@event);
 				return true;
@@ -179,36 +160,15 @@ public partial class VirtualCursor : CanvasLayer
 		}
 
 		if (@event is InputEventMouseMotion mm && trackedTouchIndex == 0)
-		{
-			var delta = mm.GlobalPosition - gestureLastGlobal;
-			gestureLastGlobal = mm.GlobalPosition;
+			return HandleDrag(mm.GlobalPosition, mm.Relative, acceptEvent, @event);
 
-			// 移动光标
-			MoveCursorBy(delta * CursorMoveSensitivity);
-
-			// 判断是否已"移动过"
-			var totalDelta = mm.GlobalPosition - gestureStartGlobal;
-			if (totalDelta.Length() >= DragThreshold)
-				gestureMoved = true;
-
-			if (acceptEvent)
-				AcceptEvent(@event);
-			return true;
-		}
-
-		// Android 触摸：只处理单指（双指已经被 HandleContentTouchGesture 拦截了）
 		if (@event is InputEventScreenTouch touch)
 		{
 			if (touch.Pressed)
 			{
 				if (trackedTouchIndex < 0)
 				{
-					trackedTouchIndex = touch.Index;
-					gestureStartGlobal = touch.Position;
-					gestureLastGlobal = touch.Position;
-					gestureElapsed = 0f;
-					gestureMoved = false;
-					gestureLongPressTriggered = false;
+					BeginGesture(touch.Index, touch.Position);
 					if (acceptEvent)
 						AcceptEvent(@event);
 					return true;
@@ -216,13 +176,7 @@ public partial class VirtualCursor : CanvasLayer
 			}
 			else if (touch.Index == trackedTouchIndex)
 			{
-				// 释放：判断是否触发点击
-				if (!gestureMoved && !gestureLongPressTriggered)
-				{
-					// 短按 = 左键
-					CommitClick(VK_LEFT);
-				}
-				ResetGestureState();
+				ReleaseGesture();
 				if (acceptEvent)
 					AcceptEvent(@event);
 				return true;
@@ -231,47 +185,134 @@ public partial class VirtualCursor : CanvasLayer
 		}
 
 		if (@event is InputEventScreenDrag drag && drag.Index == trackedTouchIndex)
+			return HandleDrag(drag.Position, drag.Relative, acceptEvent, @event);
+
+		return false;
+	}
+
+	void BeginGesture(int touchIndex, Vector2 globalPosition)
+	{
+		trackedTouchIndex = touchIndex;
+		gestureStartGlobal = globalPosition;
+		gestureLastGlobal = globalPosition;
+		gestureElapsed = 0f;
+		gestureMoved = false;
+		gestureLongPressTriggered = false;
+		gestureHadDragSample = false;
+		gestureLongPressSlideActive = false;
+	}
+
+	void ReleaseGesture()
+	{
+		if (gestureLongPressSlideActive)
+			EndLongPressSlide(true);
+		else if (!gestureMoved && gestureLongPressTriggered)
+			CommitClick(VK_RIGHT);
+		else if (!gestureMoved)
+			CommitClick(VK_LEFT);
+
+		ResetGestureState();
+	}
+
+	bool HandleDrag(Vector2 eventPosition, Vector2 eventRelative, bool acceptEvent, InputEvent @event)
+	{
+		var delta = ResolveDragDelta(eventPosition, eventRelative);
+
+		if (gestureLongPressTriggered)
 		{
-			var delta = drag.Position - gestureLastGlobal;
-			gestureLastGlobal = drag.Position;
-
-			// 移动光标
-			MoveCursorBy(delta * CursorMoveSensitivity);
-
-			// 判断是否已"移动过"
-			var totalDelta = drag.Position - gestureStartGlobal;
-			if (totalDelta.Length() >= DragThreshold)
-				gestureMoved = true;
-
+			HandleLongPressSlideDelta(delta);
 			if (acceptEvent)
 				AcceptEvent(@event);
 			return true;
 		}
 
-		return false;
+		MoveCursorBy(delta * CursorMoveSensitivity);
+
+		var totalDelta = eventPosition - gestureStartGlobal;
+		if (totalDelta.Length() >= DragThreshold)
+			gestureMoved = true;
+
+		if (acceptEvent)
+			AcceptEvent(@event);
+		return true;
+	}
+
+	void HandleLongPressSlideDelta(Vector2 delta)
+	{
+		if (delta.LengthSquared() <= MinDragDeltaSquared)
+			return;
+
+		if (!gestureLongPressSlideActive)
+			BeginLongPressSlide();
+		EmueraContent.instance?.VirtualCursorSlideBy(delta);
+		gestureMoved = true;
+	}
+
+	void BeginLongPressSlide()
+	{
+		if (gestureLongPressSlideActive)
+			return;
+
+		gestureLongPressSlideActive = true;
+		// 长按后继续移动时，不提交右键，改为复用主控制台的真实滚动链路。
+		EmueraContent.instance?.VirtualCursorBeginSlide(cursorGlobalPosition);
+	}
+
+	void EndLongPressSlide(bool startInertia)
+	{
+		if (!gestureLongPressSlideActive)
+			return;
+
+		gestureLongPressSlideActive = false;
+		EmueraContent.instance?.VirtualCursorEndSlide(startInertia);
+	}
+
+	Vector2 ResolveDragDelta(Vector2 eventPosition, Vector2 eventRelative)
+	{
+		bool firstDragSample = !gestureHadDragSample;
+		gestureHadDragSample = true;
+		var fallbackDelta = eventPosition - gestureLastGlobal;
+		gestureLastGlobal = eventPosition;
+
+		// Godot 拖动事件已经提供 relative。虚拟光标是触摸板模式，优先使用
+		// relative，避免 Android 首帧 position 基准不一致导致光标起步横跳。
+		if (eventRelative.LengthSquared() > MinDragDeltaSquared)
+			return eventRelative;
+		if (firstDragSample && fallbackDelta.LengthSquared() >= DragThreshold * DragThreshold)
+			return Vector2.Zero;
+		return fallbackDelta;
 	}
 
 	void MoveCursorBy(Vector2 delta)
 	{
-		// 直接操作屏幕全局坐标
 		cursorGlobalPosition += delta;
+		ClampCursorToMovementBounds();
 
-		// clamp 到屏幕可视区域边界
-		var viewport = GetViewport();
-		if (viewport != null)
-		{
-			var viewportRect = viewport.GetVisibleRect();
-			cursorGlobalPosition.X = Mathf.Clamp(cursorGlobalPosition.X, viewportRect.Position.X, viewportRect.Position.X + viewportRect.Size.X);
-			cursorGlobalPosition.Y = Mathf.Clamp(cursorGlobalPosition.Y, viewportRect.Position.Y, viewportRect.Position.Y + viewportRect.Size.Y);
-		}
+		EmueraContent.instance?.VirtualCursorSynchronizePosition(cursorGlobalPosition);
+		UpdateCursorVisualPosition();
+	}
 
-		// 更新 hover 高亮（双通道同步）
+	Rect2 GetCursorMovementBounds()
+	{
 		var content = EmueraContent.instance;
 		if (content != null)
-			content.VirtualCursorUpdateHover(cursorGlobalPosition);
+		{
+			var contentRect = content.VirtualCursorGetContentViewportRect();
+			if (contentRect.Size.X > 1.0f && contentRect.Size.Y > 1.0f)
+				return contentRect;
+		}
 
-		// 更新光标可视化位置
-		UpdateCursorVisualPosition();
+		var viewport = GetViewport();
+		if (viewport != null)
+			return viewport.GetVisibleRect();
+		return new Rect2(Vector2.Zero, new Vector2(1, 1));
+	}
+
+	void ClampCursorToMovementBounds()
+	{
+		var bounds = GetCursorMovementBounds();
+		cursorGlobalPosition.X = Mathf.Clamp(cursorGlobalPosition.X, bounds.Position.X, bounds.Position.X + bounds.Size.X);
+		cursorGlobalPosition.Y = Mathf.Clamp(cursorGlobalPosition.Y, bounds.Position.Y, bounds.Position.Y + bounds.Size.Y);
 	}
 
 	void UpdateCursorVisualPosition()
@@ -283,28 +324,36 @@ public partial class VirtualCursor : CanvasLayer
 		cursorVisual.Visible = true;
 	}
 
-	void CommitClick(int mouseVk)
+	// 旋转、分屏或系统栏变化时保留已有位置，只将其收回新的可视内容区域。
+	public void RefreshViewportBounds()
 	{
-		var content = EmueraContent.instance;
-		if (content == null)
+		if (!enabled)
 			return;
 
-		// 光标存储的是屏幕全局坐标，直接用于点击提交
-		content.VirtualCursorCommitClick(cursorGlobalPosition, mouseVk);
+		ClampCursorToMovementBounds();
+		UpdateCursorVisualPosition();
+		EmueraContent.instance?.VirtualCursorSynchronizePosition(cursorGlobalPosition);
+	}
+
+	void CommitClick(int mouseVk)
+	{
+		EmueraContent.instance?.VirtualCursorCommitClick(cursorGlobalPosition, mouseVk);
 	}
 
 	void ResetGestureState()
 	{
+		EndLongPressSlide(false);
 		trackedTouchIndex = -1;
 		gestureElapsed = 0f;
 		gestureMoved = false;
 		gestureLongPressTriggered = false;
+		gestureHadDragSample = false;
+		gestureLongPressSlideActive = false;
 	}
 
 	void ClearHover()
 	{
 		GenericUtils.ClearPointingButton();
-		lastHoverButton = null;
 	}
 
 	void AcceptEvent(InputEvent @event)
@@ -322,9 +371,8 @@ public partial class VirtualCursor : CanvasLayer
 		gestureElapsed += (float)delta;
 		if (gestureElapsed >= LongPressDuration)
 		{
+			// 长按先进入待定状态：松手不移动=右键；继续移动=真实滑动。
 			gestureLongPressTriggered = true;
-			// 长按 = 右键，立即触发（不等松手）
-			CommitClick(VK_RIGHT);
 		}
 	}
 }

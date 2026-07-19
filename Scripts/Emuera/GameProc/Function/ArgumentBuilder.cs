@@ -989,10 +989,18 @@ namespace MinorShift.Emuera.GameProc.Function
                 LexicalAnalyzer.SkipWhiteSpace(st);
                 if (st.EOS)
                     return new ExpressionArgument(null);
-                // eraFL 的 "INPUTS ,1" 表示省略第一个默认值参数，后面的值是旧式选项。
-                // 若把 ",1" 当成默认字符串，空白区域右键会提交非空 RESULTS，导致状态页切换条件失败。
-                if (!st.EOS && st.Current == ',')
-                    return new ExpressionArgument(null);
+                // eraFL 的 "INPUTS ,1" 同时表示省略默认字符串并启用鼠标扩展结果。
+                // 该标记必须跟随等待请求进入提交链，不能只丢弃第二参数，否则技能按钮值无法写入 RESULTS:1。
+                if (Program.IsEraFlProfile && !st.EOS
+                    && GEmuera.Core.Compatibility.EraFlCompatibilityModule.IsOmittedDefaultArgument(st.Current))
+                {
+                    st.ShiftNext();
+                    bool enablePointerInputMetadata = GEmuera.Core.Compatibility.EraFlCompatibilityModule
+                        .IsPointerInputMetadataOption(st.Substring());
+                    if (!enablePointerInputMetadata)
+                        warn("eraFLのINPUTS省略引数にはマウス拡張オプション1を指定してください", line, 1, false);
+                    return new ExpressionArgument(null, enablePointerInputMetadata);
+                }
                 StrFormWord sfwt = LexicalAnalyzer.AnalyseFormattedString(st, FormStrEndWith.EoL, false);
                 if (!st.EOS)
                 {

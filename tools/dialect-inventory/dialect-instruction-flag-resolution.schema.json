@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gemuera.local/schema/m0-dialect-instruction-flag-resolution-1.0.0.json",
+  "title":"gEmuera M0 dialect instruction flag resolution",
+  "type":"object","additionalProperties":false,
+  "required":["schemaVersion","workPackage","generatedAtUtc","executionStatus","gateStatus","blockerCode","result","sourceDescriptorSetHash","sourceInstructionSignatureResolutionHash","catalogId","catalogVersion","catalogHash","resolutionSetHash","instructionCount","coverage","knownFlags","ruleMatches","uncovered","instructions"],
+  "properties":{
+    "schemaVersion":{"const":"1.0.0"},"workPackage":{"const":"M0-DIA-06"},"generatedAtUtc":{"type":"string","format":"date-time"},"executionStatus":{"const":"InProgress"},"gateStatus":{"const":"Blocked"},"blockerCode":{"const":"EvidenceMissing"},"result":{"const":"Partial"},
+    "sourceDescriptorSetHash":{"$ref":"#/$defs/sha256"},"sourceInstructionSignatureResolutionHash":{"$ref":"#/$defs/sha256"},"catalogId":{"type":"string","minLength":1},"catalogVersion":{"type":"string","pattern":"^[0-9]+\\.[0-9]+\\.[0-9]+$"},"catalogHash":{"$ref":"#/$defs/sha256"},"resolutionSetHash":{"$ref":"#/$defs/sha256"},"instructionCount":{"type":"integer","minimum":1},
+    "coverage":{"$ref":"#/$defs/coverage"},"knownFlags":{"$ref":"#/$defs/stringArray"},"ruleMatches":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/ruleMatch"}},"uncovered":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},"instructions":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/instruction"}}
+  },
+  "$defs":{
+    "sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"count":{"type":"integer","minimum":0},"stringArray":{"type":"array","items":{"type":"string","minLength":1}},
+    "coverage":{"type":"object","additionalProperties":false,"required":["directRegistrationStaticCount","handlerSingleStaticCount","handlerRulesStaticCount","unresolvedCount","knownFlagCount","catalogRuleCount"],"properties":{"directRegistrationStaticCount":{"$ref":"#/$defs/count"},"handlerSingleStaticCount":{"$ref":"#/$defs/count"},"handlerRulesStaticCount":{"$ref":"#/$defs/count"},"unresolvedCount":{"$ref":"#/$defs/count"},"knownFlagCount":{"type":"integer","minimum":1},"catalogRuleCount":{"type":"integer","minimum":1}}},
+    "ruleMatch":{"type":"object","additionalProperties":false,"required":["ruleId","matchedCount","matchedPublicKeys"],"properties":{"ruleId":{"type":"string","minLength":1},"matchedCount":{"type":"integer","minimum":1},"matchedPublicKeys":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}}},
+    "instruction":{"type":"object","additionalProperties":false,"required":["publicKey","targetModule","handlerType","resolvedArgumentSchema","argumentResolutionStatus","registrationFlagExpression","handlerFlagCandidates","effectiveFlags","flagResolutionStatus","flagRuleIds","completionModeCandidate","effectCandidates","evidenceStatus","behaviorFixtureStatus"],"properties":{
+      "publicKey":{"type":"string","minLength":1},"targetModule":{"type":"string","minLength":1},"handlerType":{"type":"string"},"resolvedArgumentSchema":{"type":"string","minLength":1},"argumentResolutionStatus":{"enum":["PreservedStatic","ResolvedStaticByRule"]},"registrationFlagExpression":{"type":"string","minLength":1},"handlerFlagCandidates":{"$ref":"#/$defs/stringArray"},"effectiveFlags":{"$ref":"#/$defs/stringArray"},"flagResolutionStatus":{"enum":["DirectRegistrationStatic","HandlerSingleStatic","HandlerRulesStatic"]},"flagRuleIds":{"$ref":"#/$defs/stringArray"},"completionModeCandidate":{"enum":["ControlFlowCandidate","InputWaitCandidate","SynchronousCandidate","TimedYieldCandidate","Unresolved"]},"effectCandidates":{"$ref":"#/$defs/stringArray"},"evidenceStatus":{"const":"StaticCandidate"},"behaviorFixtureStatus":{"const":"Uncovered"}
+    }}
+  }
+}

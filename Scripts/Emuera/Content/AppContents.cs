@@ -305,6 +305,9 @@ namespace MinorShift.Emuera.Content
             while(iter.MoveNext())
 				iter.Current.Dispose();
 			resourceDic.Clear();
+			var sprites = imageDictionary.Values.GetEnumerator();
+			while (sprites.MoveNext())
+				sprites.Current.Dispose();
 			imageDictionary.Clear();
 			lazyImageDictionary.Clear();
 			csvSpriteNames.Clear();
@@ -481,7 +484,7 @@ namespace MinorShift.Emuera.Content
 
 		private static bool UseLazyResourceIndex
 		{
-			get { return Program.IsSnakeProfile; }
+			get { return Program.IsSnakeProfile || Program.IsEraFlProfile; }
 		}
 
 		private static void BuildLazyResourceIndex(List<string> csvFiles)

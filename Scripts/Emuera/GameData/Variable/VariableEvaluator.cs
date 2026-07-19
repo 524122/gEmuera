@@ -23,8 +23,8 @@ namespace MinorShift.Emuera.GameData.Variable
 		readonly GameBase gamebase;
 		readonly ConstantData constant;
 		readonly VariableData varData;
-		MTRandom rand = new MTRandom();
-		Random newRand = new Random();
+		MTRandom rand;
+		Random newRand;
 		const string RuntimeDataStoreBinaryMarker = "__RDS__";
 		const string RuntimeDataStoreTextMarker = "__RDS_TEXT__";
 		const string RuntimeDataStoreTextEndMarker = "__RDS_TEXT_END__";
@@ -36,10 +36,12 @@ namespace MinorShift.Emuera.GameData.Variable
 		public ConstantData Constant { get { return constant; } }
 		public MTRandom Rand { get { return rand; } }
 
-		public VariableEvaluator(GameBase gamebase, ConstantData constant)
+		public VariableEvaluator(GameBase gamebase, ConstantData constant, Int64? randomSeed = null)
 		{
 			this.gamebase = gamebase;
 			this.constant = constant;
+			rand = randomSeed.HasValue ? new MTRandom(randomSeed.Value) : new MTRandom();
+			newRand = randomSeed.HasValue ? new Random((int)randomSeed.Value) : new Random();
 			RuntimeDataStore.Clear();
 			varData = new VariableData(gamebase, constant);
 			GlobalStatic.VariableData = varData;

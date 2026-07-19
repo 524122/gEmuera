@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M0-DIA-17 dialect behavior fixture contract catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage",
+    "sourceDeclarationVocabularyWorkPackage", "sourcePolicySurfaceWorkPackage",
+    "sourceDeclarationVocabularyHash", "sourcePolicySurfaceHash", "expectedContractCount", "contracts"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "catalogId": {"const": "gemuera.dialect-behavior-fixture-contracts"},
+    "catalogVersion": {"pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "sourceWorkPackage": {"const": "M0-DIA-17"},
+    "sourceDeclarationVocabularyWorkPackage": {"const": "M0-DIA-13"},
+    "sourcePolicySurfaceWorkPackage": {"const": "M0-DIA-15"},
+    "sourceDeclarationVocabularyHash": {"pattern": "^[0-9a-f]{64}$"},
+    "sourcePolicySurfaceHash": {"pattern": "^[0-9a-f]{64}$"},
+    "expectedContractCount": {"const": 10},
+    "contracts": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "behaviorKeyId", "fixtureId", "requiredProfileIds", "requiredEvidenceKinds", "requiredTraceFacets",
+          "fixtureContractStatus", "behaviorEvidenceStatus", "runtimeStatus", "interfaceImplementationStatus"
+        ],
+        "properties": {
+          "behaviorKeyId": {"pattern": "^[a-z][a-z0-9.-]+\\.v[0-9]+$"},
+          "fixtureId": {"pattern": "^DIA-[A-Z0-9-]+$"},
+          "requiredProfileIds": {"type": "array", "items": {"enum": ["v24pure", "snake"]}},
+          "requiredEvidenceKinds": {"type": "array", "items": {"enum": ["baseline", "extension", "undeclared"]}},
+          "requiredTraceFacets": {"type": "array", "items": {"enum": ["input", "observable-result", "error", "completion", "effect"]}},
+          "fixtureContractStatus": {"const": "Planned"},
+          "behaviorEvidenceStatus": {"const": "Uncovered"},
+          "runtimeStatus": {"const": "NotImplemented"},
+          "interfaceImplementationStatus": {"const": "BlockedByFixture"}
+        }
+      }
+    }
+  }
+}

@@ -889,6 +889,41 @@ namespace MinorShift.Emuera.Content
 		}
 
 		/// <summary>
+		/// GCLEARLOWALPHA(int ID, int alphaThreshold)
+		/// 将 alpha 小于等于阈值的像素批量清为透明黑，避免 ERB 逐像素调用导致 Android 脚本线程长时间阻塞。
+		/// </summary>
+		public void ClearLowAlpha(int alphaThreshold)
+		{
+			lock (imageSync)
+			{
+				if (godotImage == null)
+					return;
+				if (godotImage.GetFormat() != Godot.Image.Format.Rgba8)
+					godotImage.Convert(Godot.Image.Format.Rgba8);
+
+				byte threshold = (byte)Math.Clamp(alphaThreshold, 0, 255);
+				byte[] data = godotImage.GetData();
+				bool modified = false;
+				for (int i = 3; i < data.Length; i += 4)
+				{
+					if (data[i] <= threshold && (data[i] != 0 || data[i - 1] != 0 || data[i - 2] != 0 || data[i - 3] != 0))
+					{
+						data[i - 3] = 0;
+						data[i - 2] = 0;
+						data[i - 1] = 0;
+						data[i] = 0;
+						modified = true;
+					}
+				}
+				if (modified)
+				{
+					godotImage.SetData(width, height, false, Godot.Image.Format.Rgba8, data);
+					MarkImageMutated();
+				}
+			}
+		}
+
+		/// <summary>
 		/// GDISPOSE(int ID)
 		/// </summary>
 		public void GDispose()

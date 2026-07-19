@@ -38,21 +38,29 @@ namespace MinorShift._Library{
 	/// SFMTの擬似乱数ジェネレータークラス。
 	/// </summary>
 	public sealed class MTRandom {
+		readonly Int64 traceStreamId;
+		Int64 traceCallIndex;
 
 		/// <summary>
 		/// 現在時刻を種とした、(2^19937-1)周期のSFMT擬似乱数ジェネレーターを初期化します。
 		/// </summary>
-		public MTRandom() : this(Environment.TickCount) { }
+		public MTRandom() : this(Environment.TickCount, true) { }
 
 		/// <summary>
 		/// seedを種とした、(2^MEXP-1)周期の擬似乱数ジェネレーターを初期化します。
 		/// </summary>
-		public MTRandom(Int64 seed)
+		public MTRandom(Int64 seed) : this(seed, false)
+		{
+		}
+
+		private MTRandom(Int64 seed, bool implicitClockSeed)
 		{
 			unchecked
 			{
 				init_gen_rand((UInt32)seed);
 			}
+			traceStreamId = global::gEmuera.M0.LegacyTrace.RegisterRng("SFMT19937",
+				implicitClockSeed ? "implicit_clock" : "explicit", seed.ToString(System.Globalization.CultureInfo.InvariantCulture));
 		}
 
 
@@ -286,7 +294,14 @@ namespace MinorShift._Library{
 				gen_rand_all();
 				idx = 0;
 			}
-			return sfmt[idx++];
+			UInt32 value = sfmt[idx++];
+			if (traceStreamId != 0)
+			{
+				Int64 callIndex = System.Threading.Interlocked.Increment(ref traceCallIndex);
+				global::gEmuera.M0.LegacyTrace.TryRecordRngCall("SFMT19937", traceStreamId, callIndex,
+					"next_uint32", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+			}
+			return value;
 		}
 
 		/// <summary>

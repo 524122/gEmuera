@@ -84,6 +84,21 @@ namespace MinorShift.Emuera.GameView
 			return sb.ToString();
 		}
 
+		public override string ToLogString()
+		{
+			StringBuilder sb = new StringBuilder();
+			sb.Append(AltText ?? "<div>");
+			foreach (ConsoleDisplayLine line in Children)
+			{
+				if (line == null)
+					continue;
+				sb.Append(line.ToLogString());
+				sb.Append("\r\n");
+			}
+			sb.Append("</div>");
+			return sb.ToString();
+		}
+
 		public static int ToPixel(MixedNum value)
 		{
 			if (value == null)

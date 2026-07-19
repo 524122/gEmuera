@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-fixture-manifest-report-1.0.0.json",
+  "title": "gEmuera M0 Fixture Manifest Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result", "catalog", "preparedBy", "reviewedBy", "approvedBy", "gateDecision", "compatibility", "rollback", "fixtureCount", "readyForReviewCount", "uncovered", "fixtures"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackage": { "const": "M0-FIX-01" },
+    "generatedAtUtc": { "type": "string" },
+    "executionStatus": { "const": "InProgress" },
+    "gateStatus": { "const": "Blocked" },
+    "blockerCode": { "const": "EvidenceMissing" },
+    "result": { "enum": ["Partial", "ReadyForReview"] },
+    "catalog": { "$ref": "#/$defs/documentIdentity" },
+    "preparedBy": { "type": "string" },
+    "reviewedBy": { "type": "string" },
+    "approvedBy": { "type": "string" },
+    "gateDecision": { "const": "NeedsEvidence" },
+    "compatibility": { "type": "array", "items": { "type": "string" } },
+    "rollback": { "type": "string" },
+    "fixtureCount": { "type": "integer", "minimum": 1 },
+    "readyForReviewCount": { "type": "integer", "minimum": 0 },
+    "uncovered": { "type": "array", "items": { "type": "string" } },
+    "fixtures": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/resolvedFixture" } }
+  },
+  "$defs": {
+    "documentIdentity": {
+      "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+      "properties": { "path": { "type": "string" }, "sha256": { "$ref": "#/$defs/sha256" } }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "resolvedFixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "layer", "category", "profile", "rootBinding", "availabilityStatus", "evidenceStatus", "source", "authorization", "content", "expectedReports", "expectedCoverage", "uncovered", "notes"],
+      "properties": {
+        "id": { "type": "string" },
+        "layer": { "enum": ["upstream", "legacy", "game"] },
+        "category": { "type": "string" },
+        "profile": { "type": "string" },
+        "rootBinding": { "type": "string" },
+        "availabilityStatus": { "enum": ["Captured", "Uncovered"] },
+        "evidenceStatus": { "enum": ["Uncovered", "Partial", "ReadyForReview"] },
+        "source": {
+          "type": "object", "additionalProperties": false, "required": ["name", "origin", "revision", "localRoot"],
+          "properties": { "name": { "type": "string" }, "origin": { "type": "string" }, "revision": { "type": "string" }, "localRoot": { "type": "string" } }
+        },
+        "authorization": {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "origin", "license", "evidence", "evidenceStatus", "evidenceSha256", "redistributionAllowed"],
+          "properties": {
+            "status": { "enum": ["Verified", "Unverified", "MissingEvidence"] }, "origin": { "type": "string" }, "license": { "type": "string" },
+            "evidence": { "type": "string" }, "evidenceStatus": { "enum": ["Captured", "Declared", "Uncovered"] },
+            "evidenceSha256": { "type": "string", "pattern": "^$|^[0-9a-f]{64}$" }, "redistributionAllowed": { "type": "boolean" }
+          }
+        },
+        "content": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["manifestPath", "documentSha256", "canonicalSha256", "fileCount", "totalBytes", "exclusionPolicy"],
+              "properties": {
+                "manifestPath": { "type": "string" }, "documentSha256": { "$ref": "#/$defs/sha256" }, "canonicalSha256": { "$ref": "#/$defs/sha256" },
+                "fileCount": { "type": "integer", "minimum": 0 }, "totalBytes": { "type": "integer", "minimum": 0 }, "exclusionPolicy": { "type": "string" }
+              }
+            }
+          ]
+        },
+        "expectedReports": { "type": "array", "items": { "$ref": "#/$defs/resolvedReport" } },
+        "expectedCoverage": { "type": "array", "items": { "type": "string" } },
+        "uncovered": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "string" }
+      }
+    },
+    "resolvedReport": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "path", "required", "status", "source", "bytes", "sha256"],
+      "properties": {
+        "kind": { "type": "string" }, "path": { "type": "string" }, "required": { "type": "boolean" }, "status": { "enum": ["Captured", "Uncovered"] },
+        "source": { "type": "string" }, "bytes": { "type": "integer", "minimum": 0 }, "sha256": { "type": "string", "pattern": "^$|^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

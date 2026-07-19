@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-legacy-trace-1.0.0.json",
+  "title": "gEmuera M0 Typed Legacy Trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "coverageStatus", "capacity", "recordedCount", "overflowed", "droppedEventCount", "events"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "coverageStatus": { "enum": ["Partial", "Covered"] },
+    "capacity": { "type": "integer", "minimum": 1 },
+    "recordedCount": { "type": "integer", "minimum": 0 },
+    "overflowed": { "type": "boolean" },
+    "droppedEventCount": { "type": "integer", "minimum": 0 },
+    "normalizationRules": {
+      "type": "array",
+      "items": { "enum": ["observer_timestamps", "absolute_paths", "session_identifiers"] },
+      "uniqueItems": true
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "category", "kind", "threadOwner", "orderingPoint", "completionMode", "observerMonotonicTicks", "observerUtc", "payload"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 },
+          "category": { "enum": ["clock", "rng", "wait", "input", "display", "effect", "error", "runner"] },
+          "kind": { "type": "string", "minLength": 1 },
+          "threadOwner": { "enum": ["godot_main", "legacy_vm", "external_harness", "unknown"] },
+          "orderingPoint": {
+            "enum": ["runner_lifecycle", "clock_observation", "rng_call", "wait_request", "input_submission", "vm_consumption", "display_commit", "ui_projection", "effect_enqueue", "error_sink"]
+          },
+          "completionMode": {
+            "enum": ["observe_only", "core_immediate_legacy", "wait_port_legacy", "commit_then_project_legacy", "fire_and_continue_legacy", "fault"]
+          },
+          "observerMonotonicTicks": { "type": "integer", "minimum": 0 },
+          "observerUtc": { "type": "string" },
+          "payload": {
+            "oneOf": [
+              { "$ref": "#/$defs/runnerPayload" },
+              { "$ref": "#/$defs/clockPayload" },
+              { "$ref": "#/$defs/rngPayload" },
+              { "$ref": "#/$defs/waitPayload" },
+              { "$ref": "#/$defs/inputPayload" },
+              { "$ref": "#/$defs/displayPayload" },
+              { "$ref": "#/$defs/effectPayload" },
+              { "$ref": "#/$defs/errorPayload" }
+            ]
+          }
+        },
+        "allOf": [
+          { "if": { "properties": { "category": { "const": "runner" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/runnerPayload" } } } },
+          { "if": { "properties": { "category": { "const": "clock" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/clockPayload" } } } },
+          { "if": { "properties": { "category": { "const": "rng" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/rngPayload" } } } },
+          { "if": { "properties": { "category": { "const": "wait" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/waitPayload" } } } },
+          { "if": { "properties": { "category": { "const": "input" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/inputPayload" } } } },
+          { "if": { "properties": { "category": { "const": "display" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/displayPayload" } } } },
+          { "if": { "properties": { "category": { "const": "effect" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/effectPayload" } } } },
+          { "if": { "properties": { "category": { "const": "error" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/errorPayload" } } } }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "runnerPayload": {
+      "type": "object", "additionalProperties": false, "required": ["data"],
+      "properties": { "data": { "type": "string" } }
+    },
+    "clockPayload": {
+      "type": "object", "additionalProperties": false, "required": ["source", "sampleKind", "value"],
+      "properties": { "source": { "type": "string" }, "sampleKind": { "type": "string" }, "value": { "type": "string" } }
+    },
+    "rngPayload": {
+      "type": "object", "additionalProperties": false, "required": ["provider", "streamId", "callIndex", "operation", "seedOrigin", "value"],
+      "properties": {
+        "provider": { "type": "string" }, "streamId": { "type": "integer", "minimum": 0 }, "callIndex": { "type": "integer", "minimum": 0 },
+        "operation": { "type": "string" }, "seedOrigin": { "type": "string" }, "value": { "type": "string" }
+      }
+    },
+    "waitPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requestId", "inputType", "needValue", "oneInput", "noFocus", "timelimitMs", "buttonGeneration"],
+      "properties": {
+        "requestId": { "type": "integer" }, "inputType": { "type": "string" }, "needValue": { "type": "boolean" }, "oneInput": { "type": "boolean" },
+        "noFocus": { "type": "boolean" }, "timelimitMs": { "type": "integer" }, "buttonGeneration": { "type": "integer" }
+      }
+    },
+    "inputPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["value", "fromButton", "skip", "mouseButton", "accepted", "inputType", "buttonGeneration"],
+      "properties": {
+        "value": { "type": "string" }, "fromButton": { "type": "boolean" }, "skip": { "type": "boolean" }, "mouseButton": { "type": "integer" },
+        "accepted": { "type": "boolean" }, "inputType": { "type": "string" }, "buttonGeneration": { "type": "integer" }
+      }
+    },
+    "displayPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["transactionId", "removeBottomCount", "lineCount", "update", "buttonGeneration", "scrollIntent", "dataOnlyLineCount"],
+      "properties": {
+        "transactionId": { "type": "integer", "minimum": 0 }, "removeBottomCount": { "type": "integer", "minimum": 0 }, "lineCount": { "type": "integer", "minimum": 0 },
+        "update": { "type": "boolean" }, "buttonGeneration": { "type": "integer" }, "scrollIntent": { "type": "string" }, "dataOnlyLineCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "effectPayload": {
+      "type": "object", "additionalProperties": false, "required": ["effectType", "target", "operation", "channel", "value"],
+      "properties": {
+        "effectType": { "type": "string" }, "target": { "type": "string" }, "operation": { "type": "string" }, "channel": { "type": "integer" }, "value": { "type": "integer" }
+      }
+    },
+    "errorPayload": {
+      "type": "object", "additionalProperties": false, "required": ["errorType", "code", "message", "sourceSymbol"],
+      "properties": {
+        "errorType": { "type": "string" }, "code": { "type": "string" }, "message": { "type": "string" }, "sourceSymbol": { "type": "string" }
+      }
+    }
+  }
+}

@@ -20,12 +20,66 @@ namespace MinorShift.Emuera.GameView
 		}
 		internal ConsoleDisplayLine[] GetDisplayLinesSnapshotForuEmuera()
 		{
+			return GetDisplayLinesSnapshotForuEmuera(-1, out _, out _);
+		}
+
+		internal ConsoleDisplayLine[] GetDisplayLinesSnapshotForuEmuera(
+			int minimumLineNo, out int totalCount, out int snapshotStartIndex)
+		{
 			lock (displayLineLock)
 			{
-				var snapshot = new ConsoleDisplayLine[displayLineList.Count];
-				displayLineList.CopyTo(snapshot, 0);
+				totalCount = displayLineList.Count;
+				snapshotStartIndex = 0;
+				if (totalCount == 0)
+					return Array.Empty<ConsoleDisplayLine>();
+
+				// Godot 侧会主动裁掉较早的历史行；这些行之后不会参与更新或点击，
+				// 无需在每次动态地图刷新时重新复制。清屏、行号回绕或序列异常时
+				// TryFindSnapshotStartIndex 返回 false，继续走完整快照保证兼容行为。
+				if (minimumLineNo >= 0
+					&& TryFindSnapshotStartIndex(minimumLineNo, out int startIndex))
+					snapshotStartIndex = startIndex;
+
+				int snapshotCount = totalCount - snapshotStartIndex;
+				var snapshot = new ConsoleDisplayLine[snapshotCount];
+				for (int i = 0; i < snapshotCount; i++)
+					snapshot[i] = displayLineList[snapshotStartIndex + i];
 				return snapshot;
 			}
+		}
+
+		bool TryFindSnapshotStartIndex(int minimumLineNo, out int startIndex)
+		{
+			startIndex = 0;
+			int count = displayLineList.Count;
+			if (count == 0)
+				return true;
+
+			var first = displayLineList[0];
+			var last = displayLineList[count - 1];
+			if (first == null || last == null
+				|| first.LineNo > last.LineNo
+				|| last.LineNo < minimumLineNo)
+				return false;
+
+			int low = 0;
+			int high = count;
+			while (low < high)
+			{
+				int mid = low + ((high - low) / 2);
+				var line = displayLineList[mid];
+				if (line == null)
+					return false;
+				if (line.LineNo < minimumLineNo)
+					low = mid + 1;
+				else
+					high = mid;
+			}
+
+			if (low >= count)
+				return false;
+			startIndex = low;
+			return true;
 		}
 		internal bool IsInitializing
 		{

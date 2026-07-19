@@ -27,6 +27,15 @@ namespace MinorShift.Emuera.GameView
 		public abstract void GDIDrawTo(int pointY, bool isSelecting, bool isBackLog);
 
 		public abstract void SetWidth(StringMeasure sm, float subPixel);
+
+		/// <summary>
+		/// 仅供输出日志还原显示源信息。默认保持既有纯文本语义，图片和形状可覆盖为原始 HTML 标签。
+		/// </summary>
+		public virtual string ToLogString()
+		{
+			return ToString();
+		}
+
 		public override string ToString()
 		{
 			if (Str == null)

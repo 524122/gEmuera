@@ -518,7 +518,15 @@ namespace MinorShift.Emuera.GameProc
 									errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています";
 								goto err;
 							}
+							char commandSeparator = stream.Current;
 							stream.ShiftNext();
+							// 裸文字列/書式文字列を受ける PRINT 系は、命令後の「最初の区切り空白」
+							// 以外を表示内容として扱う。
+							// ここで SkipWhiteSpace すると "PRINT    X" の追加空白が消え、さらに
+							// "PRINT ;;;;;" や "PRINTFORM ;;;;;" が行中コメント扱いになって
+							// eraTW のAA表示が崩れる。
+							if (ShouldPreserveRawPrintArgument(func, commandSeparator))
+								return new InstructionLine(position, func, stream);
 							// 命令名と同名の変数への代入を優先する
 							// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応
 							// ※PRINTFORM = ... のような正当な命令呼び出しを誤判定しないよう、
@@ -612,6 +620,21 @@ namespace MinorShift.Emuera.GameProc
 			if ((stream.Current == '+' || stream.Current == '-' || stream.Current == '*' || stream.Current == '/' || stream.Current == '%' || stream.Current == '&' || stream.Current == '|' || stream.Current == '^') && stream.Next == '=')
 				return true;
 			return false;
+		}
+
+		static bool ShouldPreserveRawPrintArgument(FunctionIdentifier func, char commandSeparator)
+		{
+			if (commandSeparator == ';')
+				return false;
+			return func.IsPrint()
+			    && !func.IsPrintData()
+			    && IsRawPrintableArgumentBuilder(func.ArgBuilder);
+		}
+
+		static bool IsRawPrintableArgumentBuilder(ArgumentBuilder argBuilder)
+		{
+			return object.ReferenceEquals(argBuilder, ArgumentParser.GetArgumentBuilder(FunctionArgType.STR_NULLABLE))
+			    || object.ReferenceEquals(argBuilder, ArgumentParser.GetArgumentBuilder(FunctionArgType.FORM_STR_NULLABLE));
 		}
 		
 	}

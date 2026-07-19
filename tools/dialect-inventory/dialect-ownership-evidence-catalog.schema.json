@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-ownership-evidence-catalog-1.0.0.json",
+  "title": "gEmuera M0 dialect ownership evidence catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalogId", "catalogVersion", "sourceWorkPackage", "stableCurrentModuleCandidates", "upstream"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "catalogId": {"type": "string", "minLength": 1},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "sourceWorkPackage": {"const": "M0-DIA-07"},
+    "stableCurrentModuleCandidates": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"enum": ["gemuera.v24", "game.snake"]}
+    },
+    "upstream": {
+      "type": "object", "additionalProperties": false,
+      "required": ["instructionSourceSuffix", "expressionSourceSuffix", "instructionSourceSha256", "expressionSourceSha256", "expectedInstructionCount", "expectedExpressionFunctionCount"],
+      "properties": {
+        "instructionSourceSuffix": {"type": "string", "minLength": 1},
+        "expressionSourceSuffix": {"type": "string", "minLength": 1},
+        "instructionSourceSha256": {"$ref": "#/$defs/sha256"},
+        "expressionSourceSha256": {"$ref": "#/$defs/sha256"},
+        "expectedInstructionCount": {"type": "integer", "minimum": 1},
+        "expectedExpressionFunctionCount": {"type": "integer", "minimum": 1}
+      }
+    }
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

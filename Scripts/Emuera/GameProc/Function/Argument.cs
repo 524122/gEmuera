@@ -48,11 +48,13 @@ namespace MinorShift.Emuera.GameProc.Function
 
 	internal sealed class ExpressionArgument : Argument
 	{
-		public ExpressionArgument(IOperandTerm termSrc)
+		public ExpressionArgument(IOperandTerm termSrc, bool enablePointerInputMetadata = false)
 		{
 			Term = termSrc;
+			EnablePointerInputMetadata = enablePointerInputMetadata;
 		}
 		readonly public IOperandTerm Term;
+		readonly public bool EnablePointerInputMetadata;
 	}
 
 	internal sealed class ExpressionArrayArgument : Argument

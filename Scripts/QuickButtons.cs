@@ -1094,4 +1094,22 @@ public partial class QuickButtons : CanvasLayer
 			return false;
 		}
 	}
+
+	static bool TryGetBoolMeta(Control control, string key, out bool value)
+	{
+		value = false;
+		if (!IsControlAlive(control))
+			return false;
+		try
+		{
+			if (!control.HasMeta(key))
+				return false;
+			value = control.GetMeta(key).AsBool();
+			return true;
+		}
+		catch (ObjectDisposedException)
+		{
+			return false;
+		}
+	}
 }

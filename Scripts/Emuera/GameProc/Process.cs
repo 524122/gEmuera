@@ -69,9 +69,12 @@ namespace MinorShift.Emuera.GameProc
                 if (Config.DisplayReport)
                     GenericUtils.Info($"[LOADTIME] {stage}: {loadStopwatch.ElapsedMilliseconds}ms");
             }
-            try
-            {
+			try
+			{
 				ParserMediator.Initialize(console);
+				ParserMediator.BindCompatibilityPlan(Program.CurrentCompatibilityPlan);
+				if (ParserMediator.CurrentCompatibilityPlan != null)
+					GenericUtils.Info($"[LOAD] CompatibilityPlan={ParserMediator.CurrentCompatibilityPlan.CanonicalHash}");
 				Preload.Clear();
 				Preload.Load(Program.CsvDir);
 				Preload.Load(Program.ErbDir, !Config.UseLazyLoading);
@@ -167,11 +170,21 @@ namespace MinorShift.Emuera.GameProc
 				GlobalStatic.ConstantData = constant;
 				TrainName = constant.GetCsvNameList(VariableCode.TRAINNAME);
 
-                vEvaluator = new VariableEvaluator(gamebase, constant);
+                Int64? m0RunnerRandomSeed = null;
+                if (global::gEmuera.M0.LegacyRunnerDeterminism.TryGetRandomSeed(out int configuredRandomSeed))
+                    m0RunnerRandomSeed = configuredRandomSeed;
+                vEvaluator = new VariableEvaluator(gamebase, constant, m0RunnerRandomSeed);
 				GlobalStatic.VEvaluator = vEvaluator;
 
 				idDic = new IdentifierDictionary(vEvaluator.VariableData);
 				GlobalStatic.IdentifierDictionary = idDic;
+				if (Program.CurrentCompatibilityPlan != null)
+				{
+					ParserMediator.ConsumeCompatibilityPlan(
+						idDic.GetLegacyInstructionNames(),
+						idDic.GetLegacyFunctionNames());
+					idDic.BindCompatibilityPlan(Program.CurrentCompatibilityPlan);
+				}
 
 				StrForm.Initialize();
 				VariableParser.Initialize();
@@ -318,6 +331,15 @@ namespace MinorShift.Emuera.GameProc
 		{
 			GlobalStatic.ctrlZ.Add(s);
 			vEvaluator.RESULTS = s;
+		}
+		public void InputStringWithPointerMetadata(string s)
+		{
+			// eraFL 的 INPUTS ,1 兼容：多数界面仍读取 RESULTS:0，战斗技能则读取 RESULTS:1。
+			// 两个槽位必须在一次提交中同步写入，并且 ctrl-Z 输入历史只能记录一次。
+			GlobalStatic.ctrlZ.Add(s);
+			vEvaluator.RESULTS = s;
+			if (vEvaluator.RESULTS_ARRAY.Length > 1)
+				vEvaluator.RESULTS_ARRAY[1] = s;
 		}
 		public void InputString(long idx, string i)
 		{

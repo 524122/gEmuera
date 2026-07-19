@@ -256,7 +256,7 @@ namespace MinorShift.Emuera.GameData.Function
                     return -1;
                 var row = table.NewRow();
                 row["id"] = RuntimeDataStore.NextDataTableRowId++;
-                long changed = SetDataTableRowValues(row, table, exm, arguments, 1);
+                long changed = SetDataTableRowValues(row, table, exm, arguments, 1, allowSetId: true);
                 table.Rows.Add(row);
                 return Convert.ToInt64(row["id"], CultureInfo.InvariantCulture);
             }
@@ -732,7 +732,7 @@ namespace MinorShift.Emuera.GameData.Function
             return true;
         }
 
-        static long SetDataTableRowValues(DataRow row, DataTable table, ExpressionMediator exm, IOperandTerm[] arguments, int offset)
+        static long SetDataTableRowValues(DataRow row, DataTable table, ExpressionMediator exm, IOperandTerm[] arguments, int offset, bool allowSetId = false)
         {
             if (arguments.Length == offset)
                 return 0;
@@ -776,15 +776,15 @@ namespace MinorShift.Emuera.GameData.Function
                 string columnName = arguments[i].GetStrValue(exm) ?? "";
                 if (!table.Columns.Contains(columnName))
                     throw new CodeEE(columnName + " is not a DataTable column.");
-                SetDataTableValue(row, table.Columns[columnName], arguments[i + 1], exm);
+                SetDataTableValue(row, table.Columns[columnName], arguments[i + 1], exm, allowSetId);
                 changed++;
             }
             return changed;
         }
 
-        static void SetDataTableValue(DataRow row, DataColumn column, IOperandTerm value, ExpressionMediator exm)
+        static void SetDataTableValue(DataRow row, DataColumn column, IOperandTerm value, ExpressionMediator exm, bool allowSetId = false)
         {
-            if (string.Equals(column.ColumnName, "id", StringComparison.OrdinalIgnoreCase))
+            if (!allowSetId && string.Equals(column.ColumnName, "id", StringComparison.OrdinalIgnoreCase))
                 throw new CodeEE("DataTable id column is read-only.");
             if (value == null)
             {

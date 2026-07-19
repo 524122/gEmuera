@@ -29,8 +29,9 @@ internal static class SpriteManager
 	// 批量加载优化：队列积压超过此阈值时自动提升并发数
 	const int BulkLoadQueueThreshold = 8;
 	// 批量加载时的最大并发数（Android 限制为 2，避免内存压力）
-	const int MobileBulkLoadMaxConcurrency = 2;
-	const int DesktopBulkLoadMaxConcurrency = 4;
+const int MobileBulkLoadMaxConcurrency = 2;
+const int DesktopBulkLoadMaxConcurrency = 4;
+const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 
 	internal class SpriteInfo : IDisposable
 	{
@@ -842,6 +843,8 @@ internal static class SpriteManager
 		while(active_async_texture_loads < limit && pending_async_texture_loads.Count > 0)
 		{
 			var request = pending_async_texture_loads.Dequeue();
+			if (active_async_texture_loads == 0)
+				async_texture_loads_idle.Reset();
 			active_async_texture_loads++;
 			ThreadPool.QueueUserWorkItem(_ => RunAsyncTextureLoad(request));
 		}
@@ -915,6 +918,8 @@ internal static class SpriteManager
 			{
 				if(active_async_texture_loads > 0)
 					active_async_texture_loads--;
+				if (active_async_texture_loads == 0)
+					async_texture_loads_idle.Set();
 				StartPendingAsyncTextureLoadsLocked();
 			}
 		}
@@ -940,11 +945,13 @@ internal static class SpriteManager
 			disposeList = CollectUniqueTexturesLocked();
 			texture_dict.Clear();
 		}
+		if (!async_texture_loads_idle.Wait(AsyncTextureWorkerQuiescenceTimeoutMs))
+			GenericUtils.Warn(EmueraLogCategory.Sprite,
+				() => "[SpriteManager] async texture workers did not quiesce before lifecycle clear");
 		while(completed_async_texture_loads.TryDequeue(out var result))
 			result?.Image?.Dispose();
 		for (int i = 0; i < disposeList.Count; i++)
 			disposeList[i].Dispose();
-		GC.Collect();
 	}
 
 	static bool CanEvict(TextureInfo ti)
@@ -1027,6 +1034,7 @@ internal static class SpriteManager
 	static readonly ConcurrentQueue<AsyncTextureLoadResult> completed_async_texture_loads =
 		new ConcurrentQueue<AsyncTextureLoadResult>();
 	static readonly object dictLock = new object();
+	static readonly ManualResetEventSlim async_texture_loads_idle = new ManualResetEventSlim(true);
 	static ulong lastCleanupMs = 0;
 	static int active_async_texture_loads = 0;
 	static int async_texture_load_concurrency = 0;

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.dialect-profile-selection",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-11",
+  "sourcePlanPreflightWorkPackage": "M0-DIA-10",
+  "sourceFiles": [
+    {
+      "id": "FirstWindow",
+      "path": "Scripts/FirstWindow.cs",
+      "sha256": "001e2676f76b2e4df06a90347ffe3bc6bc18512fa747a42c198cbcab95b2f796"
+    },
+    {
+      "id": "Program",
+      "path": "Scripts/Emuera/Program.cs",
+      "sha256": "6cfd9883d3c3c20fd084ca191ed6d3235f48bfbaedd2215d5f6c186f175e038a"
+    },
+    {
+      "id": "LegacyRunnerConfig",
+      "path": "Scripts/M0/LegacyRunnerConfig.cs",
+      "sha256": "734b405dd009641da9d5d68a73d417ba8a0e2d0755788b6a8df5d47f8cc9642b"
+    }
+  ],
+  "expected": {
+    "legacyCoreProfileEnums": ["V24Pure", "Snake", "SnakeModernMobile"],
+    "launcherProfileIds": ["v24pure", "snake"],
+    "launcherFallbackProfileId": "v24pure",
+    "modernMarkerFileNames": ["modern_core.txt", "snake_modern_core.txt"],
+    "legacyMarkerFileNames": ["snake_core.txt", "legacy_snake_core.txt"],
+    "selectionPrecedence": [
+      {"order": 1, "inputKind": "EmptyExeDir", "outputLegacyCoreProfileEnum": "V24Pure"},
+      {"order": 2, "inputKind": "LauncherProfileSnake", "outputLegacyCoreProfileEnum": "Snake"},
+      {"order": 3, "inputKind": "ModernMarker", "outputLegacyCoreProfileEnum": "SnakeModernMobile"},
+      {"order": 4, "inputKind": "LegacyMarker", "outputLegacyCoreProfileEnum": "Snake"},
+      {"order": 5, "inputKind": "Default", "outputLegacyCoreProfileEnum": "V24Pure"}
+    ]
+  }
+}

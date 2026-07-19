@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m0-legacy-display-1.0.0.json",
+  "title": "gEmuera M0 Legacy Display Observation",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schemaVersion", "requestedBackend", "effectiveBackend", "backendEvidence", "viewport", "screenshot", "featureCoverage", "uncovered"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "requestedBackend": { "enum": ["controls", "canvas"] },
+    "effectiveBackend": { "enum": ["controls", "canvas"] },
+    "backendEvidence": {
+      "type": "object",
+      "required": ["retainedLines", "layoutEntries", "lineContainerChildren", "controlRowNodes", "canvasRows"],
+      "properties": {
+        "retainedLines": { "type": "integer", "minimum": 0 },
+        "layoutEntries": { "type": "integer", "minimum": 0 },
+        "lineContainerChildren": { "type": "integer", "minimum": 0 },
+        "controlRowNodes": { "type": "integer", "minimum": 0 },
+        "canvasRows": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "viewport": { "type": "object" },
+    "screenshot": {
+      "type": "object",
+      "required": ["status", "fileName", "sha256", "width", "height", "format", "frameSync", "failure"],
+      "properties": {
+        "status": { "enum": ["Captured", "Uncovered"] },
+        "fileName": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^$|^[0-9a-f]{64}$" },
+        "width": { "type": "integer", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 0 },
+        "format": { "const": "png" },
+        "frameSync": { "const": "RenderingServer.frame_post_draw" },
+        "failure": { "type": "string" }
+      }
+    },
+    "featureCoverage": {
+      "type": "object",
+      "required": ["div", "nestedDiv", "src", "srcb", "dynamicMap", "dataOnly", "scrollIntent"],
+      "additionalProperties": false,
+      "properties": {
+        "div": { "$ref": "#/$defs/coverage" },
+        "nestedDiv": { "$ref": "#/$defs/coverage" },
+        "src": { "$ref": "#/$defs/coverage" },
+        "srcb": { "$ref": "#/$defs/coverage" },
+        "dynamicMap": { "$ref": "#/$defs/coverage" },
+        "dataOnly": { "$ref": "#/$defs/coverage" },
+        "scrollIntent": { "$ref": "#/$defs/coverage" }
+      }
+    },
+    "uncovered": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "count", "note"],
+      "properties": {
+        "status": { "enum": ["Captured", "Uncovered"] },
+        "count": { "type": "integer", "minimum": 0 },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}
