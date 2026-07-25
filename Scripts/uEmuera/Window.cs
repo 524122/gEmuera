@@ -393,7 +393,12 @@ namespace uEmuera.Window
                 return false;
 
             if(current is ConsoleStyledString currentText && next is ConsoleStyledString nextText)
-                return currentText.StringStyle == nextText.StringStyle;
+                return currentText.StringStyle == nextText.StringStyle
+                    && currentText.FontSize == nextText.FontSize
+                    && currentText.VerticalAlign == nextText.VerticalAlign
+                    && string.Equals(currentText.RenderMode ?? "", nextText.RenderMode ?? "", StringComparison.Ordinal)
+                    && string.Equals(currentText.FontEdging ?? "", nextText.FontEdging ?? "", StringComparison.Ordinal)
+                    && string.Equals(currentText.FontHinting ?? "", nextText.FontHinting ?? "", StringComparison.Ordinal);
 
             if(current is ConsoleImagePart currentImage && next is ConsoleImagePart nextImage)
             {

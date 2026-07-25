@@ -212,6 +212,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_VAR_SET] = new SP_VAR_SET_ArgumentBuilder();
 			argb[FunctionArgType.SP_BUTTON] = new SP_BUTTON_ArgumentBuilder();
 			argb[FunctionArgType.SP_COLOR] = new SP_COLOR_ArgumentBuilder();
+			argb[FunctionArgType.SP_COLOR_ALPHA] = new SP_COLOR_ALPHA_ArgumentBuilder();
 			argb[FunctionArgType.SP_SPLIT] = new SP_SPLIT_ArgumentBuilder();
 			argb[FunctionArgType.SP_GETINT] = new SP_GETINT_ArgumentBuilder();
 			argb[FunctionArgType.SP_CVAR_SET] = new SP_CVAR_SET_ArgumentBuilder();
@@ -229,6 +230,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_REF] = new SP_REF_ArgumentBuilder(false);
 			argb[FunctionArgType.SP_REFBYNAME] = new SP_REF_ArgumentBuilder(true);
 			argb[FunctionArgType.SP_SETBGIMAGE] = new SP_SETBGIMAGE_ArgumentBuilder();
+			argb[FunctionArgType.SP_SETIMAGELAYERL] = new SP_SETIMAGELAYERL_ArgumentBuilder();
 			argb[FunctionArgType.SP_HTMLSPLIT] = new SP_HTMLSPLIT_ArgumentBuilder();
 			argb[FunctionArgType.SP_DT_COLUMN_OPTIONS] = new SP_DT_COLUMN_OPTIONS_ArgumentBuilder();
 			
@@ -991,12 +993,11 @@ namespace MinorShift.Emuera.GameProc.Function
                     return new ExpressionArgument(null);
                 // eraFL 的 "INPUTS ,1" 同时表示省略默认字符串并启用鼠标扩展结果。
                 // 该标记必须跟随等待请求进入提交链，不能只丢弃第二参数，否则技能按钮值无法写入 RESULTS:1。
-                if (Program.IsEraFlProfile && !st.EOS
-                    && GEmuera.Core.Compatibility.EraFlCompatibilityModule.IsOmittedDefaultArgument(st.Current))
-                {
-                    st.ShiftNext();
-                    bool enablePointerInputMetadata = GEmuera.Core.Compatibility.EraFlCompatibilityModule
-                        .IsPointerInputMetadataOption(st.Substring());
+				if (!st.EOS && Program.Compatibility.EraFl.IsOmittedDefaultArgument(st.Current))
+				{
+					st.ShiftNext();
+					bool enablePointerInputMetadata = Program.Compatibility.EraFl
+						.IsPointerInputMetadataOption(st.Substring());
                     if (!enablePointerInputMetadata)
                         warn("eraFLのINPUTS省略引数にはマウス拡張オプション1を指定してください", line, 1, false);
                     return new ExpressionArgument(null, enablePointerInputMetadata);
@@ -1668,6 +1669,28 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private sealed class SP_COLOR_ALPHA_ArgumentBuilder : ArgumentBuilder
+		{
+			public SP_COLOR_ALPHA_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
+				minArg = 2;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				IOperandTerm[] terms = popTerms(line);
+				if (terms != null && terms.Length > 2)
+				{
+					warn("引数が多すぎます", line, 2, false);
+					return null;
+				}
+				if (!checkArgumentType(line, exm, terms))
+					return null;
+				return new SpColorAlphaArgument(terms[0], terms[1]);
+			}
+		}
+
 		private sealed class SP_SPLIT_ArgumentBuilder : ArgumentBuilder
 		{
 			public SP_SPLIT_ArgumentBuilder()
@@ -1768,7 +1791,56 @@ namespace MinorShift.Emuera.GameProc.Function
 					terms.Length > 2 ? terms[2] : null);
 			}
 		}
-		
+
+		private sealed class SP_SETIMAGELAYERL_ArgumentBuilder : ArgumentBuilder
+		{
+			public SP_SETIMAGELAYERL_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[]
+				{
+					EraType.String, EraType.Integer, EraType.Integer, EraType.Integer,
+					EraType.Integer, EraType.Integer, EraType.Integer, EraType.Void
+				};
+				minArg = 2;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				IOperandTerm[] terms = popTerms(line);
+				if (terms == null)
+				{
+					warn("引数がありません", line, 2, false);
+					return null;
+				}
+				if (terms.Length < minArg)
+				{
+					warn("引数が足りません", line, 2, false);
+					return null;
+				}
+				if (terms[0] == null || terms[0].GetEraType() != EraType.String)
+				{
+					warn("第1引数の型が正しくありません", line, 2, false);
+					return null;
+				}
+				if (terms[1] == null || terms[1].GetEraType() != EraType.Integer)
+				{
+					warn("第2引数の型が正しくありません", line, 2, false);
+					return null;
+				}
+
+				return new SpSetImageLayerArgument(
+					terms[0],
+					terms[1],
+					terms.Length > 2 ? terms[2] : null,
+					terms.Length > 3 ? terms[3] : null,
+					terms.Length > 4 ? terms[4] : null,
+					terms.Length > 5 ? terms[5] : null,
+					terms.Length > 6 ? terms[6] : null,
+					terms.Length > 7 ? terms[7] : null,
+					null);
+			}
+		}
+
 		private sealed class SP_GETINT_ArgumentBuilder : ArgumentBuilder
 		{
 			public SP_GETINT_ArgumentBuilder()

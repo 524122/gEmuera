@@ -240,7 +240,7 @@ namespace MinorShift.Emuera.GameProc
             IOperandTerm[] convertedArg = new IOperandTerm[func.Arg.Length];
 			// snake fork 的 ConvertArg 原实现不会检查普通 CALL 的多余实参，会只绑定形参范围内的值。
 			// v24 仍保持严格报错；TRYCALL 继续沿用 ignoreExtraArgs 的宽松路径。
-			if(!ignoreExtraArgs && !Program.IsSnakeProfile && variadicIndex < 0 && convertedArg.Length < srcArgs.Length)
+			if(!ignoreExtraArgs && !Program.Compatibility.Snake.AllowsExtraCallArguments && variadicIndex < 0 && convertedArg.Length < srcArgs.Length)
 			{
 				errMes = "引数の数が関数\"@" + func.LabelName + "\"に設定された数を超えています";
 				return null;
@@ -331,7 +331,7 @@ namespace MinorShift.Emuera.GameProc
 							return null;
 						}
 						if (tostrMethod == null)
-							tostrMethod = FunctionMethodCreator.GetMethodList()["TOSTR"];
+							tostrMethod = FunctionMethodCreator.GetMethodList(Program.Compatibility)["TOSTR"];
 						term = new FunctionMethodTerm(tostrMethod, new IOperandTerm[] { term });
 					}
 				}
@@ -370,7 +370,7 @@ namespace MinorShift.Emuera.GameProc
 								return null;
 							}
 							if (tostrMethod == null)
-								tostrMethod = FunctionMethodCreator.GetMethodList()["TOSTR"];
+							tostrMethod = FunctionMethodCreator.GetMethodList(Program.Compatibility)["TOSTR"];
 							term = new FunctionMethodTerm(tostrMethod, new IOperandTerm[] { term });
 						}
 					}

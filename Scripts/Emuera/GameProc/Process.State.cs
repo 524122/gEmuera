@@ -6,6 +6,7 @@ using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.GameData.Function;
 using MinorShift.Emuera.GameView;
 using MinorShift.Emuera.GameData.Variable;
+using MinorShift.Emuera.Compatibility;
 
 namespace MinorShift.Emuera.GameProc
 {
@@ -630,12 +631,13 @@ namespace MinorShift.Emuera.GameProc
 			Int64 returnedRoomIndex,
 			out Int64 recoveredRoomIndex)
 		{
+			IEraFlCompatibilityPolicy eraFl = Program.Compatibility.EraFl;
 			recoveredRoomIndex = returnedRoomIndex;
-			if (!Program.IsEraFlProfile || called == null || called.IsEvent || called.IsJump
+			if (!eraFl.IsEnabled || called == null || called.IsEvent || called.IsJump
 				|| returnedRoomIndex != -1 || called.TopLabel == null
 				|| !IsEraFlFunction(
 					called,
-					global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TaskStartRoomLookupFunction))
+					eraFl.TaskStartRoomLookupFunction))
 			{
 				return false;
 			}
@@ -657,7 +659,7 @@ namespace MinorShift.Emuera.GameProc
 
 			if (string.Equals(
 				lookup.QuestType,
-				global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapQuestType,
+				eraFl.GMapQuestType,
 				StringComparison.Ordinal))
 			{
 				Int64 mapCount = 1;
@@ -667,7 +669,7 @@ namespace MinorShift.Emuera.GameProc
 					TryPopulateEraFlGMapRoomDataFromFiles(lookup.MapId, mapData);
 			}
 
-			return global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+			return eraFl.TryRecoverQuestStartRoomIndex(
 				called.FunctionName,
 				returnedRoomIndex,
 				lookup.RequestedRoomTag,
@@ -684,7 +686,8 @@ namespace MinorShift.Emuera.GameProc
 		/// </summary>
 		private void TryFinalizeEraFlGMapLoad(CalledFunction called)
 		{
-			if (!Program.IsEraFlProfile || called == null || called.IsEvent || called.IsJump
+			IEraFlCompatibilityPolicy eraFl = Program.Compatibility.EraFl;
+			if (!eraFl.IsEnabled || called == null || called.IsEvent || called.IsJump
 				|| !IsEraFlFunction(called, "QST_LOAD_MAPDATA"))
 			{
 				return;
@@ -695,7 +698,7 @@ namespace MinorShift.Emuera.GameProc
 				TryReadGlobalString("QST_QUEST_TYPE", out questType);
 			if (!string.Equals(
 				questType,
-				global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapQuestType,
+				eraFl.GMapQuestType,
 				StringComparison.Ordinal))
 			{
 				return;
@@ -841,8 +844,7 @@ namespace MinorShift.Emuera.GameProc
 				RuntimeDataStore.DataTables.TryGetValue(perMapTableName, out table);
 			}
 
-			if (!TryReadEraFlGMapNodes(table,
-				out IReadOnlyList<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData> nodes))
+			if (!TryReadEraFlGMapNodes(table, out IReadOnlyList<EraFlGMapNode> nodes))
 			{
 				return false;
 			}
@@ -855,9 +857,9 @@ namespace MinorShift.Emuera.GameProc
 		/// </summary>
 		private static bool TryReadEraFlGMapNodes(
 			System.Data.DataTable table,
-			out IReadOnlyList<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData> nodes)
+			out IReadOnlyList<EraFlGMapNode> nodes)
 		{
-			nodes = Array.Empty<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData>();
+			nodes = Array.Empty<EraFlGMapNode>();
 			if (table == null || table.Rows.Count == 0
 				|| !table.Columns.Contains("id")
 				|| !table.Columns.Contains("NODE_ID")
@@ -869,7 +871,7 @@ namespace MinorShift.Emuera.GameProc
 				return false;
 			}
 
-			var parsed = new List<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData>(table.Rows.Count);
+			var parsed = new List<EraFlGMapNode>(table.Rows.Count);
 			try
 			{
 				foreach (System.Data.DataRow row in table.Rows)
@@ -882,7 +884,7 @@ namespace MinorShift.Emuera.GameProc
 					_ = Convert.ToInt64(row["id"]);
 					_ = Convert.ToInt64(row["POS_X"]);
 					_ = Convert.ToInt64(row["POS_Y"]);
-					parsed.Add(new global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData(
+					parsed.Add(new EraFlGMapNode(
 						Convert.ToInt64(row["NODE_ID"]),
 						row["NODE_NAME"] == DBNull.Value ? "" : Convert.ToString(row["NODE_NAME"]),
 						row["PATH_LIST"] == DBNull.Value ? "" : Convert.ToString(row["PATH_LIST"])));
@@ -905,7 +907,7 @@ namespace MinorShift.Emuera.GameProc
 			Int64 mapId,
 			string[,] mapData,
 			System.Data.DataTable sourceTable,
-			IReadOnlyList<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData> nodes)
+			IReadOnlyList<EraFlGMapNode> nodes)
 		{
 			System.Data.DataTable globalTable = null;
 			System.Data.DataTable perMapTable = null;
@@ -925,7 +927,7 @@ namespace MinorShift.Emuera.GameProc
 				return false;
 			}
 
-			if (!global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TryPopulateGMapRoomData(
+			if (!Program.Compatibility.EraFl.TryPopulateGMapRoomData(
 				mapId,
 				mapData,
 				nodes))
@@ -972,11 +974,11 @@ namespace MinorShift.Emuera.GameProc
 			{
 				string schemaXml = System.IO.File.ReadAllText(schemaPath, System.Text.Encoding.UTF8);
 				string dataXml = System.IO.File.ReadAllText(dataPath, System.Text.Encoding.UTF8);
-				if (!global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TryParseGMapDataTableFromXml(
+				if (!Program.Compatibility.EraFl.TryParseGMapDataTableFromXml(
 					schemaXml,
 					dataXml,
 					out System.Data.DataTable table,
-					out IReadOnlyList<global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.GMapNodeData> nodes))
+					out IReadOnlyList<EraFlGMapNode> nodes))
 				{
 					return false;
 				}
@@ -1024,10 +1026,11 @@ namespace MinorShift.Emuera.GameProc
 			CalledFunction call,
 			UserDefinedFunctionArgument srcArgs)
 		{
-			if (!Program.IsEraFlProfile || call == null || srcArgs == null || call.IsEvent || call.IsJump
+			IEraFlCompatibilityPolicy eraFl = Program.Compatibility.EraFl;
+			if (!eraFl.IsEnabled || call == null || srcArgs == null || call.IsEvent || call.IsJump
 				|| !string.Equals(
 					call.FunctionName,
-					global::GEmuera.Core.Compatibility.EraFlCompatibilityModule.TaskStartRoomLookupFunction,
+					eraFl.TaskStartRoomLookupFunction,
 					StringComparison.Ordinal)
 				|| srcArgs.Arguments.Length < 4)
 			{

@@ -133,7 +133,7 @@ namespace MinorShift.Emuera.GameView
 			if (Config.FPS > 0)
 			{
 				int effectiveFps = Config.FPS;
-				if (Program.IsSnakeProfile && effectiveFps < 60)
+				if (Program.Compatibility.Snake.UsesFastDisplayRefresh && effectiveFps < 60)
 					effectiveFps = 60;
 				msPerFrame = 1000 / (uint)effectiveFps;
 			}
@@ -682,6 +682,19 @@ namespace MinorShift.Emuera.GameView
 		}
 		public int ClientWidth { get { return Config.WindowX; } }
 		public int ClientHeight { get { return Config.WindowY; } }
+		public int GetLinePointY(int lineNo)
+		{
+			int pointY = ClientHeight - Config.LineHeight;
+			int bottomLineNo = window.ScrollBar.Value - 1;
+			lock (displayLineLock)
+			{
+				if (displayLineList.Count - 1 < bottomLineNo)
+					bottomLineNo = displayLineList.Count - 1;
+			}
+			pointY -= (bottomLineNo - lineNo) * Config.LineHeight;
+			return pointY;
+		}
+
 #endregion
 
 		const string ErrorButtonsText = "__openFileWithDebug__";
@@ -1107,8 +1120,9 @@ namespace MinorShift.Emuera.GameView
 				return;
 			}
 			uint awaitStart = WinmmTimer.TickCount;
-			int refreshWaitMs = Program.IsSnakeProfile ? 4 : 40;
-			int frameWaitMs = Program.IsSnakeProfile ? (time > 0 ? Math.Min(8, time) : 0) : 20;
+			bool usesFastDisplayRefresh = Program.Compatibility.Snake.UsesFastDisplayRefresh;
+			int refreshWaitMs = usesFastDisplayRefresh ? 4 : 40;
+			int frameWaitMs = usesFastDisplayRefresh ? (time > 0 ? Math.Min(8, time) : 0) : 20;
 			int uiFrame = global::GenericUtils.UiFrameGeneration;
 			RefreshStrings(true);
 			int refreshGeneration = window.RefreshRequestGeneration;
@@ -1122,7 +1136,7 @@ namespace MinorShift.Emuera.GameView
 
 			if (time > 0)
 			{
-				if (Program.IsSnakeProfile)
+				if (usesFastDisplayRefresh)
 				{
 					int elapsed = (int)(WinmmTimer.TickCount - awaitStart);
 					int remaining = time - elapsed;
@@ -1136,7 +1150,7 @@ namespace MinorShift.Emuera.GameView
 					System.Threading.Thread.Sleep(time);
 				}
 			}
-			else if (Program.IsSnakeProfile)
+			else if (usesFastDisplayRefresh)
 				System.Threading.Thread.Yield();
 
 			////DoEvents()の間にウインドウが閉じられたらおしまい。
@@ -1149,8 +1163,25 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Running;
 		}
 
+		private void SimulateSequenceInput(InputRequest req)
+		{
+			string raw = emuera.SequenceInputValue ?? string.Empty;
+			emuera.HasSequenceInput = false;
+			emuera.SequenceInputValue = null;
+			inputReq = req;
+			state = ConsoleState.WaitInput;
+			PressEnterKey(false, raw, false);
+		}
+
 		public void WaitInput(InputRequest req)
 		{
+			// SEQUENCEINPUT schedules a synthetic input on the next wait; consume it once.
+			if (emuera != null && emuera.HasSequenceInput)
+			{
+				SimulateSequenceInput(req);
+				return;
+			}
+
 			state = req.NoFocus ? ConsoleState.WaitInputNoFocus : ConsoleState.WaitInput;
 			inputReq = req;
 			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
@@ -1599,11 +1630,12 @@ namespace MinorShift.Emuera.GameView
 			try
 			{
 				string[] text;
-				if(changedByMouse)//1823 マウスによって入力されたならマクロ解析を行わない
+				bool inputMacroEnabled = emuera == null || emuera.InputMacroEnabled;
+				if (changedByMouse || !inputMacroEnabled) // Snake/EE can feed the sequence literally.
 				{ text = new string[] { str }; }
 				else
 				{
-					if (str.StartsWith("@") && !inputReq.OneInput)
+					if (str.Length > 1 && str.StartsWith("@") && !inputReq.OneInput)
 					{
 						doSystemCommand(str);
 						return;
@@ -1614,12 +1646,18 @@ namespace MinorShift.Emuera.GameView
 						(inputReq.InputType == InputType.AnyKey || inputReq.InputType == InputType.EnterKey))
 						stopTimer();
 					//if((inputReq.InputType == InputType.IntValue || inputReq.InputType == InputType.StrValue)
-					if (str.Contains("("))
+					if (str.Contains("(") && inputMacroEnabled)
 						str = parseInput(new StringStream(str), false);
 					text = str.Split(spliter, StringSplitOptions.None);
 				}
 				
 				inProcess = true;
+				if (!inputMacroEnabled)
+				{
+					callEmueraProgram(str, changedByMouse);
+					RefreshStrings(false);
+					goto endMacro;
+				}
 				for (int i = 0; i < text.Length; i++)
 				{
 					string inputs = text[i];

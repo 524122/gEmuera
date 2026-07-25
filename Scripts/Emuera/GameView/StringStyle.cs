@@ -6,17 +6,25 @@ using uEmuera.Drawing;
 
 namespace MinorShift.Emuera.GameView
 {
+	internal enum FontVerticalAlign
+	{
+		Top,
+		Middle,
+		Bottom,
+	}
+
 	/// <summary>
 	/// 装飾付文字列(ConsoleStyledString)用のスタイル構造体
 	/// </summary>
 	internal struct StringStyle
 	{
-		public StringStyle(Color color, FontStyle fontStyle, string fontname)
+		public StringStyle(Color color, FontStyle fontStyle, string fontname, FontVerticalAlign? verticalAlign = null)
 		{
 			this.Color = color;
 			this.ButtonColor = Config.FocusColor;
 			this.ColorChanged = false;//こっちのパターンでは色変更を後で検知
 			this.FontStyle = fontStyle;
+			this.VerticalAlign = verticalAlign;
 			if (string.IsNullOrEmpty(fontname))
 				Fontname = Config.FontName;
 			else
@@ -26,12 +34,13 @@ namespace MinorShift.Emuera.GameView
 		/// <summary>
 		/// HTML用。ColorChangedを固定する。
 		/// </summary>
-		public StringStyle(Color color, bool colorChanged, Color buttonColor, FontStyle fontStyle, string fontname)
+		public StringStyle(Color color, bool colorChanged, Color buttonColor, FontStyle fontStyle, string fontname, FontVerticalAlign? verticalAlign = null)
 		{
 			this.Color = color;
 			this.ButtonColor = buttonColor;
 			this.ColorChanged = colorChanged;
 			this.FontStyle = fontStyle;
+			this.VerticalAlign = verticalAlign;
 			if (string.IsNullOrEmpty(fontname))
 				Fontname = Config.FontName;
 			else
@@ -43,20 +52,21 @@ namespace MinorShift.Emuera.GameView
 		public bool ColorChanged;
 		public FontStyle FontStyle;
 		public string Fontname;
+		public FontVerticalAlign? VerticalAlign { get; private set; }
 		public override bool Equals(object obj)
 		{
 			if ((obj == null) || (!(obj is StringStyle)))
 				return false;
 			StringStyle ss = (StringStyle)obj;
-			return ((this.Color == ss.Color) && (this.ButtonColor == ss.ButtonColor) && (this.ColorChanged == ss.ColorChanged) && (this.FontStyle == ss.FontStyle) && (this.Fontname.Equals(ss.Fontname,  Config.SCIgnoreCase)));
+			return ((this.Color == ss.Color) && (this.ButtonColor == ss.ButtonColor) && (this.ColorChanged == ss.ColorChanged) && (this.FontStyle == ss.FontStyle) && (this.VerticalAlign == ss.VerticalAlign) && (this.Fontname.Equals(ss.Fontname,  Config.SCIgnoreCase)));
 		}
 		public override int GetHashCode()
 		{
-			return Color.GetHashCode() ^ ButtonColor.GetHashCode() ^ ColorChanged.GetHashCode() ^ FontStyle.GetHashCode() ^ Fontname.GetHashCode();
+			return Color.GetHashCode() ^ ButtonColor.GetHashCode() ^ ColorChanged.GetHashCode() ^ FontStyle.GetHashCode() ^ Fontname.GetHashCode() ^ VerticalAlign.GetHashCode();
 		}
 		public static bool operator ==(StringStyle x, StringStyle y)
 		{
-			return ((x.Color == y.Color) && (x.ButtonColor == y.ButtonColor) && (x.ColorChanged == y.ColorChanged) && (x.FontStyle == y.FontStyle) && (x.Fontname.Equals(y.Fontname, Config.SCIgnoreCase)));
+			return ((x.Color == y.Color) && (x.ButtonColor == y.ButtonColor) && (x.ColorChanged == y.ColorChanged) && (x.FontStyle == y.FontStyle) && (x.VerticalAlign == y.VerticalAlign) && (x.Fontname.Equals(y.Fontname, Config.SCIgnoreCase)));
 		}
 		public static bool operator !=(StringStyle x, StringStyle y)
 		{

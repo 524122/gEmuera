@@ -74,6 +74,16 @@ public sealed partial class EmueraTextRenderComponent : Node
 		currentInstance = this;
 	}
 
+	public override void _Process(double delta)
+	{
+		// Do not create a SubViewport or load the fallback font until legacy
+		// GDRAWSTRING actually submits work. This keeps the Compatibility
+		// startup path free of an otherwise unused offscreen render target.
+		if (!textWaitingForRender && renderQueue.IsEmpty)
+			return;
+		ProcessQueue();
+	}
+
 	public void ProcessQueue()
 	{
 		if (textViewport == null)

@@ -66,6 +66,26 @@ public static class BuiltInDialectCatalog
         return catalog;
     }
 
+    /// <summary>
+    /// Builds the single immutable plan accepted by the legacy bridge for a
+    /// normal launcher session. Keeping this composition in Core means the
+    /// Godot launcher supplies only a requested profile id; it cannot choose
+    /// modules, ports, or a mutable registry surface.
+    /// </summary>
+    public static CompatibilityPlan CreateLegacySessionPlan(string profileId)
+    {
+        var profiles = CreateLegacyProfileCatalog();
+        profiles.Freeze();
+        var profile = profiles.Resolve(profileId);
+        var modules = CreateLegacyBaseline();
+        return new CompatibilityPlanBuilder(modules).Build(
+            profile.ProfileId,
+            profile.RootModuleIds,
+            profile.DefaultPorts,
+            profile.RequiredCapabilityIds,
+            profile.DefaultSaveProfileId);
+    }
+
     private sealed class DeclaredDialectModule : IDialectModule
     {
         public DeclaredDialectModule(

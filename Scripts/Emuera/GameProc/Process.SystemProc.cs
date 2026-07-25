@@ -107,6 +107,12 @@ namespace MinorShift.Emuera.GameProc
 		public bool flowinputString = false;
 		public bool flowinputForceSkip = false;
 
+
+		// Snake/EE input extensions: state is owned by the legacy Process for the current session.
+		internal string SequenceInputValue { get; set; }
+		internal bool HasSequenceInput { get; set; }
+		internal bool InputMacroEnabled { get; set; } = true;
+
 		void setWaitInput()
 		{
 			InputRequest req = new InputRequest();
@@ -171,7 +177,7 @@ namespace MinorShift.Emuera.GameProc
 			// TODO: Snake compatibility fallback — allow startup to continue despite ERB parse warnings.
 			// Standard v24 behavior is to exit on unrecoverable parse errors (see else-if below).
 			// Remove once snake scripts are cleaned up; use CompatiErrorLine config in the meantime.
-			if ((!noError) && (!Config.CompatiErrorLine) && Program.IsSnakeProfile)
+			if ((!noError) && (!Config.CompatiErrorLine) && Program.Compatibility.Snake.ContinuesAfterStartupFault)
 			{
 				console.PrintSystemLine("Snake互換モード: ERB解析警告がありますが起動を継続します");
 				console.PrintSystemLine("emuera.logにログを出力します");

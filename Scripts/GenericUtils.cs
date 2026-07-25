@@ -99,6 +99,10 @@ internal static class GenericUtils
     static long _lastPerformanceSampleMs;
     static double _performanceFrameMsTotal;
     static double _performanceFrameMsMax;
+    static int _performanceFrameMaxUiPending;
+    static int _performanceFrameMaxDisplayPending;
+    static int _performanceFrameMaxGpuRenderQueue;
+    static int _performanceFrameMaxTextRenderQueue;
     static int _performanceFrameCount;
     static long _lastConsoleRenderSampleMs;
     static int _consoleRenderCallbackCount;
@@ -452,6 +456,10 @@ internal static class GenericUtils
         _lastPerformanceSampleMs = 0;
         _performanceFrameMsTotal = 0.0;
         _performanceFrameMsMax = 0.0;
+        _performanceFrameMaxUiPending = 0;
+        _performanceFrameMaxDisplayPending = 0;
+        _performanceFrameMaxGpuRenderQueue = 0;
+        _performanceFrameMaxTextRenderQueue = 0;
         _performanceFrameCount = 0;
         ResetConsoleRenderSampling();
         ResetDisplayBridgeSampling();
@@ -1822,7 +1830,8 @@ internal static class GenericUtils
             DiagnosticLogExporter.WriteBreadcrumb(cfg, "BREADCRUMB.WRITE", "event=shutdown");
     }
 
-    public static void SamplePerformanceFrame(double deltaSeconds, int textureQueueCount)
+    public static void SamplePerformanceFrame(double deltaSeconds, int gpuRenderQueueCount, int textRenderQueueCount,
+        string rendererIdentity)
     {
         var cfg = _runtimeConfig;
         if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
@@ -1830,7 +1839,14 @@ internal static class GenericUtils
 
         double frameMs = Math.Max(0.0, deltaSeconds * 1000.0);
         _performanceFrameMsTotal += frameMs;
-        _performanceFrameMsMax = Math.Max(_performanceFrameMsMax, frameMs);
+        if (frameMs >= _performanceFrameMsMax)
+        {
+            _performanceFrameMsMax = frameMs;
+            _performanceFrameMaxUiPending = Volatile.Read(ref pendingUiActions);
+            _performanceFrameMaxDisplayPending = Volatile.Read(ref pendingDisplayActions);
+            _performanceFrameMaxGpuRenderQueue = gpuRenderQueueCount;
+            _performanceFrameMaxTextRenderQueue = textRenderQueueCount;
+        }
         _performanceFrameCount++;
 
         long nowMs = GetTickMs();
@@ -1842,8 +1858,16 @@ internal static class GenericUtils
         int count = Math.Max(1, _performanceFrameCount);
         double avg = _performanceFrameMsTotal / count;
         double max = _performanceFrameMsMax;
+        int maxUiPending = _performanceFrameMaxUiPending;
+        int maxDisplayPending = _performanceFrameMaxDisplayPending;
+        int maxGpuRenderQueue = _performanceFrameMaxGpuRenderQueue;
+        int maxTextRenderQueue = _performanceFrameMaxTextRenderQueue;
         _performanceFrameMsTotal = 0.0;
         _performanceFrameMsMax = 0.0;
+        _performanceFrameMaxUiPending = 0;
+        _performanceFrameMaxDisplayPending = 0;
+        _performanceFrameMaxGpuRenderQueue = 0;
+        _performanceFrameMaxTextRenderQueue = 0;
         _performanceFrameCount = 0;
 
         var data = new StringBuilder(160);
@@ -1852,10 +1876,23 @@ internal static class GenericUtils
         if (cfg.PerformanceSamplingIncludeFrameMs)
             data.Append("frame_ms_avg=").Append(avg.ToString("0.###")).Append(" frame_ms_max=").Append(max.ToString("0.###")).Append(' ');
         if (cfg.PerformanceSamplingIncludeUiQueue)
+        {
             data.Append("ui_pending=").Append(Volatile.Read(ref pendingUiActions))
-                .Append(" display_pending=").Append(Volatile.Read(ref pendingDisplayActions)).Append(' ');
+                .Append(" display_pending=").Append(Volatile.Read(ref pendingDisplayActions));
+            if (cfg.PerformanceSamplingIncludeFrameMs)
+                data.Append(" frame_max_ui_pending=").Append(maxUiPending)
+                    .Append(" frame_max_display_pending=").Append(maxDisplayPending);
+            data.Append(' ');
+        }
         if (cfg.PerformanceSamplingIncludeTextureQueue)
-            data.Append("texture_queue=").Append(textureQueueCount).Append(' ');
+        {
+            data.Append("gpu_render_queue=").Append(gpuRenderQueueCount)
+                .Append(" text_render_queue=").Append(textRenderQueueCount);
+            if (cfg.PerformanceSamplingIncludeFrameMs)
+                data.Append(" frame_max_gpu_render_queue=").Append(maxGpuRenderQueue)
+                    .Append(" frame_max_text_render_queue=").Append(maxTextRenderQueue);
+            data.Append(' ');
+        }
         if (cfg.PerformanceSamplingIncludeRingBuffer)
             data.Append("ring_count=").Append(DiagnosticLogSinks.RingCount)
                 .Append(" ring_capacity=").Append(DiagnosticLogSinks.RingCapacity).Append(' ');
@@ -1863,6 +1900,8 @@ internal static class GenericUtils
             data.Append("dropped=").Append(DiagnosticLogRouter.GetDroppedTotal()).Append(' ');
         if (cfg.PerformanceSamplingIncludeMemory)
             data.Append("static_memory=").Append(OS.GetStaticMemoryUsage()).Append(' ');
+        if (!string.IsNullOrWhiteSpace(rendererIdentity))
+            data.Append(rendererIdentity).Append(' ');
 
         // 企业级说明：性能采样是低频诊断事件，只在显式开启后每 interval 输出一次。
         // 采样数据写入 ring buffer，不在每帧构造日志文本，避免诊断系统反向拖慢 APK。

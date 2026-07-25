@@ -3,6 +3,7 @@ using GEmuera.Core.Session;
 using GEmuera.Core.Runtime;
 using CoreContractSmoke;
 using gEmuera.GodotHost;
+using MinorShift.Emuera.Compatibility;
 using System.Data;
 using System.IO;
 using System.Text;
@@ -316,6 +317,70 @@ Assert(
 Assert(
     builtInProfiles.Resolve("snake").RootModuleIds.SequenceEqual(new[] { "game.snake" }),
     "Built-in Snake profile does not declare its root module.");
+
+var legacyV24Profile = LegacyCompatibilityProfile.CreateForProfile("v24pure", scopedVariableInstructionsEnabled: true);
+Assert(
+    legacyV24Profile.ProfileId == "v24pure"
+    && !legacyV24Profile.Snake.IsEnabled
+    && !legacyV24Profile.EraFl.IsEnabled,
+    "v24 legacy compatibility profile selected a game-specific policy.");
+Assert(
+    !legacyV24Profile.IsInstructionVisible("PRINTN")
+    && !legacyV24Profile.IsFunctionVisible("陷落状态"),
+    "v24 legacy compatibility profile leaked a Snake-only registry member.");
+
+var legacySnakeProfile = LegacyCompatibilityProfile.CreateForProfile("snake", scopedVariableInstructionsEnabled: true);
+Assert(
+    legacySnakeProfile.Plan.Dialect.Modules.Any(module => module.ModuleId == "game.snake")
+    && legacySnakeProfile.Snake.IsEnabled
+	&& legacySnakeProfile.Snake.AllowsScopedVariablePreRegistration
+    && !legacySnakeProfile.EraFl.IsEnabled,
+    "Snake legacy compatibility profile did not select only its game module.");
+Assert(
+    legacySnakeProfile.IsInstructionVisible("PRINTN")
+    && legacySnakeProfile.IsInstructionVisible("VARI")
+    && legacySnakeProfile.IsFunctionVisible("陷落状态"),
+    "Snake legacy compatibility profile did not expose its scoped registry surface.");
+
+var legacySnakeProfileWithoutScopedVariables = LegacyCompatibilityProfile.CreateForProfile(
+    "snake",
+    scopedVariableInstructionsEnabled: false);
+Assert(
+    legacySnakeProfile.Plan.CanonicalHash == legacySnakeProfileWithoutScopedVariables.Plan.CanonicalHash
+    && legacySnakeProfile.RegistrySurfaceHash != legacySnakeProfileWithoutScopedVariables.RegistrySurfaceHash
+	&& legacySnakeProfileWithoutScopedVariables.Snake.AllowsScopedVariablePreRegistration
+    && !legacySnakeProfileWithoutScopedVariables.IsInstructionVisible("VARI")
+    && !legacySnakeProfileWithoutScopedVariables.IsInstructionVisible("VARS"),
+    "Snake scoped-variable registry surface is not frozen independently from the Core module plan.");
+
+var legacyEraFlProfile = LegacyCompatibilityProfile.CreateForProfile("erafl", scopedVariableInstructionsEnabled: true);
+Assert(
+    legacyEraFlProfile.Plan.Dialect.Modules.Any(module => module.ModuleId == "game.erafl")
+    && !legacyEraFlProfile.Snake.IsEnabled
+    && legacyEraFlProfile.EraFl.IsEnabled
+    && legacyEraFlProfile.UsesExtendedDisplayHistory
+    && legacyEraFlProfile.UsesLazyResourceIndex,
+    "eraFL legacy compatibility profile did not select its module policy.");
+Assert(
+    !legacyEraFlProfile.IsInstructionVisible("PRINTN")
+    && !legacyEraFlProfile.IsFunctionVisible("陷落状态"),
+    "eraFL legacy compatibility profile leaked a Snake-only registry member.");
+
+var invalidLegacyProfilePlan = new CompatibilityPlanBuilder(BuiltInDialectCatalog.CreateLegacyBaseline())
+    .Build("v24pure", new[] { "game.snake" });
+AssertThrows<InvalidOperationException>(
+    () => LegacyCompatibilityProfile.Create(invalidLegacyProfilePlan, scopedVariableInstructionsEnabled: true),
+    "Legacy compatibility profile accepted a v24 profile composed with the Snake module.");
+
+var catalogWithUnexpectedLegacyModule = BuiltInDialectCatalog.CreateLegacyBaseline();
+catalogWithUnexpectedLegacyModule.Register(new TestDialectModule(
+    new DialectModuleDefinition("test.legacy-extra", "1.0.0", 1),
+    Array.Empty<IDialectContribution>()));
+var legacyPlanWithUnexpectedModule = new CompatibilityPlanBuilder(catalogWithUnexpectedLegacyModule)
+    .Build("v24pure", new[] { "gemuera.v24", "test.legacy-extra" });
+AssertThrows<InvalidOperationException>(
+    () => LegacyCompatibilityProfile.Create(legacyPlanWithUnexpectedModule, scopedVariableInstructionsEnabled: true),
+    "Legacy compatibility profile accepted an unclassified module in a built-in profile closure.");
 
 var extensionProfiles = new CompatibilityProfileCatalog();
 extensionProfiles.Register(new CompatibilityProfileDefinition(
@@ -852,6 +917,13 @@ Assert(
         && recoveredQuestStart == 2,
     "eraFL task-start recovery did not return the current map's room index.");
 Assert(
+    legacyEraFlProfile.EraFl.TaskStartRoomLookupFunction == "HO_FIND_ROOM_BY_TAG"
+        && legacyEraFlProfile.EraFl.GMapQuestType == "GMAP"
+        && legacyEraFlProfile.EraFl.TryRecoverQuestStartRoomIndex(
+            "HO_FIND_ROOM_BY_TAG", -1, "任务開始地点", 1, "MAP", eraFlQuestMap, out var bridgedQuestStart)
+        && bridgedQuestStart == 2,
+    "eraFL legacy policy did not project its task-start recovery boundary.");
+Assert(
     !EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
         "HO_FIND_ROOM_BY_TAG", 7, "任务開始地点", 1, eraFlQuestMap, out var retainedQuestStart)
         && retainedQuestStart == 7,
@@ -939,6 +1011,18 @@ Assert(
         && parsedEraFlGMapTableNodes.Count == 2,
     "eraFL GMAP schema/XML fallback discarded the complete drawing table.");
 parsedEraFlGMapTable?.Dispose();
+Assert(
+    legacyEraFlProfile.EraFl.TryParseGMapDataTableFromXml(
+        eraFlSchemaXml,
+        eraFlDataXml,
+        out var bridgedEraFlGMapTable,
+        out var bridgedEraFlGMapNodes)
+        && bridgedEraFlGMapTable.TableName == "GMAPDATA"
+        && bridgedEraFlGMapNodes.Count == 2
+        && bridgedEraFlGMapNodes[1].NodeId == 0
+        && bridgedEraFlGMapNodes[1].NodeName == "城镇入口",
+    "eraFL legacy policy did not project GMAP XML data into the bridge DTO.");
+bridgedEraFlGMapTable.Dispose();
 Assert(
     EraFlCompatibilityModule.TryParseGMapNodesFromXml(
         eraFlSchemaXml,

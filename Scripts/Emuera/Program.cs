@@ -12,6 +12,7 @@ using uEmuera.Drawing;
 using uEmuera.Forms;
 using uEmuera.Window;
 using GEmuera.Core.Compatibility;
+using MinorShift.Emuera.Compatibility;
 
 namespace MinorShift.Emuera
 {
@@ -29,6 +30,9 @@ namespace MinorShift.Emuera
 		static string m0RunnerStartupErrorLogPath = "";
 		static string m0RunnerDefaultOutputLogPath = "";
 		static CompatibilityPlan m1CompatibilityPlan;
+		static LegacyCompatibilityProfile m1CompatibilityProfile;
+		static readonly LegacyCompatibilityProfile defaultCompatibilityProfile =
+			LegacyCompatibilityProfile.CreateForProfile("v24pure", scopedVariableInstructionsEnabled: true);
 		/*
 		コードの開始地点。
 		ここでMainWindowを作り、
@@ -59,11 +63,14 @@ namespace MinorShift.Emuera
 		{
 
 			ExeDir = Sys.ExeDir;
-			var detectedProfile = DetectCoreProfile();
 			var boundPlan = CurrentCompatibilityPlan;
-			CoreProfile = boundPlan == null
-				? detectedProfile
-				: ResolveCompatibilityProfile(boundPlan.ProfileId);
+			if (boundPlan == null)
+			{
+				var detectedProfile = DetectCoreProfile();
+				ConfigureCompatibilityPlan(BuiltInDialectCatalog.CreateLegacySessionPlan(
+					GetCompatibilityProfileId(detectedProfile)));
+				boundPlan = CurrentCompatibilityPlan;
+			}
 #if UEMUERA_DEBUG
 			//debugMode = true;
 
@@ -122,6 +129,10 @@ namespace MinorShift.Emuera
 			Application.SetCompatibleTextRenderingDefault(false);
 			ConfigData.Instance.LoadConfig();
 			JSONConfig.Load(ConfigData.Instance);
+			// VARI/VARS changes the parser-visible instruction surface. Recompose
+			// the legacy projection only after both configuration layers have been
+			// loaded, while retaining the same immutable Core module plan.
+			ConfigureCompatibilityPlan(boundPlan, Config.UseScopedVariableInstruction);
 			ApplyAndroidWindowWidthPolicy();
 			global::FrameRateHelper.ApplyConfigFps();
 			//二重起動の禁止かつ二重起動
@@ -254,18 +265,29 @@ namespace MinorShift.Emuera
 
 		public static bool debugMode = false;
 		public static bool DebugMode { get { return debugMode; } }
-		public static EmueraCoreProfile CoreProfile { get; private set; } = EmueraCoreProfile.V24Pure;
+		public static EmueraCoreProfile CoreProfile
+		{
+			get { return ResolveCompatibilityProfile(Compatibility.ProfileId); }
+		}
 		public static CompatibilityPlan CurrentCompatibilityPlan
 		{
 			get { return System.Threading.Volatile.Read(ref m1CompatibilityPlan); }
 		}
+		internal static LegacyCompatibilityProfile Compatibility
+		{
+			get
+			{
+				return System.Threading.Volatile.Read(ref m1CompatibilityProfile)
+					?? defaultCompatibilityProfile;
+			}
+		}
 		public static bool IsSnakeProfile
 		{
-			get { return CoreProfile == EmueraCoreProfile.Snake || CoreProfile == EmueraCoreProfile.SnakeModernMobile; }
+			get { return Compatibility.Snake.IsEnabled; }
 		}
 		public static bool IsEraFlProfile
 		{
-			get { return CoreProfile == EmueraCoreProfile.EraFl; }
+			get { return Compatibility.EraFl.IsEnabled; }
 		}
 		public static bool SupportsLazyLoading { get { return true; } }
 		public static bool IsSnakeModernMobileProfile { get { return CoreProfile == EmueraCoreProfile.SnakeModernMobile; } }
@@ -275,16 +297,28 @@ namespace MinorShift.Emuera
 		/// </summary>
 		internal static void ConfigureCompatibilityPlan(CompatibilityPlan plan)
 		{
+			// This early binding occurs before the game configuration is available.
+			// Program.Main rebuilds the profile with the loaded value before any
+			// IdentifierDictionary or parser registry is constructed.
+			ConfigureCompatibilityPlan(plan, scopedVariableInstructionsEnabled: true);
+		}
+
+		internal static void ConfigureCompatibilityPlan(
+			CompatibilityPlan plan,
+			bool scopedVariableInstructionsEnabled)
+		{
 			if (plan == null)
 				throw new ArgumentNullException(nameof(plan));
 
-			EmueraCoreProfile expected = ResolveCompatibilityProfile(plan.ProfileId);
+			LegacyCompatibilityProfile profile = LegacyCompatibilityProfile.Create(
+				plan,
+				scopedVariableInstructionsEnabled);
 			var existing = System.Threading.Volatile.Read(ref m1CompatibilityPlan);
 			if (existing != null && !string.Equals(existing.CanonicalHash, plan.CanonicalHash, StringComparison.Ordinal))
 				throw new InvalidOperationException("A different compatibility plan is already bound to the active legacy session.");
 
-			CoreProfile = expected;
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, plan);
+			System.Threading.Volatile.Write(ref m1CompatibilityProfile, profile);
 		}
 
 		internal static void ClearCompatibilityPlan(CompatibilityPlan plan)
@@ -295,8 +329,19 @@ namespace MinorShift.Emuera
 			if (existing != null && string.Equals(existing.CanonicalHash, plan.CanonicalHash, StringComparison.Ordinal))
 			{
 				System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
-				CoreProfile = EmueraCoreProfile.V24Pure;
+				System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 			}
+		}
+
+		/// <summary>
+		/// The legacy VM is process-wide, so its compatibility context must be
+		/// released after the worker has stopped and before another launcher
+		/// selection can bind a new immutable plan.
+		/// </summary>
+		internal static void ClearCompatibilityPlan()
+		{
+			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
+			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 		}
 
 		private static void ApplyAndroidWindowWidthPolicy()
@@ -370,8 +415,8 @@ namespace MinorShift.Emuera
 			AnalysisFiles?.Clear();
 			AnalysisFiles = null;
 			debugMode = false;
-			CoreProfile = EmueraCoreProfile.V24Pure;
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
+			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 			StartTime = 0;
 		}
 
@@ -518,6 +563,18 @@ namespace MinorShift.Emuera
 				"erafl" => EmueraCoreProfile.EraFl,
 				_ => throw new InvalidOperationException(
 					$"Compatibility plan profile '{profileId}' is not supported by the legacy bridge.")
+			};
+		}
+
+		private static string GetCompatibilityProfileId(EmueraCoreProfile profile)
+		{
+			return profile switch
+			{
+				EmueraCoreProfile.V24Pure => "v24pure",
+				EmueraCoreProfile.Snake => "snake",
+				EmueraCoreProfile.EraFl => "erafl",
+				_ => throw new InvalidOperationException(
+					$"Legacy core profile '{profile}' has no built-in compatibility plan."),
 			};
 		}
 

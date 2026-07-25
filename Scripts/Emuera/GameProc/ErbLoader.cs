@@ -210,6 +210,12 @@ namespace MinorShift.Emuera.GameProc
 
 		private void TryPreRegisterSnakeDynamicVariable(LogicalLine line)
 		{
+			if (!Program.Compatibility.Snake.AllowsScopedVariablePreRegistration
+				|| !Program.Compatibility.ScopedVariableInstructionsEnabled)
+			{
+				return;
+			}
+
 			InstructionLine instruction = line as InstructionLine;
 			if (instruction == null || instruction.ParentLabelLine == null)
 				return;
@@ -687,7 +693,7 @@ namespace MinorShift.Emuera.GameProc
                         {
 							// TODO: Snake compatibility fallback — relax subscript requirement for PRIVATE arguments.
 							// Remove once snake scripts are updated to declare subscripts explicitly.
-							bool allowSnakePrivateArgument = Program.IsSnakeProfile && vTerm.Identifier.IsPrivate;
+							bool allowSnakePrivateArgument = Program.Compatibility.Snake.AllowsPrivateArguments && vTerm.Identifier.IsPrivate;
                             if (vTerm is VariableNoArgTerm && !allowSnakePrivateArgument)
                             { errMes = "関数定義の参照型でない引数\"" + vTerm.Identifier.Name + "\"に添え字が指定されていません"; goto err; }
                             if (!vTerm.isAllConst && !allowSnakePrivateArgument)

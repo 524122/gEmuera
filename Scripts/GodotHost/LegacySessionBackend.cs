@@ -142,6 +142,7 @@ public sealed class LegacySessionBackend : ILegacySessionBackend
         cancellationToken.ThrowIfCancellationRequested();
         global::EmueraThread.instance.End();
         global::MinorShift.Emuera.GlobalStatic.Reset();
+        global::MinorShift.Emuera.Program.ClearCompatibilityPlan();
         return ValueTask.CompletedTask;
     }
 

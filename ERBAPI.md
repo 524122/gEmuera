@@ -1,235 +1,285 @@
-# ERB 语法扩展与魔改安全指南
+# ERB 扩展接口与魔改安全指南
 
-本文供修改 gEmuera ERB 语法、指令、内置函数、变量和脚本可见能力的 Agent 使用。目标不是让任何位置都可以“快速加一个关键字”，而是让每项扩展都有唯一 owner、明确 profile、完整行为证据和可回退路径，并且不改变未选择该扩展的会话。
+本文供修改 gEmuera 的 ERB 语法、指令、内置函数、变量、兼容 profile 或脚本可见运行时能力时使用。它描述的是**当前工作区在 2026-07-19 的真实接口边界**，不是第三方插件规范，也不代表新的 Core 已替换 legacy ERB 引擎。
 
-文档状态：`Reviewed / Migration-aware / Not a stable public plugin API`。本文描述 2026-07-16 的真实代码边界；权威架构裁决仍以 [DialectExtensionSystem](NewFrameworkDesign/DialectExtensionSystem.md)、[CompatibilityMatrix](NewFrameworkDesign/CompatibilityMatrix.md) 和 [AIDevelopmentWorkflow](NewFrameworkDesign/AIDevelopmentWorkflow.md) 为准。`NewFrameworkDesign/generated/` 中的机器报告只有在 source identity 和 contract tests 通过时才优先于旧叙述数字；当前 DIA-01 门禁为红，见下表。
+最重要的规则：**先确定改动属于哪一条执行路径；先证明未选择侧不变，再实现选择侧。**
 
-最重要的规则：**先证明未选择扩展的一侧不变，再实现选择扩展的一侧。**
+> 当前工作区没有 `NewFrameworkDesign/`、`OriginalFrameworkDesign/` 或 `CODE_MAP.md`。不要把这些缺失文件、旧 generated 报告或历史计数当成当前架构的权威。当前权威顺序为：C# 公共签名与调用点 → `tools/core-contracts` 合同 → `tools/dialect-inventory` 静态合同 → 针对实际 ERB 行为的可重复 fixture/trace。
 
-## 当前审查结论
+## 1. 当前架构结论
 
-### 已确认的边界与风险
+### 1.1 三条并存路径，不能混为一条
 
-| 等级 | 审查结论 | 代码/证据 | 对 Agent 的约束 |
+```text
+生产 legacy 路径（当前实际执行 ERB）
+SessionSelection
+  -> Scripts/GodotHost/LegacySessionBackend
+  -> Program.ConfigureCompatibilityPlan(...)
+  -> MinorShift.Emuera.Program / Process
+  -> legacy parser、IdentifierDictionary、FunctionIdentifier、FunctionMethod
+  -> legacy state / EmueraConsole
+  -> Godot UI 投影
+
+Core 候选解析路径（当前只做 Core 侧解析/会话验证）
+CoreApplicationRuntime -> GameSession
+  -> LegacyCoreAdapter -> ErbParser
+  -> ErbParseResult（Empty / Comment / Label / Instruction + diagnostics）
+
+Core 可恢复解释器合同（已存在，但尚未成为生产 ERB 引擎）
+冻结的 IErbInterpreterCatalog
+  -> IErbInterpreterFactory + ErbInterpreterDescriptor
+  -> IErbInterpreterHost.StepAsync / ResumeAsync
+  -> VmStepResult + ordered VmEffect / VmCompletion
+  -> host bridge 投影到 Godot 或平台 port
+```
+
+因此，以下表述都不正确：
+
+- “在 `src/Core` 添加 descriptor 后，生产 ERB 自动拥有新指令。”
+- “`IErbInterpreterHost` 已是当前游戏的生产解释器实现。”
+- “Core 的简化 `ErbParser` 已覆盖 legacy 的完整 ERB grammar、lazy loading、label/变量或执行语义。”
+- “CompatibilityPlan 已完成 legacy v24/Snake 的运行时隔离。”
+
+### 1.2 本次审查确认的当前状态
+
+| 等级 | 当前事实 | 代码/合同证据 | 对扩展任务的约束 |
 | --- | --- | --- | --- |
-| 阻断 | 当前 dialect evidence 已失效。DIA-01/DIA-02 测试在 `PrototypeRuntimeNode.cs` 发现未分类的 `profile.selected-name` 命中 | `Scripts/GodotHost/PrototypeRuntimeNode.cs:44`；`Test-DialectInventory.ps1`、`Test-DialectRegistrySnapshot.ps1` 当前失败 | 先由 owner 裁决分类并按依赖链重生成 DIA 报告；不得直接沿用旧 hash 或自行猜 `targetModule` |
-| 阻断 | legacy 指令与函数注册尚未按 profile 隔离。v24 和 Snake 注册函数仍在同一静态构造中无条件执行 | `Scripts/Emuera/GameProc/Function/FunctionIdentifier.cs:397`、`:457`；`generated/dialect-registry-snapshots.json` 为 `currentRuntimeIsolation=Failed` | 不能继续把新的 profile 专属 key 直接注册进 legacy 静态表并宣称它只对该 profile 可见 |
-| 阻断 | Core `IDialectModule` 当前只贡献 descriptor，不提供 legacy handler；内置 v24/Snake module 的 contribution 仍为空 | `src/Core/Compatibility/DialectRuntime.cs:66`、`BuiltInDialectCatalog.cs:28` | `IDialectContribution` 不是当前可独立使用的“新增可执行语法”接口 |
-| 阻断 | 非空 descriptor 路由是完整可见面，不是增量补丁。只加入一个 descriptor 会让未列出的旧指令/函数不可见；descriptor 对应 key 未先存在于 legacy 表则直接失败 | `CompatibilityDescriptorRoute.cs:23`、`IdentifierDictionary.cs:616` | 禁止向当前 built-in plan 单独塞一个新 descriptor；必须先有完整 profile registry 与两侧行为证据 |
-| 高 | `IdentifierDictionary` 在 plan 收窄前用完整 legacy 表构建名称冲突表；将来即使隐藏某个 key，它仍可能被当作系统保留名 | `IdentifierDictionary.cs:139`、`:172`、`:191`、`:616` | D2 隔离不能只收窄 lookup，还必须验证 label/变量/macro 冲突语义 |
-| 高 | legacy 注册表由静态可变 `Dictionary` 持有并直接返回；指令 comparer 还在首次静态初始化时捕获 `Config.ICVariable` | `FunctionIdentifier.cs:38`、`:63`；`Creator.cs:398` | 不得在启动后修改返回字典，不得把当前 comparer/初始化顺序提升为未来稳定 API |
-| 高 | 外部 DLL 插件使用默认 `AssemblyLoadContext`、反射和进程内完全信任；方法注册为覆盖式赋值 | `PluginManager.cs:38`、`:54`、`:257` | `PluginManager`/`CALLSHARP` 不能作为移动端方言机制，也不能用于绕过 module、fixture 和冲突检查 |
+| 阻断 | 生产 ERB 执行仍由 `Scripts/Emuera` 的 legacy 注册表、parser 与 `Process` 拥有；Core `LegacyCoreAdapter` 是 candidate-only 的解析桥 | `Scripts/GodotHost/LegacySessionBackend.cs`、`src/Core/Runtime/LegacyCoreAdapter.cs`、`src/Core/Application/GameSession.cs` | 改动生产 ERB 语义时，必须实现并验证 legacy 路径；仅改 Core 不能宣称游戏可用 |
+| 阻断 | `IErbInterpreterHost`、factory/catalog、step/resume、effect/completion 合同已存在，但仓库内非测试代码没有具体 factory 或 host 实现 | `src/Core/Runtime/ErbExecution.cs`；`tools/core-contracts/TestModules.cs` 是当前实现者 | 新 host 只能作为受合同保护的 Core/实验工作；接入启动路径和真实 ERB 语义前不得宣称替代 legacy |
+| 阻断 | 当前 DIA 静态证据不能生成可信基线：DIA-01、DIA-02 与 signature inventory 均在 `Scripts/Emuera/Program.cs` 发现未分类的 `profile.v24-id` 命中而失败 | `tools/dialect-inventory/Test-DialectInventory.ps1` 等；`dialect-classification.json` 缺少该文件的对应 marker 分类 | 先由 owner 为该分支补充/裁决分类，再按依赖顺序重跑；不能沿用旧 hash、旧计数或手工改期望值 |
+| 高 | legacy v24 与 Snake 指令/函数仍被同一静态注册流程加入，当前 runtime isolation 未完成 | `Scripts/Emuera/GameProc/Function/FunctionIdentifier.cs` 的 `addV24CompatibilityFunctions()`、`addSnakeCompatibilityFunctions()` | 不得把“注册在 Snake 相关方法附近”写成“仅 Snake 可见”；需要完整可见面与两侧行为证据 |
+| 高 | Core module contribution 能构建 `InstructionDescriptor` / `FunctionDescriptor`，但 built-in module 目前仍是空 contribution；它不提供 legacy handler | `src/Core/Compatibility/DialectRuntime.cs`、`src/Core/Compatibility/BuiltInDialectCatalog.cs` | `IDialectContribution` 不是目前可单独投产的“新增可执行 ERB 语法”接口 |
+| 高 | non-empty descriptor plan 是完整可见面：route 只能选择已有 legacy handler，且只暴露 plan 中的 key | `src/Core/Compatibility/CompatibilityDescriptorRoute.cs`、`Scripts/Emuera/GameData/IdentifierDictionary.cs` | 禁止向 built-in plan 单独塞一个增量 descriptor；必须先有完整 registry、collision 与行为证据 |
+| 高 | legacy 注册表仍直接暴露可变 `Dictionary`，并保留依赖静态初始化和 comparer 的兼容事实 | `FunctionIdentifier.GetInstructionNameDic()`、`FunctionMethodCreator.GetMethodList()` | 不得在启动后修改返回字典，也不得把现状当作新的稳定扩展 API |
+| 高 | Godot 只应承担 session/bridge/UI 投影；ERB state、关键字、错误与执行顺序不能搬入 Node、Autoload 或 signal | `GameSession` 是 CLR 对象；`PrototypeRuntimeNode`/bridges 只管理 prototype 会话、bridge 与 UI 投影，不持有 ERB 语义 owner | 新的 Core/host 语义必须无 Godot 类型；平台完成通过 immutable DTO/effect/completion 进入 VM |
 
-最后一次成功生成的 DIA 基线为 326 个指令注册、360 个表达式函数注册；测试投影为 v24 `290/358`、Snake `326/360`，Snake 差集为 `36/2`。该报告生成于 2026-07-15，早于当前未分类的 prototype host 变更，因此这些数字只能作为上一份基线，不能写成本次 source identity 已通过。上一份测试投影的“未选择模块不变性”已通过，但旧 runtime 隔离仍失败；这两项也必须同时陈述，不能把静态报告写成 D2 已完成。
+DIA 静态测试在分类修复后，仍只应得到结构性证据。现有合同的设计目标是 `InProgress`、`Blocked`、`EvidenceMissing`、`Partial`，并明确 legacy runtime isolation 仍为 `Failed`；它们不是“方言隔离已完成”的证明。
 
-### 当前可安全使用到什么程度
+### 1.3 本次验证基线
 
-- 可以在 legacy owner 中做小范围、带双侧 fixture 的兼容修复，并保留旧运行路径。
-- 可以使用 Core module/catalog 合同验证依赖、重复 key、冻结和 plan hash，但它们目前不是完整 Parser/VM 语义实现。
-- 可以增加 inventory、signature、ownership 和 lookup 静态证据，但静态扫描不能替代 parse/execute/error/completion/effect 行为测试。
-- 在当前 DIA-01 未分类命中关闭前，不能把旧 generated hash 当作新 ERB 变更的可信基线。
-- 不能宣称已有通用第三方 ERB 插件 API、完整 profile 隔离、任意方言动态加载或 Android DLL 扩展。
+- 在 restore 成功后，`dotnet build src/Core/GEmuera.Core.csproj -c Release --no-restore` 与 `CoreContractSmoke` 已通过，说明当前 Core 的编译和公开合同 smoke 可运行。
+- `tools/core-contracts/Test-CoreArchitecture.ps1` 当前仍失败：脚本固定要求 `<TargetFrameworks>net8.0;net10.0</TargetFrameworks>`，而当前 `src/Core/GEmuera.Core.csproj` 声明的是 `net8.0;net9.0`。因此不能把 Core architecture gate 写成已通过；应由其 owner 统一 target-framework 合同后再恢复绿色。
+- 这两个结论都不改变生产 ERB 仍由 legacy 路径执行的事实，也不解除 DIA-01 的静态证据阻断。
 
-## What：允许扩展什么
+## 2. 当前可用的接口边界
 
-按从低风险到高风险排序：
+### 2.1 Legacy 生产扩展面
 
-| 扩展种类 | 适用目标 | 首选形式 | 风险 |
+| 能力 | 当前 owner / 入口 | 关键联动 |
+| --- | --- | --- |
+| 表达式内置函数 | `Scripts/Emuera/GameData/Function/Creator*.cs`、`FunctionMethod` | `FunctionMethodCreator.GetMethodList()`、`IdentifierDictionary.GetFunctionMethod`、同名 METHOD 指令投影、`CanRestructure` |
+| 语句指令 | `Scripts/Emuera/GameProc/Function/FunctionIdentifier.cs`、`Instraction.Child.cs`、`AbstractInstruction` | `FunctionCode`、`ArgumentBuilder`、`ArgumentParser`、flags、flow/wait、`Process` |
+| `#` directive / label | `Scripts/Emuera/GameProc/LogicalLineParser.cs`、`LogicalLine.cs` | `ErbLoader`、`LabelDictionary`、analysis、lazy load、reload |
+| lexer / expression | `Scripts/Emuera/Sub/LexicalAnalyzer.cs`、`Scripts/Emuera/GameData/Expression/` | macro/rename、source position、错误恢复、大小写比较规则 |
+| legacy 系统变量与存档 | `Scripts/Emuera/GameData/Variable/`、legacy save reader/writer | descriptor、token、scope/reset、SAVE/GLOBAL/STATIC、旧档兼容 |
+| legacy profile 绑定 | `Scripts/Emuera/Program.cs`、`Scripts/GodotHost/LegacySessionBackend.cs` | 兼容计划必须在启动 legacy worker 前绑定；这不是完整 registry 隔离 |
+
+### 2.2 Core 迁移合同面
+
+| 合同 | 当前类型 | 真实含义 / 限制 |
+| --- | --- | --- |
+| session compatibility | `CompatibilityPlan`、`DialectPlan`、`DialectModuleCatalog` | 生成不可变 module/port/capability/save-profile 计划与 hash；不能自行执行 legacy handler |
+| descriptor contribution | `IInstructionContribution`、`IFunctionContribution`、`InstructionDescriptor`、`FunctionDescriptor` | `Apply` 到 builder，重复 key 会失败；当前 built-in module 没有可执行 contribution |
+| interpreter identity | `ErbInterpreterKey`、`ErbInterpreterDescriptor`、`IErbInterpreterFactory`、`IErbInterpreterCatalog` | engine id **和** semantic version 都是选择身份；factory 必须使用冻结 descriptor 创建 host |
+| host context | `ErbInterpreterContext` | 只携带不可变 `CompatibilityPlan`、source identity 与 `SessionStamp` |
+| 执行与恢复 | `IErbInterpreterHost.StepAsync`、`ResumeAsync` | host 拥有可变 VM state；调用方只交换 immutable DTO |
+| step 结果 | `VmStepBudget`、`VmStepResult`、`VmExecutionState`、`VmStepStopReason`、`VmFault` | result 显式报告预算、状态、停因、effects 与 fault |
+| effects | `VmDisplayEffect`、`VmInputEffect`、`VmPortEffect`、`VmApplicationEffect` | 每个 effect 有严格递增 sequence 与 completion mode；wait 状态必须只有一个匹配的 wait effect |
+| completion | `VmCompletion` | session stamp 与 `VmOperationId` 必须匹配 pending request；失败 completion 必须携带 `VmFault` |
+| 可恢复基类 | `ResumableErbInterpreterHost` | 统一检查 step/resume 合法性、并发执行、effect 顺序、等待状态、终态和 dispose；子类只提供具体执行 |
+| Core 解析 | `ErbParser`、`ErbLogicalLine`、`ErbParseResult` | 当前是确定性的行边界/诊断合同，不是完整 legacy parser 或执行器 |
+| Core state/save | `VariableStore`、`SaveService`、`DeterministicSaveCodec` | 已有 session-scoped candidate/atomic-commit 风格的数据合同；尚未替代 legacy `VariableDescriptor`、VarExt 或真实旧档 ABI |
+
+### 2.3 Descriptor route 的精确语义
+
+`CompatibilityDescriptorRoute.Create(...)` 从**已经构建完成**的 legacy instruction/function 字典中查找 descriptor key：
+
+1. descriptor key 不在 legacy 字典中会立即失败；route 不会创建 handler；
+2. non-empty `plan.Dialect.Instructions/Functions` 会成为可见面的完整列表，而不是“在旧表上加几项”；
+3. `IdentifierDictionary.BindCompatibilityPlan(...)` 只有在两个 descriptor 表都为空时才退回完整 legacy 字典；
+4. 因此新 key 需要同时拥有真实 handler、完整 profile registry、跨表 collision 规则和两侧行为测试，不能只加 descriptor。
+
+## 3. 允许扩展什么，以及应走哪一条路径
+
+| 扩展种类 | 首选方式 | 当前适用路径 | 风险 |
 | --- | --- | --- | --- |
-| ERB/ERH 脚本层能力 | 能用用户函数、宏、用户变量或现有指令组合表达 | 游戏脚本或数据，不改解释器 | 低 |
-| 表达式内置函数 | 从参数计算并返回 Integer/String/Float；通常不挂起 VM | `FunctionMethod` + `FunctionMethodCreator` 注册 | 中 |
-| 语句指令 | 修改状态、控制流、输出、输入等待或产生外部 effect | `AbstractInstruction` + 参数 builder + 注册 | 中高 |
-| `#` directive/label 语法 | 改变函数、局部变量或加载期元数据 | `LogicalLineParser`/逻辑行模型 | 高 |
-| 词法、运算符和表达式 grammar | 现有函数/指令/directive 无法表达的新语言结构 | Lexer + parser + AST/term + diagnostics | 很高 |
-| 脚本可见系统变量 | 新的 engine-owned 状态、类型、维度或 scope | variable descriptor/store/token 全链路 | 很高 |
-| 存档格式或 VarExt 域 | 新 wire type、保存域或 codec profile | 显式 `SaveProfileId` 与候选读写 | 极高 |
-| 平台/运行时能力 | SQL、文件、输入、音频、资源等脚本可观察服务 | typed Core port/capability + ERB facade | 高 |
-| 外部 DLL | 用户明确授权的桌面完全信任代码 | 独立 trusted plugin 路径 | 极高且移动端不支持 |
+| ERB/ERH 脚本层能力 | 用户函数、宏、用户变量、CSV 或现有指令组合 | 游戏脚本，不改解释器 | 低 |
+| 表达式内置函数 | `FunctionMethod` + `Creator*.cs` 注册 | legacy 生产路径 | 中 |
+| 语句指令 | `AbstractInstruction` + 参数 builder + `FunctionIdentifier` 注册 | legacy 生产路径 | 中高 |
+| `#` directive / label 语法 | legacy logical-line 模型与 loader | legacy 生产路径 | 高 |
+| lexer / 运算符 / grammar | legacy lexer/parser/AST 相关模型 | legacy 生产路径 | 很高 |
+| Core 解释器实现 | 明确 factory、冻结 descriptor、`IErbInterpreterHost` 与 step/resume 合同 | Core 实验/迁移路径；尚未生产接线 | 很高 |
+| Core descriptor / module | 贡献 descriptor、依赖与 port 声明 | Core compatibility 计划；不能单独带来 legacy 行为 | 中高 |
+| 系统变量 / 保存 ABI | legacy 全链路；必要时同步 Core candidate contract | legacy 生产路径 + Core 验证 | 极高 |
+| 平台能力 | typed Core DTO/effect + bridge adapter | Core/bridge；legacy facade 必须另行实现 | 高 |
+| 外部 DLL | 用户明确授权的桌面 trusted plugin 路径 | 非移动端、非方言 module | 极高 |
 
-以下不属于可接受的 ERB 扩展：
+以下都不属于可接受的 ERB 扩展：
 
-- 在 Godot Node、Control、Autoload 或 signal 中实现 ERB 语义。
-- 依据游戏目录名、函数名或 `Program.IsSnakeProfile` 在 Parser/VM hot path 增加新分支。
-- 让 CompatibilityPack 指定 assembly、C# 类型、脚本回调、任意路径或 URL。
-- 用 `_Rename.csv` 文本替换冒充 registry alias/replacement。
-- 用反射扫描程序集来发现移动端方言模块。
+- 在 Godot `Node`、`Control`、Autoload 或 signal 中保存 ERB state、等待状态或关键字语义；
+- 在 Parser/VM hot path 新增按游戏目录名、函数名或 `Program.IsSnakeProfile` 的业务分支；
+- 让 CompatibilityPack 指定 assembly、任意 C# 类型、脚本回调、绝对路径或 URL；
+- 用 `_Rename.csv` 文本替换冒充 registry alias/replacement；
+- 用反射扫描程序集发现移动端方言 module；
+- 仅增加 Core descriptor、`FunctionCode` 或 `VariableCode` 就宣称完整语义已实现。
 
-## Where：改动应落在哪里
+## 4. 分层与不变量
 
-ERB 可观察行为的调用方向必须保持：
+ERB 可观察行为必须保持下列方向：
 
 ```text
 ERB source
-  -> lexer/parser
-  -> typed logical line / expression term
-  -> VM instruction/function owner
-  -> state mutation + typed effect/fault/completion
-  -> Bridge port
+  -> parser / logical line / expression term
+  -> legacy instruction/function owner 或 Core interpreter host
+  -> state mutation + typed result/effect/fault
+  -> bridge / platform port
   -> Godot projection
 ```
 
-Godot 只能投影 effect 或完成 port 请求，不能反向拥有关键字、参数默认值、错误或执行顺序。
+Godot 可以投影 effect、完成 port 请求或管理 UI 生命周期；它不能反向拥有关键字、默认参数、错误、VM state 或执行顺序。当前 Core 的 `GameSession` 也被设计成 CLR session 对象，而不是 Godot Node。
 
-| 目标 | 当前 owner/入口 | 通常还需检查 | 未来 owner |
-| --- | --- | --- | --- |
-| 表达式函数 | `Scripts/Emuera/GameData/Function/Creator.cs`、`Creator.Method*.cs`、`FunctionMethod.cs` | `IdentifierDictionary.GetFunctionMethod`、同名指令投影、`CanRestructure` | frozen `FunctionDescriptor` + Core evaluator |
-| 指令 | `GameProc/Function/BuiltInFunctionCode.cs`、`FunctionIdentifier.cs`、`Instraction.Child.cs` | `Instruction.cs`、`ArgumentBuilder.cs`、`Argument.cs`、`ArgumentParser.cs`、flags/flow/wait | frozen `InstructionDescriptor` + VM handler |
-| `#` directive/label | `GameProc/LogicalLineParser.cs`、`LogicalLine.cs` | `ErbLoader.cs`、`LabelDictionary.cs`、lazy label scan、reload/analysis mode | Syntax/Directive registry + Core parser |
-| 词法/表达式 | `Sub/LexicalAnalyzer.cs`、`Word*.cs`、`GameData/Expression/*` | comparer、macro、source span、错误恢复 | Core lexer/parser/typed diagnostics |
-| 系统变量 | `GameData/Variable/VariableCode.cs`、`VariableDescriptor.cs`、`VariableIdentifier.cs` | `VariableData`、`VariableToken`、`VariableEvaluator`、reset、save reader/writer | session `VariableSchema` + `VariableStore` |
-| Map/XML/DT/SQL | `Creator.Method.Map/Xml/DT/Sql.cs`、`RuntimeDataStore`、runtime manager | VarExt SAVE/GLOBAL/STATIC、Android SQLite | typed extension/runtime port |
-| 方言元数据 | `src/Core/Compatibility/DialectRuntime.cs`、`BuiltInDialectCatalog.cs` | `CompatibilityDescriptorRoute.cs`、`IdentifierDictionary.BindCompatibilityPlan` | session-frozen complete registry |
-| 外部 DLL | `Runtime/Utils/PluginSystem/*`、`CALLSHARP` handler | 授权、hash、平台、进程重启 | desktop-only `TrustedPluginHost` |
-| 静态证据 | `tools/dialect-inventory/*` | `NewFrameworkDesign/generated/*` | 只用于 evidence/gate，不是 runtime 输入 |
+每项扩展必须维护：
 
-文件名 `Instraction.Child.cs` 是仓库保留的历史拼写，不要为了命名正确顺手重命名。
+1. **未选择侧不变**：未选择 module/profile 的 registry、plan hash 和行为 fixture 不能被改变。
+2. **会话所有权**：新 Core 状态属于带 generation 的 session；不能写入 process-wide 可变 truth。legacy 的静态事实必须被显式识别为迁移风险，而非复制为新设计。
+3. **重复即失败**：Core builders/catalogs 采用明确重复拒绝；legacy 的静态表也不得依赖注册顺序或覆盖式赋值。
+4. **公开合同完整**：public key、参数、默认值、返回、flags、错误、completion、effect、时序与 `CanRestructure` 都是语义。
+5. **descriptor 与 handler 一致**：descriptor 不是文档；它必须与实际 handler 的 key/signature/owner/completion 一致。当前没有 handler 时不能加入生产 plan。
+6. **名称规则显式**：legacy comparer、culture 与 `ToUpper` 是兼容事实；新增 alias 或 ignore-case 必须带 collision/culture fixture。
+7. **等待可恢复**：wait effect、VM state、operation id、completion session stamp 与取消/late completion 必须成套验证。
+8. **存档 ABI 显式**：变量 code、kind、维度、scope、wire tag 和 save profile 影响旧档；不能因为类型相似而复用编号。
+9. **Core 无 Godot 依赖**：Core host/contract 不引用 Godot Node、场景路径、反射发现或 UI state。
+10. **证据不夸大**：inventory/hash 只证明结构；Core smoke 只证明合同；二者都不能替代 parse/execute/error/effect/保存行为 fixture。
 
-## Why：为什么必须这样分层
+## 5. Agent 实施流程
 
-每项扩展都必须保持以下不变量：
+### 5.1 先分类改动
 
-1. **未选择模块不变**：新增或升级模块不能改变未选择它的 profile 的注册集合、plan hash 或行为 fixture。
-2. **会话所有权**：语义属于 `GameSession` 的冻结计划，不属于进程级当前游戏名或可变 static。
-3. **重复即失败**：同名 instruction/function/variable 默认冲突；不得依赖发现顺序或 last-wins。
-4. **公开合同完整**：public key、参数、默认值、返回类型、flags、错误、completion、effect、时序和重构纯度都属于语义。
-5. **handler 与 descriptor 一致**：descriptor 不能只是文档；其 key、签名、owner 和完成模式必须与真正执行者一致。
-6. **名称规则显式**：当前 legacy 的 comparer、current-culture `ToUpper` 和跨表碰撞只是兼容事实，不是未来默认设计。
-7. **存档 ABI 显式**：变量 code、wire tag、维度和保存域影响旧档；不能因类型看起来相似就复用编号。
-8. **平台与语言分离**：Android 文件、输入、音频、SQLite 或资源实现通过 typed port 提供，不进入 parser。
-9. **AOT 可构建**：内置方言使用编译期 allowlist；移动端不依赖反射或 DLL 动态加载。
-10. **证据不夸大**：inventory/signature/hash 证明结构，不证明运行结果；截图也不证明 Core state/error/effect 顺序。
-
-这些约束防止三类常见回归：Snake-only key 泄漏到 v24、局部语法修补改变保存或等待顺序、以及 UI/平台代码逐渐成为第二套解释器。
-
-## When：什么时候选择哪种扩展
-
-按顺序回答，命中后停止继续扩大修改面：
-
-1. 能否只用 ERB/ERH 用户函数、宏、用户变量、CSV 或现有函数组合？能则不改解释器。
-2. 是否只是“输入参数，立即返回一个 typed value”？是则优先表达式 `FunctionMethod`。
-3. 是否需要状态修改、控制流、输出、等待、资源或平台 effect？是则使用语句指令，或现有指令调用 typed capability。
-4. 是否只是加载期元数据，而且必须使用新的 `#` 结构？是则扩展 directive，不碰通用 lexer。
-5. 现有 token/表达式 grammar 是否确实无法表示？只有此时才改 lexer/parser。
-6. 是否需要 engine-owned、脚本可直接寻址的新状态？先判断用户变量或 extension store 是否足够；只有 ABI 必需时才加系统变量。
-7. 是否会持久化？若会，立刻升级为 Save/Variable work package，定义 codec profile、候选加载、round-trip 和旧档拒绝语义。
-8. 是否需要第三方任意 C#？这不是方言模块；只能进入桌面 trusted plugin 评审，移动端报告 Unsupported。
-
-下列任一条件出现时，任务不能停留在 FastLoop，必须升级为 WorkPackage：
-
-- 修改 `LexicalAnalyzer`、`LogicalLineParser`、`VariableCode`、save reader/writer 或静态注册初始化。
-- 新增/改变 wait、input、CALL/JUMP/RETURN、Display、resource、file、SQL、audio effect。
-- 增加新的 profile、BehaviorKey、CapabilityId、module dependency、alias 或 replacement。
-- 需要 `Program.IsSnakeProfile`、全局配置、游戏路径或 Godot 类型才能完成实现。
-- 预期改变 v24/Snake 任一侧现有错误、completion、effect sequence 或存档 bytes。
-
-## How：Agent 的强制实施流程
-
-### 1. 先写扩展合同
-
-编辑代码前，在任务记录或测试 fixture 中填完以下字段。未知项写 `Uncovered`，不能猜：
+在编辑代码前，明确写下 `route`：
 
 ```yaml
 featureKey: stable.task.key
+route: legacy-production | core-candidate | interpreter-host-experiment | bridge-only
 publicKeys: [PUBLIC_KEY]
-kind: expression-function | instruction | directive | grammar | variable | capability
-ownerModule: gemuera.v24 | game.snake | reviewed-new-module
+kind: expression-function | instruction | directive | grammar | variable | capability | interpreter
+ownerModule: gemuera.v24 | game.snake | erafl | reviewed-new-module
 profiles: [v24pure, snake]
 signature: arguments, optional/default rules, return type
 stateMutation: exact owner and ordering
 errors: parse/load/runtime faults and source position
-completion: immediate | wait-port | commit-then-project | application-effect
+completion: core-immediate | commit-then-project | fire-and-continue | wait-port | vm-thread-blocking-bounded
 effects: ordered typed effects, including explicit none
 saveImpact: none | schema | codec-profile | migration
 fixtures: baseline, extension, undeclared
 rollback: registry/flag/adapter and expected old snapshot
 ```
 
-这里的 YAML 是 Agent 任务记录模板，不是 CompatibilityPack schema，不能被游戏包加载。
+该 YAML 是任务记录模板，不是 CompatibilityPack schema，也不能被游戏包加载。
 
-### 2. 做库存和冲突检查
+- `legacy-production`：必须进入真实 legacy parser/handler/fixture 链。
+- `core-candidate`：只能修改 Core 解析、state 或 save 合同；不得声称 production ERB 已改变。
+- `interpreter-host-experiment`：必须覆盖 factory/catalog/host/effect/completion 合同；未接线前不得取代 legacy。
+- `bridge-only`：不得偷偷改变 ERB 关键字、参数、执行顺序或 Core state。
 
-至少检查公开 key、handler、注册位置、同名函数/指令/变量、profile ownership 和现有 fixture：
+### 5.2 先做库存、分类和冲突检查
 
 ```powershell
-rg -n --fixed-strings "<PUBLIC_KEY>" Scripts src tools NewFrameworkDesign
+rg -n --fixed-strings "<PUBLIC_KEY>" Scripts src tools
 rg -n "addV24CompatibilityFunctions|addSnakeCompatibilityFunctions|GetMethodList|GetInstructionNameDic" Scripts/Emuera
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test-DialectInventory.ps1 -ProjectRoot .
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test-DialectRegistrySnapshot.ps1 -ProjectRoot .
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test-DialectSignatureInventory.ps1 -ProjectRoot .
 ```
 
-名称相同不证明语义相同，`SNAKE_*` 类名也不证明 owner。先查 `dialect-classification.json`、ownership/visibility/lookup generated report，再由 fixture 裁决。
+若 DIA-01 失败，先处理分类/source-identity 问题，**不要**生成或接受新 hash、报告或计数。审查当天的实际 blocker 是 `Scripts/Emuera/Program.cs` 的 `profile.v24-id` 未映射；不要再沿用旧文档中 “`PrototypeRuntimeNode.cs` 的 `profile.selected-name`” 的说法。
 
-### 3. 先得到 RED
+名称相同不等于语义相同，`SNAKE_*` 类名也不等于 owner。以 `tools/dialect-inventory/dialect-classification.json`、相关静态合同和真正的 fixture 为准。
 
-行为测试至少形成以下矩阵：
+### 5.3 先得到 RED
 
 | 场景 | 必须断言 |
 | --- | --- |
-| baseline profile 未选择扩展 | 原注册快照/hash/行为不变；扩展 key 不可见或按既有规则处理 |
+| baseline profile 未选择扩展 | 原 registry/hash/行为不变；扩展 key 不可见或按既有规则处理 |
 | extension profile 选择扩展 | parse、参数绑定、执行结果/state、error、completion、effect 顺序符合合同 |
-| undeclared/缺依赖/重复 key | 候选构建或加载稳定失败，当前会话不变 |
-| boundary 参数 | 空值、省略、类型错、最小/最大、溢出、无效资源或取消均有确定结果 |
+| undeclared / 缺依赖 / 重复 key | catalog/候选构建或加载稳定失败，当前 session 不变 |
+| boundary 参数 | 空值、省略、类型错、最小/最大、溢出、无效资源、取消与 late completion 都有确定结果 |
 
-当前仓库没有正式 xUnit test project。纯 Core 合同可先进入 `tools/core-contracts` 的定向 smoke；legacy ERB 语义应先做可重复的特征化 fixture/trace。`tools/dialect-inventory` 只验证静态结构，不能单独作为 TDD 的 GREEN。若现有 runner 无法驱动该行为，应先建立最小纯 C# seam 或专用 fixture，不要用启动完整 Godot 后人工点击代替自动断言。
+静态 inventory 不能单独作为 TDD 的 GREEN。纯 Core 合同可以先进入 `tools/core-contracts`；legacy ERB 语义应使用可重复的特征化 fixture/trace。只有涉及 Node、Godot 输入或场景生命周期时才使用 GDUnit4。
 
-只有涉及 Node、signal、Godot 输入或场景生命周期时才使用 GDUnit4；纯 ERB parser/function/instruction 不应依赖 Godot 测试。
+### 5.4 按最小 owner 实现
 
-### 4. 实现最小 owner
+#### 新增 legacy 表达式函数
 
-#### 新增表达式函数
+1. 在职责相符的 `Creator.Method*.cs` 中实现 `FunctionMethod`，不要把所有函数堆到无关文件。
+2. 显式设置 `ReturnType`、`argumentTypeArray` 与 `CanRestructure`；可选/可变参数应锁定 `CheckArgumentType` 的错误语义。
+3. 只 override 与 return type 匹配的取值方法；读取 RNG、时间、变量、资源、配置或产生副作用时不得允许常量重构。
+4. 在 `Creator.cs` 以唯一 public key 注册，并检查它与 instruction 表的跨表 collision；表达式函数可能投影为 METHOD instruction。
 
-1. 在职责相符的 `Creator.Method*.cs` 中实现 `FunctionMethod`；不要把所有新函数继续堆入无关文件。
-2. 构造函数显式设置 `ReturnType`、`argumentTypeArray` 和 `CanRestructure`。
-3. 可选、可变参数或 nullable 参数必须 override `CheckArgumentType`，并锁定错误文本/位置语义。
-4. 只 override 与 `ReturnType` 匹配的 `GetIntValue`、`GetStrValue`、`GetFloatValue` 或确有需要的 `GetReturnValue`。
-5. 读取 RNG、时间、变量、资源、配置或产生副作用时，`CanRestructure=false`；只有纯净、确定且常量折叠不改变错误/时序时才允许 true。
-6. 在 `Creator.cs` 用唯一 public key 注册，并检查它与 instruction 表的跨表碰撞。旧 `FunctionIdentifier` 会把未碰撞的表达式函数投影为 METHOD instruction，不能忽略这个可见面。
+#### 新增 legacy 语句指令
 
-#### 新增语句指令
+1. 仅在稳定 code identity 确有必要时增加 `FunctionCode`。
+2. 在 `Instraction.Child.cs` 或职责明确的新 partial 中实现 `AbstractInstruction`。
+3. 优先复用 `ArgumentBuilder`；新参数形状才增补 builder/`Argument`，用 `EraType` 表示脚本类型。
+4. 明确设置所有实际 flags（flow/jump/try/method-safe/partial/print/input/wait 等）。
+5. `DoInstruction` 必须锁定 state mutation、错误、输出/effect 与推进点；等待指令还要覆盖 request、resume、cancel、timeout 与 late completion。
+6. 当前 runtime isolation 未完成，因此“只在 Snake 可见”的需求不能只在 Snake 注册函数中新增 key；必须同时提供完整可见面和两侧行为证据。
 
-1. 仅在确有稳定 code identity 时增加 `FunctionCode`。
-2. 在 `Instraction.Child.cs` 或职责明确的新 partial 文件实现 `AbstractInstruction`。
-3. 优先复用现有 `ArgumentBuilder`；新参数形状才增加 builder/`Argument`，并使用 `EraType` 表达脚本类型。
-4. 明确设置所有有效 flags：flow、jump、try、method-safe、partial、force-arg、print/input/wait 等不能只凭 handler 名推断。
-5. `DoInstruction` 必须明确 state mutation、错误、输出/effect 和推进点；等待指令还要覆盖 request、resume、timeout、cancel 与 late completion。
-6. 注册到经过 ownership 裁决的贡献位置。若需求是“只在 Snake 可见”，当前 runtime 隔离失败意味着不能仅在 `addSnakeCompatibilityFunctions()` 增加 key 后就完成任务；必须先关闭 D2 路由/名称隔离，或把任务保持 Blocked。
+#### 新增 directive / grammar
 
-#### 新增 directive 或 grammar
+1. 先证明已有函数、指令或 directive 不能表达需求。
+2. directive 同步检查 `ParseSharpLine`、logical-line 模型、loader、analysis、reload、full/lazy load 与内存脚本。
+3. grammar 同步检查 lexer token、expression parser、macro/rename、source span、错误恢复和大小写策略。
+4. `_Rename.csv` 仍是 source rewrite，不可替代 alias、replacement 或 parser production。
 
-1. 先证明表达式函数/指令/directive 现有形状不能表达需求。
-2. directive 同步检查 `ParseSharpLine`、`LogicalLine` 模型、`ErbLoader`、analysis mode、reload 和 `Process.LazyLoading` 的轻量 label 扫描。
-3. grammar 同步检查 lexer token、expression parser、macro/rename 阶段、source span、错误恢复和大小写策略。
-4. full load、lazy load、partial reload 和内存脚本必须得到一致 logical line；不能只让正常启动路径通过。
-5. `_Rename.csv` 仍是 lexer 前的 `SourceTextRewrite`，不能借其替代 alias、replacement 或 parser production。
+#### 新增 Core interpreter host（实验/迁移）
 
-#### 新增系统变量或保存能力
+1. 定义精确的 `ErbInterpreterDescriptor`：engine id、engine version、API version、支持 module version range 与 required module ids 都要可重复。
+2. 由编译期明确注册的 factory 创建 host；冻结 catalog 后不得再从可变注册状态读取语义。
+3. 优先继承 `ResumableErbInterpreterHost`；若不继承，必须实现同等的 step/resume、终态、并发、sequence、wait-effect 与 completion 校验。
+4. `WaitingInput` 只能对应一个 `VmInputEffect`；`WaitingPort` 只能对应一个 `VmPortEffect` 或 `VmApplicationEffect`；effect sequence 必须跨 resume 严格递增。
+5. `ResumeAsync` 必须拒绝不同 session、不同 operation id、缺少 fault 的失败 completion，以及非等待态 resume。
+6. host 不得引用 Godot 类型、路径或 Node；bridge 接收 immutable effect/DTO 并把 completion 回传给 host。
+7. 在启动/选择/端到端行为都接线并回归通过前，标记为 experimental，不得声称替换 legacy。
 
-1. 首先证明用户定义变量、局部/私有变量或 `RuntimeDataStore` 不能满足需求。
-2. 不得只改 `VariableCode`。必须同步 descriptor 的 kind/dimension/attributes、identifier、token、store、reset/scope 和所有读写路径。
-3. Integer/String/Float/Ref、1D/2D/3D、character/local/global/save/constant 均需精确区分；`VariableCode` bit flag 必须经 `VariableDescriptor` 解读。
-4. 任何保存变化都使用显式 `SaveProfileId`，先 candidate parse 再 atomic commit；不能自动猜测 `0x20..0x23` 等冲突 wire type。
-5. 覆盖旧档读取、未知 key/type/dimension、sparse、round-trip、错误 profile 不污染当前 store，以及 SAVE/GLOBAL/STATIC 域。
+#### 新增系统变量 / 保存能力
 
-#### 新增平台或运行时能力
+1. 先证明用户变量、local/private 变量或 runtime store 无法满足。
+2. legacy 变量不得只改 `VariableCode`：descriptor、identifier、token、store、scope/reset 和读写路径必须同步。
+3. Core `VariableStore` 的 candidate/commit 模式可用于验证新设计，但不能自动代表 legacy VarExt/旧档兼容。
+4. 保存变化必须有显式 save profile、candidate parse、atomic commit、旧档/未知 type/dimension/sparse/round-trip 证据。
 
-1. ERB facade 只形成 typed request/effect；Core port 接受受限 token/DTO，不接受 Godot Node 或任意绝对路径。
-2. Bridge/平台 adapter 实现文件、SQL、输入、音频或资源操作，并带 generation、cancel、budget 和 fault。
+#### 新增平台能力
+
+1. Core facade 只形成 typed request/effect，port 接受受限 token/DTO，不接受 Godot Node 或任意路径。
+2. bridge/platform adapter 负责输入、资源、音频、文件或 SQL，并处理 generation、cancel、budget 和 fault。
 3. Android/iOS 能力必须由最终导出验证；桌面 DLL/反射结果不能外推到移动端。
-4. 外部 DLL 不进入 `DialectModuleCatalog`。需要完全信任插件时走独立 desktop policy，并记录 hash 授权与进程重启边界。
 
-### 5. 同步 descriptor 时避免“半张表”
+### 5.5 同步 descriptor 时避免“半张表”
 
-当前 Core descriptor route 只能选择已经存在的 legacy handler，并把非空 descriptor 集合作为完整可见面。因此：
+1. 不要为单个 legacy 新函数/指令立即向 `BuiltInDialectCatalog` 加孤立 contribution。
+2. non-empty plan 必须一次提供该 profile 的完整 instruction/function surface，不能只提供差集。
+3. 同步验证 lookup、名称冲突表、跨表 collision、comparer/normalizer 和 hidden-key 不可见性。
+4. descriptor 的 signature、module、completion/return 必须来自已求值 inventory 和行为 fixture，而不是类名推断。
+5. 只有完整 registry snapshot、两侧行为和 undeclared-side rejection 都通过后，才可以考虑把 non-empty descriptor route 用作实际运行路由。
 
-1. 不要为单个 legacy 新函数/指令立即向 `BuiltInDialectCatalog` 加一条孤立 contribution。
-2. D2 接线必须一次提供所选 profile 的完整 instruction/function surface，而不是只提供增量模块差集。
-3. 完整 surface 必须同时处理 lookup、名称冲突表、跨表碰撞、comparer/normalizer 和 hidden-key 不可见性。
-4. descriptor 的 signature、module、completion/return 必须来自已求值 inventory 和行为 fixture，不从类名猜。
-5. 只有完整 v24/Snake registry snapshot、两侧 behavior 和 undeclared-side rejection 都通过后，才能让 non-empty descriptor plan 成为默认 runtime 路由。
+## 6. 验证与文档
 
-### 6. GREEN 后运行分层验证
+### 6.1 先 restore，再使用 `--no-restore`
 
-只改 legacy ERB C# 时，最低 FastLoop 为：
+当前 `tools/core-contracts/CoreContractSmoke.csproj` 是 `net9.0`，而 `src/Core/GEmuera.Core.csproj` 是 `net8.0;net9.0`。首次运行、修改 `TargetFramework(s)`、项目引用或清理 `obj/` 后，必须先 restore；否则旧资产文件会让 `--no-restore` 报 NETSDK1005。
+
+```powershell
+# 首次运行或 TFM / 项目引用变化后
+dotnet restore gemuera-c#.sln
+dotnet restore tools/core-contracts/CoreContractSmoke.csproj
+
+# 随后的定向合同检查
+dotnet build src/Core/GEmuera.Core.csproj -c Release --no-restore
+dotnet run --project tools/core-contracts/CoreContractSmoke.csproj -c Release --no-restore
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/core-contracts/Test-CoreArchitecture.ps1 -ProjectRoot .
+```
+
+仅改 legacy ERB C# 时，最低 FastLoop 为：
 
 ```powershell
 dotnet build gemuera-c#.sln -c Debug --no-restore
@@ -242,69 +292,69 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 
 | 变更 | 追加验证 |
 | --- | --- |
-| 指令参数/flags | `Test-DialectSignatureResolution.ps1`、`Test-DialectInstructionFlagResolution.ps1` |
-| 函数参数/返回 | `Test-DialectFunctionSignatureResolution.ps1` |
-| 名称/comparer/碰撞 | `Test-DialectNameLookupContract.ps1` |
-| module/profile/BehaviorKey | 对应 DIA-09 至 DIA-17 contract tests |
-| Core module/plan | Core build、`CoreContractSmoke`、`Test-CoreArchitecture.ps1` |
-| legacy 行为 | 任务专用 v24/Snake fixture/trace；命令和 artifact 见 `tools/legacy-runner/README.md` |
-| 保存 | save baseline/fixture/round-trip tests，且原文件 hash 不变 |
+| 指令参数 / flags | `Test-DialectSignatureResolution.ps1`、`Test-DialectInstructionFlagResolution.ps1` |
+| 函数参数 / 返回 | `Test-DialectFunctionSignatureResolution.ps1` |
+| 名称 / comparer / collision | `Test-DialectNameLookupContract.ps1` |
+| module / profile / behavior key | 对应 `tools/dialect-inventory/Test-Dialect*.ps1` 合同 |
+| Core module / host / plan | Core build、CoreContractSmoke、`Test-CoreArchitecture.ps1`，以及 host 的 step/resume/effect fixture |
+| legacy 行为 | 任务专用 v24/Snake/erafl fixture 或 trace；入口见 `tools/legacy-runner/README.md` |
+| 保存 | save baseline、candidate-commit、旧档和 round-trip 测试，且原档 hash 不变 |
 | Godot 场景 | 单一相关 GDUnit4 suite |
-| Android 能力 | WorkPackage/PhaseRelease 的 APK 与真机报告 |
+| Android 能力 | APK 与真机/目标设备报告 |
 
-Core 合同命令：
+`tools/dialect-inventory/README.md` 规定静态合同的依赖关系。任何 source/profile/registration 变更都会使下游 hash 失效；不能只改期望计数、只重生成最后一份报告，或把 `Partial`/`Failed`/`Blocked` 写成通过。
 
-```powershell
-dotnet build src/Core/GEmuera.Core.csproj -c Release --no-restore
-dotnet run --project tools/core-contracts/CoreContractSmoke.csproj -c Release --no-restore
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/core-contracts/Test-CoreArchitecture.ps1 -ProjectRoot .
-```
+### 6.2 评审、日志与回退
 
-registration 或 profile source 变化会使下游 DIA hash 失效。按 `tools/dialect-inventory/README.md` 的依赖顺序重新生成和测试 DIA-01 至 DIA-17；DIA-07 需要锁定的 XEmuera 源目录。不能只修改期望计数或只重生成最后一份报告来“恢复绿色”。所有 `Partial/Failed/Uncovered/Blocked` 状态必须保留，直到对应行为证据真实关闭。
+- 修改 `Scripts/**/*.cs` 时，若工作区存在 `CODE_MAP.md`，按其约定判断并同步更新；若不存在，必须在 action log 中明确记录“代码地图在当前工作区不可用”，不能凭空重建或声称已更新。
+- 每次文件修改在被忽略的 `action_maps/` 写中文日志，记录 RED/GREEN、命令与 exit code、artifact/hash、未覆盖项、风险和回退。
+- 回退必须恢复旧 registry/descriptor/adapter 与行为证据；保存改动还要保留旧 codec 和原档备份。
+- 不删除正式回归测试；只删除一次性探针和无复用价值的临时文件。
+- build、inventory、单个游戏启动、Core smoke 或截图都不是“完整兼容”的单独证明。
 
-### 7. 评审、文档和回退
+## 7. Definition of Done
 
-- 修改 `Scripts/**/*.cs` 后判断并更新 `CODE_MAP.md`；新增公开 key、ownership 或语义还要更新本指南和对应权威设计/evidence。
-- action log 记录 RED、GREEN、命令、exit code、artifact/hash、未覆盖项和回退。
-- 回退必须恢复旧 registry snapshot/hash；保存相关变更还要保留旧 codec 和原档备份。
-- 不删除为稳定回归建立的正式测试。只删除一次性探针和无复用价值的临时文件。
-- 不把 build、inventory 或单个游戏启动写成“完整兼容”。
+结束一个 ERB 扩展任务前，至少确认：
 
-## Definition of Done
-
-Agent 只有在以下项目全部满足或明确标为 Blocked 时才能结束任务：
-
-- [ ] public key、kind、module/profile owner、依赖和版本已明确。
-- [ ] 全表与跨表 collision 已检查；无静默覆盖。
-- [ ] signature、默认值、return、flags、errors、completion、effects 和 `CanRestructure` 已固定。
+- [ ] 已明确 `route`、public key、kind、owner module/profile、依赖和版本。
+- [ ] 已检查同表和跨表 collision，且没有依赖静默覆盖或注册顺序。
+- [ ] 参数、默认值、return、flags、错误、completion、effects 与 `CanRestructure` 已固定。
 - [ ] baseline、extension、undeclared 三类场景先 RED 后 GREEN。
-- [ ] v24 和 Snake 两侧均有证据；未选择模块的 registry/hash/行为不变。
+- [ ] 未选择 module/profile 的 registry/hash/行为不变；如果 runtime isolation 仍未实现，已明确标出限制而不是夸大。
 - [ ] parser 改动覆盖 full/lazy/reload；wait 改动覆盖 resume/cancel/late completion。
 - [ ] variable/save 改动覆盖 schema、reset、candidate commit、旧档和 round-trip。
-- [ ] Core 无 Godot 类型、路径、反射模块发现或可变 session truth。
-- [ ] inventory/signature/lookup/module 报告已按依赖链更新，状态没有夸大。
-- [ ] 定向 build/test、行为 fixture 和必要的平台门已记录。
-- [ ] `CODE_MAP.md` 判断、action log、风险和回退步骤已完成。
+- [ ] Core host 不含 Godot 类型、路径、反射发现或可变 session truth。
+- [ ] inventory/signature/lookup/module 报告按依赖关系更新，或者因当前 gate 阻断而诚实保留失败状态。
+- [ ] 定向 build/test、行为 fixture 和必要平台门已记录。
+- [ ] `CODE_MAP.md` 可用性判断、action log、风险与回退步骤已完成。
 
-## 禁止合并的快捷方式
+## 8. 禁止合并的快捷方式
 
-- 新增 `if (Program.IsSnakeProfile)`、`CoreProfile ==` 或按游戏 id 判断的 Parser/VM 语义。
+- 为新增语义在 Parser/VM hot path 加 `Program.IsSnakeProfile`、`CoreProfile ==` 或游戏 id 分支。
 - 启动后修改 `GetInstructionNameDic()` 或 `GetMethodList()` 返回的字典。
-- 只加 `FunctionCode`/`VariableCode`/descriptor，不实现和测试完整链路。
-- 将一个增量 descriptor 当作完整 plan，或用空表 fallback 掩盖缺失注册。
+- 只加 `FunctionCode`、`VariableCode`、descriptor 或 catalog 注册，不实现并测试完整链路。
+- 把一个增量 descriptor 当作完整 plan，或用空表 fallback 掩盖缺失 registry。
 - 依赖 `Dictionary[key] = value`、注册顺序或函数向指令投影实现覆盖。
 - 未经 comparer/culture fixture 直接新增 `ToUpper()`、ignore-case 或 Unicode alias。
-- 为本可用函数/指令表达的能力修改 lexer grammar。
+- 为能由现有函数/指令表达的能力修改 lexer grammar。
 - 在 expression function 中允许常量折叠，却读取时间、RNG、变量、资源或产生副作用。
-- 用 Godot signal、Node 或 Autoload 保存 ERB state/等待状态。
-- 将 reflection DLL、CompatibilityPack 或 `_Rename.csv` 当成内置方言注册机制。
+- 让 Godot signal、Node 或 Autoload 保存 ERB state/等待状态。
+- 将反射 DLL、CompatibilityPack 或 `_Rename.csv` 当成内置方言注册机制。
+- 在 restore 尚未完成或 TFM 已变化时，用一次 `--no-restore` 失败掩盖合同验证未执行的事实。
 
-## 参考入口
+## 9. 当前参考入口
 
-- [方言、兼容模块与魔改接口](NewFrameworkDesign/DialectExtensionSystem.md)
-- [指令与内置函数库存](NewFrameworkDesign/InstructionInventory.md)
-- [变量系统](NewFrameworkDesign/VariableSystem.md)
-- [扩展运行时与插件安全](NewFrameworkDesign/ExtensionRuntime.md)
-- [AI 分层验证流程](NewFrameworkDesign/AIDevelopmentWorkflow.md)
-- [运行与验证命令](NewFrameworkDesign/HowToRun.md)
-- [代码地图](CODE_MAP.md)
+- `src/Core/Runtime/ErbExecution.cs`：解释器选择、host、step/resume、effect/completion 合同。
+- `src/Core/Runtime/LegacyCoreAdapter.cs`：Core candidate-only 解析边界。
+- `src/Core/Parsing/ErbParsing.cs`：当前 Core 简化解析模型与 diagnostics。
+- `src/Core/Compatibility/DialectRuntime.cs`：module、descriptor、plan 与 hash 合同。
+- `src/Core/Compatibility/BuiltInDialectCatalog.cs`：当前 built-in 声明与空 contribution 的限制。
+- `src/Core/Compatibility/CompatibilityDescriptorRoute.cs`：descriptor 到已有 legacy handler 的只读路由。
+- `src/Core/Application/GameSession.cs`：Core session/prototype composition。
+- `Scripts/GodotHost/LegacySessionBackend.cs`：生产 legacy 启动和 compatibility plan 绑定。
+- `Scripts/Emuera/GameProc/Function/FunctionIdentifier.cs`：legacy 指令注册。
+- `Scripts/Emuera/GameData/Function/Creator.cs`：legacy 表达式函数注册。
+- `Scripts/Emuera/GameData/IdentifierDictionary.cs`：legacy lookup 与 descriptor route 绑定。
+- `tools/dialect-inventory/README.md`：静态方言合同与执行顺序。
+- `tools/core-contracts/`：Core 公共合同 smoke/architecture gates。
+- `AGENTS.md`：协作、日志与项目级验证规则。

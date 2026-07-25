@@ -1438,24 +1438,25 @@ public partial class EmueraContent
 			}
 			else if (isBackLog && !css.pColorChanged)
 				color = Config.LogColor;
-			DrawText(GetTextRenderPlan(css, css.Str), color.ToGodotColor(), css.Font, css.Font?.Bold == true, x, lineY, width);
+			DrawText(GetTextRenderPlan(css, css.Str), color.ToGodotColor(), css.Font, css.Font?.Bold == true, x, lineY, width, css.VerticalAlign);
 		}
 
-		void DrawText(ConsoleTextRenderPlan plan, Color color, EmuFont emuFont, bool bold, float x, float lineY, float width)
+		void DrawText(ConsoleTextRenderPlan plan, Color color, EmuFont emuFont, bool bold, float x, float lineY, float width, FontVerticalAlign? verticalAlign = null)
 		{
 			Font font = owner.ResolveConsoleFont(emuFont);
 			if (font == null || plan == null || string.IsNullOrEmpty(plan.Text))
 				return;
 			string text = plan.Text;
-			float fontHeight = font.GetHeight(owner.FontSize);
-			float baseline = GetTextBaseline(font, owner.FontSize, owner.EffectiveLineHeight, fontHeight);
+			int actualFontSize = emuFont != null ? Math.Max(1, Mathf.RoundToInt(emuFont.Size)) : owner.FontSize;
+			float fontHeight = font.GetHeight(actualFontSize);
+			float baseline = GetTextBaseline(font, actualFontSize, owner.EffectiveLineHeight, fontHeight, verticalAlign);
 			if (!plan.UsesGridDrawing)
 			{
 				DrawString(font, new Vector2(x, lineY + baseline), text, HorizontalAlignment.Left,
-					Mathf.Max(1.0f, width), owner.FontSize, color);
+					Mathf.Max(1.0f, width), actualFontSize, color);
 				if (bold)
 					DrawString(font, new Vector2(x + 1.0f, lineY + baseline), text, HorizontalAlignment.Left,
-						Mathf.Max(1.0f, width - 1.0f), owner.FontSize, color);
+						Mathf.Max(1.0f, width - 1.0f), actualFontSize, color);
 				return;
 			}
 
@@ -1464,7 +1465,7 @@ public partial class EmueraContent
 			for (int i = 0; i < text.Length; i++)
 			{
 				bool half = uEmuera.Utils.CheckHalfSize(text[i]);
-				float nextExactX = exactX + (half ? owner.FontSize / 2.0f : owner.FontSize);
+				float nextExactX = exactX + (half ? actualFontSize / 2.0f : actualFontSize);
 				float nextDrawX = x + (int)nextExactX;
 				float cellWidth = nextDrawX - drawX;
 				// 逐字符绘制只负责保持 emuera 的半角/全角格点起点，裁剪仍由整段宽度决定。
@@ -1472,13 +1473,13 @@ public partial class EmueraContent
 				float drawWidth = IsBlockElementChar(text[i])
 					? cellWidth
 					: Mathf.Max(cellWidth, x + width - drawX);
-				DrawGridChar(font, text[i], plan.GetGlyph(i), drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
+				DrawGridChar(font, text[i], plan.GetGlyph(i), drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight, actualFontSize);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
 		}
 
-		void DrawGridChar(Font font, char value, string glyph, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
+		void DrawGridChar(Font font, char value, string glyph, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight, int fontSize)
 		{
 			if (TryGetSolidBlockElementRect(value, cellWidth, owner.EffectiveLineHeight, fontHeight, out var blockRect))
 			{
@@ -1486,9 +1487,9 @@ public partial class EmueraContent
 				return;
 			}
 			float drawWidth = Mathf.Max(1.0f, cellWidth);
-			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, owner.FontSize, color);
+			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, fontSize, color);
 			if (bold)
-				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), owner.FontSize, color);
+				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), fontSize, color);
 		}
 
 		void DrawImagePart(ConsoleImagePart image, float lineY, int relX, bool isSelecting)
@@ -1516,12 +1517,20 @@ public partial class EmueraContent
 				DrawSetTransform(Vector2.Zero, 0, Vector2.One);
 		}
 
-		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f)
+		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f, FontVerticalAlign? verticalAlign = null)
 		{
 			if (fontHeight < 0.0f)
 				fontHeight = font.GetHeight(fontSize);
+			float freeSpace = height - fontHeight;
+			float alignmentOffset = verticalAlign switch
+			{
+				FontVerticalAlign.Top => 0.0f,
+				FontVerticalAlign.Middle => freeSpace * 0.5f,
+				FontVerticalAlign.Bottom => freeSpace,
+				_ => freeSpace * 0.5f,
+			};
 			float ascent = font.GetAscent(fontSize);
-			return Mathf.Round((height - fontHeight) * 0.5f + ascent);
+			return Mathf.Round(alignmentOffset + ascent);
 		}
 
 	}

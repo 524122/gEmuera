@@ -269,9 +269,9 @@ namespace MinorShift.Emuera.GameData.Expression
 					return refToken;
 				if (varCode != VariableCode.__NULL__ && GlobalStatic.ConstantData.isDefined(varCode, idStr))//連想配列的な可能性アリ
 					return new SingleTerm(idStr);
-				if ((Config.UseERD || Program.IsSnakeProfile) && varCode != VariableCode.__NULL__ && varId != null && GlobalStatic.ConstantData.isUserDefined(varId.Name, idStr, varId.Dimension))
+				if ((Config.UseERD || Program.Compatibility.Snake.AllowsUserDefinedVariableResolution) && varCode != VariableCode.__NULL__ && varId != null && GlobalStatic.ConstantData.isUserDefined(varId.Name, idStr, varId.Dimension))
 					return new SingleTerm(idStr);
-				if (varCode != VariableCode.__NULL__ && varId != null && Program.IsSnakeProfile && isSnakeUserDefinedVariableCode(varId.Code))
+				if (varCode != VariableCode.__NULL__ && varId != null && Program.Compatibility.Snake.AllowsUserDefinedVariableResolution && isSnakeUserDefinedVariableCode(varId.Code))
 					return new SingleTerm(idStr);
 				GlobalStatic.IdentifierDictionary.ThrowException(idStr, false);
 			}

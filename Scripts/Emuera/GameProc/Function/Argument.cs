@@ -276,6 +276,33 @@ namespace MinorShift.Emuera.GameProc.Function
 		public readonly IOperandTerm Opacity;
 	}
 
+	internal sealed class SpSetImageLayerArgument : Argument
+	{
+		public SpSetImageLayerArgument(IOperandTerm spriteName, IOperandTerm depth, IOperandTerm x, IOperandTerm y,
+			IOperandTerm width, IOperandTerm height, IOperandTerm opacity, IOperandTerm cmArray, IOperandTerm followScroll)
+		{
+			SpriteName = spriteName;
+			Depth = depth;
+			X = x;
+			Y = y;
+			Width = width;
+			Height = height;
+			Opacity = opacity;
+			CMArray = cmArray;
+			FollowScroll = followScroll;
+		}
+
+		readonly public IOperandTerm SpriteName;
+		readonly public IOperandTerm Depth;
+		readonly public IOperandTerm X;
+		readonly public IOperandTerm Y;
+		readonly public IOperandTerm Width;
+		readonly public IOperandTerm Height;
+		readonly public IOperandTerm Opacity;
+		readonly public IOperandTerm CMArray;
+		readonly public IOperandTerm FollowScroll;
+	}
+
 	internal sealed class SpForNextArgment : Argument
 	{
 		public SpForNextArgment(VariableTerm var, IOperandTerm start, IOperandTerm end, IOperandTerm step)
@@ -411,6 +438,17 @@ namespace MinorShift.Emuera.GameProc.Function
 		readonly public IOperandTerm G;
 		readonly public IOperandTerm B;
 		readonly public IOperandTerm RGB;
+	}
+
+	internal sealed class SpColorAlphaArgument : Argument
+	{
+		public SpColorAlphaArgument(IOperandTerm rgb, IOperandTerm alpha)
+		{
+			RGB = rgb;
+			Alpha = alpha;
+		}
+		readonly public IOperandTerm RGB;
+		readonly public IOperandTerm Alpha;
 	}
 
 	internal sealed class SpSplitArgument : Argument

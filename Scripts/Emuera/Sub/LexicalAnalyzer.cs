@@ -562,6 +562,7 @@ namespace MinorShift.Emuera.Sub
 							case 'S': buffer.Append('　'); break;
 							case 't': buffer.Append('\t'); break;
 							case 'n': buffer.Append('\n'); break;
+							case 'e': buffer.Append('\\'); buffer.Append('e'); break;
 							default: buffer.Append(st.Current); break;
 						}
 						st.ShiftNext();//\の次の文字を読み飛ばす

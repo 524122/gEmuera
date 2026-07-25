@@ -2,9 +2,13 @@
 
 # gEmuera
 
-基于 Godot 4.6 + .NET 8.0 的跨平台 Emuera 文字游戏引擎移植版。
+基于 Godot 4.7 + .NET 8.0 的跨平台 Emuera 文字游戏引擎移植版。
 
 Emuera 是日本 eramaker 系列文字游戏的执行引擎，通过解析 `.ERB` 脚本文件和 `.CSV` 数据文件来运行游戏。本项目将原版 Windows Forms / GDI+ 渲染架构替换为 Godot 节点系统，实现了桌面端和 Android 移动端的跨平台支持。
+
+## 开发者接手
+
+当前可运行路径、Core/Host 合同、迁移阶段、已知阻断和验证入口统一记录在 [当前实现与开发接手指南](../NewFrameworkDesign/DeveloperHandoff.md)。接手开发时以该文档、`AGENT.md`、`CODE_MAP.md` 和机器报告为准，不要把长期目标设计直接视为已完成实现。
 
 ## 特性
 
@@ -41,7 +45,7 @@ Emuera 是日本 eramaker 系列文字游戏的执行引擎，通过解析 `.ERB
 
 ### 环境要求
 
-- Godot 4.6（.NET 版本）
+- Godot 4.7（.NET 版本）
 - .NET 8.0 SDK
 - （Android 构建）.NET 9.0 SDK
 
@@ -64,7 +68,7 @@ eraGameName/
 
 ### 运行
 
-1. 用 Godot 4.6 (.NET) 打开项目
+1. 用 Godot 4.7 (.NET) 打开项目
 2. 将游戏文件夹放到正确位置
 3. 运行项目，在启动界面选择游戏
 

@@ -3,10 +3,10 @@ using System;
 using MinorShift._Library;
 using MinorShift.Emuera;
 using MinorShift.Emuera.GameView;
-using System.Collections.Concurrent;
 using System.Threading;
 using MinorShift.Emuera.Content;
 using gEmuera.Diagnostics;
+using GEmuera.Core.Compatibility;
 using GEmuera.Core.Session;
 using gEmuera.GodotHost;
 using System.Threading.Tasks;
@@ -42,11 +42,6 @@ public partial class EmueraMain : Node
 		public ManualResetEventSlim Completed = new ManualResetEventSlim(false);
 	}
 
-	static ConcurrentQueue<GpuWorkItem> gpuQueue = new ConcurrentQueue<GpuWorkItem>();
-	static ConcurrentQueue<TextRenderItem> textRenderQueue = new ConcurrentQueue<TextRenderItem>();
-	static EmueraMain currentInstance;
-	static int gpuWorkIdCounter = 0;
-	static int textRenderIdCounter = 0;
 	static readonly object configMapCacheLock = new object();
 	static System.Collections.Generic.Dictionary<string, string> cachedShiftJisToUtf8Map;
 	static System.Collections.Generic.Dictionary<string, string> cachedUtf8ZhCnToUtf8Map;
@@ -55,10 +50,9 @@ public partial class EmueraMain : Node
 	LegacySessionLaunchRegistry m0RunnerSessionLaunchRegistry;
 
 	/// <summary>
-	/// True once _Process has been called at least once, indicating the main loop is running
-	/// and the SubViewport render pipeline is ready to process GPU work.
+	/// Legacy facade for the host-owned ColorMatrix queue readiness.
 	/// </summary>
-	public static bool GpuReady { get; private set; } = false;
+	public static bool GpuReady => EmueraGpuRenderComponent.GpuReady;
 
 	/// <summary>
 	/// Completes and drops render work submitted by the stopped legacy session.
@@ -68,298 +62,27 @@ public partial class EmueraMain : Node
 	/// </summary>
 	internal static void ResetCanarySessionState()
 	{
-		while (gpuQueue.TryDequeue(out var gpuItem))
-		{
-			gpuItem.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
-			gpuItem.Completed.Set();
-		}
-		while (textRenderQueue.TryDequeue(out var textItem))
-		{
-			textItem.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
-			textItem.Completed.Set();
-		}
-		currentInstance?.ResetPendingRenderState();
-		GpuReady = false;
-	}
-
-	void ResetPendingRenderState()
-	{
-		if (pendingGpuItem != null)
-		{
-			pendingGpuItem.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
-			pendingGpuItem.Completed.Set();
-			pendingGpuItem = null;
-		}
-		gpuWaitingForRender = false;
-		gpuRenderFrameCount = 0;
-		if (gpuViewport != null)
-			gpuViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-
-		if (pendingTextRenderItem != null)
-		{
-			pendingTextRenderItem.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
-			pendingTextRenderItem.Completed.Set();
-			pendingTextRenderItem = null;
-		}
-		textWaitingForRender = false;
-		textRenderFrameCount = 0;
-		if (textViewport != null)
-			textViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
+		EmueraGpuRenderComponent.ResetCanarySessionState();
+		EmueraTextRenderComponent.ResetCanarySessionState();
 	}
 
 	/// Submit ColorMatrix work from any thread. Returns the GpuWorkItem for direct wait.
 	public static GpuWorkItem GpuSubmitColorMatrix(Godot.Image src, Godot.Rect2I region, float[][] cm)
 	{
-		var item = new GpuWorkItem
-		{
-			Id = Interlocked.Increment(ref gpuWorkIdCounter),
-			SrcImage = src,
-			SrcRegion = region,
-			ColorMatrix = cm
-		};
-		gpuQueue.Enqueue(item);
-		return item;
+		return EmueraGpuRenderComponent.Submit(src, region, cm);
 	}
 
 	public static TextRenderItem SubmitTextRender(string text, string fontName, int fontSize, int fontStyle, uEmuera.Drawing.Color color, int width, int height)
 	{
-		if (GenericUtils.IsOnMainThread())
-			return null;
-		var item = new TextRenderItem
-		{
-			Id = Interlocked.Increment(ref textRenderIdCounter),
-			Text = text ?? "",
-			FontName = fontName,
-			FontSize = System.Math.Max(1, fontSize),
-			FontStyle = fontStyle,
-			Color = color,
-			Width = System.Math.Max(1, width),
-			Height = System.Math.Max(1, height)
-		};
-		textRenderQueue.Enqueue(item);
-		return item;
+		return EmueraTextRenderComponent.Submit(text, fontName, fontSize, fontStyle, color, width, height);
 	}
 
-	// SubViewport-based GPU rendering for ColorMatrix
-	SubViewport gpuViewport;
-	TextureRect gpuTextureRect;
-	ShaderMaterial gpuShaderMaterial;
-	GpuWorkItem pendingGpuItem;
-	int gpuRenderFrameCount = 0;
-	bool gpuWaitingForRender = false;
-	SubViewport textViewport;
-	Label textRenderLabel;
-	FontFile textRenderFont;
-	TextRenderItem pendingTextRenderItem;
-	int textRenderFrameCount = 0;
-	bool textWaitingForRender = false;
 	bool startupStarted = false;
 	Control startupOverlay;
 	Label startupStatusLabel;
-	// Root-level Android lifecycle state. The main node owns frame-rate throttling
-	// while EmueraContent owns reversible audio pause state for script channels.
-	bool applicationPauseActive = false;
-	int maxFpsBeforeApplicationPause = -1;
-
-	void SetupGpuRenderer()
-	{
-		if (!ShouldUseGpuRenderer() || gpuViewport != null)
-			return;
-
-		gpuViewport = new SubViewport();
-		gpuViewport.TransparentBg = true;
-		gpuViewport.Size = new Vector2I(16, 16);
-		gpuViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-		gpuViewport.Name = "GpuRenderViewport";
-
-		gpuTextureRect = new TextureRect();
-		gpuTextureRect.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize;
-		gpuTextureRect.Name = "GpuTextureRect";
-
-		gpuShaderMaterial = ColorMatrixGPU.CreateCompositMaterial();
-		gpuTextureRect.Material = gpuShaderMaterial;
-
-		gpuViewport.AddChild(gpuTextureRect);
-		AddChild(gpuViewport);
-	}
-
-	static bool ShouldUseGpuRenderer()
-	{
-		return !OS.HasFeature("mobile");
-	}
-
-	void SetupTextRenderer()
-	{
-		if (textViewport != null)
-			return;
-
-		textRenderFont = ResourceLoader.Load<FontFile>("res://Fonts/MS Gothic.ttf");
-		textViewport = new SubViewport();
-		textViewport.TransparentBg = true;
-		textViewport.Size = new Vector2I(16, 16);
-		textViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-		textViewport.Name = "TextRenderViewport";
-
-		textRenderLabel = new Label();
-		textRenderLabel.Name = "TextRenderLabel";
-		textRenderLabel.Position = Vector2.Zero;
-		textRenderLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
-		textRenderLabel.VerticalAlignment = VerticalAlignment.Top;
-		textRenderLabel.HorizontalAlignment = HorizontalAlignment.Left;
-		textRenderLabel.AutowrapMode = TextServer.AutowrapMode.Off;
-		textRenderLabel.ClipText = true;
-		if (textRenderFont != null)
-			textRenderLabel.AddThemeFontOverride("font", textRenderFont);
-
-		textViewport.AddChild(textRenderLabel);
-		AddChild(textViewport);
-	}
-
-	void ProcessTextRenderQueue()
-	{
-		if (textViewport == null)
-			SetupTextRenderer();
-		if (textViewport == null)
-			return;
-
-		if (textWaitingForRender)
-		{
-			textRenderFrameCount++;
-			if (textRenderFrameCount >= 2)
-			{
-				var vpTex = textViewport.GetTexture();
-				var resultImg = vpTex?.GetImage();
-				if (resultImg != null && resultImg.GetWidth() > 0 && resultImg.GetHeight() > 0)
-				{
-					if (resultImg.GetFormat() != Godot.Image.Format.Rgba8)
-						resultImg.Convert(Godot.Image.Format.Rgba8);
-					pendingTextRenderItem.ResultImage = resultImg;
-				}
-				else
-				{
-					pendingTextRenderItem.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
-				}
-				pendingTextRenderItem.Completed.Set();
-				pendingTextRenderItem = null;
-				textWaitingForRender = false;
-				textViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-			}
-		}
-
-		if (!textWaitingForRender && textRenderQueue.TryDequeue(out var item))
-		{
-			textViewport.Size = new Vector2I(item.Width, item.Height);
-			textRenderLabel.Text = item.Text ?? "";
-			textRenderLabel.Size = new Vector2(item.Width, item.Height);
-			textRenderLabel.CustomMinimumSize = textRenderLabel.Size;
-			textRenderLabel.AddThemeFontSizeOverride("font_size", item.FontSize);
-			textRenderLabel.AddThemeColorOverride("font_color", new Color(item.Color.r, item.Color.g, item.Color.b, item.Color.a));
-			textRenderLabel.Position = Vector2.Zero;
-
-			textViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
-			textRenderFrameCount = 0;
-			textWaitingForRender = true;
-			pendingTextRenderItem = item;
-		}
-	}
-
-	/// Process pending GPU work. Called from _Process on the main thread.
-	/// Frame-counted cycle: setup render → wait 2 frames → retrieve result.
-	/// Falls back to CPU processing if GPU render produces no output.
-	void ProcessGpuQueue()
-	{
-		if (!ShouldUseGpuRenderer())
-		{
-			while (gpuQueue.TryDequeue(out var queuedItem))
-			{
-				queuedItem.ResultImage = MinorShift.Emuera.Content.GraphicsImage.ApplyColorMatrixGPU(
-					queuedItem.SrcImage, queuedItem.SrcRegion, queuedItem.ColorMatrix);
-				queuedItem.Completed.Set();
-			}
-			return;
-		}
-
-		if (gpuViewport == null)
-			SetupGpuRenderer();
-		if (gpuViewport == null)
-			return;
-
-		// Phase 1: Wait for render to complete (2 frames after setup)
-		if (gpuWaitingForRender)
-		{
-			gpuRenderFrameCount++;
-			if (gpuRenderFrameCount >= 2)
-			{
-				var vpTex = gpuViewport.GetTexture();
-				if (vpTex != null)
-				{
-					var resultImg = vpTex.GetImage();
-					if (resultImg != null && resultImg.GetWidth() > 0 && resultImg.GetHeight() > 0)
-					{
-						if (resultImg.GetFormat() != Godot.Image.Format.Rgba8)
-							resultImg.Convert(Godot.Image.Format.Rgba8);
-						pendingGpuItem.ResultImage = resultImg;
-					}
-					else
-					{
-						pendingGpuItem.ResultImage = MinorShift.Emuera.Content.GraphicsImage.ApplyColorMatrixGPU(
-							pendingGpuItem.SrcImage, pendingGpuItem.SrcRegion, pendingGpuItem.ColorMatrix);
-					}
-				}
-				else
-				{
-					pendingGpuItem.ResultImage = MinorShift.Emuera.Content.GraphicsImage.ApplyColorMatrixGPU(
-						pendingGpuItem.SrcImage, pendingGpuItem.SrcRegion, pendingGpuItem.ColorMatrix);
-				}
-				pendingGpuItem.Completed.Set();
-				pendingGpuItem = null;
-				gpuWaitingForRender = false;
-				gpuViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
-			}
-		}
-
-		// Phase 2: Set up next render if idle
-		if (!gpuWaitingForRender && gpuQueue.TryDequeue(out var item))
-		{
-			var srcW = item.SrcRegion.Size.X;
-			var srcH = item.SrcRegion.Size.Y;
-			if (srcW > 0 && srcH > 0)
-			{
-				var subImg = item.SrcImage.GetRegion(item.SrcRegion);
-				if (subImg != null)
-				{
-					var imgTex = ImageTexture.CreateFromImage(subImg);
-					gpuTextureRect.Texture = imgTex;
-					gpuTextureRect.Size = new Vector2(srcW, srcH);
-					gpuTextureRect.Position = Vector2.Zero;
-					gpuViewport.Size = item.SrcRegion.Size;
-
-					ColorMatrixGPU.SetMatrixUniforms(gpuShaderMaterial, item.ColorMatrix);
-
-					gpuViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
-					gpuRenderFrameCount = 0;
-					gpuWaitingForRender = true;
-					pendingGpuItem = item;
-				}
-				else
-				{
-					// GetRegion failed, use CPU fallback
-					item.ResultImage = MinorShift.Emuera.Content.GraphicsImage.ApplyColorMatrixGPU(
-						item.SrcImage, item.SrcRegion, item.ColorMatrix);
-					item.Completed.Set();
-				}
-			}
-			else
-			{
-				item.ResultImage = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
-				item.Completed.Set();
-			}
-		}
-	}
 
 	public override void _Ready()
 	{
-		currentInstance = this;
 		FrameRateHelper.Apply();
 		ResolutionHelper.Apply();
 		GenericUtils.SetMainThread();
@@ -446,6 +169,22 @@ public partial class EmueraMain : Node
         }
         GenericUtils.NotifyGamePathSelected(Sys.ExeDir, FirstWindow.SelectedCoreProfileName);
 
+        // EmueraContent is created before the legacy worker. Bind the same
+        // immutable plan now so its profile-scoped display defaults cannot
+        // read the mutable launcher selection directly.
+        try
+        {
+            MinorShift.Emuera.Program.ConfigureCompatibilityPlan(
+                BuiltInDialectCatalog.CreateLegacySessionPlan(
+                    FirstWindow.SelectedCoreProfileName));
+        }
+        catch (Exception error)
+        {
+            GenericUtils.Error($"LEGACY_COMPATIBILITY_PLAN_STARTUP_FAILED {error}");
+            UpdateStartupStatus("Unable to resolve compatibility profile.");
+            return;
+        }
+
         // Load SHIFT-JIS / UTF-8 config maps
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         if (!IsInsideTree())
@@ -497,7 +236,8 @@ public partial class EmueraMain : Node
         GenericUtils.FlushUI();
         ProcessTextRenderQueue();
         if (GenericUtils.IsPerformanceSamplingEnabled)
-            GenericUtils.SamplePerformanceFrame(delta, gpuQueue.Count + textRenderQueue.Count);
+            GenericUtils.SamplePerformanceFrame(delta, gpuQueue.Count, textRenderQueue.Count,
+                RendererRuntimeIdentity.GetPerformanceData());
 
         if (!working)
             return;

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 //using System.Drawing;
 using System.Collections.Generic;
 using System.IO;
@@ -280,6 +280,25 @@ namespace MinorShift.Emuera
 				fontStyleDic.Add(style, styledFont);
 			}
 			return styledFont;
+		}
+
+		public static Font GetFont(string theFontname, FontStyle style, float? fontSize)
+		{
+			if (!fontSize.HasValue || Math.Abs(fontSize.Value - FontSize) < 0.001f)
+				return GetFont(theFontname, style);
+
+			float actualSize = fontSize.Value;
+			if (actualSize <= 0 || float.IsNaN(actualSize) || float.IsInfinity(actualSize))
+				return null;
+			string fontName = string.IsNullOrEmpty(theFontname) ? FontName : theFontname;
+			try
+			{
+				return new Font(fontName, actualSize, style, GraphicsUnit.Pixel);
+			}
+			catch
+			{
+				return null;
+			}
 		}
 
 		public static void ClearFont()

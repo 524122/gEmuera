@@ -59,6 +59,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		SP_SET_ARRAY,//可変数値変数・<数式配列型>。未使用
 		SP_SETS_ARRAY,//可変文字列変数・<文字列配列型>。未使用
 		SP_COLOR,
+		SP_COLOR_ALPHA,//<RGB>,<透明度%>
 		SP_SPLIT,//<文字列式>, <文字列式>, <可変文字変数>
 		SP_CVAR_SET,//<可変変数>,<式>,<数式 or 文字列式 or null>(,<範囲初値>, <範囲終値>)
 		SP_CONTROL_ARRAY,//<可変変数>,<数値>,<数値>
@@ -73,6 +74,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		SP_REF,
 		SP_REFBYNAME,
 		SP_SETBGIMAGE,
+		SP_SETIMAGELAYERL,
 		SP_HTMLSPLIT,
 		SP_DT_COLUMN_OPTIONS,
 	}

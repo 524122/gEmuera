@@ -432,10 +432,7 @@ public partial class EmueraContent : Control
 
 	static bool IsExtendedDisplayProfile()
 	{
-		if (Program.IsSnakeProfile || Program.IsEraFlProfile)
-			return true;
-		return GEmuera.Core.Compatibility.EraFlCompatibilityModule.UsesExtendedDisplayHistory(
-			FirstWindow.SelectedCoreProfileName);
+		return Program.Compatibility.UsesExtendedDisplayHistory;
 	}
 
 	// emuera still exposes the console viewport through Config.WindowY. Keeping
@@ -996,15 +993,17 @@ public partial class EmueraContent : Control
 
 	// Render a text fragment in emuera's fixed half/full-width grid. Godot Label
 	// uses real glyph advance, which makes CJK/box-drawing maps drift on Android.
-	Control CreateTextPart(string text, EmuColor color, EmuFont font, float width, EmuColor? selectedColor = null)
+	Control CreateTextPart(string text, EmuColor color, EmuFont font, float width, EmuColor? selectedColor = null, FontVerticalAlign? verticalAlign = null)
 	{
+		int actualFontSize = font != null ? Math.Max(1, Mathf.RoundToInt(font.Size)) : FontSize;
 		var textPart = new ConsoleTextPart(
 			ResolveConsoleFont(font),
-			FontSize,
+			actualFontSize,
 			color.ToGodotColor(),
 			(selectedColor ?? color).ToGodotColor(),
 			font?.Bold == true,
-			text);
+			text,
+			verticalAlign);
 		SetFixedControlSize(textPart, new Vector2(width, EffectiveLineHeight));
 		return textPart;
 	}
@@ -3728,7 +3727,7 @@ public partial class EmueraContent : Control
 			{
 				w = css.Width > 0 ? css.Width : 9999;
 			}
-			var text = CreateTextPart(css.Str, css.pColor, css.Font, w, css.pButtonColor);
+			var text = CreateTextPart(css.Str, css.pColor, css.Font, w, css.pButtonColor, css.VerticalAlign);
 			text.Position = new Vector2(posX, 0);
 			container.AddChild(text);
 
@@ -4142,7 +4141,7 @@ public partial class EmueraContent : Control
 	{
 		if (border == null || boxW <= 0 || boxH <= 0)
 			return;
-		int defaultColor = Config.ForeColor.ToArgb() & 0xFFFFFF;
+		int defaultColor = Config.ForeColor.ToArgb();
 		AddBorderRect(wrapper, boxX, boxY, boxW, BoxValue(border, BoxDirection.Top), ColorValue(borderColor, BoxDirection.Top, defaultColor));
 		AddBorderRect(wrapper, boxX + boxW - BoxValue(border, BoxDirection.Right), boxY, BoxValue(border, BoxDirection.Right), boxH, ColorValue(borderColor, BoxDirection.Right, defaultColor));
 		AddBorderRect(wrapper, boxX, boxY + boxH - BoxValue(border, BoxDirection.Bottom), boxW, BoxValue(border, BoxDirection.Bottom), ColorValue(borderColor, BoxDirection.Bottom, defaultColor));
@@ -4152,11 +4151,12 @@ public partial class EmueraContent : Control
 	// Add one border rectangle if the side has positive thickness.
 	void AddBorderRect(Control wrapper, float x, float y, float w, float h, int color)
 	{
-		if (w <= 0 || h <= 0 || color < 0)
+		if (w <= 0 || h <= 0)
 			return;
 		var rect = new ColorRect();
 		rect.MouseFilter = MouseFilterEnum.Ignore;
-		rect.Color = new Godot.Color(((color >> 16) & 0xFF) / 255f, ((color >> 8) & 0xFF) / 255f, (color & 0xFF) / 255f, 1f);
+		uint argb = unchecked((uint)color);
+		rect.Color = new Godot.Color(((argb >> 16) & 0xFF) / 255f, ((argb >> 8) & 0xFF) / 255f, (argb & 0xFF) / 255f, ((argb >> 24) & 0xFF) / 255f);
 		rect.Position = new Vector2(x, y);
 		rect.Size = new Vector2(w, h);
 		wrapper.AddChild(rect);
@@ -4171,7 +4171,7 @@ public partial class EmueraContent : Control
 	}
 
 	// Safe border-color lookup with transparent fallback.
-	static int ColorValue(int[] values, int index, int fallback = -1)
+	static int ColorValue(int[] values, int index, int fallback)
 	{
 		if (values == null || index < 0 || index >= values.Length)
 			return fallback;
@@ -7428,11 +7428,10 @@ public partial class EmueraContent : Control
 
 	static bool ShouldSubmitEraFlBlankPointerString(MinorShift.Emuera.GameView.EmueraConsole console, int mouseVk)
 	{
-		return Program.IsEraFlProfile
-			&& GEmuera.Core.Compatibility.EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(
-				mouseVk,
-				console != null && console.IsWaitingInput
-					&& console.InputType == MinorShift.Emuera.GameProc.InputType.StrValue);
+		return Program.Compatibility.EraFl.ShouldSubmitBlankPointerStringInput(
+			mouseVk,
+			console != null && console.IsWaitingInput
+				&& console.InputType == MinorShift.Emuera.GameProc.InputType.StrValue);
 	}
 
 	static bool ShouldSubmitBlankLeftClickDefault(MinorShift.Emuera.GameView.EmueraConsole console, int mouseVk)
@@ -7671,6 +7670,7 @@ public partial class EmueraContent : Control
 	{
 		readonly Font font;
 		readonly int fontSize;
+		readonly FontVerticalAlign? verticalAlign;
 		readonly Color color;
 		readonly Color selectedColor;
 		readonly bool bold;
@@ -7678,13 +7678,14 @@ public partial class EmueraContent : Control
 		Vector2 fixedSize;
 		bool selected;
 
-		public ConsoleTextPart(Font font, int fontSize, Color color, Color selectedColor, bool bold, string text)
+		public ConsoleTextPart(Font font, int fontSize, Color color, Color selectedColor, bool bold, string text, FontVerticalAlign? verticalAlign = null)
 		{
 			this.font = font;
 			this.fontSize = fontSize > 0 ? fontSize : 18;
 			this.color = color;
 			this.selectedColor = selectedColor;
 			this.bold = bold;
+			this.verticalAlign = verticalAlign;
 			this.text = uEmuera.Utils.StripZeroWidth(text) ?? "";
 			MouseFilter = MouseFilterEnum.Ignore;
 			ClipContents = true;
@@ -7716,7 +7717,7 @@ public partial class EmueraContent : Control
 				return;
 
 			float fontHeight = font.GetHeight(fontSize);
-			float baseline = GetTextBaseline(font, fontSize, Size.Y, fontHeight);
+			float baseline = GetTextBaseline(font, fontSize, Size.Y, fontHeight, verticalAlign);
 			Color drawColor = selected ? selectedColor : color;
 			if (selected && Config.UseButtonFocusBackgroundColor && !string.IsNullOrWhiteSpace(text))
 				DrawRect(new Rect2(Vector2.Zero, Size), new Color(50.0f / 255.0f, 50.0f / 255.0f, 50.0f / 255.0f, 1.0f));
@@ -7750,12 +7751,20 @@ public partial class EmueraContent : Control
 				DrawString(font, new Vector2(1.0f, baseline), text, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, drawColor);
 		}
 
-		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f)
+		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f, FontVerticalAlign? verticalAlign = null)
 		{
 			if (fontHeight < 0.0f)
 				fontHeight = font.GetHeight(fontSize);
+			float freeSpace = height - fontHeight;
+			float alignmentOffset = verticalAlign switch
+			{
+				FontVerticalAlign.Top => 0.0f,
+				FontVerticalAlign.Middle => freeSpace * 0.5f,
+				FontVerticalAlign.Bottom => freeSpace,
+				_ => freeSpace * 0.5f,
+			};
 			float ascent = font.GetAscent(fontSize);
-			return Mathf.Round((height - fontHeight) * 0.5f + ascent);
+			return Mathf.Round(alignmentOffset + ascent);
 		}
 
 		float GetCellWidth(bool half)

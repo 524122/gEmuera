@@ -10,6 +10,7 @@ using MinorShift.Emuera.GameData.Variable;
 using MinorShift.Emuera.GameData;
 using MinorShift._Library;
 using MinorShift.Emuera.GameData.Function;
+using MinorShift.Emuera.Content;
 //using System.Drawing;
 using System.IO;
 using uEmuera.Drawing;
@@ -1806,17 +1807,15 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SNAKE_TEXT_BGC_ON_Instruction()
 			{
-				ArgBuilder = SNAKE_ARGS_ArgumentBuilder.Instance;
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_COLOR_ALPHA);
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
-				ExpressionArrayArgument arg = (ExpressionArrayArgument)func.Argument;
-				if (arg.TermList.Length == 0 || arg.TermList[0] == null)
-					return;
-				long rgb = arg.TermList[0].GetIntValue(exm);
-				long alphaPercent = arg.TermList.Length > 1 && arg.TermList[1] != null ? arg.TermList[1].GetIntValue(exm) : 100;
+				SpColorAlphaArgument arg = (SpColorAlphaArgument)func.Argument;
+				long rgb = arg.RGB.GetIntValue(exm);
+				long alphaPercent = arg.Alpha.GetIntValue(exm);
 				if (rgb < 0 || rgb > 0xFFFFFF)
 					throw new CodeEE("TEXT_BGC_ONの第１引数が色を表す整数の範囲外です");
 				if (alphaPercent < 0 || alphaPercent > 100)
@@ -1846,7 +1845,9 @@ namespace MinorShift.Emuera.GameProc.Function
 
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
 			{
-				IOperandTerm[] terms = popTerms(line);
+				StringStream st = line.PopArgumentPrimitive();
+				WordCollection wc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.AnalyzePrintV);
+				IOperandTerm[] terms = ExpressionParser.ReduceArguments(wc, ArgsEndWith.EoL, false);
 				if (terms.Length < 1 || terms.Length > 2)
 				{
 					warn(terms.Length < 1 ? "引数が足りません" : "引数が多すぎます", line, 2, false);
@@ -2074,6 +2075,45 @@ namespace MinorShift.Emuera.GameProc.Function
 				float[][] colorMatrix = readOptionalColorMatrix(arg, exm, 7);
 				bool followScroll = getOptionalInt(arg, exm, 8, 0) != 0;
 				exm.Console.SetImageLayer(name, depth, x, y, width, height, opacity, colorMatrix, followScroll);
+			}
+		}
+
+		private sealed class SETIMAGELAYERL_Instruction : AbstractInstruction
+		{
+			public SETIMAGELAYERL_Instruction()
+			{
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_SETIMAGELAYERL);
+				flag = METHOD_SAFE | EXTENDED;
+			}
+
+			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
+			{
+				SpSetImageLayerArgument arg = (SpSetImageLayerArgument)func.Argument;
+				string spriteName = arg.SpriteName.GetStrValue(exm);
+				long depth = arg.Depth.GetIntValue(exm);
+
+				int xpos = arg.X != null ? (int)arg.X.GetIntValue(exm) : 0;
+				int ypos = arg.Y != null ? (int)arg.Y.GetIntValue(exm) : 0;
+				int width = arg.Width != null ? (int)arg.Width.GetIntValue(exm) : 0;
+				int height = arg.Height != null ? (int)arg.Height.GetIntValue(exm) : 0;
+				int opacity = arg.Opacity != null ? (int)arg.Opacity.GetIntValue(exm) : 255;
+				float[][] colorMatrix = arg.CMArray != null ? readOptionalColorMatrix(arg.CMArray, exm) : null;
+
+				int lineNo = exm.Console.GetLineNo;
+				int imageHeight = height;
+				if (imageHeight <= 0)
+				{
+					var sprite = AppContents.GetSprite(spriteName);
+					if (sprite != null && sprite.IsCreated)
+						imageHeight = sprite.DestBaseSize.Height;
+				}
+
+				int lineHeight = Config.LineHeight;
+				int pointY = exm.Console.GetLinePointY(lineNo);
+				int x = Config.DrawingParam_ShapePositionShift + xpos;
+				int y = pointY + lineHeight - exm.Console.ClientHeight + (imageHeight - lineHeight) + ypos;
+
+				exm.Console.SetImageLayer(spriteName, depth, x, y, width, height, opacity, colorMatrix, true);
 			}
 		}
 
@@ -2596,6 +2636,13 @@ namespace MinorShift.Emuera.GameProc.Function
 			if (arg.TermList.Length <= index || arg.TermList[index] == null)
 				return defaultValue;
 			return (int)arg.TermList[index].GetIntValue(exm);
+		}
+
+		private static float[][] readOptionalColorMatrix(IOperandTerm term, ExpressionMediator exm)
+		{
+			if (term == null)
+				return null;
+			return readOptionalColorMatrix(new ExpressionArrayArgument(new List<IOperandTerm> { term }), exm, 0);
 		}
 
 		private static float[][] readOptionalColorMatrix(ExpressionArrayArgument arg, ExpressionMediator exm, int index)

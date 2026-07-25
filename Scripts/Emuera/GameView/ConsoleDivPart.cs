@@ -28,13 +28,15 @@ namespace MinorShift.Emuera.GameView
 			X = ToPixel(xPos);
 			Y = ToPixel(yPos);
 			DivWidth = Math.Abs(ToPixel(width));
-			DivHeight = Math.Abs(ToPixel(height));
 			Depth = depth;
-			BackgroundColor = color >= 0 ? Color.FromRgbInt(color) : (Color?)null;
+			BackgroundColor = color != int.MinValue ? Color.FromArgb(color) : (Color?)null;
 			StyledBox = box;
 			IsRelative = isRelative;
 			Display = displayMode;
-			Children = children ?? new ConsoleDisplayLine[0];
+			Children = children ?? Array.Empty<ConsoleDisplayLine>();
+			DivHeight = height != null
+				? Math.Abs(ToPixel(height))
+				: CalculateAutoHeight(Children, box);
 			Str = "";
 			AltText = BuildAltText(xPos, yPos, width, height, depth, color, box, displayMode);
 			Width = 0;
@@ -116,8 +118,8 @@ namespace MinorShift.Emuera.GameView
 			AddMixedNumArg(sb, "height", height);
 			if (depth != 0)
 				sb.Append(" depth='").Append(depth).Append("'");
-			if (color >= 0)
-				sb.Append(" color='#").Append(color.ToString("X6")).Append("'");
+			if (color != int.MinValue)
+				sb.Append(" color='#").Append(ColorToHtml(color)).Append("'");
 			if (display != DisplayMode.Relative)
 				sb.Append(" display='").Append(DisplayModeToHtml(display)).Append("'");
 			if (box != null)
@@ -156,6 +158,28 @@ namespace MinorShift.Emuera.GameView
 			sb.Append("'");
 		}
 
+		static int CalculateAutoHeight(ConsoleDisplayLine[] children, StyledBoxModel box)
+		{
+			int height = children.Length * Config.LineHeight;
+			height += GetBoxValue(box?.Padding, BoxDirection.Top);
+			height += GetBoxValue(box?.Padding, BoxDirection.Bottom);
+			height += GetBoxValue(box?.Border, BoxDirection.Top);
+			height += GetBoxValue(box?.Border, BoxDirection.Bottom);
+			return height;
+		}
+
+		static int GetBoxValue(int[] values, int index)
+		{
+			return values != null && index >= 0 && index < values.Length ? values[index] : 0;
+		}
+
+		static string ColorToHtml(int argb)
+		{
+			uint value = unchecked((uint)argb);
+			return (value >> 24) == 0xFF
+				? (value & 0xFFFFFF).ToString("X6")
+				: value.ToString("X8");
+		}
 		static void AddColorBoxArg(StringBuilder sb, string name, int[] values)
 		{
 			if (values == null)
@@ -165,7 +189,7 @@ namespace MinorShift.Emuera.GameView
 			{
 				if (i > 0)
 					sb.Append(",");
-				sb.Append("#").Append(values[i].ToString("X6"));
+				sb.Append("#").Append(ColorToHtml(values[i]));
 			}
 			sb.Append("'");
 		}

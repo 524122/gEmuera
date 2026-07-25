@@ -7,7 +7,11 @@
       "Bash(where gh *)",
       "Bash(git init *)",
       "Bash(git remote *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Read(//e/XEmuera-master/**)",
+      "Bash(codegraph explore *)",
+      "Bash([ -d \"$GAMEDIR\" ])",
+      "Bash(find 'E:\\\\Godot_v4.6.2-stable_mono_win64\\\\snake\\\\EraTW-Magic_DLC-update_base' -iname *.erb)"
     ]
   }
 }

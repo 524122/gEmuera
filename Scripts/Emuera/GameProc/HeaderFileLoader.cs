@@ -42,7 +42,7 @@ namespace MinorShift.Emuera.GameProc
 #endif
 			bool noError = true;
 			dimlines = new Queue<DimLineWC>();
-			if (Config.UseERD || Program.IsSnakeProfile)
+			if (Config.UseERD || Program.Compatibility.Snake.AllowsUserDefinedVariableResolution)
 				PrepareERDFileNames();
 			try
 			{
@@ -316,7 +316,7 @@ namespace MinorShift.Emuera.GameProc
 						else
 							var = parentProcess.VEvaluator.VariableData.CreateUserDefVariable(data);
 						idDic.AddUseDefinedVariable(var);
-						if (Config.UseERD || Program.IsSnakeProfile)
+						if (Config.UseERD || Program.Compatibility.Snake.AllowsUserDefinedVariableResolution)
 							LoadUserDefinedNameData(data, dimline.SC);
 					}
 					catch (IdentifierNotFoundCodeEE e)

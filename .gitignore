@@ -38,3 +38,15 @@ era*/
 *.apk
 *.aab
 *.idsig
+
+# Node.js (tooling)
+node_modules/
+
+# IDE-specific (TRAE)
+.trae/
+
+# Build artifacts
+artifacts/
+
+# Stray test output
+1600

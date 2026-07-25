@@ -77,6 +77,12 @@ public sealed partial class EmueraGpuRenderComponent : Node
         currentInstance = this;
     }
 
+    public override void _Process(double delta)
+    {
+        MarkFrameReady();
+        ProcessQueue();
+    }
+
     public void ProcessQueue()
     {
         if (!ShouldUseGpuRenderer())
@@ -85,6 +91,9 @@ public sealed partial class EmueraGpuRenderComponent : Node
                 CompleteWithCpuFallback(queuedItem);
             return;
         }
+
+        if (!gpuWaitingForRender && workQueue.IsEmpty)
+            return;
 
         if (gpuViewport == null)
             SetupGpuRenderer();
@@ -225,6 +234,9 @@ public sealed partial class EmueraGpuRenderComponent : Node
 
     static bool ShouldUseGpuRenderer()
     {
-        return !OS.HasFeature("mobile");
+        // OpenGL Compatibility has no RenderingDevice pipeline cache. Avoid a
+        // texture upload, shader draw, and GPU readback for an image that the
+        // legacy worker immediately needs on the CPU.
+        return !OS.HasFeature("mobile") && !RendererRuntimeIdentity.UsesCompatibilityRenderer;
     }
 }

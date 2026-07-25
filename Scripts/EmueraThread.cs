@@ -241,13 +241,10 @@ public class EmueraThread
                 try
                 {
                     int resultMouseButton = originalMouseButton;
-                    if (MinorShift.Emuera.Program.IsEraFlProfile)
-                    {
-                        // Godot/Win32 的中键 VK 是 0x04，但 eraFL 的 RESULT:1 鼠标协议是
-                        // 1=左、2=右、3=中。两者不能共用同一个数值。
-                        resultMouseButton = GEmuera.Core.Compatibility.EraFlCompatibilityModule
-                            .NormalizePointerButtonResult(originalMouseButton);
-                    }
+					// Godot/Win32 的中键 VK 是 0x04，但 eraFL 的 RESULT:1 鼠标协议是
+					// 1=左、2=右、3=中。策略在非 eraFL session 中保持原值。
+					resultMouseButton = MinorShift.Emuera.Program.Compatibility.EraFl
+						.NormalizePointerButtonResult(originalMouseButton);
                     if(resultMouseButton != 0)
                         MinorShift.Emuera.GlobalStatic.Process?.InputInteger(1, resultMouseButton);
                     // 右/中键点击空区域时 input=""，IntValue 状态下 PressEnterKey 无法解析空字符串会直接
@@ -255,14 +252,11 @@ public class EmueraThread
                     // eraFL(USERCOM_INPUT.ERB) 判定"未点击任何按钮"的条件是 RESULT:0 == -1，
                     // 不是 0——必须补 "-1" 而不是 "0"，否则 RESULT:0==-1 的判断永远不成立。
                     string submitInput = console.IsWaitingEnterKey ? "" : originalInput;
-                    if (MinorShift.Emuera.Program.IsEraFlProfile)
-                    {
-                        submitInput = GEmuera.Core.Compatibility.EraFlCompatibilityModule
-                            .NormalizePointerIntegerSubmission(
-                                submitInput,
-                                resultMouseButton,
-                                console.InputType == MinorShift.Emuera.GameProc.InputType.IntValue);
-                    }
+					submitInput = MinorShift.Emuera.Program.Compatibility.EraFl
+						.NormalizePointerIntegerSubmission(
+							submitInput,
+							resultMouseButton,
+							console.InputType == MinorShift.Emuera.GameProc.InputType.IntValue);
                     console.PressEnterKey(skipflag, submitInput, originalMouseButton != 0);
                     consumed = true;
                 }

@@ -3120,6 +3120,31 @@ namespace MinorShift.Emuera.GameData.Function
                 return true;
             }
         }
+        public sealed class StrFormCheckMethod : FunctionMethod
+        {
+            public StrFormCheckMethod()
+            {
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
+                CanRestructure = false;
+            }
+
+            public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                string str = arguments[0].GetStrValue(exm);
+                try
+                {
+                    StrFormWord wt = LexicalAnalyzer.AnalyseFormattedString(new StringStream(str), FormStrEndWith.EoL, false);
+                    StrForm strForm = StrForm.FromWordToken(wt);
+                    strForm.GetString(exm);
+                    return 1;
+                }
+                catch
+                {
+                    return 0;
+                }
+            }
+        }
 
         public sealed class JoinMethod : FunctionMethod
         {
@@ -4904,6 +4929,24 @@ namespace MinorShift.Emuera.GameData.Function
 				return exm.Console.ExistsImageLayer(arguments[0].GetIntValue(exm)) ? 1 : 0;
 			}
 		}
+		private sealed class GetLineYMethod : FunctionMethod
+		{
+			public GetLineYMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
+				CanRestructure = false;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				long lineNo = arguments[0].GetIntValue(exm);
+				if (lineNo < 0)
+					throw new CodeEE("GETLINEY関数の1番目の引数に0未満の値が指定されました: " + lineNo);
+				int pointY = exm.Console.GetLinePointY((int)lineNo);
+				return pointY + Config.LineHeight - exm.Console.ClientHeight;
+			}
+		}
 
 		private sealed class ExistFunctionMethod : FunctionMethod
 		{
@@ -4919,7 +4962,7 @@ namespace MinorShift.Emuera.GameData.Function
 				if (Config.ICFunction)
 					name = name.ToUpper();
 
-				if (FunctionMethodCreator.GetMethodList().TryGetValue(name, out var method))
+				if (FunctionMethodCreator.GetMethodList(Program.Compatibility).TryGetValue(name, out var method))
 				{
 					if (method.ReturnType == EraType.Integer)
 						return 2;
@@ -5188,7 +5231,7 @@ namespace MinorShift.Emuera.GameData.Function
 
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				if (!Program.IsSnakeProfile)
+				if (!Program.Compatibility.Snake.IsEnabled)
 					return name + "関数はSnake互換モード専用です";
 				if (arguments.Length > 1)
 					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
@@ -5252,6 +5295,54 @@ namespace MinorShift.Emuera.GameData.Function
 			static bool GetBit(long value, int bit)
 			{
 				return ((value >> bit) & 1L) != 0;
+			}
+		}
+		private sealed class SequenceInputMethod : FunctionMethod
+		{
+			public SequenceInputMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
+				CanRestructure = false;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				exm.Process.SequenceInputValue = arguments[0].GetStrValue(exm);
+				exm.Process.HasSequenceInput = true;
+				return 0;
+			}
+		}
+
+		private sealed class DisableInputMacroMethod : FunctionMethod
+		{
+			public DisableInputMacroMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
+				CanRestructure = false;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				exm.Process.InputMacroEnabled = false;
+				return 0;
+			}
+		}
+
+		private sealed class EnableInputMacroMethod : FunctionMethod
+		{
+			public EnableInputMacroMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
+				CanRestructure = false;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				exm.Process.InputMacroEnabled = true;
+				return 0;
 			}
 		}
 

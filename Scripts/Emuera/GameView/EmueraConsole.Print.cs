@@ -107,6 +107,7 @@ namespace MinorShift.Emuera.GameView
 		int lineNo = 0;
 		Int64 logicalLineCount = 0;
 		public long LineCount { get { return logicalLineCount; } }
+		public int GetLineNo { get { return lineNo; } }
 		private void addRangeDisplayLine(ConsoleDisplayLine[] lineList)
 		{
 			for (int i = 0; i < lineList.Length; i++)

@@ -24,13 +24,28 @@ namespace MinorShift.Emuera.GameView
 	internal sealed class ConsoleStyledString : AConsoleColoredPart
 	{
 		private ConsoleStyledString() { }
+
+		public string RenderMode { get; private set; }
+		public string FontEdging { get; private set; }
+		public string FontHinting { get; private set; }
+		public float? FontSize { get; private set; }
+		public FontVerticalAlign? VerticalAlign { get; private set; }
+
 		public ConsoleStyledString(string str, StringStyle style)
+			: this(str, style, null, null, null, null, style.VerticalAlign)
 		{
-            //if ((StaticConfig.TextDrawingMode != TextDrawingMode.GRAPHICS) && (str.IndexOf('\t') >= 0))
-            //    str = str.Replace("\t", "");
-			this.Str = str;
-			this.StringStyle = style;
-			Font = Config.GetFont(style.Fontname, style.FontStyle);
+		}
+
+		public ConsoleStyledString(string str, StringStyle style, string renderMode, string fontEdging, string fontHinting, float? fontSize, FontVerticalAlign? verticalAlign)
+		{
+			Str = str;
+			StringStyle = style;
+			RenderMode = string.IsNullOrWhiteSpace(renderMode) ? null : renderMode.ToLowerInvariant();
+			FontEdging = string.IsNullOrWhiteSpace(fontEdging) ? null : fontEdging.ToLowerInvariant();
+			FontHinting = string.IsNullOrWhiteSpace(fontHinting) ? null : fontHinting.ToLowerInvariant();
+			FontSize = fontSize;
+			VerticalAlign = verticalAlign ?? style.VerticalAlign;
+			Font = Config.GetFont(style.Fontname, style.FontStyle, fontSize);
 			if (Font == null)
 			{
 				Error = true;
@@ -38,7 +53,7 @@ namespace MinorShift.Emuera.GameView
 			}
 			Color = style.Color;
 			ButtonColor = style.ButtonColor;
-            colorChanged = style.ColorChanged;
+			colorChanged = style.ColorChanged;
 			if (!colorChanged && Color != Config.ForeColor)
 				colorChanged = true;
 			PointX = -1;
@@ -77,6 +92,11 @@ namespace MinorShift.Emuera.GameView
 			ret.ButtonColor = this.ButtonColor;
 			ret.colorChanged = this.colorChanged;
 			ret.StringStyle = this.StringStyle;
+			ret.RenderMode = this.RenderMode;
+			ret.FontEdging = this.FontEdging;
+			ret.FontHinting = this.FontHinting;
+			ret.FontSize = this.FontSize;
+			ret.VerticalAlign = this.VerticalAlign;
 			ret.XsubPixel = this.XsubPixel;
 			return ret;
 		}
@@ -90,6 +110,17 @@ namespace MinorShift.Emuera.GameView
 			}
 			Width = sm.GetDisplayLength(Str, Font);
 			XsubPixel = subPixel;
+		}
+
+		private int GetVerticalAlignOffset()
+		{
+			if (!VerticalAlign.HasValue || VerticalAlign.Value == FontVerticalAlign.Top || Font == null)
+				return 0;
+
+			float remainingHeight = Config.LineHeight - Font.Size;
+			if (VerticalAlign.Value == FontVerticalAlign.Middle)
+				remainingHeight /= 2.0f;
+			return (int)Math.Round(remainingHeight);
 		}
 
 		public override void DrawTo(Graphics graph, int pointY, bool isSelecting, bool isBackLog, TextDrawingMode mode)
@@ -106,10 +137,11 @@ namespace MinorShift.Emuera.GameView
 			else if (isBackLog && !colorChanged)
                 color = Config.LogColor;
 				
+			int drawY = pointY + GetVerticalAlignOffset();
 			if (mode == TextDrawingMode.GRAPHICS)
-				graph.DrawString(Str, Font, new SolidBrush(color), new Point(PointX, pointY));
+				graph.DrawString(Str, Font, new SolidBrush(color), new Point(PointX, drawY));
 			else
-				TextRenderer.DrawText(graph, Str, Font, new Point(PointX, pointY), color, TextFormatFlags.NoPrefix);
+				TextRenderer.DrawText(graph, Str, Font, new Point(PointX, drawY), color, TextFormatFlags.NoPrefix);
 
 		}
 
@@ -122,7 +154,7 @@ namespace MinorShift.Emuera.GameView
                 color = this.ButtonColor;
 			else if (isBackLog && !colorChanged)
                 color = Config.LogColor;
-			GDI.TabbedTextOutFull(Font,color,Str, PointX, pointY);
+			GDI.TabbedTextOutFull(Font,color,Str, PointX, pointY + GetVerticalAlignOffset());
 			//GDI.SetFont(Font);
 			//GDI.SetTextColor(color);
 			//GDI.TabbedTextOut(Str, PointX, pointY);

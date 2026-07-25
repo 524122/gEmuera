@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using MinorShift.Emuera.GameData.Function;
+using MinorShift.Emuera.Compatibility;
 
 namespace MinorShift.Emuera.GameProc.Function
 {
@@ -41,6 +43,9 @@ namespace MinorShift.Emuera.GameProc.Function
 		readonly static Dictionary<FunctionCode, FunctionCode> funcParent = new Dictionary<FunctionCode, FunctionCode>();
 		readonly static ArgumentBuilder methodArgumentBuilder = null;
 		readonly static AbstractInstruction methodInstruction = null;
+		static readonly object registrySurfaceGate = new object();
+		static readonly Dictionary<string, IReadOnlyDictionary<string, FunctionIdentifier>> registrySurfaces =
+			new Dictionary<string, IReadOnlyDictionary<string, FunctionIdentifier>>(System.StringComparer.Ordinal);
 
 		private static void addFunction(FunctionCode code, AbstractInstruction inst)
 		{ addFunction(code, inst, 0); }
@@ -60,9 +65,34 @@ namespace MinorShift.Emuera.GameProc.Function
 			funcDic.Add(key, new FunctionIdentifier(key, code, arg, flag));
 		}
 
-		public static Dictionary<string, FunctionIdentifier> GetInstructionNameDic()
+		/// <summary>
+		/// Returns the immutable instruction surface selected for one legacy
+		/// session. The global table below remains only the legacy handler store;
+		/// it is never exposed as the parser's profile-specific registry.
+		/// </summary>
+		public static IReadOnlyDictionary<string, FunctionIdentifier> GetInstructionNameDic(
+			LegacyCompatibilityProfile compatibility)
 		{
-			return funcDic;
+			if (compatibility == null)
+				throw new System.ArgumentNullException(nameof(compatibility));
+
+			string cacheKey = compatibility.RegistrySurfaceHash;
+			lock (registrySurfaceGate)
+			{
+				if (registrySurfaces.TryGetValue(cacheKey, out var existing))
+					return existing;
+
+				var selected = new Dictionary<string, FunctionIdentifier>(System.StringComparer.Ordinal);
+				foreach (KeyValuePair<string, FunctionIdentifier> pair in funcDic)
+				{
+					if (compatibility.IsInstructionVisible(pair.Key))
+						selected.Add(pair.Key, pair.Value);
+				}
+
+				var frozen = new ReadOnlyDictionary<string, FunctionIdentifier>(selected);
+				registrySurfaces.Add(cacheKey, frozen);
+				return frozen;
+			}
 		}
 		private static void addPrintFunction(FunctionCode code)
 		{
@@ -88,11 +118,10 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.TEXT_BGC_OFF, new SNAKE_TEXT_BGC_OFF_Instruction());
 			addFunction(FunctionCode.TEXT_BGC_ON, new SNAKE_TEXT_BGC_ON_Instruction());
 			addFunction(FunctionCode.DT_COLUMN_OPTIONS, new SNAKE_DT_COLUMN_OPTIONS_Instruction());
-			if (Config.UseScopedVariableInstruction)
-			{
-				addFunction(FunctionCode.VARI, new SNAKE_VARI_Instruction(false));
-				addFunction(FunctionCode.VARS, new SNAKE_VARI_Instruction(true));
-			}
+			// The complete handler store is static, while visibility is selected by
+			// LegacyCompatibilityProfile's immutable scoped-variable snapshot.
+			addFunction(FunctionCode.VARI, new SNAKE_VARI_Instruction(false));
+			addFunction(FunctionCode.VARS, new SNAKE_VARI_Instruction(true));
 			addFunction(FunctionCode.HTML_PRINT_ISLAND, new SNAKE_HTML_PRINT_ISLAND_Instruction());
 			addFunction(FunctionCode.HTML_PRINT_ISLAND_CLEAR, new SNAKE_HTML_PRINT_ISLAND_CLEAR_Instruction());
 			addFunction(FunctionCode.HTML_PRINTC, new SNAKE_HTML_PRINTC_Instruction(true));
@@ -450,6 +479,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.AWAIT, new AWAIT_Instruction());
 
 			addFunction(FunctionCode.SETIMAGELAYER, new SETIMAGELAYER_Instruction());
+			addFunction(FunctionCode.SETIMAGELAYERL, new SETIMAGELAYERL_Instruction());
 			addFunction(FunctionCode.CLEARIMAGELAYER, new CLEARIMAGELAYER_Instruction());
 			addFunction(FunctionCode.CLEARIMAGELAYER_ALL, new CLEARIMAGELAYER_ALL_Instruction());
 			addFunction(FunctionCode.SETANIMETIMER, new SETANIMETIMER_Instruction());
@@ -464,7 +494,8 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.ENCODETOUNI, argb[FunctionArgType.FORM_STR_NULLABLE], METHOD_SAFE | EXTENDED);//式中関数版を追加。処理が全然違う
 			#endregion
 
-			Dictionary<string, FunctionMethod> methodList = FunctionMethodCreator.GetMethodList();
+			IReadOnlyDictionary<string, FunctionMethod> methodList =
+				FunctionMethodCreator.GetLegacyHandlerMethodList();
 			foreach (KeyValuePair<string, FunctionMethod> pair in methodList)
 			{
 				string key = pair.Key;

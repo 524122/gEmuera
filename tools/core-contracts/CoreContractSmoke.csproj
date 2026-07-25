@@ -18,5 +18,11 @@
              Link="GodotHost\GameContentProbe.cs" />
     <Compile Include="..\..\Scripts\GodotHost\LegacyThreadQuiescence.cs"
              Link="GodotHost\LegacyThreadQuiescence.cs" />
+    <!-- This immutable legacy projection is deliberately dependency-free.
+         Link it here so profile/module closure is tested without loading Godot. -->
+    <Compile Include="..\..\Scripts\Emuera\Compatibility\LegacyCompatibilityProfile.cs"
+             Link="Emuera\Compatibility\LegacyCompatibilityProfile.cs" />
+    <Compile Include="..\..\Scripts\Emuera\Compatibility\LegacyCompatibilityModules.cs"
+             Link="Emuera\Compatibility\LegacyCompatibilityModules.cs" />
   </ItemGroup>
 </Project>
