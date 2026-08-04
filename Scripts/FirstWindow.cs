@@ -919,15 +919,24 @@ public partial class FirstWindow : Control
 			using var storageDir = DirAccess.Open("/storage");
 			if (storageDir != null)
 			{
-				foreach (string volume in storageDir.GetDirectories())
+				// Android 沙箱下 /storage 根可能无法枚举：Java 侧 dirOpen 返回 0 使
+				// list_dir_begin 失败，而 Godot 核心 _get_contents 忽略该错误后直接
+				// 调 get_next，打印 "Condition 'id == 0' is true. Returning: ''"。
+				// 先用 ListDirBegin 探测可枚举性，失败则跳过卷枚举（主存储已由
+				// 上方显式路径覆盖，不受影响）。
+				if (storageDir.ListDirBegin() == Error.Ok)
 				{
-					if (string.IsNullOrEmpty(volume) || volume == "self")
-						continue;
-					string volumeEmuera = "/storage/" + volume + "/emuera";
-					// 只把确实包含 emuera 容器的卷加入扫描根，避免把无关卷
-					// 全扫一遍导致启动器出现大量无效条目。
-					if (uEmuera.Utils.DirectoryExists(volumeEmuera))
-						AddUniqueRoot(roots, volumeEmuera);
+					storageDir.ListDirEnd();
+					foreach (string volume in storageDir.GetDirectories())
+					{
+						if (string.IsNullOrEmpty(volume) || volume == "self")
+							continue;
+						string volumeEmuera = "/storage/" + volume + "/emuera";
+						// 只把确实包含 emuera 容器的卷加入扫描根，避免把无关卷
+						// 全扫一遍导致启动器出现大量无效条目。
+						if (uEmuera.Utils.DirectoryExists(volumeEmuera))
+							AddUniqueRoot(roots, volumeEmuera);
+					}
 				}
 			}
 
