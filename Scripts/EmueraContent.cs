@@ -4602,8 +4602,14 @@ public partial class EmueraContent : Control
 		if (!anime.GetCurrentFrameInfo(out var baseImage, out var srcRect, out var offset))
 			return GetSpriteTexture(sprite, out layout);
 
+		// 注意：baseImage 是 GraphicsImage 的动态帧不走本缓存。GraphicsImage 的 DisplayRevision
+		// 在后台线程持续递增，而 GetGraphicsImageDisplayTexture 在稳定窗口（24ms）内会返回旧纹理
+		// 并标记 retrySoon——若缓存条目记下"旧纹理+新 revision"，图像稳定后命中会永远返回旧帧。
+		// GraphicsImage 路径本就由 graphicsImageTextureCache 按 revision 承担缓存，无需再包一层。
+		bool useFrameCache = baseImage is not GraphicsImage;
 		long revision = baseImage is GraphicsImage g && g.godotImage != null ? g.DisplayRevision : 0L;
-		if (animatedSpriteFrameCache.TryGetValue(sprite, out var cached)
+		if (useFrameCache
+			&& animatedSpriteFrameCache.TryGetValue(sprite, out var cached)
 			&& cached.Texture != null
 			&& GodotObject.IsInstanceValid(cached.Texture)
 			&& ReferenceEquals(cached.BaseImage, baseImage)
@@ -4621,6 +4627,8 @@ public partial class EmueraContent : Control
 		Texture2D texture = GetSpriteTexture(sprite, out layout);
 		if (texture == null)
 			return null; // 不缓存未就绪结果，异步解码完成后下一轮再尝试。
+		if (!useFrameCache)
+			return texture;
 
 		// 解析期间后台计时可能已推进帧；只在与解析读取到的帧一致时才缓存，
 		// 避免把旧帧标识映射到新帧纹理。
