@@ -19,7 +19,7 @@ namespace MinorShift.Emuera.Sub
 	/// </summary>
 	internal sealed class EraBinaryDataWriter : IDisposable
 	{
-		public EraBinaryDataWriter(FileStream fs)
+		public EraBinaryDataWriter(Stream fs)
 		{
 			if (Config.SystemSaveInBinary && Config.ZipSaveData)
 			{
@@ -107,7 +107,7 @@ namespace MinorShift.Emuera.Sub
 			{
 				writer.Write((byte)EraSaveDataType.IntArray);
 				writer.Write(key);
-				writeData(((SparseArray<Int64>)v).ToArray());
+				writeData((SparseArray<Int64>)v);
 			}
 			else if (v is Int64[,])
 			{
@@ -137,7 +137,7 @@ namespace MinorShift.Emuera.Sub
 			{
 				writer.Write((byte)EraSaveDataType.StrArray);
 				writer.Write(key);
-				writeData(((SparseArray<string>)v).ToArray());
+				writeData((SparseArray<string>)v);
 			}
 			else if (v is string[,])
 			{
@@ -167,7 +167,7 @@ namespace MinorShift.Emuera.Sub
 			{
 				writer.Write((byte)EraSaveDataType.PcFloatArray);
 				writer.Write(key);
-				writeData(((SparseArray<double>)v).ToArray());
+				writeData((SparseArray<double>)v);
 			}
 			else if (v is double[,])
 			{
@@ -533,6 +533,67 @@ namespace MinorShift.Emuera.Sub
 				for(int y = 0; y < length1; y++)
 					for(int z = 0; z < length2; z++)
 						writer.Write(array[x,y,z]);
+		}
+
+		// 1D 変数は SparseArray が密集化されているため、ToArray() の全量コピーを挟まず
+		// 内部の密集バッファ（RawData）を直接走査する（生成バイト列は ToArray() 経由と同一）。
+		// 不変条件により RawData.Length == Length かつ overflow は範囲外キーのみなので、
+		// ToArray() の結果と要素内容が一致する。
+		private void writeData(SparseArray<Int64> array)
+		{
+			Int64[] data = array.RawData;
+			//配列の記憶。0が連続する場合には圧縮を試みる。
+			writer.Write((Int32)data.Length);
+			int countZero = 0;//0については0が連続する数を記憶する。その他の数はそのまま記憶する。
+			for(int x = 0; x < data.Length; x++)
+			{
+				if (data[x] == 0)
+					countZero++;
+				else
+				{
+					if (countZero > 0)
+					{
+						writer.Write(Ebdb.Zero);
+						this.m_WriteInt(countZero);
+						countZero = 0;
+					}
+					this.m_WriteInt(data[x]);
+				}
+			}
+			//記憶途中で配列の残りが全部0であるなら0の数も記憶せず配列の終わりを記憶
+			writer.Write(Ebdb.EoD);
+		}
+
+		private void writeData(SparseArray<string> array)
+		{
+			string[] data = array.RawData;
+			int countZero = 0;
+			writer.Write((int)data.Length);
+			for(int x = 0; x < data.Length; x++)
+			{
+				if (data[x] == null || data[x].Length == 0)
+					countZero++;
+				else
+				{
+					if (countZero > 0)
+					{
+						writer.Write(Ebdb.Zero);
+						this.m_WriteInt(countZero);
+						countZero = 0;
+					}
+					writer.Write(Ebdb.String);
+					writer.Write(data[x]);
+				}
+			}
+			writer.Write(Ebdb.EoD);
+		}
+
+		private void writeData(SparseArray<double> array)
+		{
+			double[] data = array.RawData;
+			writer.Write((Int32)data.Length);
+			for(int x = 0; x < data.Length; x++)
+				writer.Write(data[x]);
 		}
 		#endregion
 		#region IDisposable メンバ

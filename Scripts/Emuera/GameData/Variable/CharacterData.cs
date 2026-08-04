@@ -28,6 +28,44 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public List<object> UserDefCVarDataList { get; set; }
 
+		// 保存キーの静的キャッシュ。code.ToString()（列挙体のボックス化＋フォーマット）の実結果を
+		// キャッシュするため、生成文字列は ToString() と完全に同一。セーブはメインスレッドでのみ実行される。
+		static Dictionary<VariableCode, string> varCodeNameCache = null;
+		static string GetVarCodeName(VariableCode code)
+		{
+			Dictionary<VariableCode, string> cache = varCodeNameCache;
+			if (cache == null)
+				cache = varCodeNameCache = new Dictionary<VariableCode, string>();
+			if (cache.TryGetValue(code, out string name))
+				return name;
+			name = code.ToString();
+			cache[code] = name;
+			return name;
+		}
+
+		// ロード時の変数トークン解決キャッシュ。GetVariableToken は string ハッシュ＋複数辞書引きを
+		// 変数ごとに行うため、同一キー（キャラ数分繰り返し現れる）をキャッシュで打ち切る。
+		// IdentifierDictionary はセッション（プロセス再生成）ごとに再構築されるため、
+		// 参照が変わった時点でキャッシュを破棄して再構築する。ロードはメインスレッドのみで実行される。
+		static IdentifierDictionary loadTokenCacheOwner = null;
+		static Dictionary<string, VariableToken> loadTokenCache = null;
+		static VariableToken GetLoadVariableToken(string key)
+		{
+			IdentifierDictionary idDic = GlobalStatic.IdentifierDictionary;
+			if (!object.ReferenceEquals(loadTokenCacheOwner, idDic))
+			{
+				loadTokenCacheOwner = idDic;
+				loadTokenCache = new Dictionary<string, VariableToken>();
+			}
+			if (loadTokenCache.TryGetValue(key, out VariableToken cached))
+				return cached;
+			VariableToken token = null;
+			if (!idDic.getVarTokenIsForbid(key))
+				token = idDic.GetVariableToken(key, null, false);
+			loadTokenCache[key] = token;
+			return token;
+		}
+
 		public CharacterData(ConstantData constant, VariableData varData)
 		{
 			dataInteger = new Int64[(int)VariableCode.__COUNT_CHARACTER_INTEGER__];
@@ -481,28 +519,28 @@ namespace MinorShift.Emuera.GameData.Variable
 				switch (flag)
 				{
 					case VariableCode.__INTEGER__:
-						writer.WriteWithKey(code.ToString(), dataInteger[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataInteger[CodeInt]);
 						break;
 					case VariableCode.__STRING__:
-						writer.WriteWithKey(code.ToString(), dataString[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataString[CodeInt]);
 						break;
 					case VariableCode.__FLOAT__:
-						writer.WriteWithKey(code.ToString(), dataFloat[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataFloat[CodeInt]);
 						break;
 					case VariableCode.__INTEGER__ | VariableCode.__ARRAY_1D__:
-						writer.WriteWithKey(code.ToString(), dataIntegerArray[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataIntegerArray[CodeInt]);
 						break;
 					case VariableCode.__STRING__ | VariableCode.__ARRAY_1D__:
-						writer.WriteWithKey(code.ToString(), dataStringArray[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataStringArray[CodeInt]);
 						break;
 					case VariableCode.__FLOAT__ | VariableCode.__ARRAY_1D__:
-						writer.WriteWithKey(code.ToString(), dataFloatArray[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataFloatArray[CodeInt]);
 						break;
 					case VariableCode.__INTEGER__ | VariableCode.__ARRAY_2D__:
-						writer.WriteWithKey(code.ToString(), dataIntegerArray2D[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataIntegerArray2D[CodeInt]);
 						break;
 					case VariableCode.__STRING__ | VariableCode.__ARRAY_2D__:
-						writer.WriteWithKey(code.ToString(), dataStringArray2D[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataStringArray2D[CodeInt]);
 						break;
 					//case VariableCode.__INTEGER__ | VariableCode.__ARRAY_3D__:
 					//    writer.Write(code.ToString(), dataIntegerArray3D[CodeInt]);
@@ -540,8 +578,8 @@ namespace MinorShift.Emuera.GameData.Variable
 				object array = null;
 				if (nameAndType.Key != null)
 				{
-                    if (!GlobalStatic.IdentifierDictionary.getVarTokenIsForbid(nameAndType.Key))
-                        vToken = GlobalStatic.IdentifierDictionary.GetVariableToken(nameAndType.Key, null, false);
+					// getVarTokenIsForbid + GetVariableToken の解決結果を per-load キャッシュする
+					vToken = GetLoadVariableToken(nameAndType.Key);
 					if (userDefineData)
 					{
 						if (vToken == null || !vToken.IsSavedata || !vToken.IsCharacterData || !(vToken is UserDefinedCharaVariableToken))

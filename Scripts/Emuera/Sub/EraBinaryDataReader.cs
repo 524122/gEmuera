@@ -295,6 +295,10 @@ namespace MinorShift.Emuera.Sub
 				byte b;
 				int x = 0;
 				int saveLength0 = reader.ReadInt32();
+				// 作業配列が本メソッド内で新規確保（ゼロ初期化）される場合は Zero ラン/後尾への 0 書き戻しは
+				// 冗長なので省略しても結果は同一。呼び出し側から渡された既存配列（長さが保存値以上）は
+				// ゼロ初期化が保証されないため従来通り書き戻す（LOADSave/LOADVAR/LOADGLOBAL の既存配列も対象）。
+				bool isNewArray = (refArray == null);
 				if (refArray == null)//読み捨て。レアケースのはず
 					refArray = new Int64[saveLength0];
 
@@ -308,6 +312,7 @@ namespace MinorShift.Emuera.Sub
                     refArray = new Int64[Math.Max(length0, saveLength0)];
 
                     length0 = Math.Min(length0, saveLength0);
+                    isNewArray = true;
 				}
 				while (true)
 				{
@@ -317,7 +322,7 @@ namespace MinorShift.Emuera.Sub
 					if (b == Ebdb.Zero)
 					{
 						int cnt = (int)m_ReadInt();
-						if (needInit)
+						if (needInit && !isNewArray)
 							for (int i = 0; i < cnt; i++)
 								refArray[x + i] = 0;
 						x += cnt;
@@ -335,7 +340,7 @@ namespace MinorShift.Emuera.Sub
 						throw new FileEE("バイナリデータの異常");
 					x++;
 				}
-				if (needInit)
+				if (needInit && !isNewArray)
 					for (; x < length0; x++)
 						refArray[x] = 0;
 				if (oriArray != null)
@@ -578,6 +583,9 @@ namespace MinorShift.Emuera.Sub
 				byte b;
 				int x = 0;
 				int saveLength0 = reader.ReadInt32();
+				// 新規確保（null 初期化）の作業配列への null 書き戻しは冗長なため省略（結果は同一）。
+				// 既存配列はゼロ初期化が保証されないため従来通り書き戻す。
+				bool isNewArray = (refArray == null);
 				if (refArray == null)//読み捨て。レアケースのはず
 					refArray = new string[saveLength0];
 
@@ -591,6 +599,7 @@ namespace MinorShift.Emuera.Sub
                     refArray = new string[Math.Max(length0, saveLength0)];
 
                     length0 = Math.Min(length0, saveLength0);
+                    isNewArray = true;
 				}
 				while (true)
 				{
@@ -600,7 +609,7 @@ namespace MinorShift.Emuera.Sub
 					if (b == Ebdb.Zero)
 					{
 						int cnt = (int)m_ReadInt();
-						if (needInit)
+						if (needInit && !isNewArray)
 							for (int i = 0; i < cnt; i++)
 								refArray[x + i] = null;
 						x += cnt;
@@ -612,7 +621,7 @@ namespace MinorShift.Emuera.Sub
 						throw new FileEE("バイナリデータの異常");
 					x++;
 				}
-				if (needInit)
+				if (needInit && !isNewArray)
 					for (; x < length0; x++)
 						refArray[x] = null;
 				if (oriArray != null)
@@ -805,6 +814,9 @@ namespace MinorShift.Emuera.Sub
 				byte b;
 				int x = 0;
 				int saveLength0 = reader.ReadInt32();
+				// 新規確保（ゼロ初期化）の作業配列への 0 書き戻しは冗長なため省略（結果は同一）。
+				// 既存配列はゼロ初期化が保証されないため従来通り書き戻す。
+				bool isNewArray = (refArray == null);
 				if (refArray == null)
 					refArray = new double[saveLength0];
 				int length0 = refArray.Length;
@@ -813,6 +825,7 @@ namespace MinorShift.Emuera.Sub
 					oriArray = refArray;
 					refArray = new double[Math.Max(length0, saveLength0)];
 					length0 = Math.Min(length0, saveLength0);
+					isNewArray = true;
 				}
 				while (true)
 				{
@@ -822,7 +835,7 @@ namespace MinorShift.Emuera.Sub
 					if (b == Ebdb.Zero)
 					{
 						int cnt = (int)m_ReadInt();
-						if (needInit)
+						if (needInit && !isNewArray)
 							for (int i = 0; i < cnt; i++)
 								refArray[x + i] = 0;
 						x += cnt;
@@ -831,7 +844,7 @@ namespace MinorShift.Emuera.Sub
 					refArray[x] = reader.ReadDouble();
 					x++;
 				}
-				if (needInit)
+				if (needInit && !isNewArray)
 					for (; x < length0; x++)
 						refArray[x] = 0;
 				if (oriArray != null)
