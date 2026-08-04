@@ -79,3 +79,6 @@ coverage/
 .idea/
 .fleet/
 *.sln.iml
+
+# Local worktrees created by Agent/Workflow tooling
+.claude/worktrees/
