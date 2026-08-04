@@ -29,7 +29,9 @@ namespace MinorShift.Emuera.GameData.Function
         }
         public override double GetFloatValue(ExpressionMediator exm)
         {
-			return method.GetReturnValue(exm, arguments).GetFloatValue(exm);
+			// 直接转发 GetFloatValue，避免 GetReturnValue 先分配 SingleTerm 再取回的额外开销。
+			// 语义等价：GetReturnValue 对 Float 返回类型内部就是调用 GetFloatValue 构造 SingleTerm。
+			return method.GetFloatValue(exm, arguments);
         }
 		public override SingleTerm GetValue(ExpressionMediator exm)
 		{

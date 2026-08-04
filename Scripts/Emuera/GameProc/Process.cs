@@ -501,8 +501,15 @@ namespace MinorShift.Emuera.GameProc
             int temp_current = state.currentMin;
             state.currentMin = state.functionCount;
 			// UserDefinedMethodTerm 会被表达式树缓存，CalledFunction 只能作为模板复用。
-			// 每次求值克隆独立调用帧，避免 returnAddress/RETURNF 状态串到下一次调用。
-			CalledFunction call = udmt.Call.Clone();
+			// v24/Snake 参考实现均直接复用模板（只 updateRetAddress），不每次 Clone。
+			// 但 GetValue 重入（递归/嵌套的同函数表达式）会改写模板的可变字段
+			// （returnAddress / VariadicArgCount / EraFlQuestStartLookup / IsJump），
+			// 因此进入前保存、退出后恢复，确保外层帧与下一次调用从一致状态开始。
+			CalledFunction call = udmt.Call;
+			LogicalLine savedReturnAddress = call.ReturnAddress;
+			bool savedIsJump = call.IsJump;
+			int savedVariadicArgCount = call.VariadicArgCount;
+			EraFlQuestStartLookupContext savedEraFlLookup = call.EraFlQuestStartLookup;
             call.updateRetAddress(state.CurrentLine);
 			bool success = false;
 			var savedState = state.CaptureCallState();
@@ -531,6 +538,11 @@ namespace MinorShift.Emuera.GameProc
 				{
 					state.RollbackToState(savedState.funcCount, savedState.ctxCount, savedState.currentLine);
 				}
+				// 恢复模板可变字段（成功与失败路径都要恢复）
+				call.updateRetAddress(savedReturnAddress);
+				call.IsJump = savedIsJump;
+				call.VariadicArgCount = savedVariadicArgCount;
+				call.EraFlQuestStartLookup = savedEraFlLookup;
                 //1756beta2+v3:こいつらはここにないとデバッグコンソールで式中関数が事故った時に大事故になる
                 state.currentMin = temp_current;
                 methodStack--;
