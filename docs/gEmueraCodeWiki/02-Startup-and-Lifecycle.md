@@ -35,6 +35,20 @@ project.godot
                 └─ PrototypeCommandPanel : Control
 ```
 
+### 组件化工具面板：`scenes/`
+
+M2 起，五个工具面板被抽为独立的 `.tscn` 场景资产（`scenes/Inputpad.tscn`、`Scalepad.tscn`、`QuickButtons.tscn`、`OptionWindow.tscn`、`RuntimeDiagnosticsPanel.tscn`）。这些场景只含根节点与脚本 `ext_resource`（按 path 引用，不依赖 uid），供 `EmueraContent._Ready()` 通过 `GD.Load<PackedScene>` + `Instantiate()` 挂载，AddChild 顺序与初始化契约与组件化前一致。
+
+| 场景资产 | 根节点类型 | 挂载脚本 |
+| --- | --- | --- |
+| `scenes/Inputpad.tscn` | `Control` | `Scripts/Panels/Inputpad.cs` |
+| `scenes/Scalepad.tscn` | `Control` | `Scripts/Panels/Scalepad.cs` |
+| `scenes/QuickButtons.tscn` | `CanvasLayer` | `Scripts/Panels/QuickButtons.cs` |
+| `scenes/OptionWindow.tscn` | `Control` | `Scripts/Panels/OptionWindow.cs` |
+| `scenes/RuntimeDiagnosticsPanel.tscn` | `PanelContainer` | `Scripts/Diagnostics/RuntimeDiagnosticsPanel.cs` |
+
+`EmueraMain` 仍以代码挂载 `RuntimeDiagnosticsPanel.AttachFloatingTo(this)`，场景资产仅供复用；面板脚本新增的 `PadShown/PadHidden`、`PopupOpened/PopupClosed` 信号为纯增量，未连接任何监听者时行为不变。
+
 ## Application-scoped Autoload
 
 ### `AppBootstrap`

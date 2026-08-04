@@ -1,6 +1,6 @@
 # 源码索引
 
-> **生成文件。** 此索引只覆盖仓库自有的 `Scripts/`、`src/Core/`、`test/` 与 `tools/core-contracts/` C# 源文件；跳过 `bin/`、`obj/`、`.godot/`、`android/build/`、`addons/gdUnit4/` 和 `node_modules/`。
+> **生成文件。** 此索引覆盖仓库自有的 `Scripts/`、`src/Core/`、`test/` 与 `tools/core-contracts/` C# 源文件，以及 `scenes/` 场景资产（列出挂载脚本）；跳过 `bin/`、`obj/`、`.godot/`、`android/build/`、`addons/gdUnit4/` 和 `node_modules/`。
 >
 > 重新生成：`powershell -NoProfile -ExecutionPolicy Bypass -File docs/gEmueraCodeWiki/Update-SourceMap.ps1`。声明名由轻量正则提取，用于定位，不等同于公开 API 或完整调用图。
 
@@ -66,7 +66,7 @@
 | `Scripts/Emuera/Content/FontModel.cs` | `FontModel` |
 | `Scripts/Emuera/Content/GraphicsImage.cs` | `GraphicsImage` |
 | `Scripts/Emuera/CtrlZ.cs` | `CtrlZ` |
-| `Scripts/Emuera/GameData/ConstantData.cs` | `CharacterStrData, CharacterIntData, ConstantData, LazyErdNameData, CharacterTemplate` |
+| `Scripts/Emuera/GameData/ConstantData.cs` | `CharacterStrData, CharacterIntData, ConstantData, LazyErdNameData, CsvFieldRange, CharacterTemplate` |
 | `Scripts/Emuera/GameData/DefineMacro.cs` | `DefineMacro` |
 | `Scripts/Emuera/GameData/EraType.cs` | `EraType, EraTypeHelper` |
 | `Scripts/Emuera/GameData/Expression/CaseExpression.cs` | `CaseExpressionType, CaseExpression` |
@@ -83,7 +83,8 @@
 | `Scripts/Emuera/GameData/Function/Creator.Method.Map.cs` | `FunctionMethodCreator, MapCreateMethod, MapExistMethod, MapReleaseMethod, MapSetMethod, MapHasMethod, MapRemoveMethod, MapClearMethod, MapSizeMethod, MapGetMethod, MapGetKeysMethod, MapValuesMethod, MapToStringMethod, MapFromStringMethod, MapToXmlMethod, MapFromXmlMethod, MapMergeMethod, MapRemoveIfMethod, MapFindKeyMethod` |
 | `Scripts/Emuera/GameData/Function/Creator.Method.Sql.cs` | `FunctionMethodCreator, SqlConnectionOpenMethod, SqlConnectMethod, SqlDisconnectMethod, SqlExecuteNonQueryMethod, SqlExecuteReaderMethod, SqlReaderReadMethod, SqlReaderGetIntMethod, SqlReaderGetFloatMethod, SqlReaderIsNullMethod, SqlReaderCloseMethod, SqlPExecuteNonQueryMethod, SqlPExecuteReaderMethod, SqlExecuteScalarLongMethod, SqlExecuteScalarFloatMethod, SqlPExecuteScalarLongMethod, SqlPExecuteScalarFloatMethod, SqlEscapeMethod, SqlExecuteScalarStringMethod, SqlPExecuteScalarStringMethod, SqlReaderGetStringMethod, SqlImportMapXmlMethod, SqlImportDtXmlMethod, SqlImportXmlCustomMethod, SqlExportMapXmlMethod, SqlExportDtXmlMethod` |
 | `Scripts/Emuera/GameData/Function/Creator.Method.Xml.cs` | `FunctionMethodCreator, XmlDocumentMethod, XmlReleaseMethod, XmlToStrMethod, XmlGetMethod, XmlSetMethod, XmlAddNodeMethod, XmlRemoveNodeMethod, XmlReplaceMethod` |
-| `Scripts/Emuera/GameData/Function/FunctionMethod.cs` | `FunctionMethod` |
+| `Scripts/Emuera/GameData/Function/DialectFunctionContracts.cs` | `DialectFunctionContracts` |
+| `Scripts/Emuera/GameData/Function/FunctionMethod.cs` | `FunctionMethod, DialectFunctionMethod` |
 | `Scripts/Emuera/GameData/Function/FunctionMethodTerm.cs` | `FunctionMethodTerm` |
 | `Scripts/Emuera/GameData/Function/RuntimeDataStore.cs` | `RuntimeDataStore` |
 | `Scripts/Emuera/GameData/Function/UserDefinedMethodTerm.cs` | `SuperUserDefinedMethodTerm, UserDefinedMethodTerm, UserDefinedRefMethodTerm, UserDefinedRefMethodNoArgTerm` |
@@ -108,13 +109,13 @@
 | `Scripts/Emuera/GameData/Variable/VariableToken.cs` | `VariableToken, CharaVariableToken, UserDefinedVariableToken, UserDefinedCharaVariableToken, ReferenceToken, LocalVariableToken, VariableData, IntVariableToken, FloatVariableToken, Int1DVariableToken, Int2DVariableToken, Int3DVariableToken, StrVariableToken, Str1DVariableToken, Str2DVariableToken, Str3DVariableToken, CharaIntVariableToken, CharaInt1DVariableToken, CharaStrVariableToken, CharaStr1DVariableToken, CharaInt2DVariableToken, CharaStr2DVariableToken, ConstantToken, IntConstantToken, StrConstantToken, Int1DConstantToken, Str1DConstantToken, PseudoVariableToken, RandToken, CompatiRandToken, CHARANUM_Token, LASTLOAD_TEXT_Token, LASTLOAD_VERSION_Token, LASTLOAD_NO_Token, LINECOUNT_Token, WINDOW_TITLE_Token, MONEYLABEL_Token, DRAWLINESTR_Token, EmptyStrToken, EmptyIntToken, Debug__FILE__Token, Debug__FUNCTION__Token, Debug__LINE__Token, ISTIMEOUTToken, __INT_MAX__Token, __INT_MIN__Token, EMUERA_VERSIONToken, LocalInt1DVariableToken, LocalFloat1DVariableToken, LocalStr1DVariableToken, StaticInt1DVariableToken, StaticInt2DVariableToken, StaticInt3DVariableToken, StaticStr1DVariableToken, StaticStr2DVariableToken, StaticStr3DVariableToken, PrivateInt1DVariableToken, PrivateInt2DVariableToken, PrivateInt3DVariableToken, PrivateStr1DVariableToken, PrivateStr2DVariableToken, PrivateStr3DVariableToken, ReferenceIntScalarToken, ReferenceFloatScalarToken, ReferenceStrScalarToken, ReferenceInt1DToken, ReferenceInt2DToken, ReferenceInt3DToken, ReferenceFloat1DToken, ReferenceFloat2DToken, ReferenceFloat3DToken, ReferenceStr1DToken, ReferenceStr2DToken, ReferenceStr3DToken, UserDefinedCharaInt1DVariableToken, UserDefinedCharaStr1DVariableToken, UserDefinedCharaInt2DVariableToken, UserDefinedCharaStr2DVariableToken, StaticFloat1DVariableToken, StaticFloat2DVariableToken, StaticFloat3DVariableToken, PrivateFloat1DVariableToken, PrivateFloat2DVariableToken, PrivateFloat3DVariableToken, UserDefinedCharaFloat1DVariableToken, UserDefinedCharaFloat2DVariableToken` |
 | `Scripts/Emuera/GameProc/ErbLoader.cs` | `ErbLoader, PPState` |
 | `Scripts/Emuera/GameProc/ExecutionContext.cs` | `ExecutionContext` |
-| `Scripts/Emuera/GameProc/Function/Argument.cs` | `Argument, ExpressionsArgument, VoidArgument, ErrorArgument, ExpressionArgument, ExpressionArrayArgument, SpPrintVArgument, SpTimesArgument, SpBarArgument, SpSwapCharaArgument, SpSwapVarArgument, SpVarsizeArgument, SpSaveDataArgument, SpTInputsArgument, SortOrder, SpSortcharaArgument, SpCallFArgment, SpCallArgment, SpCallSharpArgment, SnakeVariArgument, SnakeVarsArgument, SpDtColumnOptionsArgument, OptionType, SpSetBgImageArgument, SpSetImageLayerArgument, SpForNextArgment, SpPowerArgument, CaseArgument, PrintDataArgument, StrDataArgument, MethodArgument, BitArgument, SpVarSetArgument, SpCVarSetArgument, SpButtonArgument, SpColorArgument, SpColorAlphaArgument, SpSplitArgument, SpHtmlSplitArgument, SpGetIntArgument, SpArrayControlArgument, SpArrayShiftArgument, SpArraySortArgument, SpCopyArrayArgument, SpSaveVarArgument, RefArgument, OneInputArgument, OneInputsArgument, SpSetArgument, SpSetArrayArgument` |
-| `Scripts/Emuera/GameProc/Function/ArgumentBuilder.cs` | `ArgumentBuilder, ArgumentParser, SP_DT_COLUMN_OPTIONS_ArgumentBuilder, SP_PRINTV_ArgumentBuilder, SP_TIMES_ArgumentBuilder, FORM_STR_ANY_ArgumentBuilder, VOID_ArgumentBuilder, STR_ArgumentBuilder, FORM_STR_ArgumentBuilder, SP_VAR_ArgumentBuilder, SP_SORTCHARA_ArgumentBuilder, SP_SORT_ARRAY_ArgumentBuilder, SP_CALL_ArgumentBuilder, CASE_ArgumentBuilder, SP_SET_ArgumentBuilder, METHOD_ArgumentBuilder, SP_INPUTS_ArgumentBuilder, INT_EXPRESSION_ArgumentBuilder, INT_ANY_ArgumentBuilder, STR_EXPRESSION_ArgumentBuilder, EXPRESSION_ArgumentBuilder, SP_BAR_ArgumentBuilder, SP_SWAP_ArgumentBuilder, SP_SAVEDATA_ArgumentBuilder, SP_TINPUT_ArgumentBuilder, SP_TINPUTS_ArgumentBuilder, SP_FOR_NEXT_ArgumentBuilder, SP_POWER_ArgumentBuilder, SP_SWAPVAR_ArgumentBuilder, VAR_INT_ArgumentBuilder, VAR_STR_ArgumentBuilder, BIT_ARG_ArgumentBuilder, SP_VAR_SET_ArgumentBuilder, SP_CVAR_SET_ArgumentBuilder, SP_BUTTON_ArgumentBuilder, SP_COLOR_ArgumentBuilder, SP_COLOR_ALPHA_ArgumentBuilder, SP_SPLIT_ArgumentBuilder, SP_HTMLSPLIT_ArgumentBuilder, SP_SETBGIMAGE_ArgumentBuilder, SP_SETIMAGELAYERL_ArgumentBuilder, SP_GETINT_ArgumentBuilder, SP_CONTROL_ARRAY_ArgumentBuilder, SP_SHIFT_ARRAY_ArgumentBuilder, SP_SAVEVAR_ArgumentBuilder, SP_SAVECHARA_ArgumentBuilder, SP_REF_ArgumentBuilder, SP_INPUT_ArgumentBuilder, SP_COPY_ARRAY_Arguments, Expressions_ArgumentBuilder` |
+| `Scripts/Emuera/GameProc/Function/Argument.cs` | `Argument, ExpressionsArgument, VoidArgument, ErrorArgument, ExpressionArgument, ExpressionArrayArgument, MixedIntegerExprTerm, SpPrintShapeArgument, SpPrintImgArgument, SpPrintVArgument, SpTimesArgument, SpBarArgument, SpSwapCharaArgument, SpSwapVarArgument, SpVarsizeArgument, SpSaveDataArgument, SpTInputsArgument, SortOrder, SpSortcharaArgument, SpCallFArgment, SpCallArgment, SpCallSharpArgment, SnakeVariArgument, SnakeVarsArgument, SpDtColumnOptionsArgument, OptionType, SpSetBgImageArgument, SpSetImageLayerArgument, SpForNextArgment, SpPowerArgument, CaseArgument, PrintDataArgument, StrDataArgument, MethodArgument, BitArgument, SpVarSetArgument, SpCVarSetArgument, SpButtonArgument, SpColorArgument, SpColorAlphaArgument, SpSplitArgument, SpHtmlSplitArgument, SpGetIntArgument, SpArrayControlArgument, SpArrayShiftArgument, SpArraySortArgument, SpCopyArrayArgument, SpSaveVarArgument, RefArgument, OneInputArgument, OneInputsArgument, SpSetArgument, SpSetArrayArgument` |
+| `Scripts/Emuera/GameProc/Function/ArgumentBuilder.cs` | `ArgumentBuilder, ArgumentParser, SP_PRINT_IMG_ArgumentBuilder, SP_PRINT_SHAPE_ArgumentBuilder, SP_DT_COLUMN_OPTIONS_ArgumentBuilder, SP_PRINTV_ArgumentBuilder, SP_TIMES_ArgumentBuilder, FORM_STR_ANY_ArgumentBuilder, VOID_ArgumentBuilder, STR_ArgumentBuilder, FORM_STR_ArgumentBuilder, SP_VAR_ArgumentBuilder, SP_SORTCHARA_ArgumentBuilder, SP_SORT_ARRAY_ArgumentBuilder, SP_CALL_ArgumentBuilder, CASE_ArgumentBuilder, SP_SET_ArgumentBuilder, METHOD_ArgumentBuilder, SP_INPUTS_ArgumentBuilder, INT_EXPRESSION_ArgumentBuilder, INT_ANY_ArgumentBuilder, STR_EXPRESSION_ArgumentBuilder, EXPRESSION_ArgumentBuilder, SP_BAR_ArgumentBuilder, SP_SWAP_ArgumentBuilder, SP_SAVEDATA_ArgumentBuilder, SP_TINPUT_ArgumentBuilder, SP_TINPUTS_ArgumentBuilder, SP_FOR_NEXT_ArgumentBuilder, SP_POWER_ArgumentBuilder, SP_SWAPVAR_ArgumentBuilder, VAR_INT_ArgumentBuilder, VAR_STR_ArgumentBuilder, BIT_ARG_ArgumentBuilder, SP_VAR_SET_ArgumentBuilder, SP_CVAR_SET_ArgumentBuilder, SP_BUTTON_ArgumentBuilder, SP_COLOR_ArgumentBuilder, SP_COLOR_ALPHA_ArgumentBuilder, SP_SPLIT_ArgumentBuilder, SP_HTMLSPLIT_ArgumentBuilder, SP_SETBGIMAGE_ArgumentBuilder, SP_SETIMAGELAYERL_ArgumentBuilder, SP_GETINT_ArgumentBuilder, SP_CONTROL_ARRAY_ArgumentBuilder, SP_SHIFT_ARRAY_ArgumentBuilder, SP_SAVEVAR_ArgumentBuilder, SP_SAVECHARA_ArgumentBuilder, SP_REF_ArgumentBuilder, SP_INPUT_ArgumentBuilder, SP_COPY_ARRAY_Arguments, Expressions_ArgumentBuilder` |
 | `Scripts/Emuera/GameProc/Function/ArgumentParser.cs` | `ArgumentParser` |
 | `Scripts/Emuera/GameProc/Function/BuiltInFunctionCode.cs` | `FunctionCode` |
 | `Scripts/Emuera/GameProc/Function/FunctionArgType.cs` | `FunctionArgType` |
 | `Scripts/Emuera/GameProc/Function/FunctionIdentifier.cs` | `FunctionIdentifier` |
-| `Scripts/Emuera/GameProc/Function/Instraction.Child.cs` | `FunctionIdentifier, PRINT_Instruction, PRINT_DATA_Instruction, HTML_PRINT_Instruction, HTML_TAGSPLIT_Instruction, PRINT_IMG_Instruction, PRINT_RECT_Instruction, PRINT_SPACE_Instruction, CUSTOMDRAWLINE_Instruction, DEBUGPRINT_Instruction, DEBUGCLEAR_Instruction, METHOD_Instruction, SET_Instruction, REUSELASTLINE_Instruction, CLEARLINE_Instruction, STRLEN_Instruction, SETBIT_Instruction, WAIT_Instruction, WAITANYKEY_Instruction, INPUTANY_Instruction, TWAIT_Instruction, INPUT_Instruction, INPUTS_Instruction, ONEINPUT_Instruction, ONEINPUTS_Instruction, BINPUT_Instruction, BINPUTS_Instruction, ONEBINPUT_Instruction, ONEBINPUTS_Instruction, TINPUT_Instruction, TINPUTS_Instruction, CALLF_Instruction, BAR_Instruction, TIMES_Instruction, ADDCHARA_Instruction, ADDVOIDCHARA_Instruction, SWAPCHARA_Instruction, COPYCHARA_Instruction, ADDCOPYCHARA_Instruction, SORTCHARA_Instruction, RESETCOLOR_Instruction, RESETBGCOLOR_Instruction, FONTBOLD_Instruction, FONTITALIC_Instruction, FONTREGULAR_Instruction, VARSET_Instruction, CVARSET_Instruction, RANDOMIZE_Instruction, INITRAND_Instruction, DUMPRAND_Instruction, SAVEGLOBAL_Instruction, LOADGLOBAL_Instruction, RESETDATA_Instruction, RESETGLOBAL_Instruction, SAVECHARA_Instruction, LOADCHARA_Instruction, SAVEVAR_Instruction, LOADVAR_Instruction, DELDATA_Instruction, DO_NOTHING_Instruction, SNAKE_COMPAT_NOOP_Instruction, RawArgBuilder, SNAKE_ARGS_ArgumentBuilder, SNAKE_TEXT_BGC_ON_Instruction, SNAKE_TEXT_BGC_OFF_Instruction, SNAKE_HTML_PRINT_ArgumentBuilder, SNAKE_CALLSHARP_ArgumentBuilder, SNAKE_CALLSHARP_Instruction, SNAKE_SETBGIMAGE_Instruction, SNAKE_CLEARBGIMAGE_Instruction, SNAKE_REMOVEBGIMAGE_Instruction, SETIMAGELAYER_Instruction, SETIMAGELAYERL_Instruction, CLEARIMAGELAYER_Instruction, CLEARIMAGELAYER_ALL_Instruction, SNAKE_PLAYSOUND_Instruction, SNAKE_STOPSOUND_Instruction, SNAKE_PLAYBGM_Instruction, SNAKE_STOPBGM_Instruction, SNAKE_SETVOLUME_Instruction, SNAKE_HTML_PRINTC_Instruction, SNAKE_HTML_PRINT_ISLAND_Instruction, SNAKE_HTML_PRINT_ISLAND_CLEAR_Instruction, SNAKE_UPDATECHECK_Instruction, SETANIMETIMER_Instruction, SNAKE_UI_SETTING_Instruction, SNAKE_SKIPLOG_Instruction, BREAKBUTTON_Instruction, SNAKE_DT_COLUMN_OPTIONS_Instruction, SNAKE_VARI_Instruction, SNAKE_VARI_ArgumentBuilder, SNAKE_TOOLTIP_SETFONT_Instruction, SNAKE_TOOLTIP_INT_Instruction, REF_Instruction, TOOLTIP_SETCOLOR_Instruction, TOOLTIP_SETDELAY_Instruction, TOOLTIP_SETDURATION_Instruction, INPUTMOUSEKEY_Instruction, AWAIT_Instruction, BEGIN_Instruction, FORCE_BEGIN_Instruction, SAVELOADGAME_Instruction, REPEAT_Instruction, WHILE_Instruction, SIF_Instruction, ELSEIF_Instruction, ENDIF_Instruction, IF_Instruction, SELECTCASE_Instruction, RETURNFORM_Instruction, RETURN_Instruction, CATCH_Instruction, RESTART_Instruction, BREAK_Instruction, CONTINUE_Instruction, REND_Instruction, WEND_Instruction, LOOP_Instruction, RETURNF_Instruction, CALLS_Instruction, CALL_Instruction, CALLEVENT_Instruction, GOTO_Instruction` |
+| `Scripts/Emuera/GameProc/Function/Instraction.Child.cs` | `FunctionIdentifier, PRINT_Instruction, PRINT_DATA_Instruction, HTML_PRINT_Instruction, HTML_TAGSPLIT_Instruction, PRINT_IMG_Instruction, PRINT_RECT_Instruction, PRINT_SPACE_Instruction, CUSTOMDRAWLINE_Instruction, DEBUGPRINT_Instruction, DEBUGCLEAR_Instruction, METHOD_Instruction, SET_Instruction, REUSELASTLINE_Instruction, CLEARLINE_Instruction, STRLEN_Instruction, SETBIT_Instruction, WAIT_Instruction, WAITANYKEY_Instruction, INPUTANY_Instruction, TWAIT_Instruction, INPUT_Instruction, INPUTS_Instruction, ONEINPUT_Instruction, ONEINPUTS_Instruction, BINPUT_Instruction, BINPUTS_Instruction, ONEBINPUT_Instruction, ONEBINPUTS_Instruction, TINPUT_Instruction, TINPUTS_Instruction, CALLF_Instruction, BAR_Instruction, TIMES_Instruction, ADDCHARA_Instruction, ADDVOIDCHARA_Instruction, SWAPCHARA_Instruction, COPYCHARA_Instruction, ADDCOPYCHARA_Instruction, SORTCHARA_Instruction, RESETCOLOR_Instruction, RESETBGCOLOR_Instruction, FONTBOLD_Instruction, FONTITALIC_Instruction, FONTREGULAR_Instruction, VARSET_Instruction, CVARSET_Instruction, RANDOMIZE_Instruction, INITRAND_Instruction, DUMPRAND_Instruction, SAVEGLOBAL_Instruction, LOADGLOBAL_Instruction, RESETDATA_Instruction, RESETGLOBAL_Instruction, SAVECHARA_Instruction, LOADCHARA_Instruction, SAVEVAR_Instruction, LOADVAR_Instruction, DELDATA_Instruction, DO_NOTHING_Instruction, SNAKE_COMPAT_NOOP_Instruction, RawArgBuilder, SNAKE_ARGS_ArgumentBuilder, SNAKE_SETIMAGELAYER_ArgumentBuilder, SNAKE_SKIA_ArgumentBuilder, SNAKE_TEXT_BGC_ON_Instruction, SNAKE_TEXT_BGC_OFF_Instruction, SNAKE_HTML_PRINT_ArgumentBuilder, SNAKE_CALLSHARP_ArgumentBuilder, SNAKE_CALLSHARP_Instruction, SNAKE_SETBGIMAGE_Instruction, V24_SETBGIMAGE_Instruction, SNAKE_CLEARBGIMAGE_Instruction, SNAKE_REMOVEBGIMAGE_Instruction, SETIMAGELAYER_Instruction, SETIMAGELAYERL_Instruction, CLEARIMAGELAYER_Instruction, CLEARIMAGELAYER_ALL_Instruction, SNAKE_PLAYSOUND_Instruction, SNAKE_STOPSOUND_Instruction, SNAKE_PLAYBGM_Instruction, SNAKE_STOPBGM_Instruction, SNAKE_SETVOLUME_Instruction, SNAKE_HTML_PRINTC_Instruction, SNAKE_HTML_PRINT_ISLAND_Instruction, SNAKE_HTML_PRINT_ISLAND_CLEAR_Instruction, SNAKE_UPDATECHECK_Instruction, SETANIMETIMER_Instruction, SNAKE_UI_SETTING_Instruction, SNAKE_SKIPLOG_Instruction, BREAKBUTTON_Instruction, SNAKE_DT_COLUMN_OPTIONS_Instruction, SNAKE_VARI_Instruction, SNAKE_VARI_ArgumentBuilder, SNAKE_TOOLTIP_SETFONT_Instruction, SNAKE_TOOLTIP_INT_Instruction, REF_Instruction, TOOLTIP_SETCOLOR_Instruction, TOOLTIP_SETDELAY_Instruction, TOOLTIP_SETDURATION_Instruction, INPUTMOUSEKEY_Instruction, AWAIT_Instruction, BEGIN_Instruction, FORCE_BEGIN_Instruction, SAVELOADGAME_Instruction, REPEAT_Instruction, WHILE_Instruction, SIF_Instruction, ELSEIF_Instruction, ENDIF_Instruction, IF_Instruction, SELECTCASE_Instruction, RETURNFORM_Instruction, RETURN_Instruction, CATCH_Instruction, RESTART_Instruction, BREAK_Instruction, CONTINUE_Instruction, REND_Instruction, WEND_Instruction, LOOP_Instruction, RETURNF_Instruction, CALLS_Instruction, CALL_Instruction, CALLEVENT_Instruction, GOTO_Instruction` |
 | `Scripts/Emuera/GameProc/Function/Instruction.cs` | `AbstractInstruction` |
 | `Scripts/Emuera/GameProc/HeaderFileLoader.cs` | `HeaderFileLoader` |
 | `Scripts/Emuera/GameProc/InputRequest.cs` | `InputType, InputRequest` |
@@ -183,7 +184,7 @@
 
 | 文件 | 识别到的类型声明 |
 | --- | --- |
-| `Scripts/EmueraContent.cs` | `EmueraContent, ConsoleLineLayoutEntry, CanvasOverlayKey, PureImageFallbackLine, GraphicsImageTextureCacheEntry, CbgRenderEntry, SpriteAnimeFrameLayoutInfo, ConsoleColorRectPart, ConsoleTextPart, UiDiagnosticOverlay, OverlayRect` |
+| `Scripts/EmueraContent.cs` | `EmueraContent, ConsoleLineLayoutEntry, CanvasOverlayKey, ConsoleFontMetricsEntry, PureImageFallbackLine, GraphicsImageTextureCacheEntry, CbgRenderEntry, SpriteAnimeFrameLayoutInfo, AnimatedSpriteFrameCacheEntry, ConsoleColorRectPart, ConsoleTextPart, UiDiagnosticOverlay, OverlayRect` |
 
 ## `Scripts/EmueraContent.M0.cs`
 
@@ -225,7 +226,7 @@
 
 | 文件 | 识别到的类型声明 |
 | --- | --- |
-| `Scripts/GenericUtils.cs` | `EmueraLogLevel, EmueraLogCategory, EmueraDisplayScrollMode, GenericUtils, ConsoleRenderSamplingWindow, DisplayBridgeSamplingWindow, SnakeAudioState, SnakeAudioInfo` |
+| `Scripts/GenericUtils.cs` | `EmueraLogLevel, EmueraLogCategory, EmueraDisplayScrollMode, GenericUtils, UiEnvelope, ConsoleRenderSamplingWindow, DisplayBridgeSamplingWindow, SnakeAudioState, SnakeAudioInfo` |
 
 ## `Scripts/GodotHost`
 
@@ -250,12 +251,6 @@
 | `Scripts/GodotHost/PrototypeStatusView.cs` | `PrototypeStatusView` |
 | `Scripts/GodotHost/RendererRuntimeIdentity.cs` | `RendererRuntimeIdentity` |
 
-## `Scripts/Inputpad.cs`
-
-| 文件 | 识别到的类型声明 |
-| --- | --- |
-| `Scripts/Inputpad.cs` | `Inputpad` |
-
 ## `Scripts/M0`
 
 | 文件 | 识别到的类型声明 |
@@ -276,11 +271,14 @@
 | --- | --- |
 | `Scripts/MultiLanguage.cs` | `MultiLanguage` |
 
-## `Scripts/OptionWindow.cs`
+## `Scripts/Panels`
 
 | 文件 | 识别到的类型声明 |
 | --- | --- |
-| `Scripts/OptionWindow.cs` | `OptionWindow` |
+| `Scripts/Panels/Inputpad.cs` | `Inputpad` |
+| `Scripts/Panels/OptionWindow.cs` | `OptionWindow` |
+| `Scripts/Panels/QuickButtons.cs` | `QuickButtons` |
+| `Scripts/Panels/Scalepad.cs` | `Scalepad` |
 
 ## `Scripts/PerformanceBenchmark.cs`
 
@@ -288,23 +286,11 @@
 | --- | --- |
 | `Scripts/PerformanceBenchmark.cs` | `PerformanceBenchmark, BenchmarkResult` |
 
-## `Scripts/QuickButtons.cs`
-
-| 文件 | 识别到的类型声明 |
-| --- | --- |
-| `Scripts/QuickButtons.cs` | `QuickButtons` |
-
 ## `Scripts/ResolutionHelper.cs`
 
 | 文件 | 识别到的类型声明 |
 | --- | --- |
 | `Scripts/ResolutionHelper.cs` | `ResolutionHelper` |
-
-## `Scripts/Scalepad.cs`
-
-| 文件 | 识别到的类型声明 |
-| --- | --- |
-| `Scripts/Scalepad.cs` | `Scalepad` |
 
 ## `Scripts/SpriteDebugNotifier.cs`
 
@@ -335,7 +321,7 @@
 | `Scripts/uEmuera/partial/AConsoleColoredPart.cs` | `AConsoleColoredPart` |
 | `Scripts/uEmuera/partial/EmueraConsole.cs` | `EmueraConsole` |
 | `Scripts/uEmuera/Properties.cs` | `ResourceManager, Resources` |
-| `Scripts/uEmuera/Utils.cs` | `Logger, Utils` |
+| `Scripts/uEmuera/Utils.cs` | `Logger, Utils, DirListing` |
 | `Scripts/uEmuera/VisualBasic.cs` | `VbStrConv, Strings` |
 | `Scripts/uEmuera/Window.cs` | `DebugDialog, MainWindow` |
 
@@ -454,4 +440,14 @@
 | `tools/core-contracts/M3M7ContractSmoke.cs` | `M3M7ContractSmoke, QueuedOwnerScheduler` |
 | `tools/core-contracts/Program.cs` | `—` |
 | `tools/core-contracts/TestModules.cs` | `TestDialectModule, TestInstructionContribution, TestFunctionContribution, TestInterpreterFactory, MutableDescriptorInterpreterFactory, DescriptorIgnoringTestInterpreterFactory, TestInterpreterHost, ResumableHostMode, ResumableTestInterpreterHost, ResumableTestInterpreterFactory, InterpreterTestDescriptors, TestLegacyBackend` |
+
+## `scenes/`
+
+| 场景资产 | 根节点类型 | 挂载脚本（ext_resource） |
+| --- | --- | --- |
+| `scenes/Inputpad.tscn` | `Control` | `res://Scripts/Panels/Inputpad.cs` |
+| `scenes/OptionWindow.tscn` | `Control` | `res://Scripts/Panels/OptionWindow.cs` |
+| `scenes/QuickButtons.tscn` | `CanvasLayer` | `res://Scripts/Panels/QuickButtons.cs` |
+| `scenes/RuntimeDiagnosticsPanel.tscn` | `PanelContainer` | `res://Scripts/Diagnostics/RuntimeDiagnosticsPanel.cs` |
+| `scenes/Scalepad.tscn` | `Control` | `res://Scripts/Panels/Scalepad.cs` |
 

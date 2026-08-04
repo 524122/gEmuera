@@ -19,6 +19,8 @@
 
 不要把 `src/Core` 中存在的类型理解为已经替换第 1 层。当前阶段、未覆盖项和硬 gate 以 [`../NewFrameworkDesign/DeveloperHandoff.md`](../NewFrameworkDesign/DeveloperHandoff.md) 为准。
 
+M2 起，第 1 层的五个工具面板（`Inputpad`/`Scalepad`/`QuickButtons`/`OptionWindow`/`RuntimeDiagnosticsPanel`）被组件化为 `scenes/*.tscn` 场景资产，由 `EmueraContent` 实例化挂载。它们仍是 legacy host/presentation 的行为 owner，不属于 GodotHost 桥，也不改变 Core 合同边界。
+
 ## Godot Host 责任
 
 ### Application Autoload

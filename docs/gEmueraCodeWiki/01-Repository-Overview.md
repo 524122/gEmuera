@@ -12,6 +12,7 @@ Godot project / launcher
   │   ├─ Scripts/Emuera/GameView       控制台显示语义、HTML、输入等待
   │   ├─ Scripts/Emuera/Content        图片/精灵/字体/Graphics surface
   │   ├─ Scripts/uEmuera               WinForms/System.Drawing 兼容层
+  │   ├─ Scripts/Panels                Godot 工具面板组件（M2 组件化，场景资产见 scenes/）
   │   └─ Scripts/*.cs                  Godot UI、线程桥、纹理、诊断接线
   └─ candidate Core / migration contracts
       ├─ src/Core                       无 Godot 的 session、ports、DTO、资源等
@@ -35,6 +36,7 @@ Godot project / launcher
 | 路径 | 责任 | 修改时的注意事项 |
 | --- | --- | --- |
 | `Scripts/` | 应用的 C# 源码：Godot presentation、legacy runtime、诊断、Host、M0 工具支撑。 | 当前默认运行的主要实现；改动后要判定是否同步更新本 Wiki。 |
+| `scenes/` | M2 起新增的工具面板场景资产（Inputpad/Scalepad/QuickButtons/OptionWindow/RuntimeDiagnosticsPanel 的 `.tscn`）。 | 只含根节点与脚本 `ext_resource` 引用；面板脚本位于 `Scripts/Panels/`（诊断面板在 `Scripts/Diagnostics/`）。 |
 | `src/Core/` | 将来架构所需的 pure .NET contract/prototype。 | 不要引入 Godot 类型、文件系统路径泄漏或反射式运行时发现。 |
 | `test/` | 当前 GDUnit4 回归入口。 | 场景/Node 相关行为应优先在此类测试覆盖。 |
 | `tools/` | identity、fixture、legacy runner、dialect、save、Core、文档和治理工具。 | 生成报告不等于 gate 已通过；保留真实状态。 |
@@ -53,6 +55,7 @@ Godot project / launcher
 | 目录 / 文件群 | 当前 owner | 关键类型 / 文件 | 主要入口 |
 | --- | --- | --- | --- |
 | 根级 `Scripts/*.cs` | Godot presentation 与 legacy bridge | `FirstWindow`、`EmueraMain`、`EmueraThread`、`EmueraContent`、`GenericUtils`、`SpriteManager` | 场景回调、UI queue、输入、纹理上传、显示投影。 |
+| `Scripts/Panels/` | 组件化工具面板（M2） | `Inputpad`、`QuickButtons`、`Scalepad`、`OptionWindow` | 由 `scenes/*.tscn` 实例化并挂载到 `EmueraContent`；导出布局度量与 `PadShown/PadHidden`、`PopupOpened/PopupClosed` 信号。 |
 | `Scripts/Emuera/GameProc/` | legacy ERB 加载/执行 | `ErbLoader`、`LogicalLineParser`、`LabelDictionary`、partial `Process`、`ProcessState` | `Process.Initialize()`、`DoScript()`、`runScriptProc()`。 |
 | `Scripts/Emuera/GameData/` | legacy 数据与表达式 | `ExpressionMediator`、`ExpressionParser`、`VariableEvaluator`、`VariableData`、`FunctionMethodCreator` | 解析/求值、函数注册、变量读写、CSV/常量。 |
 | `Scripts/Emuera/GameView/` | legacy 控制台语义 | `EmueraConsole`、`PrintStringBuffer`、`ConsoleDisplayLine`、`HtmlManager` | 输出 line/parts、输入请求、按钮和等待恢复。 |
@@ -88,6 +91,7 @@ Godot project / launcher
 | `project.godot` | main scene、Autoload、Compatibility/OpenGL ES 3 renderer、application feature flags。 |
 | `first_window.tscn` | 启动器场景，只挂载 `FirstWindow.cs`。 |
 | `main.tscn` | legacy `EmueraMain` 加 Core prototype child nodes。 |
+| `scenes/*.tscn` | M2 组件化工具面板场景资产，供 `EmueraContent` 通过 `GD.Load<PackedScene>` 实例化挂载。 |
 | `config.toml` | diagnostics 与 session-isolation canary 的运行期配置。 |
 | `export_presets.cfg` | desktop / Android export preset。 |
 | `gemuera-c#.sln` | Godot host solution。 |
@@ -102,5 +106,6 @@ Godot project / launcher
 | ERB 加载/label/懒加载/执行错误 | `GameProc/ErbLoader.cs`、`LogicalLineParser.cs`、`Process*.cs`、[`03`](03-Legacy-Interpreter.md)。 |
 | 函数、变量、表达式或 CSV 错误 | `GameData/` 对应子目录、[`04`](04-Legacy-Data-and-Expressions.md)、`ERBAPI.md`。 |
 | 文本、HTML、图片、按钮、滚动或输入异常 | `GameView/`、`EmueraContent*.cs`、`EmueraImage.cs`、[`05`](05-Console-Rendering-and-Resources.md)。 |
+| 输入面板/快捷按钮/缩放/设置窗口布局或行为 | `Scripts/Panels/`、`scenes/*.tscn`、`EmueraContent`。 |
 | session/profile/canary/ports prototype 问题 | `src/Core/`、`Scripts/GodotHost/`、[`06`](06-GodotHost-and-Core.md)。 |
 | 日志、回放、性能样本、保存 trail | `Scripts/Diagnostics/`、`GenericUtils.cs`、`config.toml`、[`08`](08-Operations-Testing-and-Diagnostics.md)。 |

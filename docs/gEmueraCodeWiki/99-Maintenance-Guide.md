@@ -26,6 +26,7 @@
 | 改 build target、csproj、native lib、export preset、test command | `01`、`08`、`10`。 |
 | 改 diagnostics/config/log/replay tool | `08`、`10`。 |
 | 新增/删除/移动 C# 文件，或改 primary type 名 | `10`（运行生成器）及受影响的模块页。 |
+| 新增/删除/移动 `scenes/` 场景资产，或改其中挂载的脚本路径 | `10`（运行生成器）、`02`、`05`。 |
 | 改阶段状态、gate、已知限制或 release evidence | 本 Wiki 的摘要仅按权威文档同步；先更新 `docs/NewFrameworkDesign/` / report，不可反向猜测。 |
 
 `01` 等数字代表本文目录中的文件，例如 [`01-Repository-Overview.md`](01-Repository-Overview.md)。
@@ -52,6 +53,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 该脚本：
 
 - 扫描 `Scripts/`、`src/Core/`、`test/`、`tools/core-contracts/` 的 C# 文件；
+- 同时输出 `scenes/` 下的 `.tscn` 场景资产（根节点类型 + ext_resource 挂载脚本）；
 - 排除 `bin/`、`obj/`、`.godot/`、`android/build/`、`addons/gdUnit4/` 与 `node_modules/`；
 - 按目录输出路径和轻量正则提取的声明名；
 - 不运行游戏、不会改业务代码，只覆盖 `10-Source-Index.md`。
