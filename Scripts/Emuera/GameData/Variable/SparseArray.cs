@@ -182,6 +182,13 @@ namespace MinorShift.Emuera.GameData.Variable
 			overflow = null;
 		}
 
+		/// <summary>
+		/// 存档直書き用の内部アクセス。data.Length は常に Length（logicalLength）と一致し、
+		/// 不変条件（overflow は常に [0, logicalLength) の外のキーのみ）により
+		/// ToArray() の返却配列と要素内容が一致する。読み取り専用で使うこと（変更禁止）。
+		/// </summary>
+		internal T[] RawData => data;
+
 		public T[] ToArray()
 		{
 			return ToArray(logicalLength);

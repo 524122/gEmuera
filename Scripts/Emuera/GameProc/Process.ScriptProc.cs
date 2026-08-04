@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text;
 //using System.Drawing;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameData;
@@ -14,6 +15,13 @@ namespace MinorShift.Emuera.GameProc
 {
 	internal sealed partial class Process
 	{
+		// PUTFORM による SAVEDATA_TEXT 累積用。SAVEDATA_TEXT は文字列変数として常に現在値を保持する必要が
+		// あるため、StringBuilder 累積＋書き戻し方式で += の逐次文字列連結を避ける。
+		// PUTFORM 以外（SystemProc の初期化や ERB からの代入）で SAVEDATA_TEXT が書き換えられた場合は
+		// 参照比較で検出してバッファを再同期する（結果は従来の += と同一）。
+		StringBuilder saveTextBuilder = null;
+		string lastSaveTextMaterialized = null;
+
 		private void runScriptProc()
 		{
 			uint snakeStart = 0;
@@ -330,10 +338,19 @@ namespace MinorShift.Emuera.GameProc
 					{
 						term = ((ExpressionArgument)func.Argument).Term;
 						str = term.GetStrValue(exm);
-						if (vEvaluator.SAVEDATA_TEXT != null)
-							vEvaluator.SAVEDATA_TEXT += str;
-						else
-							vEvaluator.SAVEDATA_TEXT = str;
+						string current = vEvaluator.SAVEDATA_TEXT;
+						// 外部（SystemProc の初期化・ERB からの代入）で書き換えられた場合はバッファを再同期。
+						// 通常の PUTFORM 連続時は参照一致のため再同期不要（結果は従来の += と同一）。
+						if (saveTextBuilder == null)
+							saveTextBuilder = new StringBuilder(current ?? "");
+						else if (!object.ReferenceEquals(current, lastSaveTextMaterialized))
+						{
+							saveTextBuilder.Length = 0;
+							saveTextBuilder.Append(current ?? "");
+						}
+						saveTextBuilder.Append(str);
+						lastSaveTextMaterialized = saveTextBuilder.ToString();
+						vEvaluator.SAVEDATA_TEXT = lastSaveTextMaterialized;
 						break;
 					}
 				case FunctionCode.QUIT://ゲームを終了

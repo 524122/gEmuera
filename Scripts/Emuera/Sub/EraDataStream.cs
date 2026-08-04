@@ -544,16 +544,16 @@ namespace MinorShift.Emuera.Sub
 		//    writer = new StreamWriter(file, Config.SaveEncode);
 		//    //writer = new StreamWriter(filepath, false, Config.SaveEncode);
 		//}
-		public EraDataWriter(FileStream file)
+		public EraDataWriter(Stream file)
 		{
 			this.file = file;
 			writer = new StreamWriter(file, Config.SaveEncode);
 		}
-		
+
 		public const string FINISHER = EraDataReader.FINISHER;
 		public const string EMU_START = EraDataReader.EMU_1808_START;
 		public const string EMU_SEPARATOR = EraDataReader.EMU_SEPARATOR;
-		FileStream file;
+		Stream file;
 		StreamWriter writer;
 		#region eramaker
 		public void Write(Int64 integer)
@@ -593,7 +593,16 @@ namespace MinorShift.Emuera.Sub
 		{
 			if (array == null)
 				throw new FileEE("無効な配列が渡されました");
-			Write(array.ToArray());
+			// ToArray() の全量コピーを挟まず内部密集バッファを直接走査（出力は同一）
+			Int64[] data = array.RawData;
+			int count = -1;
+			for (int i = 0; i < data.Length; i++)
+				if (data[i] != 0)
+					count = i;
+			count++;
+			for (int i = 0; i < count; i++)
+				writer.WriteLine(data[i].ToString());
+			writer.WriteLine(FINISHER);
 		}
 		public void Write(string[] array)
 		{
@@ -619,7 +628,21 @@ namespace MinorShift.Emuera.Sub
 		{
 			if (array == null)
 				throw new FileEE("無効な配列が渡されました");
-			Write(array.ToArray());
+			// ToArray() の全量コピーを挟まず内部密集バッファを直接走査（出力は同一）
+			string[] data = array.RawData;
+			int count = -1;
+			for (int i = 0; i < data.Length; i++)
+				if (!string.IsNullOrEmpty(data[i]))
+					count = i;
+			count++;
+			for (int i = 0; i < count; i++)
+			{
+				if (data[i] == null)
+					writer.WriteLine("");
+				else
+					writer.WriteLine(data[i]);
+			}
+			writer.WriteLine(FINISHER);
 		}
 		#endregion
 		#region Emuera
@@ -678,7 +701,19 @@ namespace MinorShift.Emuera.Sub
 		{
 			if (array == null)
 				throw new FileEE("無効な配列が渡されました");
-			WriteExtended(key, array.ToArray());
+			// ToArray() の全量コピーを挟まず内部密集バッファを直接走査（出力は同一）
+			Int64[] data = array.RawData;
+			int count = -1;
+			for (int i = 0; i < data.Length; i++)
+				if (data[i] != 0)
+					count = i;
+			count++;
+			if (count == 0)
+				return;
+			writer.WriteLine(key);
+			for (int i = 0; i < count; i++)
+				writer.WriteLine(data[i].ToString());
+			writer.WriteLine(FINISHER);
 		}
 		public void WriteExtended(string key, string[] array)
 		{
@@ -707,7 +742,24 @@ namespace MinorShift.Emuera.Sub
 		{
 			if (array == null)
 				throw new FileEE("無効な配列が渡されました");
-			WriteExtended(key, array.ToArray());
+			// ToArray() の全量コピーを挟まず内部密集バッファを直接走査（出力は同一）
+			string[] data = array.RawData;
+			int count = -1;
+			for (int i = 0; i < data.Length; i++)
+				if (!string.IsNullOrEmpty(data[i]))
+					count = i;
+			count++;
+			if (count == 0)
+				return;
+			writer.WriteLine(key);
+			for (int i = 0; i < count; i++)
+			{
+				if (data[i] == null)
+					writer.WriteLine("");
+				else
+					writer.WriteLine(data[i]);
+			}
+			writer.WriteLine(FINISHER);
 		}
 
 		public void WriteExtended(string key, Int64[,] array2D)

@@ -3499,37 +3499,46 @@ namespace MinorShift.Emuera.GameData.Variable
 		public bool SaveTo(int saveIndex, string saveText)
 		{
 			string filepath = getSaveDataPath(saveIndex);
-			FileStream fs = null;
-			EraDataWriter writer = null;
-			EraBinaryDataWriter bWriter = null;
+			// 主线程はメモリに一括バッファしてから一時ファイルへ同期で一括書き込み、原子リネームで確定する。
+			// SAVEDATA の「保存完了」同期セマンティクス（戻り時にディスクへ確定）とエラー処理（失敗時 false）を
+			// 保つため、バックグラウンドスレッド化は行わない（一時ファイルは失敗時に削除される）。
+			string tmpPath = filepath + ".tmp";
 			try
 			{
 				Config.CreateSavDir();
-				fs = new FileStream(filepath, FileMode.Create, FileAccess.Write);
-				if (Config.SystemSaveInBinary)
+				byte[] saveBytes;
+				using (MemoryStream ms = new MemoryStream())
 				{
-					bWriter = new EraBinaryDataWriter(fs);
-					SaveToStreamBinary(bWriter, saveText);
+					if (Config.SystemSaveInBinary)
+					{
+						using (EraBinaryDataWriter bWriter = new EraBinaryDataWriter(ms))
+							SaveToStreamBinary(bWriter, saveText);
+					}
+					else
+					{
+						using (EraDataWriter writer = new EraDataWriter(ms))
+							SaveToStream(writer, saveText);
+					}
+					// ライタの Close で ms が閉じられても（非zip/テキスト時）、ToArray は内部バッファを
+					// そのまま返すので有効な完全データを取得できる。
+					saveBytes = ms.ToArray();
 				}
-				else
-				{
-					writer = new EraDataWriter(fs);
-					SaveToStream(writer, saveText);
-				}
+				using (FileStream fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write))
+					fs.Write(saveBytes, 0, saveBytes.Length);
+				File.Move(tmpPath, filepath, true);
 				return true;
 			}
 			catch (Exception)
 			{
+				try
+				{
+					if (File.Exists(tmpPath))
+						File.Delete(tmpPath);
+				}
+				catch
+				{
+				}
 				return false;
-			}
-			finally
-			{
-				if (writer != null)
-					writer.Close();
-				else if (bWriter != null)
-					bWriter.Close();
-				else if (fs != null)
-					fs.Close();
 			}
 		}
 
