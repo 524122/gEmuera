@@ -60,7 +60,8 @@ ERB instruction / function
 - `Scripts/EmueraContent.AndroidSpriteAnime.cs`
 - `Scripts/EmueraContent.M0.cs`
 - `Scripts/EmueraImage.cs`
-- `Scripts/Inputpad.cs`、`QuickButtons.cs`、`Scalepad.cs`、`OptionWindow.cs`
+- `Scripts/Panels/Inputpad.cs`、`QuickButtons.cs`、`Scalepad.cs`、`OptionWindow.cs`（M2 组件化面板）
+- `scenes/*.tscn`（上述面板的 `.tscn` 场景资产）
 
 ### `EmueraContent`
 
@@ -178,6 +179,17 @@ ColorMatrix 的矩阵约定、源/region、alpha、shared material cache 与图�
 - Godot texture upload/cleanup 由主线程逐帧处理；
 - 移动端需要限速，避免一帧大量纹理创建导致 UI 卡顿；
 - 不能把 “后台已读到文件” 等同于 “Godot texture 已可安全显示”。
+
+### M1 渲染/资源性能现状（语义零漂移）
+
+第二轮性能优化（M1）在保留可观察语义的前提下引入了缓存与预算：
+
+- `EmueraContent` 的 `graphicsImageTextureCache` 增加会话级字节预算与 LRU 淘汰；渲染作用域对正在显示的纹理做 pin，`_Process` 周期清扫退役条目；`GraphicsImage` 重建经 `IsCreated` 判定失效并重新上传。
+- `SpriteManager` 的 `TextureInfo` 按 CPU image + GPU 纹理双份核算内存；Android 上传后释放 CPU image 副本，`GetPixel/SetPixel/Save` 等访问时按 `sourcePath` 重新解码，脚本像素语义不变。
+- `AnimatedWebpSpriteFrames` 增加并发解码上限与帧纹理字节预算，超限保留首帧回退静态显示。
+- `StrForm` 改用 `DefaultInterpolatedStringHandler`，`PrintStringBuffer` 缓存长度增量，`CheckEscape`/`PRINTFORMS` 无格式令牌时短路完整管道。
+
+这些优化不改变显示的 line/button/image/HTML 语义；Canvas/Control 双路径的一致性要求不变。
 
 ## HTML、shape 与 graphics 关注点
 

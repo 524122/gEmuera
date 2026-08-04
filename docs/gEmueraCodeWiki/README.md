@@ -39,7 +39,7 @@
 | [`07-Dependencies-and-Threading.md`](07-Dependencies-and-Threading.md) | 项目依赖、调用图、线程/所有权矩阵、禁止依赖与关键不变量。 |
 | [`08-Operations-Testing-and-Diagnostics.md`](08-Operations-Testing-and-Diagnostics.md) | config、诊断、构建、GDUnit4、Core smoke、工具和已知门禁。 |
 | [`09-Change-Impact-Map.md`](09-Change-Impact-Map.md) | 按改动入口定位 owner、blast radius、Wiki 同步页与最小回归选择。 |
-| [`10-Source-Index.md`](10-Source-Index.md) | 237 个仓库自有 C# 源文件的生成式索引（路径 + 类型声明）。 |
+| [`10-Source-Index.md`](10-Source-Index.md) | 241 个仓库自有 C# 源文件与 `scenes/` 场景资产的生成式索引（路径 + 类型声明 / 挂载脚本）。 |
 | [`99-Maintenance-Guide.md`](99-Maintenance-Guide.md) | Wiki 更新触发器、生成命令、审校清单和文档 owner 规则。 |
 
 ## 典型检索路径
