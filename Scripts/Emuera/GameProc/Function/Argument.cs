@@ -67,6 +67,42 @@ namespace MinorShift.Emuera.GameProc.Function
 		readonly public IOperandTerm[] TermList;
 	}
 
+	internal sealed class MixedIntegerExprTerm
+	{
+		public IOperandTerm Num;
+		public bool IsPx;
+	}
+
+	internal sealed class SpPrintShapeArgument : Argument
+	{
+		public SpPrintShapeArgument(MixedIntegerExprTerm[] parameters)
+		{
+			Parameters = parameters;
+		}
+
+		public readonly MixedIntegerExprTerm[] Parameters;
+	}
+
+	internal sealed class SpPrintImgArgument : Argument
+	{
+		public SpPrintImgArgument(
+			IOperandTerm name,
+			IOperandTerm buttonName,
+			IOperandTerm mappingName,
+			MixedIntegerExprTerm[] parameters)
+		{
+			Name = name;
+			ButtonName = buttonName;
+			MappingName = mappingName;
+			Parameters = parameters;
+		}
+
+		public readonly IOperandTerm Name;
+		public readonly IOperandTerm ButtonName;
+		public readonly IOperandTerm MappingName;
+		public readonly MixedIntegerExprTerm[] Parameters;
+	}
+
 	internal sealed class SpPrintVArgument : Argument
 	{
 		public SpPrintVArgument(IOperandTerm[] list)

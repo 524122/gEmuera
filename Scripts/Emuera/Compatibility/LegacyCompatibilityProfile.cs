@@ -82,6 +82,7 @@ namespace MinorShift.Emuera.Compatibility
 		private readonly ISet<string> hiddenInstructionNames;
 		private readonly ISet<string> hiddenFunctionNames;
 		private readonly ISet<string> scopedInstructionNames;
+		private readonly ISet<string> methodProjectedFunctionNames;
 		private readonly bool scopedVariableInstructionsEnabled;
 
 		internal LegacyCompatibilityProfile(
@@ -92,7 +93,8 @@ namespace MinorShift.Emuera.Compatibility
 			IEraFlCompatibilityPolicy eraFl,
 			IEnumerable<string> hiddenInstructionNames,
 			IEnumerable<string> hiddenFunctionNames,
-			IEnumerable<string> scopedInstructionNames)
+			IEnumerable<string> scopedInstructionNames,
+			IEnumerable<string> methodProjectedFunctionNames)
 		{
 			ProfileId = profileId;
 			Plan = plan;
@@ -102,6 +104,7 @@ namespace MinorShift.Emuera.Compatibility
 			this.hiddenInstructionNames = new HashSet<string>(hiddenInstructionNames, StringComparer.Ordinal);
 			this.hiddenFunctionNames = new HashSet<string>(hiddenFunctionNames, StringComparer.Ordinal);
 			this.scopedInstructionNames = new HashSet<string>(scopedInstructionNames, StringComparer.Ordinal);
+			this.methodProjectedFunctionNames = new HashSet<string>(methodProjectedFunctionNames, StringComparer.Ordinal);
 		}
 
 		public string ProfileId { get; }
@@ -141,6 +144,13 @@ namespace MinorShift.Emuera.Compatibility
 			if (string.IsNullOrWhiteSpace(functionName))
 				return false;
 			return !hiddenFunctionNames.Contains(functionName.Trim());
+		}
+
+		public bool ShouldProjectExpressionFunctionAsInstruction(string functionName)
+		{
+			if (string.IsNullOrWhiteSpace(functionName))
+				return false;
+			return methodProjectedFunctionNames.Contains(functionName.Trim());
 		}
 
 		public static LegacyCompatibilityProfile Create(

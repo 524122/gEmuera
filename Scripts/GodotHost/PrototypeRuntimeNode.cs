@@ -8,6 +8,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+#nullable enable annotations
+
 /// <summary>
 /// Candidate Core projection used by the first prototype. It observes the
 /// selected legacy game without changing the legacy parser or VM path.

@@ -11,6 +11,7 @@ using MinorShift.Emuera.GameData;
 using MinorShift._Library;
 using MinorShift.Emuera.GameData.Function;
 using MinorShift.Emuera.Content;
+using MinorShift.Emuera.GameView;
 //using System.Drawing;
 using System.IO;
 using uEmuera.Drawing;
@@ -315,19 +316,28 @@ namespace MinorShift.Emuera.GameProc.Function
 			public PRINT_IMG_Instruction()
 			{
 				flag = EXTENDED | METHOD_SAFE;
-				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.STR_EXPRESSION);
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_PRINT_IMG);
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
                 if (GlobalStatic.Process.SkipPrint)
                     return;
-                string str;
-				if (func.Argument.IsConst)
-					str = func.Argument.ConstStr;
-				else
-					str = ((ExpressionArgument)func.Argument).Term.GetStrValue(exm);
-				exm.Console.PrintImg(str);
+				SpPrintImgArgument arg = (SpPrintImgArgument)func.Argument;
+				string name = arg.Name.GetStrValue(exm);
+				string buttonName = arg.ButtonName?.GetStrValue(exm);
+				string mappingName = arg.MappingName?.GetStrValue(exm);
+				if (string.IsNullOrEmpty(buttonName))
+					buttonName = null;
+				if (string.IsNullOrEmpty(mappingName))
+					mappingName = null;
+				exm.Console.PrintImg(
+					name,
+					buttonName,
+					mappingName,
+					getMixedNum(arg.Parameters, exm, 1),
+					getMixedNum(arg.Parameters, exm, 0),
+					getMixedNum(arg.Parameters, exm, 2));
 			}
 		}
 
@@ -336,19 +346,15 @@ namespace MinorShift.Emuera.GameProc.Function
 			public PRINT_RECT_Instruction()
 			{
 				flag = EXTENDED | METHOD_SAFE;
-				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_ANY);
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_PRINT_RECT);
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
                 if (GlobalStatic.Process.SkipPrint)
                     return;
-                ExpressionArrayArgument intExpArg = (ExpressionArrayArgument)func.Argument;
-				int[] param = new int[intExpArg.TermList.Length];
-				for (int i = 0; i < intExpArg.TermList.Length; i++)
-					param[i] = FunctionIdentifier.toUInt32inArg(intExpArg.TermList[i].GetIntValue(exm), "PRINT_RECT", i + 1);
-
-				exm.Console.PrintShape("rect", param);
+				SpPrintShapeArgument arg = (SpPrintShapeArgument)func.Argument;
+				exm.Console.PrintShape("rect", getMixedNums(arg.Parameters, exm));
 			}
 		}
 
@@ -357,20 +363,15 @@ namespace MinorShift.Emuera.GameProc.Function
 			public PRINT_SPACE_Instruction()
 			{
 				flag = EXTENDED | METHOD_SAFE;
-				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION);
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_PRINT_SPACE);
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
                 if (GlobalStatic.Process.SkipPrint)
                     return;
-                Int64 param;
-				if (func.Argument.IsConst)
-					param = func.Argument.ConstInt;
-				else
-					param = ((ExpressionArgument)func.Argument).Term.GetIntValue(exm);
-				int param32 = FunctionIdentifier.toUInt32inArg(param, "PRINT_SPACE", 1);
-				exm.Console.PrintShape("space", new int[] { param32 });
+				SpPrintShapeArgument arg = (SpPrintShapeArgument)func.Argument;
+				exm.Console.PrintShape("space", getMixedNums(arg.Parameters, exm));
 			}
 		}
 
@@ -1803,6 +1804,55 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private sealed class SNAKE_SETIMAGELAYER_ArgumentBuilder : ArgumentBuilder
+		{
+			public static readonly SNAKE_SETIMAGELAYER_ArgumentBuilder Instance = new SNAKE_SETIMAGELAYER_ArgumentBuilder();
+
+			private SNAKE_SETIMAGELAYER_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[]
+				{
+					EraType.String, EraType.Integer, EraType.Integer, EraType.Integer,
+					EraType.Integer, EraType.Integer, EraType.Integer, EraType.Void, EraType.Integer,
+				};
+				minArg = 2;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				StringStream stream = line.PopArgumentPrimitive();
+				WordCollection words = LexicalAnalyzer.Analyse(stream, LexEndWith.EoL, LexAnalyzeFlag.None);
+				IOperandTerm[] terms = ExpressionParser.ReduceArguments(words, ArgsEndWith.EoL, false);
+				var list = new List<IOperandTerm>(terms.Length);
+				for (int i = 0; i < terms.Length; i++)
+					list.Add(terms[i]?.Restructure(exm));
+				return new ExpressionArrayArgument(list);
+			}
+		}
+
+		private sealed class SNAKE_SKIA_ArgumentBuilder : ArgumentBuilder
+		{
+			public static readonly SNAKE_SKIA_ArgumentBuilder Instance = new SNAKE_SKIA_ArgumentBuilder();
+
+			private SNAKE_SKIA_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[] { EraType.Integer };
+				minArg = 0;
+				argAny = true;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				StringStream stream = line.PopArgumentPrimitive();
+				WordCollection words = LexicalAnalyzer.Analyse(stream, LexEndWith.EoL, LexAnalyzeFlag.None);
+				IOperandTerm[] terms = ExpressionParser.ReduceArguments(words, ArgsEndWith.EoL, false);
+				var list = new List<IOperandTerm>(terms.Length);
+				for (int i = 0; i < terms.Length; i++)
+					list.Add(terms[i]?.Restructure(exm));
+				return new ExpressionArrayArgument(list);
+			}
+		}
+
 		private sealed class SNAKE_TEXT_BGC_ON_Instruction : AbstractInstruction
 		{
 			public SNAKE_TEXT_BGC_ON_Instruction()
@@ -2021,6 +2071,28 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private sealed class V24_SETBGIMAGE_Instruction : AbstractInstruction
+		{
+			public V24_SETBGIMAGE_Instruction()
+			{
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.FORM_STR_ANY);
+				flag = METHOD_SAFE | EXTENDED;
+			}
+
+			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
+			{
+				ExpressionArrayArgument arg = (ExpressionArrayArgument)func.Argument;
+				string name = arg.TermList[0].GetStrValue(exm);
+				long depth = arg.TermList.Length >= 2
+					? long.Parse(arg.TermList[1].GetStrValue(exm))
+					: 0;
+				float opacity = arg.TermList.Length >= 3
+					? long.Parse(arg.TermList[2].GetStrValue(exm)) / 255.0f
+					: 1.0f;
+				exm.Console.AddBackgroundImage(name, depth, opacity);
+			}
+		}
+
 		private sealed class SNAKE_CLEARBGIMAGE_Instruction : AbstractInstruction
 		{
 			public SNAKE_CLEARBGIMAGE_Instruction()
@@ -2056,7 +2128,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SETIMAGELAYER_Instruction()
 			{
-				ArgBuilder = SNAKE_ARGS_ArgumentBuilder.Instance;
+				ArgBuilder = SNAKE_SETIMAGELAYER_ArgumentBuilder.Instance;
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
@@ -2372,7 +2444,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			public SNAKE_UI_SETTING_Instruction(FunctionCode code)
 			{
 				this.code = code;
-				ArgBuilder = code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION);
+				ArgBuilder = code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION);
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
@@ -2629,6 +2701,28 @@ namespace MinorShift.Emuera.GameProc.Function
 						break;
 				}
 			}
+		}
+
+		private static MixedNum getMixedNum(MixedIntegerExprTerm[] parameters, ExpressionMediator exm, int index)
+		{
+			if (parameters == null || index < 0 || index >= parameters.Length)
+				return 0;
+			MixedIntegerExprTerm parameter = parameters[index];
+			return new MixedNum
+			{
+				num = (int)parameter.Num.GetIntValue(exm),
+				isPx = parameter.IsPx,
+			};
+		}
+
+		private static MixedNum[] getMixedNums(MixedIntegerExprTerm[] parameters, ExpressionMediator exm)
+		{
+			if (parameters == null || parameters.Length == 0)
+				return Array.Empty<MixedNum>();
+			var result = new MixedNum[parameters.Length];
+			for (int index = 0; index < parameters.Length; index++)
+				result[index] = getMixedNum(parameters, exm, index);
+			return result;
 		}
 
 		private static int getOptionalInt(ExpressionArrayArgument arg, ExpressionMediator exm, int index, int defaultValue)
@@ -3012,11 +3106,16 @@ namespace MinorShift.Emuera.GameProc.Function
 		private sealed class REPEAT_Instruction : AbstractInstruction
 		{
 			public REPEAT_Instruction(bool fornext)
+				: this(fornext, null)
+			{
+			}
+
+			public REPEAT_Instruction(bool fornext, ArgumentBuilder forNextArgumentBuilder)
 			{
 				flag = METHOD_SAFE | FLOW_CONTROL | PARTIAL;
 				if (fornext)
 				{
-					ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_FOR_NEXT);
+					ArgBuilder = forNextArgumentBuilder ?? ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_FOR_NEXT);
 					flag |= EXTENDED;
 				}
 				else

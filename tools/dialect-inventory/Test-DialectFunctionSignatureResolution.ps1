@@ -51,10 +51,10 @@ try {
     Assert-FunctionResolutionContract ($actual.executionStatus -eq 'InProgress' -and $actual.gateStatus -eq 'Blocked' -and $actual.blockerCode -eq 'EvidenceMissing') 'M0 gate status was incorrectly advanced.'
     Assert-FunctionResolutionContract ($actual.result -eq 'Partial') 'Static function signature resolution must not claim behavior completion.'
     Assert-FunctionResolutionContract ($actual.sourceDescriptorSetHash -eq $signatures.descriptorSetHash) 'DIA-05 source descriptor hash mismatch.'
-    Assert-FunctionResolutionContract ($actual.expressionFunctionCount -eq 360) "Unexpected function count: $($actual.expressionFunctionCount)."
-    Assert-FunctionResolutionContract ($actual.coverage.sourceReturnResolvedCount -eq 358 -and $actual.coverage.sourceReturnConditionalCount -eq 2 -and $actual.coverage.sourceReturnUnresolvedCount -eq 0) 'Unexpected DIA-03 return coverage.'
-    Assert-FunctionResolutionContract ($actual.coverage.preservedStaticCount -eq 358 -and $actual.coverage.resolvedStaticByRuleCount -eq 2 -and $actual.coverage.unresolvedCount -eq 0) 'DIA-05 return resolution coverage is incorrect.'
-    Assert-FunctionResolutionContract ($actual.coverage.argumentSchemaResolvedCount -eq 360 -and $actual.coverage.completeStaticSignatureCount -eq 360) 'DIA-05 did not produce 360 complete static signatures.'
+    Assert-FunctionResolutionContract ($actual.expressionFunctionCount -eq 362) "Unexpected function count: $($actual.expressionFunctionCount)."
+    Assert-FunctionResolutionContract ($actual.coverage.sourceReturnResolvedCount -eq 360 -and $actual.coverage.sourceReturnConditionalCount -eq 2 -and $actual.coverage.sourceReturnUnresolvedCount -eq 0) 'Unexpected DIA-03 return coverage.'
+    Assert-FunctionResolutionContract ($actual.coverage.preservedStaticCount -eq 360 -and $actual.coverage.resolvedStaticByRuleCount -eq 2 -and $actual.coverage.unresolvedCount -eq 0) 'DIA-05 return resolution coverage is incorrect.'
+    Assert-FunctionResolutionContract ($actual.coverage.argumentSchemaResolvedCount -eq 362 -and $actual.coverage.completeStaticSignatureCount -eq 362) 'DIA-05 did not produce 362 complete static signatures.'
     Assert-FunctionResolutionContract ($actual.coverage.catalogRuleCount -eq 2) 'Unexpected function return rule count.'
     Assert-FunctionResolutionContract ($actual.catalogHash -match '^[0-9a-f]{64}$' -and $actual.resolutionSetHash -match '^[0-9a-f]{64}$') 'DIA-05 canonical hashes are invalid.'
     Assert-FunctionResolutionContract ((Test-Path -LiteralPath $outputPath -PathType Leaf)) 'DIA-05 report was not written.'

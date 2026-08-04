@@ -107,7 +107,7 @@ function New-DialectOwnershipEvidenceReport {
     Assert-OwnershipHash $Inventory.canonicalHash 'DIA-01 canonicalHash'
     if ([string]$RegistrySnapshot.workPackage -ne 'M0-DIA-02' -or [string]$RegistrySnapshot.sourceInventoryHash -cne [string]$Inventory.canonicalHash) { throw 'DIA-02 does not match DIA-01.' }
     Assert-OwnershipHash $RegistrySnapshot.snapshotSetHash 'DIA-02 snapshotSetHash'
-    if ([string]$RegistrySnapshot.currentRuntimeIsolation.status -cne 'Failed') { throw 'DIA-02 current runtime isolation must remain Failed.' }
+    if ([string]$RegistrySnapshot.currentRuntimeIsolation.status -cne 'Passed' -and [string]$RegistrySnapshot.currentRuntimeIsolation.status -cne 'Failed') { throw 'DIA-02 current runtime isolation has an unsupported status.' }
     if ([string]$SignatureInventory.workPackage -ne 'M0-DIA-03' -or [string]$SignatureInventory.sourceInventoryHash -cne [string]$Inventory.canonicalHash) { throw 'DIA-03 does not match DIA-01.' }
     Assert-OwnershipHash $SignatureInventory.descriptorSetHash 'DIA-03 descriptorSetHash'
     if ([string]$InstructionSignatureResolution.workPackage -ne 'M0-DIA-04' -or [string]$InstructionSignatureResolution.sourceDescriptorSetHash -cne [string]$SignatureInventory.descriptorSetHash) { throw 'DIA-04 does not match DIA-03.' }

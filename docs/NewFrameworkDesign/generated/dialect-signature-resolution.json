@@ -1,22 +1,22 @@
 {
     "schemaVersion":  "1.0.0",
     "workPackage":  "M0-DIA-04",
-    "generatedAtUtc":  "2026-07-15T13:51:11.9344109Z",
+    "generatedAtUtc":  "2026-07-31T12:16:43.9852439Z",
     "executionStatus":  "InProgress",
     "gateStatus":  "Blocked",
     "blockerCode":  "EvidenceMissing",
     "result":  "Partial",
-    "sourceDescriptorSetHash":  "d347bdd7bfbff61ee11504b30e5d5acaa1ab4c7a04482ac272f8db6115ba2fa9",
+    "sourceDescriptorSetHash":  "0ac8b25894d83eebdb929771b90497b8817f34058a249cf5ca1ce4767191d80c",
     "catalogId":  "gemuera.m0.instruction-signature-resolution",
     "catalogVersion":  "1.0.0",
-    "catalogHash":  "5425c4e54c2f17e0768d531d596ee15a23f29b1d1716c365a8b35ab286a2032e",
-    "resolutionSetHash":  "2f9995f8630142a584767054d1f9ad4f7bef51a343e51654e1407d90845e80e2",
-    "instructionCount":  326,
+    "catalogHash":  "74736b0726d96ca5e8b20afa4f79fd63afbb74359e56dfff31a391b24575918c",
+    "resolutionSetHash":  "2b00041c834a490767854334bf8fc944283e02e58bb2656ced2ca79562cf62fb",
+    "instructionCount":  327,
     "coverage":  {
-                     "sourceResolvedCount":  214,
+                     "sourceResolvedCount":  215,
                      "sourceConditionalCount":  112,
                      "sourceUnresolvedCount":  0,
-                     "preservedStaticCount":  214,
+                     "preservedStaticCount":  215,
                      "resolvedStaticByRuleCount":  112,
                      "unresolvedCount":  0,
                      "catalogRuleCount":  19
@@ -496,13 +496,13 @@
                          },
                          {
                              "publicKey":  "BITMAP_CACHE_ENABLE",
-                             "targetModule":  "game.snake",
+                             "targetModule":  "game.snake.candidate",
                              "handlerType":  "SNAKE_UI_SETTING_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)"
+                                                                    "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)"
                                                                 ],
-                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
+                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",
@@ -3446,9 +3446,9 @@
                              "handlerType":  "PRINT_IMG_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "FunctionArgType.STR_EXPRESSION"
+                                                                    "FunctionArgType.SP_PRINT_IMG"
                                                                 ],
-                             "resolvedArgumentSchema":  "FunctionArgType.STR_EXPRESSION",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_PRINT_IMG",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",
@@ -3502,9 +3502,9 @@
                              "handlerType":  "PRINT_RECT_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "FunctionArgType.INT_ANY"
+                                                                    "FunctionArgType.SP_PRINT_RECT"
                                                                 ],
-                             "resolvedArgumentSchema":  "FunctionArgType.INT_ANY",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_PRINT_RECT",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",
@@ -3530,9 +3530,9 @@
                              "handlerType":  "PRINT_SPACE_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "FunctionArgType.INT_EXPRESSION"
+                                                                    "FunctionArgType.SP_PRINT_SPACE"
                                                                 ],
-                             "resolvedArgumentSchema":  "FunctionArgType.INT_EXPRESSION",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_PRINT_SPACE",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",
@@ -4066,9 +4066,23 @@
                              "handlerType":  "SETIMAGELAYER_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "SNAKE_ARGS_ArgumentBuilder.Instance"
+                                                                    "SNAKE_SETIMAGELAYER_ArgumentBuilder.Instance"
                                                                 ],
-                             "resolvedArgumentSchema":  "SNAKE_ARGS_ArgumentBuilder.Instance",
+                             "resolvedArgumentSchema":  "SNAKE_SETIMAGELAYER_ArgumentBuilder.Instance",
+                             "resolutionStatus":  "PreservedStatic",
+                             "ruleId":  "",
+                             "evidenceStatus":  "StaticCandidate",
+                             "behaviorFixtureStatus":  "Uncovered"
+                         },
+                         {
+                             "publicKey":  "SETIMAGELAYERL",
+                             "targetModule":  "legacy.common.unresolved",
+                             "handlerType":  "SETIMAGELAYERL_Instruction",
+                             "sourceArgumentSchemaStatus":  "Resolved",
+                             "sourceArgumentSchemaCandidates":  [
+                                                                    "FunctionArgType.SP_SETIMAGELAYERL"
+                                                                ],
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_SETIMAGELAYERL",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",
@@ -4094,9 +4108,9 @@
                              "handlerType":  "SNAKE_UI_SETTING_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)"
+                                                                    "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)"
                                                                 ],
-                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
+                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",
@@ -4108,9 +4122,9 @@
                              "handlerType":  "SNAKE_UI_SETTING_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)"
+                                                                    "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)"
                                                                 ],
-                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
+                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",
@@ -4248,9 +4262,9 @@
                              "handlerType":  "SNAKE_UI_SETTING_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)"
+                                                                    "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)"
                                                                 ],
-                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
+                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",
@@ -4364,9 +4378,9 @@
                              "handlerType":  "SNAKE_TEXT_BGC_ON_Instruction",
                              "sourceArgumentSchemaStatus":  "Resolved",
                              "sourceArgumentSchemaCandidates":  [
-                                                                    "SNAKE_ARGS_ArgumentBuilder.Instance"
+                                                                    "FunctionArgType.SP_COLOR_ALPHA"
                                                                 ],
-                             "resolvedArgumentSchema":  "SNAKE_ARGS_ArgumentBuilder.Instance",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_COLOR_ALPHA",
                              "resolutionStatus":  "PreservedStatic",
                              "ruleId":  "",
                              "evidenceStatus":  "StaticCandidate",

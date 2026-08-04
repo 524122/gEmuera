@@ -10,11 +10,11 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $project = [IO.Path]::GetFullPath($ProjectRoot)
 if ([string]::IsNullOrWhiteSpace($CatalogPath)) { $CatalogPath = Join-Path $scriptRoot 'dialect-module-visibility.json' }
-if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $project 'NewFrameworkDesign\generated\dialect-module-visibility.json' }
+if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $project 'docs\NewFrameworkDesign\generated\dialect-module-visibility.json' }
 
 function Read-ModuleVisibilityJson {
     param([string]$Name)
-    return (Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $project ('NewFrameworkDesign\generated\' + $Name)) | ConvertFrom-Json)
+    return (Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $project ('docs\NewFrameworkDesign\generated\' + $Name)) | ConvertFrom-Json)
 }
 
 try {

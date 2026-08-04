@@ -3,8 +3,8 @@
   "catalogId": "gemuera.m0.instruction-flag-resolution",
   "catalogVersion": "1.0.0",
   "sourceWorkPackage": "M0-DIA-03",
-  "sourceDescriptorSetHash": "d347bdd7bfbff61ee11504b30e5d5acaa1ab4c7a04482ac272f8db6115ba2fa9",
-  "sourceInstructionSignatureResolutionHash": "2f9995f8630142a584767054d1f9ad4f7bef51a343e51654e1407d90845e80e2",
+  "sourceDescriptorSetHash": "0ac8b25894d83eebdb929771b90497b8817f34058a249cf5ca1ce4767191d80c",
+  "sourceInstructionSignatureResolutionHash": "2b00041c834a490767854334bf8fc944283e02e58bb2656ced2ca79562cf62fb",
   "knownFlags": ["DEBUG_FUNC", "EXTENDED", "FLOW_CONTROL", "FORCE_SETARG", "ISPRINTDFUNC", "ISPRINTKFUNC", "IS_INPUT", "IS_JUMP", "IS_PRINT", "IS_PRINTDATA", "IS_TRY", "IS_TRYC", "METHOD_SAFE", "PARTIAL", "PRINT_NEWLINE", "PRINT_SINGLE", "PRINT_WAITINPUT"],
   "rules": [
     {"ruleId":"await.active","handlerType":"AWAIT_Instruction","matchKind":"Exact","pattern":"AWAIT","selectedHandlerFlags":["EXTENDED"],"expectedMatchCount":1,"rationale":"活动构造赋值仅为 EXTENDED；IS_PRINT/IS_INPUT 位于注释。"},

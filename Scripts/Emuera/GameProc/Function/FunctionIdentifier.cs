@@ -82,17 +82,67 @@ namespace MinorShift.Emuera.GameProc.Function
 				if (registrySurfaces.TryGetValue(cacheKey, out var existing))
 					return existing;
 
-				var selected = new Dictionary<string, FunctionIdentifier>(System.StringComparer.Ordinal);
+				// Preserve the legacy handler store's comparer (Config.ICVariable chooses
+				// OrdinalIgnoreCase vs Ordinal) so mixed-case instruction spellings such as
+				// PRINTFORMw, CASe, TryCall and call keep resolving like the upstream engine.
+				var selected = new Dictionary<string, FunctionIdentifier>(funcDic.Comparer);
 				foreach (KeyValuePair<string, FunctionIdentifier> pair in funcDic)
 				{
-					if (compatibility.IsInstructionVisible(pair.Key))
-						selected.Add(pair.Key, pair.Value);
+					// Expression functions are projected as METHOD instructions for legacy
+					// statement syntax. Their availability follows the function surface, not
+					// the independent instruction surface.
+					bool isVisible = pair.Value.Method == null
+						? compatibility.IsInstructionVisible(pair.Key)
+						: compatibility.IsFunctionVisible(pair.Key);
+					if (isVisible)
+						selected.Add(pair.Key, CreateProfileInstruction(pair.Value, compatibility));
+				}
+
+				// The shared handler store keeps an instruction when an instruction and
+				// an expression function have the same public name. Reintroduce only
+				// profile-declared METHOD projections; the rest retain their upstream
+				// statement visibility.
+				foreach (KeyValuePair<string, FunctionMethod> pair in FunctionMethodCreator.GetMethodList(compatibility))
+				{
+					if (selected.ContainsKey(pair.Key)
+						|| !funcDic.TryGetValue(pair.Key, out FunctionIdentifier sameNameHandler)
+						|| sameNameHandler.Method != null
+						|| !compatibility.ShouldProjectExpressionFunctionAsInstruction(pair.Key))
+						continue;
+
+					selected.Add(pair.Key, new FunctionIdentifier(pair.Key, pair.Value, methodInstruction));
 				}
 
 				var frozen = new ReadOnlyDictionary<string, FunctionIdentifier>(selected);
 				registrySurfaces.Add(cacheKey, frozen);
 				return frozen;
 			}
+		}
+
+		/// <summary>
+		/// Some upstream dialects retain the same public instruction name while
+		/// changing its grammar. Select that immutable handler while the session
+		/// registry is projected so parsing and execution do not need profile
+		/// branches on their hot paths.
+		/// </summary>
+		private static FunctionIdentifier CreateProfileInstruction(
+			FunctionIdentifier source,
+			LegacyCompatibilityProfile compatibility)
+		{
+			if (source.Method != null)
+				return source;
+			if (source.Code == FunctionCode.FOR && !compatibility.Snake.IsEnabled)
+				return new FunctionIdentifier(
+					source.Name,
+					source.Code,
+					new REPEAT_Instruction(true, ArgumentParser.CreateForNextArgumentBuilder(true)));
+			if (source.Code != FunctionCode.SETBGIMAGE)
+				return source;
+
+			AbstractInstruction instruction = compatibility.Snake.IsEnabled
+				? new SNAKE_SETBGIMAGE_Instruction()
+				: new V24_SETBGIMAGE_Instruction();
+			return new FunctionIdentifier(source.Name, source.Code, instruction);
 		}
 		private static void addPrintFunction(FunctionCode code)
 		{
@@ -129,8 +179,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.STRICT_FONT_FALLBACK, new SNAKE_UI_SETTING_Instruction(FunctionCode.STRICT_FONT_FALLBACK));
 			addFunction(FunctionCode.SET_SKIA_QUALITY, new SNAKE_UI_SETTING_Instruction(FunctionCode.SET_SKIA_QUALITY));
 			addFunction(FunctionCode.SET_TEXT_DRAWING_MODE, new SNAKE_UI_SETTING_Instruction(FunctionCode.SET_TEXT_DRAWING_MODE));
-			addFunction(FunctionCode.BITMAP_CACHE_ENABLE, new SNAKE_UI_SETTING_Instruction(FunctionCode.BITMAP_CACHE_ENABLE));
-			addFunction(FunctionCode.BREAKBUTTON, new BREAKBUTTON_Instruction());
+				addFunction(FunctionCode.BREAKBUTTON, new BREAKBUTTON_Instruction());
 		}
 
 		private static void addV24CompatibilityFunctions()
@@ -155,8 +204,9 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.QUIT_AND_RESTART, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
 			addFunction(FunctionCode.FORCE_QUIT, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
 			addFunction(FunctionCode.FORCE_QUIT_AND_RESTART, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
-			addFunction(FunctionCode.FORCE_BEGIN, new FORCE_BEGIN_Instruction());
-		}
+				addFunction(FunctionCode.FORCE_BEGIN, new FORCE_BEGIN_Instruction());
+				addFunction(FunctionCode.BITMAP_CACHE_ENABLE, new SNAKE_UI_SETTING_Instruction(FunctionCode.BITMAP_CACHE_ENABLE));
+			}
 
 		static FunctionIdentifier()
 		{

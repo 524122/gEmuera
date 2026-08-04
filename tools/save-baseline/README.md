@@ -20,7 +20,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\save-baseline\Test-Leg
 
 审计器只以共享读方式计算样本 SHA-256，并记录 1808 header、version、dataCount 和 payload 的 0/8/12/16 偏移；不会调用 legacy parser、解压、写入或覆盖源文件。报告的 `roundTripStatus` 固定为 `Uncovered`、`profileBindingStatus` 固定为 `Unbound`，因此该证据不能替代隔离副本读写往返或 gate 决策。
 
-默认输出为 `NewFrameworkDesign/generated/legacy-save-baseline.json`。catalog 精确锁定五个 source file 的 SHA-256 与 byte length；源码、公共头、enum、marker、入口、profile conflict 或 legacy mutation provenance 漂移时 fail-fast。catalog 枚举顺序和调用方后续变异不得改变 `saveBaselineSetHash`。
+默认输出为 `docs/NewFrameworkDesign/generated/legacy-save-baseline.json`。catalog 精确锁定五个 source file 的 SHA-256 与 byte length；源码、公共头、enum、marker、入口、profile conflict 或 legacy mutation provenance 漂移时 fail-fast。catalog 枚举顺序和调用方后续变异不得改变 `saveBaselineSetHash`。
 
 ## 边界
 

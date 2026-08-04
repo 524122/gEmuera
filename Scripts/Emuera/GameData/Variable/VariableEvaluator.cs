@@ -2951,18 +2951,19 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 			catch (SystemException ex)
 			{
-				if (!isAndroid)
+				if (!isAndroid && IsSaveFileLockException(ex))
 				{
+					// A desktop reader may transiently retain global.sav after the bounded
+					// atomic-replace retry. Preserve the legacy false return without emitting
+					// a fatal diagnostic for a recoverable external lock.
+					GenericUtils.Warn(EmueraLogCategory.Save, () =>
+						"[SAVEGLOBAL] Skipped global save because global.sav remained locked after retries: \"" + filepath + "\"");
+					return false;
+				}
+				if (!isAndroid)
 					GenericUtils.Error(EmueraLogCategory.Save, () =>
 						"[SAVEGLOBAL] Failed to save global data to \"" + filepath + "\": "
 						+ ex.GetType().Name + ": " + ex.Message + Environment.NewLine + ex.StackTrace);
-					if (IsSaveFileLockException(ex))
-					{
-						GenericUtils.Warn(EmueraLogCategory.Save, () =>
-							"[SAVEGLOBAL] Skipped global save because global.sav is locked by another process: \"" + filepath + "\"");
-						return false;
-					}
-				}
 				throw new CodeEE("グローバルデータの保存中にエラーが発生しました");
 				//console.PrintError(
 				//console.NewLine();
@@ -3067,20 +3068,22 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		private static void CommitSaveFileWithRetry(string tempFilePath, string filepath)
 		{
-			int delayMs = 40;
-			for (int attempt = 0; ; attempt++)
+			const int maxAttempts = 9;
+			int delayMs = 25;
+			for (int attempt = 0; attempt < maxAttempts; attempt++)
 			{
 				try
 				{
 					CommitSaveFile(tempFilePath, filepath);
 					return;
 				}
-				catch (IOException) when (attempt < 5)
+				catch (IOException) when (attempt + 1 < maxAttempts)
 				{
 					System.Threading.Thread.Sleep(delayMs);
 					delayMs *= 2;
 				}
 			}
+			throw new IOException("Unable to atomically replace the save file after bounded retries.");
 		}
 
 		private static void CommitSaveFile(string tempFilePath, string filepath)

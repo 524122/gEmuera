@@ -12,16 +12,27 @@ namespace MinorShift.Emuera.GameView
 	{
 		static public ConsoleShapePart CreateShape(string shapeType, int[] param, Color color, Color bcolor, bool colorchanged, string logParamText = null)
 		{
+			float[] pixels = new float[param.Length];
+			for (int i = 0; i < param.Length; i++)
+				pixels[i] = ((float)param[i] * Config.FontSize) / 100f;
+			return CreateShapeCore(shapeType, pixels, color, bcolor, colorchanged, logParamText ?? FormatPercentParameters(param));
+		}
+
+		static public ConsoleShapePart CreateShape(string shapeType, MixedNum[] param, Color color, Color bcolor, bool colorchanged)
+		{
+			float[] pixels = new float[param.Length];
+			for (int i = 0; i < param.Length; i++)
+				pixels[i] = param[i].isPx ? param[i].num : ((float)param[i].num * Config.FontSize) / 100f;
+			return CreateShapeCore(shapeType, pixels, color, bcolor, colorchanged, FormatMixedParameters(param));
+		}
+
+		private static ConsoleShapePart CreateShapeCore(string shapeType, float[] paramPixel, Color color, Color bcolor, bool colorchanged, string logParamText)
+		{
 			string type = shapeType.ToLower();
 			colorchanged = colorchanged || color != Config.ForeColor;
-
+			
 			ConsoleShapePart ret = null;
 			int lineHeight = Config.FontSize;
-			float[] paramPixel = new float[param.Length];
-			for (int i = 0; i < param.Length; i++)
-			{
-				paramPixel[i] = ((float)param[i] * lineHeight) / 100f;
-			}
 			RectangleF rectF;
 
 			switch (type)
@@ -58,12 +69,7 @@ namespace MinorShift.Emuera.GameView
             sb.Append("<shape type='");
             sb.Append(type);
             sb.Append("' param='");
-            for(int i = 0; i < param.Length; i++)
-            {
-                sb.Append(param[i].ToString());
-                if(i < param.Length - 1)
-                    sb.Append(", ");
-            }
+			sb.Append(logParamText);
             sb.Append("'");
             if(colorchanged)
             {
@@ -93,7 +99,7 @@ namespace MinorShift.Emuera.GameView
 #endif
 			// Godot 的非 UNITY 显示路径故意不在屏幕上打印 shape 的替代文本，
 			// 但输出日志需要与原生 Emuera 一样保留原始标签。
-			ret.LogText = BuildLogText(type, param, color, bcolor, colorchanged, logParamText);
+			ret.LogText = BuildLogText(type, color, bcolor, colorchanged, logParamText);
             ret.Color = color;
 			ret.ButtonColor = bcolor;
 			ret.colorChanged = colorchanged;
@@ -117,25 +123,26 @@ namespace MinorShift.Emuera.GameView
 			return LogText ?? AltText ?? "";
 		}
 
-		static string BuildLogText(string type, int[] param, Color color, Color bcolor, bool colorchanged, string logParamText)
+		private static string FormatPercentParameters(int[] param)
+		{
+			return string.Join(", ", param);
+		}
+
+		private static string FormatMixedParameters(MixedNum[] param)
+		{
+			var values = new string[param.Length];
+			for (int i = 0; i < param.Length; i++)
+				values[i] = param[i].num.ToString() + (param[i].isPx ? "px" : string.Empty);
+			return string.Join(", ", values);
+		}
+
+		static string BuildLogText(string type, Color color, Color bcolor, bool colorchanged, string logParamText)
 		{
 			StringBuilder sb = new StringBuilder();
 			sb.Append("<shape type='");
 			sb.Append(type);
 			sb.Append("' param='");
-			if (!string.IsNullOrEmpty(logParamText))
-			{
-				sb.Append(logParamText);
-			}
-			else
-			{
-				for (int i = 0; i < param.Length; i++)
-				{
-					sb.Append(param[i].ToString());
-					if (i < param.Length - 1)
-						sb.Append(", ");
-				}
-			}
+			sb.Append(logParamText);
 			sb.Append("'");
 			if (colorchanged)
 			{

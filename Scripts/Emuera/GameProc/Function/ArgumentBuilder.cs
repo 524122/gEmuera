@@ -39,9 +39,6 @@ namespace MinorShift.Emuera.GameProc.Function
 		/// 引数の型と数。EraType.Voidで任意の型（あるいは個別にチェックするべき引数）。
 		/// </summary>
 		protected EraType[] argumentTypeArray;//
-		/// <summary>
-		/// EraType.Void は「任意型」でも使うため、旧 null 指定の省略可能性だけ別フラグで保持する。
-		/// </summary>
 		protected bool[] nullableArgumentArray;
 		/// <summary>
 		/// 最低限必要な引数の数。設定しないと全て省略不可。
@@ -77,9 +74,11 @@ namespace MinorShift.Emuera.GameProc.Function
 					allowType = argumentTypeArray[argumentTypeArray.Length - 1];
 				else
 					allowType = argumentTypeArray[i];
+				if (!argAny && allowType == EraType.Void)
+					continue;
 				if (arguments[i] == null)
 				{
-					if (nullableArgumentArray != null && i < nullableArgumentArray.Length && nullableArgumentArray[i])
+					if (allowType == EraType.Void)
 						continue;
 					warn("第" + (i + 1).ToString() + "引数を認識できません", line, 2, false);
 					return false;
@@ -143,6 +142,10 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			return argb[key];
 		}
+		internal static ArgumentBuilder CreateForNextArgumentBuilder(bool allowsOmittedStart)
+		{
+			return new SP_FOR_NEXT_ArgumentBuilder(allowsOmittedStart);
+		}
 		readonly static Dictionary<string, ArgumentBuilder> nargb = new Dictionary<string, ArgumentBuilder>();
 
 		/// <summary>
@@ -200,7 +203,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_CALLF] = new SP_CALL_ArgumentBuilder(true, false);
 			argb[FunctionArgType.SP_CALLFORM] = new SP_CALL_ArgumentBuilder(false, true);
 			argb[FunctionArgType.SP_CALLFORMF] = new SP_CALL_ArgumentBuilder(true, true);
-			argb[FunctionArgType.SP_FOR_NEXT] = new SP_FOR_NEXT_ArgumentBuilder();
+			argb[FunctionArgType.SP_FOR_NEXT] = new SP_FOR_NEXT_ArgumentBuilder(false);
 			argb[FunctionArgType.SP_POWER] = new SP_POWER_ArgumentBuilder();
 			argb[FunctionArgType.SP_SWAPVAR] = new SP_SWAPVAR_ArgumentBuilder();
 			argb[FunctionArgType.EXPRESSION] = new EXPRESSION_ArgumentBuilder(false);
@@ -233,9 +236,142 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_SETIMAGELAYERL] = new SP_SETIMAGELAYERL_ArgumentBuilder();
 			argb[FunctionArgType.SP_HTMLSPLIT] = new SP_HTMLSPLIT_ArgumentBuilder();
 			argb[FunctionArgType.SP_DT_COLUMN_OPTIONS] = new SP_DT_COLUMN_OPTIONS_ArgumentBuilder();
+			argb[FunctionArgType.SP_PRINT_IMG] = new SP_PRINT_IMG_ArgumentBuilder();
+			argb[FunctionArgType.SP_PRINT_RECT] = new SP_PRINT_SHAPE_ArgumentBuilder(4);
+			argb[FunctionArgType.SP_PRINT_SPACE] = new SP_PRINT_SHAPE_ArgumentBuilder(1);
 			
         }
-		
+
+		private sealed class SP_PRINT_IMG_ArgumentBuilder : ArgumentBuilder
+		{
+			public SP_PRINT_IMG_ArgumentBuilder()
+			{
+				argumentTypeArray = null;
+				minArg = 1;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				WordCollection words = popWords(line);
+				if (words.EOL)
+				{
+					warn("第1引数を省略することはできません", line, 2, false);
+					return null;
+				}
+
+				IOperandTerm name = ExpressionParser.ReduceExpressionTerm(words, TermEndWith.Comma);
+				if (name == null)
+				{
+					warn("第1引数を省略することはできません", line, 2, false);
+					return null;
+				}
+				if (Config.NeedReduceArgumentOnLoad)
+					name = name.Restructure(exm);
+				words.ShiftNext();
+
+				IOperandTerm buttonName = null;
+				IOperandTerm mappingName = null;
+				var parameters = new List<MixedIntegerExprTerm>();
+				int argumentIndex = 2;
+				while (!words.EOL)
+				{
+					if (parameters.Count == 3)
+					{
+						warn("引数が多すぎます", line, 2, false);
+						return null;
+					}
+
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(words, TermEndWith.Comma | TermEndWith.KeyWordPx);
+					if (term == null)
+					{
+						warn("第" + argumentIndex.ToString() + "引数を省略することはできません", line, 2, false);
+						return null;
+					}
+					if (Config.NeedReduceArgumentOnLoad)
+						term = term.Restructure(exm);
+
+					if (term.GetEraType() == EraType.String)
+					{
+						if (parameters.Count > 0 || argumentIndex > 3)
+						{
+							warn("第" + argumentIndex.ToString() + "引数の型が正しくありません", line, 2, false);
+							return null;
+						}
+						if (argumentIndex == 2)
+							buttonName = term;
+						else
+							mappingName = term;
+					}
+					else
+					{
+						parameters.Add(new MixedIntegerExprTerm
+						{
+							Num = term,
+							IsPx = words.Current.Type != '\0' && words.Current.Type != ',',
+						});
+					}
+
+					if (words.Current.Type != '\0' && words.Current.Type != ',')
+						words.ShiftNext();
+					words.ShiftNext();
+					argumentIndex++;
+				}
+
+				return new SpPrintImgArgument(
+					name,
+					buttonName,
+					mappingName,
+					parameters.Count > 0 ? parameters.ToArray() : null);
+			}
+		}
+
+		private sealed class SP_PRINT_SHAPE_ArgumentBuilder : ArgumentBuilder
+		{
+			private readonly int maxArguments;
+
+			public SP_PRINT_SHAPE_ArgumentBuilder(int maxArguments)
+			{
+				this.maxArguments = maxArguments;
+				argumentTypeArray = new EraType[]
+				{
+					EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer
+				};
+				minArg = 1;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				WordCollection words = popWords(line);
+				var parameters = new List<MixedIntegerExprTerm>();
+				while (!words.EOL)
+				{
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(words, TermEndWith.Comma | TermEndWith.KeyWordPx);
+					if (term == null)
+					{
+						warn("引数を認識できません", line, 2, false);
+						return null;
+					}
+					if (Config.NeedReduceArgumentOnLoad)
+						term = term.Restructure(exm);
+					parameters.Add(new MixedIntegerExprTerm
+					{
+						Num = term,
+						IsPx = words.Current.Type != '\0' && words.Current.Type != ',',
+					});
+					if (words.Current.Type != '\0' && words.Current.Type != ',')
+						words.ShiftNext();
+					words.ShiftNext();
+				}
+
+				if (parameters.Count != 1 && parameters.Count != maxArguments)
+				{
+					warn("引数の数が正しくありません", line, 2, false);
+					return null;
+				}
+				return new SpPrintShapeArgument(parameters.ToArray());
+			}
+		}
+			
 		private sealed class SP_DT_COLUMN_OPTIONS_ArgumentBuilder : ArgumentBuilder
 		{
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1306,10 +1442,11 @@ namespace MinorShift.Emuera.GameProc.Function
 
 		private sealed class SP_FOR_NEXT_ArgumentBuilder : ArgumentBuilder
 		{
-			public SP_FOR_NEXT_ArgumentBuilder()
+			public SP_FOR_NEXT_ArgumentBuilder(bool allowsOmittedStart)
 			{
 				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Void, EraType.Integer, EraType.Integer };
-				nullableArgumentArray = new bool[] { false, true, false, false };
+				if (allowsOmittedStart)
+					nullableArgumentArray = new bool[] { false, true, false, false };
 				minArg = 3;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)

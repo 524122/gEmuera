@@ -430,8 +430,12 @@ namespace MinorShift.Emuera.GameData.Function
 				var selected = new Dictionary<string, FunctionMethod>(StringComparer.Ordinal);
 				foreach (KeyValuePair<string, FunctionMethod> pair in methodList)
 				{
-					if (compatibility.IsFunctionVisible(pair.Key))
-						selected.Add(pair.Key, pair.Value);
+					if (!compatibility.IsFunctionVisible(pair.Key))
+						continue;
+
+					FunctionMethod projected = DialectFunctionContracts.Project(pair.Key, pair.Value, compatibility);
+					projected.SetMethodName(pair.Key);
+					selected.Add(pair.Key, projected);
 				}
 
 				var frozen = new ReadOnlyDictionary<string, FunctionMethod>(selected);

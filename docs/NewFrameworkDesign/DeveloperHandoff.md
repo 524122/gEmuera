@@ -113,7 +113,7 @@ Godot host 还具有：
 
 接手 ERB 工作时，不要从 Core descriptor 名称直接生成 handler。当前 legacy handler 仍是行为 owner；DIA 报告主要提供静态库存、来源和未来接口候选。
 
-当前 DIA 机器基线记录过 326 个指令和 360 个表达式函数，但 Godot host profile marker `profile.selected-name` 尚未在 `dialect-classification.json` 完成 owner 裁决。DIA-01 inventory 与依赖它的 registry snapshot 因此会 fail-fast；旧生成报告中的数量只能作为上一份成功基线，不能写成当前绿色证据。
+当前双上游执行态基线为 v24 `303` 个指令和 `266` 个表达式函数、Snake `326` 个指令和 `347` 个表达式函数；当前 handler store 为 `327/362`。DIA-01、registry snapshot 与双上游差异报告均可生成，`LegacyDialectRuntimeSmoke` 还验证了实际 legacy lookup、`METHOD` 投影和 `LogicalLineParser` 的 profile 可见性。该结果不覆盖真实游戏 fixture、lazy-load、handler 执行、APK 或 Android 真机性能。
 
 ### 已落地的 legacy profile 边界
 
@@ -132,7 +132,7 @@ Godot host 还具有：
 | [`legacy-runner`](../../tools/legacy-runner) | 隔离复制游戏、输入 replay、typed trace、报告、A/B/A 与显示基线 |
 | [`save-baseline`](../../tools/save-baseline) | 静态存档协议、fixture audit 和 round-trip evidence 工具 |
 | [`session-state-inventory`](../../tools/session-state-inventory) | 固定 `GlobalStatic`/`Program` 会话根状态 |
-| [`dialect-inventory`](../../tools/dialect-inventory) | DIA-01 至 DIA-17 静态库存、解析、归属、组合和 fixture contract |
+| [`dialect-inventory`](../../tools/dialect-inventory) | DIA-01 至 DIA-17 静态库存、解析、归属、组合和 fixture contract；`LegacyDialectRuntimeSmoke` 验证 production lookup 与 parser profile surface |
 | [`core-contracts`](../../tools/core-contracts) | Core smoke 与 Core -> Godot 反向依赖守卫 |
 | [`m3-m7`](../../tools/m3-m7) | implementation inventory、work-package schema 和治理合同测试 |
 | [`doc-guards`](../../tools/doc-guards) | 文档结构、链接和稳定条款门禁 |

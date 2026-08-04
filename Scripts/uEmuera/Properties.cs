@@ -25,7 +25,7 @@ namespace Properties
             { "SyntaxErrMesMethodGraphicsColorMatrix0","{0}関数:ColorMatrixに5x5以上の二次元数値型配列変数でない引数が指定されました"},
         };
 
-        public static string GetString(string key, object culture)
+        public static string GetString(string key)
         {
             string s;
             dict.TryGetValue(key, out s);
@@ -35,7 +35,6 @@ namespace Properties
 
     public static class Resources
     {
-        private static global::System.Globalization.CultureInfo resourceCulture;
 
         /// <summary>
         ///   {0}関数:画像の範囲外が指定されています に類似しているローカライズされた文字列を検索します。
@@ -44,7 +43,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodCIMGCreateOutOfRange0", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodCIMGCreateOutOfRange0");
             }
         }
 
@@ -55,7 +54,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodColorARGB0", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodColorARGB0");
             }
         }
 
@@ -66,7 +65,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodDefaultArgumentOutOfRange0", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodDefaultArgumentOutOfRange0");
             }
         }
 
@@ -77,7 +76,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodGColorMatrix0", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodGColorMatrix0");
             }
         }
 
@@ -88,7 +87,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodGDIPLUSOnly", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodGDIPLUSOnly");
             }
         }
 
@@ -99,7 +98,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodGHeight0", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodGHeight0");
             }
         }
 
@@ -110,7 +109,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodGHeight1", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodGHeight1");
             }
         }
 
@@ -121,7 +120,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodGraphicsID0", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodGraphicsID0");
             }
         }
 
@@ -132,7 +131,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodGraphicsID1", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodGraphicsID1");
             }
         }
 
@@ -143,7 +142,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodGWidth0", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodGWidth0");
             }
         }
 
@@ -154,7 +153,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("RuntimeErrMesMethodGWidth1", resourceCulture);
+                return ResourceManager.GetString("RuntimeErrMesMethodGWidth1");
             }
         }
 
@@ -165,7 +164,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentNotNullable0", resourceCulture);
+                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentNotNullable0");
             }
         }
 
@@ -176,7 +175,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentNum0", resourceCulture);
+                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentNum0");
             }
         }
 
@@ -187,7 +186,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentNum1", resourceCulture);
+                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentNum1");
             }
         }
 
@@ -198,7 +197,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentNum2", resourceCulture);
+                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentNum2");
             }
         }
 
@@ -209,7 +208,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentType0", resourceCulture);
+                return ResourceManager.GetString("SyntaxErrMesMethodDefaultArgumentType0");
             }
         }
 
@@ -220,7 +219,7 @@ namespace Properties
         {
             get
             {
-                return ResourceManager.GetString("SyntaxErrMesMethodGraphicsColorMatrix0", resourceCulture);
+                return ResourceManager.GetString("SyntaxErrMesMethodGraphicsColorMatrix0");
             }
         }
     }

@@ -6118,19 +6118,18 @@ namespace MinorShift.Emuera.GameData.Function
 		public GraphicsGetTextSizeMethod()
 		{
 			ReturnType = EraType.Integer;
-			argumentTypeArray = new EraType[] { EraType.Integer, EraType.String };
+			argumentTypeArray = null;
 			CanRestructure = false;
 		}
 		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 		{
-			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
-				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
-			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
-			if (!g.IsCreated)
-				return 0;
-			string text = arguments[1].GetStrValue(exm) ?? "";
-			int width = uEmuera.Utils.GetDisplayLength(text, g.Fontsize);
-			int height = Math.Max(1, g.Fontsize + 6);
+			// v24/Snake measure an explicit font rather than a GraphicsImage handle.
+			// Keep this worker-thread safe and allocation-free: Godot font resources are
+			// main-thread owned, while the compatibility API only needs pixel dimensions.
+			string text = arguments[0].GetStrValue(exm) ?? "";
+			int fontSize = Math.Max(1, (int)arguments[2].GetIntValue(exm));
+			int width = uEmuera.Utils.GetDisplayLength(text, fontSize);
+			int height = Math.Max(1, fontSize + 6);
 			exm.VEvaluator.RESULT_ARRAY[1] = height;
 			return width;
 		}

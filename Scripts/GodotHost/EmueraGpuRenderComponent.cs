@@ -2,6 +2,7 @@ using Godot;
 using MinorShift.Emuera.Content;
 using System.Collections.Concurrent;
 using System.Threading;
+using gEmuera.GodotHost;
 
 /// <summary>
 /// Godot 宿主 GPU 渲染组件，负责处理后台线程提交的 ColorMatrix 离屏渲染请求。

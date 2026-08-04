@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.legacy-dialect-upstream-diff",
+  "catalogVersion": "1.0.0",
+  "instructionSourceSuffix": "Emuera/Runtime/Script/Statements/FunctionIdentifier.cs",
+  "expressionSourceSuffix": "Emuera/Runtime/Script/Statements/Function/Creator.cs",
+  "v24": {
+    "instructionSourceSha256": "543e793a29a18b2c8fc69555b6f0fcde83e39663714211addb1317101ee68c71",
+    "expressionSourceSha256": "74fbf32cd641962f0fd38eb17fd56bae3c01dc13f3119e76ae3ecb04babd29f1",
+    "instructionCount": 303,
+    "expressionFunctionCount": 266
+  },
+  "snake": {
+    "instructionSourceSha256": "ef87aee8eca0dacb9bf96287637835e35c26b8c54bc0b75caa49a5fea817512b",
+    "expressionSourceSha256": "8c18c08edb1b6380d4777d6c8a12acf4b4a7e540922eb3d88d23981ecdeede95",
+    "instructionCount": 326,
+    "expressionFunctionCount": 347
+  },
+  "current": {
+    "instructionCount": 327,
+    "expressionFunctionCount": 362
+  }
+}

@@ -1,26 +1,26 @@
 {
     "schemaVersion":  "1.0.0",
     "workPackage":  "M0-DIA-05",
-    "generatedAtUtc":  "2026-07-15T13:51:17.4300779Z",
+    "generatedAtUtc":  "2026-07-31T12:16:49.7888111Z",
     "executionStatus":  "InProgress",
     "gateStatus":  "Blocked",
     "blockerCode":  "EvidenceMissing",
     "result":  "Partial",
-    "sourceDescriptorSetHash":  "d347bdd7bfbff61ee11504b30e5d5acaa1ab4c7a04482ac272f8db6115ba2fa9",
+    "sourceDescriptorSetHash":  "0ac8b25894d83eebdb929771b90497b8817f34058a249cf5ca1ce4767191d80c",
     "catalogId":  "gemuera.m0.function-return-resolution",
     "catalogVersion":  "1.0.0",
-    "catalogHash":  "bce3961d251117620bbfca130c8b0ec100b30f09dd3911463418ebe01de637a2",
-    "resolutionSetHash":  "18f2e9f4eabadcfd8f16e9c4ba7a1e9b569d196c42c3a898d4a75b6feb77223e",
-    "expressionFunctionCount":  360,
+    "catalogHash":  "1b7c580061a1909312cbcade3dcd35e64a027d60c77530ee7395e4ef74857ad6",
+    "resolutionSetHash":  "45e19a8a110e3bdc30b1048fae0cfa5c002074f9f4d3349294dfae40a930fecc",
+    "expressionFunctionCount":  362,
     "coverage":  {
-                     "sourceReturnResolvedCount":  358,
+                     "sourceReturnResolvedCount":  360,
                      "sourceReturnConditionalCount":  2,
                      "sourceReturnUnresolvedCount":  0,
-                     "preservedStaticCount":  358,
+                     "preservedStaticCount":  360,
                      "resolvedStaticByRuleCount":  2,
                      "unresolvedCount":  0,
-                     "argumentSchemaResolvedCount":  360,
-                     "completeStaticSignatureCount":  360,
+                     "argumentSchemaResolvedCount":  362,
+                     "completeStaticSignatureCount":  362,
                      "catalogRuleCount":  2
                  },
     "ruleMatches":  [
@@ -887,62 +887,6 @@
                                     "behaviorFixtureStatus":  "Uncovered"
                                 },
                                 {
-                                    "publicKey":  "CHKGLOBALDATA",
-                                    "targetModule":  "legacy.expression.unresolved",
-                                    "handlerType":  "CheckdataMethod",
-                                    "sourceReturnTypeStatus":  "Resolved",
-                                    "sourceReturnTypeCandidates":  [
-                                                                       "EraType.Integer"
-                                                                   ],
-                                    "resolvedReturnType":  "EraType.Integer",
-                                    "returnResolutionStatus":  "PreservedStatic",
-                                    "ruleId":  "",
-                                    "sourceArgumentSchemaStatus":  "Resolved",
-                                    "sourceArgumentSchemaCandidates":  [
-                                                                           "new EraType[] { EraType.Integer }"
-                                                                       ],
-                                    "resolvedArgumentSchema":  "new EraType[] { EraType.Integer }",
-                                    "staticSignatureStatus":  "CompleteStatic",
-                                    "overridesArgumentCheck":  false,
-                                    "restructureCandidates":  [
-                                                                  "false"
-                                                              ],
-                                    "completionModeCandidate":  "SynchronousBodyCandidate",
-                                    "effectCandidates":  [
-                                                             "SessionStateCandidate"
-                                                         ],
-                                    "evidenceStatus":  "StaticCandidate",
-                                    "behaviorFixtureStatus":  "Uncovered"
-                                },
-                                {
-                                    "publicKey":  "CHKVARDATA",
-                                    "targetModule":  "legacy.expression.unresolved",
-                                    "handlerType":  "CheckdataStrMethod",
-                                    "sourceReturnTypeStatus":  "Resolved",
-                                    "sourceReturnTypeCandidates":  [
-                                                                       "EraType.Integer"
-                                                                   ],
-                                    "resolvedReturnType":  "EraType.Integer",
-                                    "returnResolutionStatus":  "PreservedStatic",
-                                    "ruleId":  "",
-                                    "sourceArgumentSchemaStatus":  "Resolved",
-                                    "sourceArgumentSchemaCandidates":  [
-                                                                           "new EraType[] { EraType.String }"
-                                                                       ],
-                                    "resolvedArgumentSchema":  "new EraType[] { EraType.String }",
-                                    "staticSignatureStatus":  "CompleteStatic",
-                                    "overridesArgumentCheck":  false,
-                                    "restructureCandidates":  [
-                                                                  "false"
-                                                              ],
-                                    "completionModeCandidate":  "SynchronousBodyCandidate",
-                                    "effectCandidates":  [
-                                                             "SessionStateCandidate"
-                                                         ],
-                                    "evidenceStatus":  "StaticCandidate",
-                                    "behaviorFixtureStatus":  "Uncovered"
-                                },
-                                {
                                     "publicKey":  "CLEARMEMORY",
                                     "targetModule":  "legacy.expression.unresolved",
                                     "handlerType":  "ClearMemoryMethod",
@@ -1615,6 +1559,34 @@
                                     "behaviorFixtureStatus":  "Uncovered"
                                 },
                                 {
+                                    "publicKey":  "DISABLE_INPUT_MACRO",
+                                    "targetModule":  "legacy.expression.unresolved",
+                                    "handlerType":  "DisableInputMacroMethod",
+                                    "sourceReturnTypeStatus":  "Resolved",
+                                    "sourceReturnTypeCandidates":  [
+                                                                       "EraType.Integer"
+                                                                   ],
+                                    "resolvedReturnType":  "EraType.Integer",
+                                    "returnResolutionStatus":  "PreservedStatic",
+                                    "ruleId":  "",
+                                    "sourceArgumentSchemaStatus":  "Resolved",
+                                    "sourceArgumentSchemaCandidates":  [
+                                                                           "new EraType[] { }"
+                                                                       ],
+                                    "resolvedArgumentSchema":  "new EraType[] { }",
+                                    "staticSignatureStatus":  "CompleteStatic",
+                                    "overridesArgumentCheck":  false,
+                                    "restructureCandidates":  [
+                                                                  "false"
+                                                              ],
+                                    "completionModeCandidate":  "SynchronousBodyCandidate",
+                                    "effectCandidates":  [
+                                                             "ValueOrUnclassifiedCandidate"
+                                                         ],
+                                    "evidenceStatus":  "StaticCandidate",
+                                    "behaviorFixtureStatus":  "Uncovered"
+                                },
+                                {
                                     "publicKey":  "DT_CELL_GET",
                                     "targetModule":  "legacy.expression.unresolved",
                                     "handlerType":  "DtCellGetMethod",
@@ -2248,6 +2220,34 @@
                                     "resolvedArgumentSchema":  "null",
                                     "staticSignatureStatus":  "CompleteStatic",
                                     "overridesArgumentCheck":  true,
+                                    "restructureCandidates":  [
+                                                                  "false"
+                                                              ],
+                                    "completionModeCandidate":  "SynchronousBodyCandidate",
+                                    "effectCandidates":  [
+                                                             "ValueOrUnclassifiedCandidate"
+                                                         ],
+                                    "evidenceStatus":  "StaticCandidate",
+                                    "behaviorFixtureStatus":  "Uncovered"
+                                },
+                                {
+                                    "publicKey":  "ENABLE_INPUT_MACRO",
+                                    "targetModule":  "legacy.expression.unresolved",
+                                    "handlerType":  "EnableInputMacroMethod",
+                                    "sourceReturnTypeStatus":  "Resolved",
+                                    "sourceReturnTypeCandidates":  [
+                                                                       "EraType.Integer"
+                                                                   ],
+                                    "resolvedReturnType":  "EraType.Integer",
+                                    "returnResolutionStatus":  "PreservedStatic",
+                                    "ruleId":  "",
+                                    "sourceArgumentSchemaStatus":  "Resolved",
+                                    "sourceArgumentSchemaCandidates":  [
+                                                                           "new EraType[] { }"
+                                                                       ],
+                                    "resolvedArgumentSchema":  "new EraType[] { }",
+                                    "staticSignatureStatus":  "CompleteStatic",
+                                    "overridesArgumentCheck":  false,
                                     "restructureCandidates":  [
                                                                   "false"
                                                               ],
@@ -3044,34 +3044,6 @@
                                 },
                                 {
                                     "publicKey":  "FIND_CHARADATA",
-                                    "targetModule":  "legacy.expression.unresolved",
-                                    "handlerType":  "FindFilesMethod",
-                                    "sourceReturnTypeStatus":  "Resolved",
-                                    "sourceReturnTypeCandidates":  [
-                                                                       "EraType.Integer"
-                                                                   ],
-                                    "resolvedReturnType":  "EraType.Integer",
-                                    "returnResolutionStatus":  "PreservedStatic",
-                                    "ruleId":  "",
-                                    "sourceArgumentSchemaStatus":  "Resolved",
-                                    "sourceArgumentSchemaCandidates":  [
-                                                                           "null"
-                                                                       ],
-                                    "resolvedArgumentSchema":  "null",
-                                    "staticSignatureStatus":  "CompleteStatic",
-                                    "overridesArgumentCheck":  true,
-                                    "restructureCandidates":  [
-                                                                  "false"
-                                                              ],
-                                    "completionModeCandidate":  "SynchronousBodyCandidate",
-                                    "effectCandidates":  [
-                                                             "SessionStateCandidate"
-                                                         ],
-                                    "evidenceStatus":  "StaticCandidate",
-                                    "behaviorFixtureStatus":  "Uncovered"
-                                },
-                                {
-                                    "publicKey":  "FIND_VARDATA",
                                     "targetModule":  "legacy.expression.unresolved",
                                     "handlerType":  "FindFilesMethod",
                                     "sourceReturnTypeStatus":  "Resolved",
@@ -4282,6 +4254,34 @@
                                     "behaviorFixtureStatus":  "Uncovered"
                                 },
                                 {
+                                    "publicKey":  "GETLINEY",
+                                    "targetModule":  "legacy.expression.unresolved",
+                                    "handlerType":  "GetLineYMethod",
+                                    "sourceReturnTypeStatus":  "Resolved",
+                                    "sourceReturnTypeCandidates":  [
+                                                                       "EraType.Integer"
+                                                                   ],
+                                    "resolvedReturnType":  "EraType.Integer",
+                                    "returnResolutionStatus":  "PreservedStatic",
+                                    "ruleId":  "",
+                                    "sourceArgumentSchemaStatus":  "Resolved",
+                                    "sourceArgumentSchemaCandidates":  [
+                                                                           "new EraType[] { EraType.Integer }"
+                                                                       ],
+                                    "resolvedArgumentSchema":  "new EraType[] { EraType.Integer }",
+                                    "staticSignatureStatus":  "CompleteStatic",
+                                    "overridesArgumentCheck":  false,
+                                    "restructureCandidates":  [
+                                                                  "false"
+                                                              ],
+                                    "completionModeCandidate":  "SynchronousBodyCandidate",
+                                    "effectCandidates":  [
+                                                             "ConsoleOrInputCandidate"
+                                                         ],
+                                    "evidenceStatus":  "StaticCandidate",
+                                    "behaviorFixtureStatus":  "Uncovered"
+                                },
+                                {
                                     "publicKey":  "GETMEMORYUSAGE",
                                     "targetModule":  "legacy.expression.unresolved",
                                     "handlerType":  "GetMemoryUsageMethod",
@@ -5135,9 +5135,9 @@
                                     "ruleId":  "",
                                     "sourceArgumentSchemaStatus":  "Resolved",
                                     "sourceArgumentSchemaCandidates":  [
-                                                                           "new EraType[] { EraType.Integer, EraType.String }"
+                                                                           "null"
                                                                        ],
-                                    "resolvedArgumentSchema":  "new EraType[] { EraType.Integer, EraType.String }",
+                                    "resolvedArgumentSchema":  "null",
                                     "staticSignatureStatus":  "CompleteStatic",
                                     "overridesArgumentCheck":  false,
                                     "restructureCandidates":  [
@@ -7506,6 +7506,34 @@
                                     "behaviorFixtureStatus":  "Uncovered"
                                 },
                                 {
+                                    "publicKey":  "SEQUENCEINPUT",
+                                    "targetModule":  "legacy.expression.unresolved",
+                                    "handlerType":  "SequenceInputMethod",
+                                    "sourceReturnTypeStatus":  "Resolved",
+                                    "sourceReturnTypeCandidates":  [
+                                                                       "EraType.Integer"
+                                                                   ],
+                                    "resolvedReturnType":  "EraType.Integer",
+                                    "returnResolutionStatus":  "PreservedStatic",
+                                    "ruleId":  "",
+                                    "sourceArgumentSchemaStatus":  "Resolved",
+                                    "sourceArgumentSchemaCandidates":  [
+                                                                           "new EraType[] { EraType.String }"
+                                                                       ],
+                                    "resolvedArgumentSchema":  "new EraType[] { EraType.String }",
+                                    "staticSignatureStatus":  "CompleteStatic",
+                                    "overridesArgumentCheck":  false,
+                                    "restructureCandidates":  [
+                                                                  "false"
+                                                              ],
+                                    "completionModeCandidate":  "SynchronousBodyCandidate",
+                                    "effectCandidates":  [
+                                                             "ValueOrUnclassifiedCandidate"
+                                                         ],
+                                    "evidenceStatus":  "StaticCandidate",
+                                    "behaviorFixtureStatus":  "Uncovered"
+                                },
+                                {
                                     "publicKey":  "SETANIMETIMER",
                                     "targetModule":  "legacy.expression.unresolved",
                                     "handlerType":  "SetAnimeTimerMethod",
@@ -8897,6 +8925,34 @@
                                     "overridesArgumentCheck":  false,
                                     "restructureCandidates":  [
                                                                   "true"
+                                                              ],
+                                    "completionModeCandidate":  "SynchronousBodyCandidate",
+                                    "effectCandidates":  [
+                                                             "ValueOrUnclassifiedCandidate"
+                                                         ],
+                                    "evidenceStatus":  "StaticCandidate",
+                                    "behaviorFixtureStatus":  "Uncovered"
+                                },
+                                {
+                                    "publicKey":  "STRFORMCHECK",
+                                    "targetModule":  "legacy.expression.unresolved",
+                                    "handlerType":  "StrFormCheckMethod",
+                                    "sourceReturnTypeStatus":  "Resolved",
+                                    "sourceReturnTypeCandidates":  [
+                                                                       "EraType.Integer"
+                                                                   ],
+                                    "resolvedReturnType":  "EraType.Integer",
+                                    "returnResolutionStatus":  "PreservedStatic",
+                                    "ruleId":  "",
+                                    "sourceArgumentSchemaStatus":  "Resolved",
+                                    "sourceArgumentSchemaCandidates":  [
+                                                                           "new EraType[] { EraType.String }"
+                                                                       ],
+                                    "resolvedArgumentSchema":  "new EraType[] { EraType.String }",
+                                    "staticSignatureStatus":  "CompleteStatic",
+                                    "overridesArgumentCheck":  false,
+                                    "restructureCandidates":  [
+                                                                  "false"
                                                               ],
                                     "completionModeCandidate":  "SynchronousBodyCandidate",
                                     "effectCandidates":  [

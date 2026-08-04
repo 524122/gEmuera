@@ -82,14 +82,14 @@ public sealed partial class EmueraStartupComponent : Node
         const string utf8Path = "res://Text/emuera_config_utf8.txt";
         const string utf8CnPath = "res://Text/emuera_config_utf8_zhcn.txt";
 
-        if (!FileAccess.FileExists(shiftjisPath) ||
-            !FileAccess.FileExists(utf8Path) ||
-            !FileAccess.FileExists(utf8CnPath))
+        if (!Godot.FileAccess.FileExists(shiftjisPath) ||
+            !Godot.FileAccess.FileExists(utf8Path) ||
+            !Godot.FileAccess.FileExists(utf8CnPath))
             return;
 
-        byte[] shiftjisBytes = FileAccess.GetFileAsBytes(shiftjisPath);
-        string utf8Text = FileAccess.GetFileAsString(utf8Path);
-        string utf8CnText = FileAccess.GetFileAsString(utf8CnPath);
+        byte[] shiftjisBytes = Godot.FileAccess.GetFileAsBytes(shiftjisPath);
+        string utf8Text = Godot.FileAccess.GetFileAsString(utf8Path);
+        string utf8CnText = Godot.FileAccess.GetFileAsString(utf8CnPath);
 
         List<string> jisMd5Strings = GenericUtils.CalcMd5List(shiftjisBytes);
         List<string> utf8Strings = BuildNonEmptyLines(utf8Text, split);

@@ -250,6 +250,19 @@
       "notes": "Component mirrors launcher selection for current M0 startup diagnostics."
     },
     {
+      "id": "prototype-runtime-profile-selection",
+      "markerId": "profile.selected-name",
+      "fileRegex": "^Scripts/GodotHost/PrototypeRuntimeNode\\.cs$",
+      "category": "profile-selection",
+      "currentOwner": "PrototypeRuntimeNode",
+      "intendedOwner": "Core application session selection request",
+      "targetModule": "session.selection",
+      "behaviorKey": "",
+      "capabilityId": "compatibility.plan.selection.v1",
+      "fixtureId": "DIA-PLAN-SELECT-001",
+      "notes": "The sidecar chooses a candidate Core session and does not replace the legacy Parser/VM owner."
+    },
+    {
       "id": "launcher-v24-profile-id",
       "markerId": "profile.v24-id",
       "fileRegex": "^Scripts/FirstWindow\\.cs$",
@@ -276,6 +289,32 @@
       "notes": "M0 runner keeps the legacy profile vocabulary for baseline reproduction."
     },
     {
+      "id": "program-v24-profile-id",
+      "markerId": "profile.v24-id",
+      "fileRegex": "^Scripts/Emuera/Program\\.cs$",
+      "category": "profile-selection",
+      "currentOwner": "Program.DetectCoreProfile",
+      "intendedOwner": "candidate CompatibilityPlan builder input",
+      "targetModule": "gemuera.v24",
+      "behaviorKey": "",
+      "capabilityId": "dialect.module-id.v1",
+      "fixtureId": "DIA-PLAN-SELECT-001",
+      "notes": "Legacy v24 identifier is resolved to the current combined profile before the session plan is frozen."
+    },
+    {
+      "id": "prototype-runtime-v24-profile-id",
+      "markerId": "profile.v24-id",
+      "fileRegex": "^Scripts/GodotHost/PrototypeRuntimeNode\\.cs$",
+      "category": "profile-selection",
+      "currentOwner": "PrototypeRuntimeNode",
+      "intendedOwner": "Core application session selection request",
+      "targetModule": "gemuera.v24",
+      "behaviorKey": "",
+      "capabilityId": "dialect.module-id.v1",
+      "fixtureId": "DIA-PLAN-SELECT-001",
+      "notes": "The sidecar v24 ID selects a candidate Core plan only."
+    },
+    {
       "id": "program-snake-profile-id",
       "markerId": "profile.snake-id",
       "fileRegex": "^Scripts/Emuera/Program\\.cs$",
@@ -287,6 +326,19 @@
       "capabilityId": "dialect.module-id.v1",
       "fixtureId": "DIA-PLAN-SELECT-001",
       "notes": "Legacy string is resolved to a combined profile today."
+    },
+    {
+      "id": "prototype-runtime-snake-profile-id",
+      "markerId": "profile.snake-id",
+      "fileRegex": "^Scripts/GodotHost/PrototypeRuntimeNode\\.cs$",
+      "category": "profile-selection",
+      "currentOwner": "PrototypeRuntimeNode",
+      "intendedOwner": "Core application session selection request",
+      "targetModule": "game.snake",
+      "behaviorKey": "",
+      "capabilityId": "dialect.module-id.v1",
+      "fixtureId": "DIA-PLAN-SELECT-001",
+      "notes": "The sidecar Snake ID selects a candidate Core plan only."
     },
     {
       "id": "content-snake-profile-id",
@@ -378,6 +430,19 @@
       "capabilityId": "",
       "fixtureId": "DIA-REG-SCOPEDVAR-001",
       "notes": "Setting controls whether VARI/VARS enter the static instruction registry."
+    },
+    {
+      "id": "program-scoped-variable-profile-binding",
+      "markerId": "setting.scoped-variable-instruction",
+      "fileRegex": "^Scripts/Emuera/Program\\.cs$",
+      "category": "configuration-projection",
+      "currentOwner": "Program.ConfigureCompatibilityPlan",
+      "intendedOwner": "frozen LegacyCompatibilityProfile",
+      "targetModule": "game.snake",
+      "behaviorKey": "instruction.scoped-variable-registration.v1",
+      "capabilityId": "",
+      "fixtureId": "DIA-REG-SCOPEDVAR-001",
+      "notes": "Program freezes the loaded setting into the active legacy profile before the parser registry is constructed."
     },
     {
       "id": "scoped-variable-registration-guard",

@@ -1,4 +1,144 @@
+# Repository formatting and naming conventions.
+# See docs/gEmueraCodeWiki/11-Code-Style-Conventions.md for boundary rules.
+
 root = true
 
 [*]
 charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{gd,gdshader,py}]
+indent_style = tab
+indent_size = 4
+
+[*.{tscn,tres,godot,cfg,toml}]
+indent_style = tab
+indent_size = 4
+
+[*.{md,yaml,yml,json}]
+indent_style = space
+indent_size = 2
+
+[*.{ps1,psm1,psd1}]
+indent_style = space
+indent_size = 4
+
+[*.cs]
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_using_directive_placement = outside_namespace:suggestion
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_prefer_simple_using_statement = true:suggestion
+csharp_style_prefer_braces = true:suggestion
+csharp_prefer_braces = true:suggestion
+
+# Modern C# names: non-public fields use _camelCase; exposed symbols use PascalCase.
+dotnet_naming_rule.nonpublic_fields_underscore.severity = suggestion
+dotnet_naming_rule.nonpublic_fields_underscore.symbols = nonpublic_fields
+dotnet_naming_rule.nonpublic_fields_underscore.style = underscore_camel_case
+dotnet_naming_symbols.nonpublic_fields.applicable_kinds = field
+dotnet_naming_symbols.nonpublic_fields.applicable_accessibilities = private, protected, protected_internal
+dotnet_naming_style.underscore_camel_case.required_prefix = _
+dotnet_naming_style.underscore_camel_case.capitalization = camel_case
+
+dotnet_naming_rule.exposed_members_pascal_case.severity = suggestion
+dotnet_naming_rule.exposed_members_pascal_case.symbols = exposed_members
+dotnet_naming_rule.exposed_members_pascal_case.style = pascal_case
+dotnet_naming_symbols.exposed_members.applicable_kinds = class, struct, interface, enum, property, method, event, delegate
+dotnet_naming_symbols.exposed_members.applicable_accessibilities = public, internal, protected, protected_internal
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
+dotnet_naming_rule.interfaces_i_prefix.severity = suggestion
+dotnet_naming_rule.interfaces_i_prefix.symbols = interfaces
+dotnet_naming_rule.interfaces_i_prefix.style = i_prefix_pascal_case
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+dotnet_naming_style.i_prefix_pascal_case.required_prefix = I
+dotnet_naming_style.i_prefix_pascal_case.capitalization = pascal_case
+
+dotnet_naming_rule.type_parameters_t_prefix.severity = suggestion
+dotnet_naming_rule.type_parameters_t_prefix.symbols = type_parameters
+dotnet_naming_rule.type_parameters_t_prefix.style = t_prefix_pascal_case
+dotnet_naming_symbols.type_parameters.applicable_kinds = type_parameter
+dotnet_naming_style.t_prefix_pascal_case.required_prefix = T
+dotnet_naming_style.t_prefix_pascal_case.capitalization = pascal_case
+
+dotnet_naming_rule.locals_and_parameters_camel_case.severity = suggestion
+dotnet_naming_rule.locals_and_parameters_camel_case.symbols = locals_and_parameters
+dotnet_naming_rule.locals_and_parameters_camel_case.style = camel_case
+dotnet_naming_symbols.locals_and_parameters.applicable_kinds = local, parameter
+dotnet_naming_style.camel_case.capitalization = camel_case
+
+dotnet_diagnostic.CA1051.severity = suggestion
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1707.severity = suggestion
+dotnet_diagnostic.CA1715.severity = suggestion
+dotnet_diagnostic.CA1825.severity = suggestion
+dotnet_diagnostic.CA1834.severity = suggestion
+dotnet_diagnostic.IDE0051.severity = silent
+dotnet_diagnostic.IDE0059.severity = suggestion
+dotnet_diagnostic.IDE0060.severity = silent
+dotnet_diagnostic.IDE0063.severity = suggestion
+dotnet_diagnostic.IDE0090.severity = suggestion
+dotnet_diagnostic.IDE0161.severity = suggestion
+
+# Upstream-synchronised legacy code retains its original style and identifiers.
+[Scripts/*.cs]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+[Scripts/Emuera/**.cs]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+dotnet_naming_rule.nonpublic_fields_underscore.severity = none
+dotnet_naming_rule.exposed_members_pascal_case.severity = none
+dotnet_naming_rule.interfaces_i_prefix.severity = none
+csharp_style_expression_bodied_properties = false:suggestion
+csharp_style_expression_bodied_accessors = false:suggestion
+
+[Scripts/uEmuera/**.cs]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+dotnet_naming_rule.nonpublic_fields_underscore.severity = none
+dotnet_naming_rule.exposed_members_pascal_case.severity = none
+dotnet_naming_rule.interfaces_i_prefix.severity = none
+csharp_style_expression_bodied_properties = false:suggestion
+csharp_style_expression_bodied_accessors = false:suggestion
+
+# The pure Core and its contract smoke are modern, Godot-free code.
+[src/Core/**.cs]
+indent_style = space
+indent_size = 4
+tab_width = 4
+csharp_style_namespace_declarations = file_scoped:suggestion
+
+[tools/core-contracts/**.cs]
+indent_style = space
+indent_size = 4
+tab_width = 4
+csharp_style_namespace_declarations = file_scoped:suggestion
+
+# Third-party Godot addons retain vendor formatting.
+[addons/**.cs]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+dotnet_naming_rule.nonpublic_fields_underscore.severity = none
+dotnet_naming_rule.exposed_members_pascal_case.severity = none
+dotnet_naming_rule.interfaces_i_prefix.severity = none
+csharp_style_expression_bodied_properties = false:suggestion
+csharp_style_expression_bodied_accessors = false:suggestion

@@ -2,9 +2,9 @@
 param([string]$ProjectRoot = (Get-Location).Path)
 
 Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+$ErrorsctionPreference = 'Stop'
 $toolRoot = Join-Path $ProjectRoot 'tools\dialect-inventory'
-$generatedRoot = Join-Path $ProjectRoot 'NewFrameworkDesign\generated'
+$generatedRoot = Join-Path $ProjectRoot 'docs\NewFrameworkDesign\generated'
 $modulePath = Join-Path $toolRoot 'DialectNameLookupContract.psm1'
 $catalogPath = Join-Path $toolRoot 'dialect-name-lookup-contract.json'
 
@@ -16,7 +16,7 @@ function Assert-LookupThrows([scriptblock]$Action, [string]$Pattern, [string]$Fa
     $caught = $null
     try { & $Action } catch { $caught = $_ }
     if ($null -eq $caught) { throw $Failure }
-    if ($caught.Exception.Message -notmatch $Pattern) { throw "$Failure Actual: $($caught.Exception.Message)" }
+    if ($caught.Exception.Message -notmatch $Pattern) { throw "$Failure sctual: $($caught.Exception.Message)" }
 }
 
 function Read-LookupJson([string]$Path) {
@@ -36,10 +36,10 @@ try {
     $actual = New-DialectNameLookupContractReport -Inventory $inventory -OwnershipEvidence $ownership -Catalog $catalog -ProjectRoot $ProjectRoot
 
     Assert-LookupContract ($actual.workPackage -ceq 'M0-DIA-08') 'Unexpected lookup work package.'
-    Assert-LookupContract ($actual.instructionRegistrationCount -eq 326) 'Instruction registration count drifted.'
-    Assert-LookupContract ($actual.expressionRegistrationCount -eq 360) 'Expression registration count drifted.'
+    Assert-LookupContract ($actual.instructionRegistrationCount -eq 327) 'Instruction registration count drifted.'
+    Assert-LookupContract ($actual.expressionRegistrationCount -eq 362) 'Expression registration count drifted.'
     Assert-LookupContract ($actual.crossRegistryCollisionCount -eq 9) 'Cross-registry collision count drifted.'
-    Assert-LookupContract ($actual.instructionLookupSurfaceCount -eq 677) 'Instruction lookup surface count drifted.'
+    Assert-LookupContract ($actual.instructionLookupSurfaceCount -eq 680) 'Instruction lookup surface count drifted.'
     Assert-LookupContract ($actual.currentRuntimeIsolation.status -ceq 'Failed') 'Runtime isolation was overstated.'
     Assert-LookupContract ($actual.parserVmConsumption.status -ceq 'NotConsumed') 'DIA-08 was incorrectly presented as runtime wiring.'
     Assert-LookupContract ($actual.semanticStatus.alias -ceq 'Unresolved') 'Semantic alias status was overstated.'
@@ -52,14 +52,14 @@ try {
     Assert-LookupContract ($actual.expressionLookup.normalizer.whenTrue -ceq 'CurrentCultureToUpper') 'Expression normalizer drifted.'
     Assert-LookupContract ($actual.expressionLookup.normalizer.selector -ceq 'Config.ICFunction') 'Expression normalizer selector drifted.'
     Assert-LookupContract ($actual.projection.collisionPolicy -ceq 'ExistingInstructionWins') 'Projection collision policy drifted.'
-    Assert-LookupContract ($actual.mutableDictionaryExposure.instructionRegistry -ceq 'RawStaticMutableDictionary') 'Instruction mutability exposure was missed.'
-    Assert-LookupContract ($actual.mutableDictionaryExposure.expressionRegistry -ceq 'RawStaticMutableDictionary') 'Expression mutability exposure was missed.'
+    Assert-LookupContract ($actual.mutableDictionaryExposure.instructionRegistry -ceq 'ImmutableProfileSurface') 'Instruction surface exposure was missed.'
+    Assert-LookupContract ($actual.mutableDictionaryExposure.expressionRegistry -ceq 'ImmutableProfileSurface') 'Expression surface exposure was missed.'
     Assert-LookupContract ($actual.sourceTextRewrite.classification -ceq 'SourceTextRewrite') 'Rename was misclassified.'
     Assert-LookupContract ($actual.sourceTextRewrite.registryAliasMechanism -ceq 'None') 'Rename was incorrectly modeled as registry alias.'
     Assert-LookupContract ($actual.sourceTextRewrite.registryReplacementMechanism -ceq 'None') 'Rename was incorrectly modeled as registry replacement.'
-    Assert-LookupContract ($actual.coverage.semanticAliasUnresolvedCount -eq 686) 'Per-key semantic alias status was overstated.'
-    Assert-LookupContract ($actual.coverage.semanticReplacementUnresolvedCount -eq 686) 'Per-key semantic replacement status was overstated.'
-    Assert-LookupContract ($actual.keyDomain.asciiUpperPublicKeyCount -eq 684) 'ASCII uppercase public-key count drifted.'
+    Assert-LookupContract ($actual.coverage.semanticAliasUnresolvedCount -eq 689) 'Per-key semantic alias status was overstated.'
+    Assert-LookupContract ($actual.coverage.semanticReplacementUnresolvedCount -eq 689) 'Per-key semantic replacement status was overstated.'
+    Assert-LookupContract ($actual.keyDomain.asciiUpperPublicKeyCount -eq 687) 'ASCII uppercase public-key count drifted.'
     Assert-LookupContract ($actual.keyDomain.nonAsciiOrMixedCasePublicKeyCount -eq 2) 'Unicode public-key count drifted.'
     Assert-LookupContract (@($actual.entries | Where-Object semanticAliasStatus -cne 'Unresolved').Count -eq 0) 'An entry resolved semantic alias without evidence.'
     Assert-LookupContract (@($actual.entries | Where-Object semanticReplacementStatus -cne 'Unresolved').Count -eq 0) 'An entry resolved semantic replacement without evidence.'
@@ -68,7 +68,7 @@ try {
     Assert-LookupContract ((@($actual.collisions.publicKey) -join ',') -ceq ($expectedCollisions -join ',')) 'Collision key set drifted.'
     Assert-LookupContract (@($actual.collisions | Where-Object resolution -cne 'InstructionPrecedence').Count -eq 0) 'A collision lost instruction precedence.'
     Assert-LookupContract (@($actual.entries | Where-Object { $_.registryKind -eq 'ExpressionFunction' -and $_.instructionProjection -eq 'SuppressedByInstructionCollision' }).Count -eq 9) 'Projected expression collision count drifted.'
-    Assert-LookupContract (@($actual.entries | Where-Object { $_.registryKind -eq 'ExpressionFunction' -and $_.instructionProjection -eq 'ProjectedAsMethodInstruction' }).Count -eq 351) 'Projected method instruction count drifted.'
+    Assert-LookupContract (@($actual.entries | Where-Object { $_.registryKind -eq 'ExpressionFunction' -and $_.instructionProjection -eq 'ProjectedAsMethodInstruction' }).Count -eq 353) 'Projected method instruction count drifted.'
 
     Assert-LookupContract (Test-LegacyInstructionLookupMatch -RegisteredKey 'PRINT' -InputName 'print' -IgnoreCaseVariable $true) 'ICVariable=true did not ignore instruction case.'
     Assert-LookupContract (-not (Test-LegacyInstructionLookupMatch -RegisteredKey 'PRINT' -InputName 'print' -IgnoreCaseVariable $false)) 'ICVariable=false ignored instruction case.'

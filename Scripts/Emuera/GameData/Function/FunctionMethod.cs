@@ -69,4 +69,67 @@ namespace MinorShift.Emuera.GameData.Function
 			Name = name;
 		}
 	}
+
+	/// <summary>
+	/// Profile-scoped projection for legacy methods whose public ERB contract differs
+	/// between v24 and Snake. The legacy implementation remains the execution owner;
+	/// this immutable wrapper freezes the selected argument surface when the registry
+	/// is projected, so argument validation does not read the profile on every call.
+	/// </summary>
+	internal sealed class DialectFunctionMethod : FunctionMethod
+	{
+		private readonly FunctionMethod inner;
+		private readonly Func<string, IOperandTerm[], string> checker;
+		private readonly Func<IOperandTerm[], IOperandTerm[]> normalizer;
+
+		internal DialectFunctionMethod(
+			FunctionMethod inner,
+			EraType[] declaredArgumentTypes,
+			Func<string, IOperandTerm[], string> checker,
+			Func<IOperandTerm[], IOperandTerm[]> normalizer = null)
+		{
+			this.inner = inner ?? throw new ArgumentNullException(nameof(inner));
+			this.checker = checker ?? throw new ArgumentNullException(nameof(checker));
+			this.normalizer = normalizer;
+			ReturnType = inner.ReturnType;
+			argumentTypeArray = declaredArgumentTypes;
+			CanRestructure = inner.CanRestructure;
+			HasUniqueRestructure = inner.HasUniqueRestructure;
+		}
+
+		private IOperandTerm[] Prepare(IOperandTerm[] arguments)
+		{
+			return normalizer == null ? arguments : normalizer(arguments);
+		}
+
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			return checker(name, arguments);
+		}
+
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			return inner.GetIntValue(exm, Prepare(arguments));
+		}
+
+		public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			return inner.GetStrValue(exm, Prepare(arguments));
+		}
+
+		public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			return inner.GetFloatValue(exm, Prepare(arguments));
+		}
+
+		public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			return inner.GetReturnValue(exm, Prepare(arguments));
+		}
+
+		public override bool UniqueRestructure(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			return inner.UniqueRestructure(exm, Prepare(arguments));
+		}
+	}
 }

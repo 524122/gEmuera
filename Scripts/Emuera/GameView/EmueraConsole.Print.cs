@@ -430,16 +430,27 @@ namespace MinorShift.Emuera.GameView
 		}
 
 		
-		public void PrintImg(string str)
-		{
-			printBuffer.Append(new ConsoleImagePart(str, null, 0, 0, 0));
-		}
+			public void PrintImg(string str)
+			{
+				printBuffer.Append(new ConsoleImagePart(str, null, 0, 0, 0));
+			}
 
-		public void PrintShape(string type, int[] param)
-		{
-			ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
-			printBuffer.Append(part);
-		}
+			public void PrintImg(string name, string buttonName, string mappingName, MixedNum height, MixedNum width, MixedNum ypos)
+			{
+				printBuffer.Append(new ConsoleImagePart(name, buttonName, mappingName, height, width, ypos));
+			}
+
+			public void PrintShape(string type, int[] param)
+			{
+				ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
+				printBuffer.Append(part);
+			}
+
+			public void PrintShape(string type, MixedNum[] param)
+			{
+				ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
+				printBuffer.Append(part);
+			}
 
 		public void PrintHtml(string str)
 		{

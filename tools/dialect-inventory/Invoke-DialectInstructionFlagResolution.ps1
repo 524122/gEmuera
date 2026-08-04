@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest;$ErrorActionPreference='Stop';$scriptRoot=Split-P
 if([string]::IsNullOrWhiteSpace($ClassificationPath)){$ClassificationPath=Join-Path $scriptRoot 'dialect-classification.json'}
 if([string]::IsNullOrWhiteSpace($ArgumentCatalogPath)){$ArgumentCatalogPath=Join-Path $scriptRoot 'instruction-signature-resolution.json'}
 if([string]::IsNullOrWhiteSpace($FlagCatalogPath)){$FlagCatalogPath=Join-Path $scriptRoot 'instruction-flag-resolution.json'}
-if([string]::IsNullOrWhiteSpace($OutputPath)){$OutputPath=Join-Path ([IO.Path]::GetFullPath($ProjectRoot)) 'NewFrameworkDesign\generated\dialect-instruction-flag-resolution.json'}
+if([string]::IsNullOrWhiteSpace($OutputPath)){$OutputPath=Join-Path ([IO.Path]::GetFullPath($ProjectRoot)) 'docs\NewFrameworkDesign\generated\dialect-instruction-flag-resolution.json'}
 try{
     Import-Module (Join-Path $scriptRoot 'DialectInventory.psm1') -Force;Import-Module (Join-Path $scriptRoot 'DialectSignatureInventory.psm1') -Force;Import-Module (Join-Path $scriptRoot 'DialectSignatureResolution.psm1') -Force;Import-Module (Join-Path $scriptRoot 'DialectInstructionFlagResolution.psm1') -Force
     $inventory=New-DialectInventory -ProjectRoot $ProjectRoot -ClassificationPath $ClassificationPath;$signatures=New-DialectSignatureInventory -ProjectRoot $ProjectRoot -Inventory $inventory

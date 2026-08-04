@@ -51,7 +51,10 @@ public sealed class ImportJournal
 {
     private readonly object _gate = new(); private ImportJournalState _state = ImportJournalState.Created; private long _bytes;
     public ImportJournal(StorageContentToken token, SessionGeneration generation) { Token = token; Generation = generation; }
-    public StorageContentToken Token { get; } public SessionGeneration Generation { get; } public ImportJournalState State { get { lock (_gate) return _state; } } public long BytesWritten { get { lock (_gate) return _bytes; } }
+    public StorageContentToken Token { get; }
+    public SessionGeneration Generation { get; }
+    public ImportJournalState State { get { lock (_gate) return _state; } }
+    public long BytesWritten { get { lock (_gate) return _bytes; } }
     public void BeginWrite() { lock (_gate) { Ensure(ImportJournalState.Created); _state = ImportJournalState.Writing; } }
     public void Append(long bytes) { lock (_gate) { Ensure(ImportJournalState.Writing); if (bytes <= 0) throw new ArgumentOutOfRangeException(nameof(bytes)); _bytes = checked(_bytes + bytes); } }
     public void MarkVerified() { lock (_gate) { Ensure(ImportJournalState.Writing); if (_bytes == 0) throw new InvalidOperationException("Cannot verify an empty import."); _state = ImportJournalState.Verified; } }
@@ -66,16 +69,20 @@ public enum PortLeaseState { Open, Completed, Cancelled, Disposed }
 public sealed class DatabaseOperationLease : IDisposable
 {
     private int _state;
-    public PortOperationKey Key { get; } public DatabaseOperationLease(PortOperationKey key) { if (key.OperationId == SessionOperationId.None) throw new ArgumentException("Operation id is required.", nameof(key)); Key = key; }
+    public PortOperationKey Key { get; }
+    public DatabaseOperationLease(PortOperationKey key) { if (key.OperationId == SessionOperationId.None) throw new ArgumentException("Operation id is required.", nameof(key)); Key = key; }
     public PortLeaseState State => (PortLeaseState)Volatile.Read(ref _state);
-    public void Complete() { Transition(PortLeaseState.Completed); } public void Cancel() { Transition(PortLeaseState.Cancelled); } public void Dispose() { Interlocked.Exchange(ref _state, (int)PortLeaseState.Disposed); }
+    public void Complete() { Transition(PortLeaseState.Completed); }
+    public void Cancel() { Transition(PortLeaseState.Cancelled); }
+    public void Dispose() { Interlocked.Exchange(ref _state, (int)PortLeaseState.Disposed); }
     private void Transition(PortLeaseState state) { if (Interlocked.CompareExchange(ref _state, (int)state, 0) != 0) throw new InvalidOperationException("Database operation lease is no longer open."); }
 }
 
 public readonly record struct LifecycleSignal(SessionGeneration Generation, bool IsPaused, bool IsExiting);
 public sealed class AudioGenerationGate
 {
-    private SessionGeneration _generation; public AudioGenerationGate(SessionGeneration generation) { _generation = generation; } public SessionGeneration Generation => _generation;
+    private SessionGeneration _generation; public AudioGenerationGate(SessionGeneration generation) { _generation = generation; }
+    public SessionGeneration Generation => _generation;
     public bool Accept(SessionGeneration generation) => generation == _generation;
     public void Reset(SessionGeneration generation) { if (generation.Value <= _generation.Value) throw new ArgumentOutOfRangeException(nameof(generation)); _generation = generation; }
 }

@@ -35,6 +35,17 @@ function Normalize-CSharpEvidence {
     return ([regex]::Replace($Value, '\s+', ' ')).Trim()
 }
 
+function Normalize-DialectArgumentSchema {
+    param([AllowEmptyString()][string]$Value)
+    $normalized = Normalize-CSharpEvidence $Value
+    # REPEAT/ FOR use a profile-selected builder at runtime.  Its null-coalescing
+    # construction is one public schema, not two unrelated candidates.
+    if ($normalized -match 'ArgumentParser\.GetArgumentBuilder\(FunctionArgType\.SP_FOR_NEXT\)') {
+        return 'FunctionArgType.SP_FOR_NEXT'
+    }
+    return $normalized
+}
+
 function Get-CSharpBlockEndIndex {
     param([string]$Text, [int]$OpenBraceIndex)
     if ($OpenBraceIndex -lt 0 -or $OpenBraceIndex -ge $Text.Length -or $Text[$OpenBraceIndex] -ne '{') { throw 'Invalid C# block start.' }
@@ -225,6 +236,7 @@ function New-DialectSignatureInventory {
         $blockText = if ($classResolution.status -eq 'Resolved') { [string]$classResolution.entry.blockText } else { '' }
         if ($bindingKind -in @('InstructionHandler','GeneratedInstructionHandler') -and $classResolution.status -eq 'Resolved') {
             $argumentCandidates = @(Get-UniqueEvidenceCandidates $blockText '\bArgBuilder\s*=(?!=)\s*(?<expr>[^;]+);' | ForEach-Object {
+                $_ = Normalize-DialectArgumentSchema $_
                 if ($_ -match '^ArgumentParser\.GetArgumentBuilder\((?<arg>FunctionArgType\.[A-Za-z0-9_]+)\)$') { $Matches['arg'] } else { $_ }
             })
         }

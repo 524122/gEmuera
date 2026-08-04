@@ -13,7 +13,11 @@ public sealed record RemovalInventoryEntry
         if (dependencies.Length == 0) throw new ArgumentException("Removal entries must identify dependent packages.", nameof(dependentPackages));
         Status = status; InvocationCount = invocationCount; DependentPackages = new ReadOnlyCollection<string>(dependencies);
     }
-    public string OwnerId { get; } public string Path { get; } public RemovalLifecycleStatus Status { get; } public IReadOnlyList<string> DependentPackages { get; } public long InvocationCount { get; }
+    public string OwnerId { get; }
+    public string Path { get; }
+    public RemovalLifecycleStatus Status { get; }
+    public IReadOnlyList<string> DependentPackages { get; }
+    public long InvocationCount { get; }
     private static string Required(string? value, string name) => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException("Value is required.", name) : value.Trim();
 }
 
@@ -59,7 +63,9 @@ public sealed class RemovalPacket
         _entries = new ReadOnlyCollection<RemovalInventoryEntry>((entries ?? throw new ArgumentNullException(nameof(entries))).ToArray()); _cycles = new ReadOnlyCollection<ReleaseCycle>((cycles ?? throw new ArgumentNullException(nameof(cycles))).ToArray());
         if (_entries.Count == 0 || _cycles.Count == 0) throw new ArgumentException("Removal packet requires inventory and release evidence."); Rollback = rollback ?? throw new ArgumentNullException(nameof(rollback)); Approval = approval ?? throw new ArgumentNullException(nameof(approval));
     }
-    public string PacketId { get; } public IReadOnlyList<RemovalInventoryEntry> Entries => _entries; public IReadOnlyList<ReleaseCycle> Cycles => _cycles; public RollbackDrill Rollback { get; } public RemovalApproval Approval { get; }
+    public string PacketId { get; }
+    public IReadOnlyList<RemovalInventoryEntry> Entries => _entries; public IReadOnlyList<ReleaseCycle> Cycles => _cycles; public RollbackDrill Rollback { get; }
+    public RemovalApproval Approval { get; }
     public bool CanMarkRemoved()
     {
         if (_cycles.Count < 2 || _cycles.TakeLast(2).Any(cycle => cycle.FallbackCalls != 0 || cycle.FaultCount != 0)) return false;

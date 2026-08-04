@@ -1,6 +1,6 @@
 # NewFrameworkDesign 文档守卫
 
-该守卫把 `NewFrameworkDesign/AcceptanceTraceability.md` 中的静态检查变成可执行门禁。它只读取设计文档；除非显式传入 `-ReportPath`，否则不会写文件。
+该守卫把 `docs/NewFrameworkDesign/AcceptanceTraceability.md` 中的静态检查变成可执行门禁。它只读取设计文档；除非显式传入 `-ReportPath`，否则不会写文件。
 
 ## 本地运行
 

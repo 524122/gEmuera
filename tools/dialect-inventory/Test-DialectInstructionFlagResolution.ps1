@@ -41,8 +41,8 @@ try {
 
     Assert-FlagContract ($actual.workPackage -eq 'M0-DIA-06') 'Unexpected flag work package.'
     Assert-FlagContract ($actual.executionStatus -eq 'InProgress' -and $actual.gateStatus -eq 'Blocked' -and $actual.blockerCode -eq 'EvidenceMissing' -and $actual.result -eq 'Partial') 'M0 gate was incorrectly advanced.'
-    Assert-FlagContract ($actual.instructionCount -eq 326) 'Unexpected descriptor count.'
-    Assert-FlagContract ($actual.coverage.directRegistrationStaticCount -eq 67 -and $actual.coverage.handlerSingleStaticCount -eq 136 -and $actual.coverage.handlerRulesStaticCount -eq 123) 'Flag resolution partition is incorrect.'
+    Assert-FlagContract ($actual.instructionCount -eq 327) 'Unexpected descriptor count.'
+    Assert-FlagContract ($actual.coverage.directRegistrationStaticCount -eq 67 -and $actual.coverage.handlerSingleStaticCount -eq 137 -and $actual.coverage.handlerRulesStaticCount -eq 123) 'Flag resolution partition is incorrect.'
     Assert-FlagContract ($actual.coverage.unresolvedCount -eq 0 -and $actual.coverage.catalogRuleCount -eq 35 -and $actual.coverage.knownFlagCount -eq 17) 'Flag resolution coverage is incomplete.'
     Assert-FlagContract ($actual.sourceDescriptorSetHash -eq $signatures.descriptorSetHash -and $actual.sourceInstructionSignatureResolutionHash -eq $arguments.resolutionSetHash) 'Flag report source identity mismatch.'
     Assert-FlagContract ($actual.catalogHash -match '^[0-9a-f]{64}$' -and $actual.resolutionSetHash -match '^[0-9a-f]{64}$' -and (Test-Path $output -PathType Leaf)) 'Flag report/hash output is invalid.'

@@ -50,3 +50,32 @@ artifacts/
 
 # Stray test output
 1600
+
+# Logs, crash dumps, and one-off diagnostic output
+*.log
+*.dmp
+*.stackdump
+logs/
+
+# Temporary files and editor recovery copies
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*~
+
+# Test and coverage output
+TestResults/
+TestResults.xml
+*.trx
+*.coverage
+*.coveragexml
+coverage/
+
+# Additional IDE metadata
+.idea/
+.fleet/
+*.sln.iml

@@ -25,12 +25,12 @@ internal static class MultiLanguage
 		currentLanguage = lang;
 		texts.Clear();
 		var path = $"res://Lang/{lang}.txt";
-		if (!FileAccess.FileExists(path))
+		if (!Godot.FileAccess.FileExists(path))
 			path = "res://Lang/default.txt";
-		if (!FileAccess.FileExists(path))
+		if (!Godot.FileAccess.FileExists(path))
 			return;
 
-		var content = FileAccess.GetFileAsString(path);
+		var content = Godot.FileAccess.GetFileAsString(path);
 		var lines = content.Split('\n');
 		foreach (var line in lines)
 		{

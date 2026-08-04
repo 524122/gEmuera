@@ -180,7 +180,7 @@ Legacy VM worker
 不能说：
 
 - Core 已成为当前生产 ERB interpreter / renderer；
-- CompatibilityPlan 已完成 v24/Snake runtime isolation；
+- Core `CompatibilityPlan` 已接管生产 legacy VM 或实现完整会话隔离；legacy v24/Snake 注册表选择虽已由 runtime smoke 验证，但仍不等同于该结论；
 - Typed ports / SAF capability 已在 Android 真实设备完成验证；
 - Display DTO、PixelStore 或 deterministic save 已替换 legacy display/resource/save；
 - 文件存在、Core build 或一个 smoke 就说明迁移阶段通过。

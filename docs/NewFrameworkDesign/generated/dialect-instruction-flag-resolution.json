@@ -1,21 +1,21 @@
 {
     "schemaVersion":  "1.0.0",
     "workPackage":  "M0-DIA-06",
-    "generatedAtUtc":  "2026-07-15T13:52:36.3229530Z",
+    "generatedAtUtc":  "2026-07-31T12:17:25.3762663Z",
     "executionStatus":  "InProgress",
     "gateStatus":  "Blocked",
     "blockerCode":  "EvidenceMissing",
     "result":  "Partial",
-    "sourceDescriptorSetHash":  "d347bdd7bfbff61ee11504b30e5d5acaa1ab4c7a04482ac272f8db6115ba2fa9",
-    "sourceInstructionSignatureResolutionHash":  "2f9995f8630142a584767054d1f9ad4f7bef51a343e51654e1407d90845e80e2",
+    "sourceDescriptorSetHash":  "0ac8b25894d83eebdb929771b90497b8817f34058a249cf5ca1ce4767191d80c",
+    "sourceInstructionSignatureResolutionHash":  "2b00041c834a490767854334bf8fc944283e02e58bb2656ced2ca79562cf62fb",
     "catalogId":  "gemuera.m0.instruction-flag-resolution",
     "catalogVersion":  "1.0.0",
-    "catalogHash":  "6401768a3bdd5cadf5c3d31dbb1ee1b0c80654dce130972b05b2c1222e1e71d9",
-    "resolutionSetHash":  "16f8ecab443a20e0a69624eef5c3f02cfcb19ce8770fd775f1f5c7d6b9412717",
-    "instructionCount":  326,
+    "catalogHash":  "6d91ac563c951bdbe174f362727ca3efeda86819b21f6861fac24337caf8ced1",
+    "resolutionSetHash":  "61b4ad2788bd2f39023d1834f7c29e886c8b276f9122a57c2296d661a8dae820",
+    "instructionCount":  327,
     "coverage":  {
                      "directRegistrationStaticCount":  67,
-                     "handlerSingleStaticCount":  136,
+                     "handlerSingleStaticCount":  137,
                      "handlerRulesStaticCount":  123,
                      "unresolvedCount":  0,
                      "knownFlagCount":  17,
@@ -1050,9 +1050,9 @@
                          },
                          {
                              "publicKey":  "BITMAP_CACHE_ENABLE",
-                             "targetModule":  "game.snake",
+                             "targetModule":  "game.snake.candidate",
                              "handlerType":  "SNAKE_UI_SETTING_Instruction",
-                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
+                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [
@@ -7138,7 +7138,7 @@
                              "publicKey":  "PRINT_IMG",
                              "targetModule":  "legacy.common.unresolved",
                              "handlerType":  "PRINT_IMG_Instruction",
-                             "resolvedArgumentSchema":  "FunctionArgType.STR_EXPRESSION",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_PRINT_IMG",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [
@@ -7236,7 +7236,7 @@
                              "publicKey":  "PRINT_RECT",
                              "targetModule":  "legacy.common.unresolved",
                              "handlerType":  "PRINT_RECT_Instruction",
-                             "resolvedArgumentSchema":  "FunctionArgType.INT_ANY",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_PRINT_RECT",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [
@@ -7286,7 +7286,7 @@
                              "publicKey":  "PRINT_SPACE",
                              "targetModule":  "legacy.common.unresolved",
                              "handlerType":  "PRINT_SPACE_Instruction",
-                             "resolvedArgumentSchema":  "FunctionArgType.INT_EXPRESSION",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_PRINT_SPACE",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [
@@ -8247,7 +8247,7 @@
                              "publicKey":  "SETIMAGELAYER",
                              "targetModule":  "legacy.common.unresolved",
                              "handlerType":  "SETIMAGELAYER_Instruction",
-                             "resolvedArgumentSchema":  "SNAKE_ARGS_ArgumentBuilder.Instance",
+                             "resolvedArgumentSchema":  "SNAKE_SETIMAGELAYER_ArgumentBuilder.Instance",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [
@@ -8264,6 +8264,33 @@
                              "completionModeCandidate":  "SynchronousCandidate",
                              "effectCandidates":  [
                                                       "ConsoleOrInputCandidate",
+                                                      "SessionStateCandidate"
+                                                  ],
+                             "evidenceStatus":  "StaticCandidate",
+                             "behaviorFixtureStatus":  "Uncovered"
+                         },
+                         {
+                             "publicKey":  "SETIMAGELAYERL",
+                             "targetModule":  "legacy.common.unresolved",
+                             "handlerType":  "SETIMAGELAYERL_Instruction",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_SETIMAGELAYERL",
+                             "argumentResolutionStatus":  "PreservedStatic",
+                             "registrationFlagExpression":  "0",
+                             "handlerFlagCandidates":  [
+                                                           "METHOD_SAFE | EXTENDED"
+                                                       ],
+                             "effectiveFlags":  [
+                                                    "EXTENDED",
+                                                    "METHOD_SAFE"
+                                                ],
+                             "flagResolutionStatus":  "HandlerSingleStatic",
+                             "flagRuleIds":  [
+
+                                             ],
+                             "completionModeCandidate":  "SynchronousCandidate",
+                             "effectCandidates":  [
+                                                      "ConsoleOrInputCandidate",
+                                                      "MediaOrDisplayCandidate",
                                                       "SessionStateCandidate"
                                                   ],
                              "evidenceStatus":  "StaticCandidate",
@@ -8298,7 +8325,7 @@
                              "publicKey":  "SET_SKIA_QUALITY",
                              "targetModule":  "game.snake",
                              "handlerType":  "SNAKE_UI_SETTING_Instruction",
-                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
+                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [
@@ -8324,7 +8351,7 @@
                              "publicKey":  "SET_TEXT_DRAWING_MODE",
                              "targetModule":  "game.snake",
                              "handlerType":  "SNAKE_UI_SETTING_Instruction",
-                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
+                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [
@@ -8580,7 +8607,7 @@
                              "publicKey":  "STRICT_FONT_FALLBACK",
                              "targetModule":  "game.snake",
                              "handlerType":  "SNAKE_UI_SETTING_Instruction",
-                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
+                             "resolvedArgumentSchema":  "code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION)",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [
@@ -8782,7 +8809,7 @@
                              "publicKey":  "TEXT_BGC_ON",
                              "targetModule":  "game.snake",
                              "handlerType":  "SNAKE_TEXT_BGC_ON_Instruction",
-                             "resolvedArgumentSchema":  "SNAKE_ARGS_ArgumentBuilder.Instance",
+                             "resolvedArgumentSchema":  "FunctionArgType.SP_COLOR_ALPHA",
                              "argumentResolutionStatus":  "PreservedStatic",
                              "registrationFlagExpression":  "0",
                              "handlerFlagCandidates":  [

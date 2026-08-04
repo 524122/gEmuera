@@ -29,8 +29,8 @@ try {
     $catalogPath = Join-Path $ProjectRoot 'tools\dialect-inventory\dialect-behavior-fixture-contract-catalog.json'
     $catalogSchemaPath = Join-Path $ProjectRoot 'tools\dialect-inventory\dialect-behavior-fixture-contract-catalog.schema.json'
     $reportSchemaPath = Join-Path $ProjectRoot 'tools\dialect-inventory\dialect-behavior-fixture-contract.schema.json'
-    $vocabularyPath = Join-Path $ProjectRoot 'NewFrameworkDesign\generated\dialect-declaration-vocabulary.json'
-    $surfacePath = Join-Path $ProjectRoot 'NewFrameworkDesign\generated\dialect-policy-surface.json'
+    $vocabularyPath = Join-Path $ProjectRoot 'docs\NewFrameworkDesign\generated\dialect-declaration-vocabulary.json'
+    $surfacePath = Join-Path $ProjectRoot 'docs\NewFrameworkDesign\generated\dialect-policy-surface.json'
     foreach ($path in @($modulePath, $catalogPath, $catalogSchemaPath, $reportSchemaPath, $vocabularyPath, $surfacePath)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "M0-DIA-17 required input is missing: $path" }
     }

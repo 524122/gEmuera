@@ -6,6 +6,8 @@ using System.Linq;
 using System.Text;
 using GEmuera.Core.Compatibility;
 
+#nullable enable annotations
+
 namespace gEmuera.GodotHost;
 
 /// <summary>

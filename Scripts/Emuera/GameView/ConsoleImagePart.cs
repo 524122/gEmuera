@@ -18,29 +18,41 @@ namespace MinorShift.Emuera.GameView
 	{
 
 		public ConsoleImagePart(string resName, string resNameb, MixedNum raw_height, MixedNum raw_width, MixedNum raw_ypos)
-			: this(resName, resNameb, raw_height, raw_width, raw_ypos, 0, DisplayMode.Relative, null)
+			: this(resName, resNameb, raw_height, raw_width, raw_ypos, 0, DisplayMode.Relative, null, null)
+		{
+		}
+
+		public ConsoleImagePart(string resName, string resNameb, string resNamem, MixedNum raw_height, MixedNum raw_width, MixedNum raw_ypos)
+			: this(resName, resNameb, raw_height, raw_width, raw_ypos, 0, DisplayMode.Relative, null, resNamem)
 		{
 		}
 
 		public ConsoleImagePart(string resName, string resNameb, MixedNum raw_height, MixedNum raw_width, MixedNum raw_ypos, MixedNum raw_xpos, DisplayMode display)
-			: this(resName, resNameb, raw_height, raw_width, raw_ypos, raw_xpos, display, null)
+			: this(resName, resNameb, raw_height, raw_width, raw_ypos, raw_xpos, display, null, null)
 		{
 		}
 
 		public ConsoleImagePart(string resName, string resNameb, MixedNum raw_height, MixedNum raw_width, MixedNum raw_ypos, MixedNum raw_xpos, DisplayMode display, string colorMatrixVariableName)
+			: this(resName, resNameb, raw_height, raw_width, raw_ypos, raw_xpos, display, colorMatrixVariableName, null)
+		{
+		}
+
+		private ConsoleImagePart(string resName, string resNameb, MixedNum raw_height, MixedNum raw_width, MixedNum raw_ypos, MixedNum raw_xpos, DisplayMode display, string colorMatrixVariableName, string mappingGraphName)
 		{
 			top = 0;
 			bottom = Config.FontSize;
 			Str = "";
 			ResourceName = resName ?? "";
 			ButtonResourceName = resNameb;
+			MappingGraphName = mappingGraphName;
+			cImageM = string.IsNullOrEmpty(MappingGraphName) ? null : AppContents.GetSprite(MappingGraphName);
 			Display = display;
 			PositionX = raw_xpos.isPx ? raw_xpos.num : (raw_xpos.num * Config.FontSize / 100);
 			ColorMatrixVariableName = colorMatrixVariableName;
 			ColorMatrix = ResolveColorMatrix(colorMatrixVariableName);
 			// 成功加载的图片不会设置 AltText，但原生输出日志仍会保留 <img> 标签。
 			// 单独保存日志文本，避免改变屏幕渲染和普通 ToString() 的兼容语义。
-			LogText = BuildLogText(ResourceName, ButtonResourceName, raw_height, raw_width, raw_ypos, raw_xpos, display, colorMatrixVariableName);
+			LogText = BuildLogText(ResourceName, ButtonResourceName, mappingGraphName, raw_height, raw_width, raw_ypos, raw_xpos, display, colorMatrixVariableName);
 
 			// Compute desired dimensions from HTML attributes regardless of whether sprite exists.
 			// This allows external renderers to size the image correctly even when loading dynamically.
@@ -190,24 +202,38 @@ namespace MinorShift.Emuera.GameView
                 else
                 {
                     cImageB = AppContents.GetSprite(ButtonResourceName);
-                }
+				}
 			}
 		}
 
         public ASprite Image { get { return cImage; } }
         public ASprite ImageBackground { get { return cImageB; } }
+		public ASprite ImageMapping { get { return cImageM; } }
+
+		public long GetMappingColor(int pointX, int pointY)
+		{
+			if (cImageM == null || !cImageM.IsCreated || destRect.Width <= 0 || destRect.Height <= 0)
+				return 0;
+			int x = pointX * cImageM.DestBaseSize.Width / destRect.Width;
+			int y = pointY * cImageM.DestBaseSize.Height / destRect.Height;
+			if (x < 0 || y < 0 || x >= cImageM.DestBaseSize.Width || y >= cImageM.DestBaseSize.Height)
+				return 0;
+			return cImageM.SpriteGetColor(x, y).ToArgb() & 0xFFFFFF;
+		}
         public Rectangle rect { get { return cImage.Rectangle; } }
         public Rectangle dest_rect { get { return destRect; } }
 		public DisplayMode Display { get; private set; }
 		public int PositionX { get; private set; }
 		public int PositionY { get { return top; } }
 		public string ColorMatrixVariableName { get; private set; }
+		public string MappingGraphName { get; private set; }
 		public float[][] ColorMatrix { get; private set; }
 		public bool FlipX { get; private set; }
 		public bool FlipY { get; private set; }
 
 		private readonly ASprite cImage;
 		private readonly ASprite cImageB;
+		private readonly ASprite cImageM;
 		private readonly int top;
 		private readonly int bottom;
 		private Rectangle destRect;
@@ -264,7 +290,7 @@ namespace MinorShift.Emuera.GameView
 			}
 		}
 
-		static string BuildLogText(string resourceName, string buttonResourceName, MixedNum rawHeight, MixedNum rawWidth, MixedNum rawYPos, MixedNum rawXPos, DisplayMode display, string colorMatrixVariableName)
+		static string BuildLogText(string resourceName, string buttonResourceName, string mappingGraphName, MixedNum rawHeight, MixedNum rawWidth, MixedNum rawYPos, MixedNum rawXPos, DisplayMode display, string colorMatrixVariableName)
 		{
 			StringBuilder sb = new StringBuilder();
 			sb.Append("<img src='");
@@ -273,6 +299,11 @@ namespace MinorShift.Emuera.GameView
 			{
 				sb.Append("' srcb='");
 				sb.Append(buttonResourceName);
+			}
+			if (!string.IsNullOrEmpty(mappingGraphName))
+			{
+				sb.Append("' srcm='");
+				sb.Append(mappingGraphName);
 			}
 			if (rawHeight.num != 0)
 			{

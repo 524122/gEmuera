@@ -11,7 +11,7 @@ $GuardVersion = "1.0.0"
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptRoot "..\.."))
 if ([string]::IsNullOrWhiteSpace($DesignRoot)) {
-    $DesignRoot = Join-Path $RepositoryRoot "NewFrameworkDesign"
+    $DesignRoot = Join-Path $RepositoryRoot "docs\NewFrameworkDesign"
 }
 $DesignRoot = [System.IO.Path]::GetFullPath($DesignRoot)
 

@@ -98,190 +98,142 @@ public partial class EmueraMain : Node
 		CallDeferred(nameof(StartGameDeferred));
 	}
 
-	public override void _Notification(int what)
+	async void StartGameDeferred()
 	{
-		// Godot delivers these notifications for APK background/foreground
-		// transitions. Handle them centrally so the emulator core does not need to
-		// know about platform lifecycle details.
-		if (what == NotificationApplicationPaused)
+		if (startupStarted)
+			return;
+		startupStarted = true;
+
+		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		if (!IsInsideTree())
+			return;
+
+		UpdateStartupStatus("正在准备游戏目录...");
+
+		// Setup path resolution
+		string eraPath = FirstWindow.ResolveStartupGamePath();
+		if (string.IsNullOrEmpty(eraPath) || !uEmuera.Utils.DirectoryExists(eraPath))
 		{
-			SetApplicationPaused(true);
-			GenericUtils.NotifyLifecycleState("android_pause");
+			eraPath = ProjectSettings.GlobalizePath("res://eraAkumaMaid0.305-CH-正式版");
 		}
-		else if (what == NotificationApplicationResumed)
+		if (!string.IsNullOrEmpty(eraPath) && uEmuera.Utils.DirectoryExists(eraPath))
 		{
-			SetApplicationPaused(false);
-			GenericUtils.NotifyLifecycleState("android_resume");
+			Sys.ExeDir = uEmuera.Utils.NormalizePath(eraPath + "/");
+		}
+		else
+		{
+			Sys.ExeDir = uEmuera.Utils.NormalizePath(OS.GetExecutablePath().GetBaseDir() + "/");
+		}
+		GenericUtils.NotifyGamePathSelected(Sys.ExeDir, FirstWindow.SelectedCoreProfileName);
+
+		// EmueraContent is created before the legacy worker. Bind the same
+		// immutable plan now so its profile-scoped display defaults cannot
+		// read the mutable launcher selection directly.
+		try
+		{
+			MinorShift.Emuera.Program.ConfigureCompatibilityPlan(
+				BuiltInDialectCatalog.CreateLegacySessionPlan(
+					FirstWindow.SelectedCoreProfileName));
+		}
+		catch (Exception error)
+		{
+			GenericUtils.Error($"LEGACY_COMPATIBILITY_PLAN_STARTUP_FAILED {error}");
+			UpdateStartupStatus("Unable to resolve compatibility profile.");
+			return;
+		}
+
+		// Load SHIFT-JIS / UTF-8 config maps
+		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		if (!IsInsideTree())
+			return;
+
+		UpdateStartupStatus("Loading config...");
+		LoadConfigMaps();
+
+		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		if (!IsInsideTree())
+			return;
+
+		UpdateStartupStatus("Creating interface...");
+
+		// Sprite debug viewer — press F3 to toggle
+		if (enable_sprite_debug_viewer && OS.GetName() != "Android")
+		{
+			var debugViewer = new SpriteDebugViewer();
+			debugViewer.Name = "SpriteDebugViewer";
+			AddChild(debugViewer);
+		}
+
+		// Create content renderer
+		var content = new EmueraContent();
+		content.Name = "EmueraContent";
+		AddChild(content);
+
+		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		if (!IsInsideTree())
+			return;
+
+		UpdateStartupStatus("Starting game...");
+		if (!await StartLegacySessionAsync())
+		{
+			UpdateStartupStatus("Unable to start game.");
+			return;
+		}
+		working = true;
+
+		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		HideStartupOverlay();
+	}
+
+	public override void _Process(double delta)
+	{
+		GenericUtils.FlushLogs();
+		GenericUtils.FlushUI();
+		if (GenericUtils.IsPerformanceSamplingEnabled)
+			GenericUtils.SamplePerformanceFrame(delta,
+				EmueraGpuRenderComponent.QueuedWorkCount,
+				EmueraTextRenderComponent.QueuedWorkCount,
+				RendererRuntimeIdentity.GetPerformanceData());
+
+		if (!working)
+			return;
+
+		if (clearRequested)
+		{
+			clearRequested = false;
+			GenericUtils.ClearText();
+		}
+
+		if (restartRequested)
+		{
+			restartRequested = false;
+			GetTree().ReloadCurrentScene();
+			return;
+		}
+
+		if (GlobalStatic.MainWindow != null)
+			GlobalStatic.MainWindow.Update();
+
+		SpriteManager.UpdateCleanup();
+		SpriteManager.UpdateOtherThreads();
+		MinorShift._Library.WinInput.UpdateKeyState();
+
+		var console = GlobalStatic.Console;
+		var content = EmueraContent.instance;
+		if (console != null && content != null)
+		{
+			bool needsInput = console.IsWaitingInputSomething;
+			if (!needsInput && content.IsInputVisible())
+				content.ShowInput(false);
 		}
 	}
 
-	void SetApplicationPaused(bool paused)
-	{
-		if (applicationPauseActive == paused)
-			return;
-		applicationPauseActive = paused;
-		if (paused)
-		{
-			// Keep the main loop alive at a low cadence instead of stopping it.
-			// This avoids a burst of queued work on resume while reducing battery
-			// use when Android backgrounds the APK.
-			maxFpsBeforeApplicationPause = Engine.MaxFps;
-			Engine.MaxFps = 5;
-			EmueraContent.instance?.SetApplicationPaused(true);
-			return;
-		}
-
-		// Restore the user's configured frame-rate policy after the temporary
-        // lifecycle cap; FrameRateHelper re-applies config in case it changed
-        // while the app was backgrounded.
-        Engine.MaxFps = maxFpsBeforeApplicationPause > 0
-            ? maxFpsBeforeApplicationPause
-            : FrameRateHelper.CurrentFrameRate;
-        FrameRateHelper.ApplyConfigFps();
-        EmueraContent.instance?.SetApplicationPaused(false);
-    }
-
-    async void StartGameDeferred()
-    {
-        if (startupStarted)
-            return;
-        startupStarted = true;
-
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        if (!IsInsideTree())
-            return;
-
-        UpdateStartupStatus("正在准备游戏目录...");
-
-        // Setup path resolution
-        string eraPath = FirstWindow.ResolveStartupGamePath();
-        if (string.IsNullOrEmpty(eraPath) || !uEmuera.Utils.DirectoryExists(eraPath))
-        {
-            eraPath = ProjectSettings.GlobalizePath("res://eraAkumaMaid0.305-CH-正式版");
-        }
-        if (!string.IsNullOrEmpty(eraPath) && uEmuera.Utils.DirectoryExists(eraPath))
-        {
-            Sys.ExeDir = uEmuera.Utils.NormalizePath(eraPath + "/");
-        }
-        else
-        {
-            Sys.ExeDir = uEmuera.Utils.NormalizePath(OS.GetExecutablePath().GetBaseDir() + "/");
-        }
-        GenericUtils.NotifyGamePathSelected(Sys.ExeDir, FirstWindow.SelectedCoreProfileName);
-
-        // EmueraContent is created before the legacy worker. Bind the same
-        // immutable plan now so its profile-scoped display defaults cannot
-        // read the mutable launcher selection directly.
-        try
-        {
-            MinorShift.Emuera.Program.ConfigureCompatibilityPlan(
-                BuiltInDialectCatalog.CreateLegacySessionPlan(
-                    FirstWindow.SelectedCoreProfileName));
-        }
-        catch (Exception error)
-        {
-            GenericUtils.Error($"LEGACY_COMPATIBILITY_PLAN_STARTUP_FAILED {error}");
-            UpdateStartupStatus("Unable to resolve compatibility profile.");
-            return;
-        }
-
-        // Load SHIFT-JIS / UTF-8 config maps
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        if (!IsInsideTree())
-            return;
-
-        UpdateStartupStatus("Loading config...");
-        LoadConfigMaps();
-
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        if (!IsInsideTree())
-            return;
-
-        UpdateStartupStatus("Creating interface...");
-
-        // Sprite debug viewer — press F3 to toggle
-        if (enable_sprite_debug_viewer && OS.GetName() != "Android")
-        {
-            var debugViewer = new SpriteDebugViewer();
-            debugViewer.Name = "SpriteDebugViewer";
-            AddChild(debugViewer);
-        }
-
-        // Create content renderer
-        var content = new EmueraContent();
-        content.Name = "EmueraContent";
-        AddChild(content);
-
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        if (!IsInsideTree())
-            return;
-
-        UpdateStartupStatus("Starting game...");
-        if (!await StartLegacySessionAsync())
-        {
-            UpdateStartupStatus("Unable to start game.");
-            return;
-        }
-        working = true;
-
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        HideStartupOverlay();
-    }
-
-    public override void _Process(double delta)
-    {
-        if (ShouldUseGpuRenderer())
-            GpuReady = true;
-        GenericUtils.FlushLogs();
-        GenericUtils.FlushUI();
-        ProcessTextRenderQueue();
-        if (GenericUtils.IsPerformanceSamplingEnabled)
-            GenericUtils.SamplePerformanceFrame(delta, gpuQueue.Count, textRenderQueue.Count,
-                RendererRuntimeIdentity.GetPerformanceData());
-
-        if (!working)
-            return;
-
-        if (clearRequested)
-        {
-            clearRequested = false;
-            GenericUtils.ClearText();
-        }
-
-        if (restartRequested)
-        {
-            restartRequested = false;
-            GetTree().ReloadCurrentScene();
-            return;
-        }
-
-        if (GlobalStatic.MainWindow != null)
-            GlobalStatic.MainWindow.Update();
-
-        ProcessGpuQueue();
-
-        SpriteManager.UpdateCleanup();
-        SpriteManager.UpdateOtherThreads();
-        MinorShift._Library.WinInput.UpdateKeyState();
-
-        var console = GlobalStatic.Console;
-        var content = EmueraContent.instance;
-        if (console != null && content != null)
-        {
-            bool needsInput = console.IsWaitingInputSomething;
-            if (!needsInput && content.IsInputVisible())
-                content.ShowInput(false);
-        }
-    }
-
 	public override void _ExitTree()
 	{
-        GenericUtils.NotifyApplicationShutdown();
-        StopLegacySession();
-        working = false;
+		GenericUtils.NotifyApplicationShutdown();
+		StopLegacySession();
+		working = false;
 		uEmuera.Utils.ResourceClear();
-		if (currentInstance == this)
-			currentInstance = null;
 	}
 
 	public async void Run()
@@ -361,100 +313,100 @@ public partial class EmueraMain : Node
 	}
 
 	async Task<bool> StartLegacySessionAsync()
-    {
-        // This is deliberately evaluated only when starting a session. A
-        // diagnostic-config hot reload must never swap an already running VM
-        // between the M0 baseline path and the M1 canary path.
-        if (legacySessionBackend?.IsRunning == true)
-            return true;
+	{
+		// This is deliberately evaluated only when starting a session. A
+		// diagnostic-config hot reload must never swap an already running VM
+		// between the M0 baseline path and the M1 canary path.
+		if (legacySessionBackend?.IsRunning == true)
+			return true;
 
-        bool useSessionIsolation = GenericUtils.GetRuntimeDiagnosticsConfig()?.MigrationSessionIsolationEnabled == true;
-        if (!useSessionIsolation)
-        {
-            var backend = legacySessionBackend ??= new LegacySessionBackend(debug, use_coroutine);
-            try
-            {
-                await backend.StartLegacyBaselineAsync();
-                return true;
-            }
-            catch (Exception error)
-            {
-                GenericUtils.Error($"LEGACY_BASELINE_START_EXCEPTION {error}");
-                return false;
-            }
-        }
+		bool useSessionIsolation = GenericUtils.GetRuntimeDiagnosticsConfig()?.MigrationSessionIsolationEnabled == true;
+		if (!useSessionIsolation)
+		{
+			var backend = legacySessionBackend ??= new LegacySessionBackend(debug, use_coroutine);
+			try
+			{
+				await backend.StartLegacyBaselineAsync();
+				return true;
+			}
+			catch (Exception error)
+			{
+				GenericUtils.Error($"LEGACY_BASELINE_START_EXCEPTION {error}");
+				return false;
+			}
+		}
 
-        try
-        {
-            var backend = legacySessionBackend ??= new LegacySessionBackend(
-                debug,
-                use_coroutine,
-                GetLegacySessionLaunchRegistry());
-            legacySessionFacade ??= LegacySessionFacade.CreateLegacyBaseline(
-                backend);
-            var selection = new SessionSelection(
-                BuildLegacyGameId(Sys.ExeDir),
-                FirstWindow.SelectedCoreProfileName);
+		try
+		{
+			var backend = legacySessionBackend ??= new LegacySessionBackend(
+				debug,
+				use_coroutine,
+				GetLegacySessionLaunchRegistry());
+			legacySessionFacade ??= LegacySessionFacade.CreateLegacyBaseline(
+				backend);
+			var selection = new SessionSelection(
+				BuildLegacyGameId(Sys.ExeDir),
+				FirstWindow.SelectedCoreProfileName);
 			GetLegacySessionLaunchRegistry().Resolve(selection);
-            var result = await legacySessionFacade.SwitchAsync(selection, null);
-            if (result.IsCommitted)
-            {
-                GenericUtils.Info(
-                    $"M1_SESSION_ISOLATION_CANARY profile={selection.ProfileId} plan={result.Session.Session?.Compatibility.CanonicalHash ?? "unknown"}");
-                return true;
-            }
+			var result = await legacySessionFacade.SwitchAsync(selection, null);
+			if (result.IsCommitted)
+			{
+				GenericUtils.Info(
+					$"M1_SESSION_ISOLATION_CANARY profile={selection.ProfileId} plan={result.Session.Session?.Compatibility.CanonicalHash ?? "unknown"}");
+				return true;
+			}
 
-            var error = result.BackendError ?? result.Session.Error;
-            GenericUtils.Error(
-                $"LEGACY_SESSION_START_FAILED status={result.Session.Status} generation={result.Session.Stamp.Generation.Value} " +
-                $"error={error?.Message ?? "none"}");
-            return false;
-        }
-        catch (Exception error)
-        {
-            GenericUtils.Error($"LEGACY_SESSION_START_EXCEPTION {error}");
-            return false;
-        }
-    }
+			var error = result.BackendError ?? result.Session.Error;
+			GenericUtils.Error(
+				$"LEGACY_SESSION_START_FAILED status={result.Session.Status} generation={result.Session.Stamp.Generation.Value} " +
+				$"error={error?.Message ?? "none"}");
+			return false;
+		}
+		catch (Exception error)
+		{
+			GenericUtils.Error($"LEGACY_SESSION_START_EXCEPTION {error}");
+			return false;
+		}
+	}
 
-    void StopLegacySession()
-    {
-        var facade = legacySessionFacade;
-        legacySessionFacade = null;
-        if (facade is not null)
-        {
-            try
-            {
-                // The current legacy bridge completes synchronously after stopping
-                // EmueraThread. Keeping the wait here preserves the former
-                // _ExitTree ordering: thread end -> legacy state reset -> resources.
-                facade.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            }
-            catch (Exception error)
-            {
-                GenericUtils.Error($"LEGACY_SESSION_STOP_FAILED {error}");
-            }
-            return;
-        }
+	void StopLegacySession()
+	{
+		var facade = legacySessionFacade;
+		legacySessionFacade = null;
+		if (facade is not null)
+		{
+			try
+			{
+				// The current legacy bridge completes synchronously after stopping
+				// EmueraThread. Keeping the wait here preserves the former
+				// _ExitTree ordering: thread end -> legacy state reset -> resources.
+				facade.DisposeAsync().AsTask().GetAwaiter().GetResult();
+			}
+			catch (Exception error)
+			{
+				GenericUtils.Error($"LEGACY_SESSION_STOP_FAILED {error}");
+			}
+			return;
+		}
 
-        var backend = legacySessionBackend;
-        if (backend is null || !backend.IsRunning)
-            return;
+		var backend = legacySessionBackend;
+		if (backend is null || !backend.IsRunning)
+			return;
 
-        try
-        {
-            backend.StopLegacyBaselineAsync().AsTask().GetAwaiter().GetResult();
-        }
-        catch (Exception error)
-        {
-            GenericUtils.Error($"LEGACY_BASELINE_STOP_FAILED {error}");
-        }
-    }
+		try
+		{
+			backend.StopLegacyBaselineAsync().AsTask().GetAwaiter().GetResult();
+		}
+		catch (Exception error)
+		{
+			GenericUtils.Error($"LEGACY_BASELINE_STOP_FAILED {error}");
+		}
+	}
 
-    static string BuildLegacyGameId(string gameDirectory)
-    {
-        return LegacySessionLaunchConfiguration.CreateGameId(gameDirectory);
-    }
+	static string BuildLegacyGameId(string gameDirectory)
+	{
+		return LegacySessionLaunchConfiguration.CreateGameId(gameDirectory);
+	}
 
 	LegacySessionLaunchRegistry GetLegacySessionLaunchRegistry()
 	{
@@ -467,144 +419,144 @@ public partial class EmueraMain : Node
 			});
 	}
 
-    public void Clear()
-    {
-        if (working)
-        {
-            // Request clear on next process
-            clearRequested = true;
-        }
-    }
+	public void Clear()
+	{
+		if (working)
+		{
+			// Request clear on next process
+			clearRequested = true;
+		}
+	}
 
-    public void Restart()
-    {
-        if (working)
-        {
-            restartRequested = true;
-        }
-    }
+	public void Restart()
+	{
+		if (working)
+		{
+			restartRequested = true;
+		}
+	}
 
-    bool working = false;
-    bool clearRequested = false;
-    bool restartRequested = false;
+	bool working = false;
+	bool clearRequested = false;
+	bool restartRequested = false;
 
-    void CreateStartupOverlay()
-    {
-        startupOverlay = new Control();
-        startupOverlay.Name = "StartupOverlay";
-        startupOverlay.AnchorLeft = 0;
-        startupOverlay.AnchorTop = 0;
-        startupOverlay.AnchorRight = 1;
-        startupOverlay.AnchorBottom = 1;
-        startupOverlay.MouseFilter = Control.MouseFilterEnum.Stop;
+	void CreateStartupOverlay()
+	{
+		startupOverlay = new Control();
+		startupOverlay.Name = "StartupOverlay";
+		startupOverlay.AnchorLeft = 0;
+		startupOverlay.AnchorTop = 0;
+		startupOverlay.AnchorRight = 1;
+		startupOverlay.AnchorBottom = 1;
+		startupOverlay.MouseFilter = Control.MouseFilterEnum.Stop;
 
-        var bg = new ColorRect();
-        bg.AnchorLeft = 0;
-        bg.AnchorTop = 0;
-        bg.AnchorRight = 1;
-        bg.AnchorBottom = 1;
-        bg.Color = Colors.Black;
-        startupOverlay.AddChild(bg);
+		var bg = new ColorRect();
+		bg.AnchorLeft = 0;
+		bg.AnchorTop = 0;
+		bg.AnchorRight = 1;
+		bg.AnchorBottom = 1;
+		bg.Color = Colors.Black;
+		startupOverlay.AddChild(bg);
 
-        startupStatusLabel = new Label();
-        startupStatusLabel.AnchorLeft = 0;
-        startupStatusLabel.AnchorTop = 0;
-        startupStatusLabel.AnchorRight = 1;
-        startupStatusLabel.AnchorBottom = 1;
-        startupStatusLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        startupStatusLabel.VerticalAlignment = VerticalAlignment.Center;
-        startupStatusLabel.Text = "Loading game...";
-        startupStatusLabel.AddThemeFontSizeOverride("font_size", 20);
-        startupStatusLabel.AddThemeColorOverride("font_color", Colors.White);
-        startupOverlay.AddChild(startupStatusLabel);
+		startupStatusLabel = new Label();
+		startupStatusLabel.AnchorLeft = 0;
+		startupStatusLabel.AnchorTop = 0;
+		startupStatusLabel.AnchorRight = 1;
+		startupStatusLabel.AnchorBottom = 1;
+		startupStatusLabel.HorizontalAlignment = HorizontalAlignment.Center;
+		startupStatusLabel.VerticalAlignment = VerticalAlignment.Center;
+		startupStatusLabel.Text = "Loading game...";
+		startupStatusLabel.AddThemeFontSizeOverride("font_size", 20);
+		startupStatusLabel.AddThemeColorOverride("font_color", Colors.White);
+		startupOverlay.AddChild(startupStatusLabel);
 
-        AddChild(startupOverlay);
-    }
+		AddChild(startupOverlay);
+	}
 
-    void UpdateStartupStatus(string status)
-    {
-        if (startupStatusLabel != null)
-            startupStatusLabel.Text = status;
-    }
+	void UpdateStartupStatus(string status)
+	{
+		if (startupStatusLabel != null)
+			startupStatusLabel.Text = status;
+	}
 
-    void HideStartupOverlay()
-    {
-        if (startupOverlay == null)
-            return;
+	void HideStartupOverlay()
+	{
+		if (startupOverlay == null)
+			return;
 
-        startupOverlay.QueueFree();
-        startupOverlay = null;
-        startupStatusLabel = null;
-    }
+		startupOverlay.QueueFree();
+		startupOverlay = null;
+		startupStatusLabel = null;
+	}
 
-    void LoadConfigMaps()
-    {
-        lock (configMapCacheLock)
-        {
-            if (cachedShiftJisToUtf8Map != null && cachedUtf8ZhCnToUtf8Map != null)
-            {
-                uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(cachedShiftJisToUtf8Map);
-                uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(cachedUtf8ZhCnToUtf8Map);
-                return;
-            }
-        }
+	void LoadConfigMaps()
+	{
+		lock (configMapCacheLock)
+		{
+			if (cachedShiftJisToUtf8Map != null && cachedUtf8ZhCnToUtf8Map != null)
+			{
+				uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(cachedShiftJisToUtf8Map);
+				uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(cachedUtf8ZhCnToUtf8Map);
+				return;
+			}
+		}
 
 		char[] split = new char[] { '\r', '\n' };
-        var shiftjisPath = "res://Text/emuera_config_shiftjis.bytes";
-        var utf8Path = "res://Text/emuera_config_utf8.txt";
-        var utf8CnPath = "res://Text/emuera_config_utf8_zhcn.txt";
+		var shiftjisPath = "res://Text/emuera_config_shiftjis.bytes";
+		var utf8Path = "res://Text/emuera_config_utf8.txt";
+		var utf8CnPath = "res://Text/emuera_config_utf8_zhcn.txt";
 
-        if (!Godot.FileAccess.FileExists(shiftjisPath) ||
-            !Godot.FileAccess.FileExists(utf8Path) ||
-            !Godot.FileAccess.FileExists(utf8CnPath))
-            return;
+		if (!Godot.FileAccess.FileExists(shiftjisPath) ||
+			!Godot.FileAccess.FileExists(utf8Path) ||
+			!Godot.FileAccess.FileExists(utf8CnPath))
+			return;
 
-        var shiftjisBytes = Godot.FileAccess.GetFileAsBytes(shiftjisPath);
-        var utf8Text = Godot.FileAccess.GetFileAsString(utf8Path);
-        var utf8CnText = Godot.FileAccess.GetFileAsString(utf8CnPath);
+		var shiftjisBytes = Godot.FileAccess.GetFileAsBytes(shiftjisPath);
+		var utf8Text = Godot.FileAccess.GetFileAsString(utf8Path);
+		var utf8CnText = Godot.FileAccess.GetFileAsString(utf8CnPath);
 
-        var jis_md5_strs = GenericUtils.CalcMd5List(shiftjisBytes);
+		var jis_md5_strs = GenericUtils.CalcMd5List(shiftjisBytes);
 
-        var utf8_strs = utf8Text.Split(split, System.StringSplitOptions.RemoveEmptyEntries);
-        var utf8_str_list = new System.Collections.Generic.List<string>();
-        foreach (var str in utf8_strs)
-        {
-            if (string.IsNullOrWhiteSpace(str))
-                continue;
-            utf8_str_list.Add(str);
-        }
+		var utf8_strs = utf8Text.Split(split, System.StringSplitOptions.RemoveEmptyEntries);
+		var utf8_str_list = new System.Collections.Generic.List<string>();
+		foreach (var str in utf8_strs)
+		{
+			if (string.IsNullOrWhiteSpace(str))
+				continue;
+			utf8_str_list.Add(str);
+		}
 
-        var utf8cn_strs = utf8CnText.Split(split, System.StringSplitOptions.RemoveEmptyEntries);
-        var utf8cn_str_list = new System.Collections.Generic.List<string>();
-        foreach (var str in utf8cn_strs)
-        {
-            if (string.IsNullOrWhiteSpace(str))
-                continue;
-            utf8cn_str_list.Add(str);
-        }
+		var utf8cn_strs = utf8CnText.Split(split, System.StringSplitOptions.RemoveEmptyEntries);
+		var utf8cn_str_list = new System.Collections.Generic.List<string>();
+		foreach (var str in utf8cn_strs)
+		{
+			if (string.IsNullOrWhiteSpace(str))
+				continue;
+			utf8cn_str_list.Add(str);
+		}
 
-        if (jis_md5_strs.Count == 0 || utf8_str_list.Count == 0)
-            return;
+		if (jis_md5_strs.Count == 0 || utf8_str_list.Count == 0)
+			return;
 
-        var jis_map = new System.Collections.Generic.Dictionary<string, string>();
-        int jisCount = System.Math.Min(jis_md5_strs.Count, utf8_str_list.Count);
-        for (int i = 0; i < jisCount; ++i)
-        {
-            jis_map[jis_md5_strs[i]] = utf8_str_list[i];
-        }
-        var utf8cn_map = new System.Collections.Generic.Dictionary<string, string>();
-        int utf8CnCount = System.Math.Min(utf8cn_str_list.Count, utf8_str_list.Count);
-        for (int i = 0; i < utf8CnCount; ++i)
-        {
-            utf8cn_map[utf8cn_str_list[i]] = utf8_str_list[i];
-        }
-        lock (configMapCacheLock)
-        {
-            // res://Text 配置映射在进程内不变化，缓存后重启游戏不再重复读盘和构建字典。
-            cachedShiftJisToUtf8Map ??= jis_map;
-            cachedUtf8ZhCnToUtf8Map ??= utf8cn_map;
-            uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(cachedShiftJisToUtf8Map);
-            uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(cachedUtf8ZhCnToUtf8Map);
-        }
-    }
+		var jis_map = new System.Collections.Generic.Dictionary<string, string>();
+		int jisCount = System.Math.Min(jis_md5_strs.Count, utf8_str_list.Count);
+		for (int i = 0; i < jisCount; ++i)
+		{
+			jis_map[jis_md5_strs[i]] = utf8_str_list[i];
+		}
+		var utf8cn_map = new System.Collections.Generic.Dictionary<string, string>();
+		int utf8CnCount = System.Math.Min(utf8cn_str_list.Count, utf8_str_list.Count);
+		for (int i = 0; i < utf8CnCount; ++i)
+		{
+			utf8cn_map[utf8cn_str_list[i]] = utf8_str_list[i];
+		}
+		lock (configMapCacheLock)
+		{
+			// res://Text 配置映射在进程内不变化，缓存后重启游戏不再重复读盘和构建字典。
+			cachedShiftJisToUtf8Map ??= jis_map;
+			cachedUtf8ZhCnToUtf8Map ??= utf8cn_map;
+			uEmuera.Utils.SetSHIFTJIS_to_UTF8Dict(cachedShiftJisToUtf8Map);
+			uEmuera.Utils.SetUTF8ZHCN_to_UTF8Dict(cachedUtf8ZhCnToUtf8Map);
+		}
+	}
 }

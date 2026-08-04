@@ -1984,7 +1984,7 @@ namespace MinorShift.Emuera.GameData.Variable
 					}
 					else
 					{
-						ExecutionContext targetContext = procState.FindContextByLabel(subID);
+						MinorShift.Emuera.GameProc.ExecutionContext targetContext = procState.FindContextByLabel(subID);
 						if (targetContext != null)
 						{
 							Int64[] runtimeArray = null;
@@ -2085,7 +2085,7 @@ namespace MinorShift.Emuera.GameData.Variable
 					}
 					else
 					{
-						ExecutionContext targetContext = procState.FindContextByLabel(subID);
+						MinorShift.Emuera.GameProc.ExecutionContext targetContext = procState.FindContextByLabel(subID);
 						if (targetContext != null)
 						{
 							double[] runtimeArray = null;
@@ -2164,7 +2164,7 @@ namespace MinorShift.Emuera.GameData.Variable
 					}
 					else
 					{
-						ExecutionContext targetContext = procState.FindContextByLabel(subID);
+						MinorShift.Emuera.GameProc.ExecutionContext targetContext = procState.FindContextByLabel(subID);
 						if (targetContext != null)
 						{
 							string[] runtimeArray = null;

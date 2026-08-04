@@ -702,6 +702,12 @@ public partial class EmueraContent : Control
 		rootContent.AnchorTop = 0;
 		rootContent.AnchorRight = 1;
 		rootContent.AnchorBottom = 1;
+		// CBG 背景层（cbgContainer，ZIndex=10）必须位于控制台前景之下：eraTW 系列把
+		// 立绘/文字/行内图片放在 rootContent 内（累计 z=0），若低于背景层会被半透明
+		// 背景图蒙罩（"低亮/无衬底"模式下背景带 alpha，立绘看起来跟着变透明）。
+		// 这里把整个内容层抬到 20（>10），保持内部相对顺序不变，与 Snake 语义一致：
+		// 背景色 → CBG 背景图 → 前景文字/图片。
+		rootContent.ZIndex = 20;
 		AddChild(rootContent);
 
 		// Menu bar on a separate CanvasLayer so it doesn't block click-to-advance.

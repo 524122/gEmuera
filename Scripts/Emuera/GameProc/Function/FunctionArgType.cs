@@ -77,5 +77,8 @@ namespace MinorShift.Emuera.GameProc.Function
 		SP_SETIMAGELAYERL,
 		SP_HTMLSPLIT,
 		SP_DT_COLUMN_OPTIONS,
+		SP_PRINT_IMG,
+		SP_PRINT_RECT,
+		SP_PRINT_SPACE,
 	}
 }

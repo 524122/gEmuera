@@ -7,9 +7,21 @@
 [ext_resource type="Script" uid="uid://b24k3iatkhjvc" path="res://Scripts/GodotHost/PrototypeAudioBridge.cs" id="5_audio"]
 [ext_resource type="Script" uid="uid://pxkxbjjh7akf" path="res://Scripts/GodotHost/PrototypeResourceBridge.cs" id="6_resource"]
 [ext_resource type="Script" uid="uid://dmsk4dtqn6uff" path="res://Scripts/GodotHost/PrototypeCommandPanel.cs" id="7_panel"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/EmueraLifecycleComponent.cs" id="8_lifecycle"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/EmueraGpuRenderComponent.cs" id="9_gpu_render"]
+[ext_resource type="Script" path="res://Scripts/GodotHost/EmueraTextRenderComponent.cs" id="10_text_render"]
 
 [node name="Main" type="Node" unique_id=57311244]
 script = ExtResource("1_emuera")
+
+[node name="EmueraLifecycle" type="Node" parent="."]
+script = ExtResource("8_lifecycle")
+
+[node name="EmueraGpuRender" type="Node" parent="."]
+script = ExtResource("9_gpu_render")
+
+[node name="EmueraTextRender" type="Node" parent="."]
+script = ExtResource("10_text_render")
 
 [node name="PrototypeRuntime" type="Node" parent="." unique_id=91880193]
 script = ExtResource("2_prototype")

@@ -502,6 +502,14 @@ namespace MinorShift.Emuera.GameProc
 					//命令文
 					if (func != null)//関数文
 					{
+						// v24 declares VARI/VARS while building the logical line.  Snake
+						// retains its dynamic ArgumentBuilder path, so the selected profile
+						// determines the grammar once during parsing rather than execution.
+						if ((func.Code == FunctionCode.VARI || func.Code == FunctionCode.VARS)
+							&& !Program.Compatibility.Snake.IsEnabled)
+						{
+							return ParseV24ScopedVariableDeclaration(position, func, currentLabel, stream);
+						}
 						if (ShouldPreferPrivateVariableAssignment(idCode, currentLabel, stream))
 						{
 							stream.Seek(0, System.IO.SeekOrigin.Begin);
@@ -607,6 +615,74 @@ namespace MinorShift.Emuera.GameProc
 			bool result = IsPrivateVariableAssignmentStart(stream);
 			stream.CurrentPosition = savedPosition;
 			return result;
+		}
+
+		private static LogicalLine ParseV24ScopedVariableDeclaration(
+			ScriptPosition position,
+			FunctionIdentifier func,
+			FunctionLabelLine currentLabel,
+			StringStream stream)
+		{
+			var line = new InstructionLine(position, func, stream)
+			{
+				ParentLabelLine = currentLabel,
+			};
+			string statement = line.PopArgumentPrimitive()?.Substring() ?? string.Empty;
+			int commentIndex = statement.IndexOf(';');
+			if (commentIndex >= 0)
+				statement = statement.Substring(0, commentIndex);
+
+			int equalsIndex = statement.IndexOf('=');
+			string left = equalsIndex < 0 ? statement : statement.Substring(0, equalsIndex);
+			string right = equalsIndex < 0 ? string.Empty : statement.Substring(equalsIndex + 1);
+			string[] leftParts = left.Split(',');
+			string name = leftParts[0].Trim();
+			if (name.Length == 0)
+				throw new CodeEE("VARI/VARS requires a private variable name.");
+
+			var lengths = new List<int> { 1 };
+			if (leftParts.Length > 1)
+			{
+				lengths.Clear();
+				for (int i = 1; i < leftParts.Length; i++)
+					lengths.Add(int.Parse(leftParts[i].Trim()));
+			}
+
+			bool isString = func.Code == FunctionCode.VARS;
+			var variable = new UserDefinedVariableData
+			{
+				Name = name,
+				Static = false,
+				Lengths = lengths.ToArray(),
+				Dimension = lengths.Count,
+				TypeIsStr = isString,
+			};
+			currentLabel.AddPrivateVariable(variable);
+
+			if (isString)
+			{
+				string value = null;
+				if (leftParts.Length == 1 && !string.IsNullOrWhiteSpace(right))
+				{
+					int literalStart = right.IndexOf('"');
+					int literalEnd = right.LastIndexOf('"');
+					if (literalStart < 0 || literalEnd <= literalStart)
+						throw new CodeEE("VARS initial value must be a quoted string literal.");
+					value = right.Substring(literalStart + 1, literalEnd - literalStart - 1);
+				}
+				line.Argument = new SnakeVarsArgument(name, value);
+				return line;
+			}
+
+			IOperandTerm initialValue = new SingleTerm(0);
+			if (leftParts.Length == 1 && !string.IsNullOrWhiteSpace(right))
+			{
+				GlobalStatic.Process.scaningLine = line;
+				WordCollection words = LexicalAnalyzer.Analyse(new StringStream(right), LexEndWith.EoL, LexAnalyzeFlag.None);
+				initialValue = ExpressionParser.ReduceIntegerTerm(words, TermEndWith.EoL);
+			}
+			line.Argument = new SnakeVariArgument(name, initialValue);
+			return line;
 		}
 
 		static bool IsPrivateVariableAssignmentStart(StringStream stream)

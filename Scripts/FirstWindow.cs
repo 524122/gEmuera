@@ -25,6 +25,10 @@ public partial class FirstWindow : Control
 	const int MaxLauncherGameEntries = 512;
 	const int MaxCompatibilityProfilesPerRoot = 32;
 	const int MaxGamesPerCompatibilityProfile = 64;
+	// 扫描根下允许的额外嵌套深度：emuera/snake/归档目录/游戏（深度 1 的
+	// 嵌套）。再深的归档结构不扫描，避免把游戏内部子目录误识别为独立游戏，
+	// 也避免大目录树扫描拖慢启动器。
+	const int MaxLauncherScanDepth = 2;
 	const int MaxScanMessages = 6;
 	public const string CoreProfileV24Pure = "v24pure";
 	public const string CoreProfileSnake = "snake";
@@ -812,9 +816,12 @@ public partial class FirstWindow : Control
 
 		if (!canAccess)
 		{
-			// MANAGE_EXTERNAL_STORAGE not granted — guide user to settings
-			statusLabel.Text = "需要\"所有文件访问\"权限。请在系统设置中开启后返回此应用。\n"
-				+ "\"All files access\" permission required. Please enable in system settings.";
+			// Android 11+ 的 MANAGE_EXTERNAL_STORAGE 属于"特殊应用权限"，
+			// OS.RequestPermissions() 不会弹出授权对话框，必须由用户到系统设置页
+			// 手动开启。开启后返回应用会经 _Notification(ApplicationResumed) 自动
+			// 重新扫描，所以这里给出具体操作路径而不是只写"系统设置"。
+			statusLabel.Text = "需要\"所有文件访问\"权限：设置 → 应用 → gEmuera → 权限 → 所有文件访问。开启后返回本应用（将自动重新扫描游戏）。\n"
+				+ "\"All files access\" required: Settings → Apps → gEmuera → Permissions → All files access, then return (auto re-scan).";
 			// Still try to scan — user:// and app-specific dirs don't need this permission
 		}
 		androidPermissionCheckPending = !canAccess;
@@ -903,7 +910,27 @@ public partial class FirstWindow : Control
 
 		if (OS.GetName() == "Android")
 		{
+			// 主存储卷必须显式加入：/storage 枚举在某些 ROM 上不可靠，且
+			// /storage/self/primary 是指向 emulated/0 的符号链接（见下方跳过）。
 			AddUniqueRoot(roots, "/storage/emulated/0/emuera");
+
+			// 枚举所有存储卷（外置 SD 卡等）。部分平板把游戏放在
+			// /storage/XXXX-XXXX/emuera 下，只扫主存储会"检测不到游戏"。
+			using var storageDir = DirAccess.Open("/storage");
+			if (storageDir != null)
+			{
+				foreach (string volume in storageDir.GetDirectories())
+				{
+					if (string.IsNullOrEmpty(volume) || volume == "self")
+						continue;
+					string volumeEmuera = "/storage/" + volume + "/emuera";
+					// 只把确实包含 emuera 容器的卷加入扫描根，避免把无关卷
+					// 全扫一遍导致启动器出现大量无效条目。
+					if (uEmuera.Utils.DirectoryExists(volumeEmuera))
+						AddUniqueRoot(roots, volumeEmuera);
+				}
+			}
+
 			string appDir = OS.GetUserDataDir();
 			if (!string.IsNullOrEmpty(appDir))
 				AddUniqueRoot(roots, appDir);
@@ -1000,6 +1027,20 @@ public partial class FirstWindow : Control
 					LauncherGameSource.V24Root,
 					scanMessages);
 			}
+			else
+			{
+				// 支持 emuera/归档目录/游戏 这类嵌套结构（部分平板用户习惯
+				// 用子目录归档游戏包）；只递归一层，配合 IsEraGameDirectory
+				// 校验避免把游戏内部目录误报为独立游戏。
+				ScanNestedEraGameDirectories(
+					gameRoot,
+					1,
+					CoreProfileV24Pure,
+					LauncherGameSource.V24Root,
+					entries,
+					addedPaths,
+					scanMessages);
+			}
 		}
 
 		ScanCompatibilityDirectory(normalizedRoot, entries, addedPaths, scanMessages);
@@ -1035,6 +1076,53 @@ public partial class FirstWindow : Control
 					LauncherGameSource.SnakeRoot,
 					scanMessages);
 			}
+			else
+			{
+				ScanNestedEraGameDirectories(
+					gameRoot,
+					1,
+					CoreProfileSnake,
+					LauncherGameSource.SnakeRoot,
+					entries,
+					addedPaths,
+					scanMessages);
+			}
+		}
+	}
+
+	// 在非游戏目录内再找一层游戏目录（总深度不超过 2）。
+	void ScanNestedEraGameDirectories(
+		string directory,
+		int depth,
+		string profileId,
+		LauncherGameSource source,
+		List<LauncherGameEntry> entries,
+		HashSet<string> addedPaths,
+		List<string> scanMessages)
+	{
+		if (string.IsNullOrEmpty(directory) || depth > MaxLauncherScanDepth)
+			return;
+
+		foreach (string directoryName in GetDirectDirectoryNames(directory))
+		{
+			if (entries.Count >= MaxLauncherGameEntries)
+			{
+				AddScanMessage(scanMessages, $"游戏条目超过 {MaxLauncherGameEntries} 个，已停止继续扫描。");
+				return;
+			}
+
+			string gameRoot = CombineDirectory(directory, directoryName);
+			if (!IsEraGameDirectory(gameRoot))
+				continue;
+
+			AddGameEntry(
+				entries,
+				addedPaths,
+				GetGameDisplayName(directory, gameRoot),
+				gameRoot,
+				profileId,
+				source,
+				scanMessages);
 		}
 	}
 

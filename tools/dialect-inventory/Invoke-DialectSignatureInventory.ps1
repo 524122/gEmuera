@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($ClassificationPath)) { $ClassificationPath = Join-Path $scriptRoot 'dialect-classification.json' }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path ([IO.Path]::GetFullPath($ProjectRoot)) 'NewFrameworkDesign\generated\dialect-signature-inventory.json'
+    $OutputPath = Join-Path ([IO.Path]::GetFullPath($ProjectRoot)) 'docs\NewFrameworkDesign\generated\dialect-signature-inventory.json'
 }
 try {
     Import-Module (Join-Path $scriptRoot 'DialectInventory.psm1') -Force

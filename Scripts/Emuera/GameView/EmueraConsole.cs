@@ -1094,15 +1094,10 @@ namespace MinorShift.Emuera.GameView
 		}
 
 		/// <summary>
-		/// ToolTip表示したフラグ
-		/// </summary>
-		bool tooltipUsed = false;
-		/// <summary>
 		/// マウスの直下にあるテキスト。ボタンであってもよい。
 		/// ToolTip表示用。世代無視、履歴中も表示
 		/// </summary>
 		ConsoleButtonString pointingString = null;
-		ConsoleButtonString lastPointingString = null;
 		#endregion
 
 		#region Input & Timer系
