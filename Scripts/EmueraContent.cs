@@ -4780,7 +4780,14 @@ public partial class EmueraContent : Control
 				TrackAsyncTextureRequestForCurrentRender();
 			if (renderingCbgTextures)
 				cbgTextureUnavailableDuringRender = true;
-			return cached.Texture;
+			// cached 是 class（H4 改造后）：TryGetValue 失败时为空，必须判空再取。
+			// 稳定窗口内返回旧纹理时仍需 pin，避免字节预算 LRU 淘汰仍在显示的纹理。
+			if (cached != null && cached.Texture != null)
+			{
+				PinGraphicsImageTextureForDisplay(cached.Texture);
+				return cached.Texture;
+			}
+			return null;
 		}
 
 		try

@@ -7712,6 +7712,9 @@ namespace MinorShift.Emuera.GameData.Function
 				List<string> files;
 				try
 				{
+					// ENUMFILES 是运行时动态枚举：会话中途新增/删除的文件必须可见，
+					// 先失效目录快照缓存再枚举（与 baseline 每次即时枚举语义一致）。
+					uEmuera.Utils.InvalidateRecursiveDirListing(dir);
 					files = uEmuera.Utils.GetFilePaths(dir, pattern, option);
 					for (int i = 0; i < files.Count; i++)
 						files[i] = uEmuera.Utils.GetRelativePathFromGameDir(files[i]);

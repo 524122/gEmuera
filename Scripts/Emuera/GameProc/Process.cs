@@ -257,6 +257,9 @@ namespace MinorShift.Emuera.GameProc
 		{
 			saveCurrentState(false);
 			state.SystemState = SystemStateCode.System_Reloaderb;
+			// 会话中途 reload 必须重新枚举 ERB 目录：目录快照缓存（启动期 M4 优化）
+			// 若不清除会看不到新增/删除的 .ERB 文件。
+			uEmuera.Utils.InvalidateRecursiveDirListing(Program.ErbDir);
 			ErbLoader loader = new ErbLoader(console, exm, this);
             await loader.LoadErbFilesAsync(Program.ErbDir, false, labelDic, Config.UseLazyLoading && Program.SupportsLazyLoading);
 			console.ReadAnyKey();

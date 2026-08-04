@@ -1214,6 +1214,30 @@ namespace uEmuera
         /// historical behaviour; only the canary bridge calls this boundary
         /// after the worker has quiesced.
         /// </summary>
+        /// <summary>
+        /// 失效给定根目录（含子目录）的目录快照缓存。ERB reload、ENUMFILES 等运行时
+        /// 动态枚举必须读到最新文件，不能停留在启动期快照（会话中途新增/删除的文件
+        /// 必须对 reload 与 ENUMFILES 可见，与 baseline 每次即时枚举语义一致）。
+        /// </summary>
+        internal static void InvalidateRecursiveDirListing(string root)
+        {
+            if (string.IsNullOrEmpty(root))
+                return;
+            lock (recursiveDirListingLock)
+            {
+                if (recursiveDirListingCache.Count == 0)
+                    return;
+                var stale = new List<string>();
+                foreach (var key in recursiveDirListingCache.Keys)
+                {
+                    if (IsUnderDirRoot(key, root))
+                        stale.Add(key);
+                }
+                foreach (var key in stale)
+                    recursiveDirListingCache.Remove(key);
+            }
+        }
+
         internal static void ResetCanarySessionState()
         {
             lock (recursiveFileIndexLock)
