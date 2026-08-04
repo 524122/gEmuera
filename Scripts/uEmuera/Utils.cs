@@ -137,6 +137,83 @@ namespace uEmuera
         static readonly Dictionary<string, Dictionary<string, string>> recursiveFileIndexCache =
             new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
+        // Android 启动期 5-6 遍整树枚举的合并缓存：每个目录只用 DirAccess 列出一次，
+        // GetFilePaths/GetDirectoryPaths 的所有模式查询复用同一快照（同文件集合、同排序）。
+        // 仅作用于 Erb/Csv/Content 三个静态游戏数据根，运行时的可变目录（如存档目录）
+        // 仍走即时枚举，保证 ENUMFILES 等运行时函数不会读到陈旧结果。
+        private sealed class DirListing
+        {
+            public readonly string[] Files;
+            public readonly string[] Subdirs;
+            public DirListing(string[] files, string[] subdirs)
+            {
+                Files = files;
+                Subdirs = subdirs;
+            }
+        }
+
+        static readonly object recursiveDirListingLock = new object();
+        static readonly Dictionary<string, DirListing> recursiveDirListingCache =
+            new Dictionary<string, DirListing>(StringComparer.OrdinalIgnoreCase);
+
+        static bool IsCacheableDirRoot(string search)
+        {
+            return IsUnderDirRoot(search, MinorShift.Emuera.Program.ErbDir)
+                || IsUnderDirRoot(search, MinorShift.Emuera.Program.CsvDir)
+                || IsUnderDirRoot(search, MinorShift.Emuera.Program.ContentDir);
+        }
+
+        static bool IsUnderDirRoot(string path, string root)
+        {
+            if (string.IsNullOrEmpty(root))
+                return false;
+            string p = NormalizePath(path).TrimEnd('/');
+            string r = NormalizePath(root).TrimEnd('/');
+            if (string.IsNullOrEmpty(r))
+                return false;
+            if (string.Equals(p, r, StringComparison.OrdinalIgnoreCase))
+                return true;
+            // 目录边界匹配，避免 ErbDir=".../erb" 误命中 ".../erb_saves"。
+            return p.StartsWith(r + "/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        static DirListing GetOrBuildDirListing(string search)
+        {
+            lock (recursiveDirListingLock)
+            {
+                if (recursiveDirListingCache.TryGetValue(search, out var listing))
+                    return listing;
+                listing = BuildDirListing(search);
+                recursiveDirListingCache[search] = listing;
+                return listing;
+            }
+        }
+
+        static DirListing BuildDirListing(string search)
+        {
+            using var dir = Godot.DirAccess.Open(search);
+            if (dir == null)
+            {
+                global::GenericUtils.Error(global::EmueraLogCategory.FileSystem, () => $"[FS] DirAccess open failed: {search}, error: {Godot.DirAccess.GetOpenError()}");
+                return new DirListing(Array.Empty<string>(), Array.Empty<string>());
+            }
+            dir.IncludeHidden = true;
+            return new DirListing(dir.GetFiles(), dir.GetDirectories());
+        }
+
+        static void CollectFilePathsCached(string search, System.Text.RegularExpressions.Regex pattern, List<string> result)
+        {
+            var listing = GetOrBuildDirListing(search);
+            string prefix = search.TrimEnd('/') + "/";
+            foreach (string file in listing.Files)
+            {
+                if (pattern.IsMatch(file))
+                    result.Add(prefix + file);
+            }
+            foreach (string subdir in listing.Subdirs)
+                CollectFilePathsCached(prefix + subdir, pattern, result);
+        }
+
         public static void SetSHIFTJIS_to_UTF8Dict(Dictionary<string, string> dict)
         {
             shiftjis_to_utf8 = dict;
@@ -534,6 +611,25 @@ namespace uEmuera
             }
 
             var result = new List<string>();
+            if (IsCacheableDirRoot(search))
+            {
+                var listing = GetOrBuildDirListing(search);
+                var regex = GlobToRegex(pattern);
+                if (option == SearchOption.AllDirectories)
+                {
+                    CollectFilePathsCached(search, regex, result);
+                }
+                else
+                {
+                    string prefix = search.TrimEnd('/') + "/";
+                    foreach (string file in listing.Files)
+                    {
+                        if (regex.IsMatch(file))
+                            result.Add(prefix + file);
+                    }
+                }
+                return result;
+            }
             CollectFilePaths(search, GlobToRegex(pattern), option, result);
             return result;
         }
@@ -586,6 +682,14 @@ namespace uEmuera
                 return new List<string>(Directory.GetDirectories(search, "*", SearchOption.TopDirectoryOnly));
 
             var result = new List<string>();
+            if (IsCacheableDirRoot(search))
+            {
+                var listing = GetOrBuildDirListing(search);
+                string prefix = search.TrimEnd('/') + "/";
+                foreach (string entry in listing.Subdirs)
+                    result.Add(prefix + entry);
+                return result;
+            }
             using var dir = Godot.DirAccess.Open(search);
             if (dir == null)
             {
@@ -1114,6 +1218,8 @@ namespace uEmuera
         {
             lock (recursiveFileIndexLock)
                 recursiveFileIndexCache.Clear();
+            lock (recursiveDirListingLock)
+                recursiveDirListingCache.Clear();
 
             // The encoding dictionaries are populated from res:// once by
             // the startup bridge and are immutable process catalogs.  Keep
