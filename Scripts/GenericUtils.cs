@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -52,7 +51,38 @@ internal enum EmueraDisplayScrollMode
 
 internal static class GenericUtils
 {
-    static readonly ConcurrentQueue<Action> uiQueue = new ConcurrentQueue<Action>();
+    // UI 动作队列改为 lock + 环形缓冲 + 信封对象池：每次入队复用信封对象，不再
+    // 为每个动作分配闭包和 ConcurrentQueue 内部节点（Android Mono GC 暂停的主要人为来源）。
+    static readonly object uiQueueLock = new object();
+    static UiEnvelope[] uiQueueRing = new UiEnvelope[256];
+    static readonly Stack<UiEnvelope> uiEnvelopePool = new Stack<UiEnvelope>();
+    static int uiQueueHead = 0;
+    static int uiQueueCount = 0;
+
+    /// <summary>
+    /// 复用信封：承载一个待执行 UI 动作。出队执行后归还池，避免逐动作分配闭包。
+    /// 计数递减放在 finally，保证动作抛异常时 pending 计数仍被正确回退。
+    /// </summary>
+    sealed class UiEnvelope
+    {
+        public Action Action;
+        public bool DisplayWork;
+
+        public void Run()
+        {
+            try
+            {
+                Action();
+            }
+            finally
+            {
+                if (DisplayWork)
+                    Interlocked.Decrement(ref pendingDisplayActions);
+                Interlocked.Decrement(ref pendingUiActions);
+            }
+        }
+    }
+
     static int mainThreadId = -1;
     static int pendingUiActions = 0;
     static int pendingDisplayActions = 0;
@@ -435,7 +465,20 @@ internal static class GenericUtils
         // All queued actions at this point were produced by the stopped
         // candidate.  A stale action must never mutate the next candidate's
         // Godot view, so discard the envelopes and their accounting together.
-        while (uiQueue.TryDequeue(out _)) { }
+        // 主线程调用且生产者已停，清空环形缓冲并把信封全部归还池，不留下悬空引用。
+        lock (uiQueueLock)
+        {
+            while (uiQueueCount > 0)
+            {
+                UiEnvelope envelope = uiQueueRing[uiQueueHead];
+                uiQueueRing[uiQueueHead] = null;
+                uiQueueHead = (uiQueueHead + 1) % uiQueueRing.Length;
+                uiQueueCount--;
+                envelope.Action = null;
+                envelope.DisplayWork = false;
+                uiEnvelopePool.Push(envelope);
+            }
+        }
         Interlocked.Exchange(ref pendingUiActions, 0);
         Interlocked.Exchange(ref pendingDisplayActions, 0);
         Interlocked.Increment(ref uiFrameGeneration);
@@ -502,15 +545,29 @@ internal static class GenericUtils
         ulong budgetUsec = OS.GetName() == "Android" ? AndroidUiBudgetUsec : DesktopUiBudgetUsec;
         ulong startUsec = Time.GetTicksUsec();
         int count = 0;
-        while (count < maxActions && uiQueue.TryDequeue(out var action))
+        while (count < maxActions)
         {
+            UiEnvelope envelope;
+            lock (uiQueueLock)
+            {
+                if (uiQueueCount == 0)
+                    break;
+                envelope = uiQueueRing[uiQueueHead];
+                uiQueueRing[uiQueueHead] = null;
+                uiQueueHead = (uiQueueHead + 1) % uiQueueRing.Length;
+                uiQueueCount--;
+            }
             try
             {
-                action();
+                envelope.Run();
             }
             catch (Exception ex)
             {
                 Error(EmueraLogCategory.UI, () => $"[UI Queue] {ex}");
+            }
+            finally
+            {
+                ReleaseUiEnvelope(envelope);
             }
             count++;
             if (Time.GetTicksUsec() - startUsec >= budgetUsec)
@@ -543,19 +600,43 @@ internal static class GenericUtils
         if (displayWork)
             Interlocked.Increment(ref pendingDisplayActions);
 
-        uiQueue.Enqueue(() =>
+        lock (uiQueueLock)
         {
-            try
-            {
-                action();
-            }
-            finally
-            {
-                if (displayWork)
-                    Interlocked.Decrement(ref pendingDisplayActions);
-                Interlocked.Decrement(ref pendingUiActions);
-            }
-        });
+            if (uiQueueCount == uiQueueRing.Length)
+                GrowUiRingLocked();
+            UiEnvelope envelope = AcquireUiEnvelope();
+            envelope.Action = action;
+            envelope.DisplayWork = displayWork;
+            int tail = (uiQueueHead + uiQueueCount) % uiQueueRing.Length;
+            uiQueueRing[tail] = envelope;
+            uiQueueCount++;
+        }
+    }
+
+    // 从空闲池取一个信封，仅允许在持有 uiQueueLock 时调用。
+    static UiEnvelope AcquireUiEnvelope()
+    {
+        return uiEnvelopePool.Count > 0 ? uiEnvelopePool.Pop() : new UiEnvelope();
+    }
+
+    // 环形缓冲已满时扩容（仅在超大突发时发生，不属于逐动作热路径）。
+    static void GrowUiRingLocked()
+    {
+        int oldCapacity = uiQueueRing.Length;
+        var newRing = new UiEnvelope[oldCapacity * 2];
+        for (int i = 0; i < uiQueueCount; i++)
+            newRing[i] = uiQueueRing[(uiQueueHead + i) % oldCapacity];
+        uiQueueHead = 0;
+        uiQueueRing = newRing;
+    }
+
+    // 执行完毕后归还信封：先清空 Action 引用，避免池长期持有闭包/游戏对象引用。
+    static void ReleaseUiEnvelope(UiEnvelope envelope)
+    {
+        envelope.Action = null;
+        envelope.DisplayWork = false;
+        lock (uiQueueLock)
+            uiEnvelopePool.Push(envelope);
     }
 
     public static EmueraLogLevel RuntimeLogLevel
