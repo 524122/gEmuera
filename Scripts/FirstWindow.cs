@@ -127,8 +127,12 @@ public partial class FirstWindow : Control
 		GenericUtils.SetMainThread();
 		GenericUtils.InitializeLogging();
 
+		// 统一深色主题：Theme 资源提供基线样式，代码 overrides 覆盖交互控件。
+		Theme = GEmueraTheme.LoadTheme();
+
 		BuildLauncherUi();
 		ApplyLauncherSafeArea();
+		PlayLauncherEntrance();
 		GetViewport().SizeChanged += OnViewportSizeChanged;
 
 		if (OS.GetName() == "Android")
@@ -147,9 +151,8 @@ public partial class FirstWindow : Control
 
 	void BuildLauncherUi()
 	{
-		var background = new ColorRect();
-		background.Color = new Color(0.075f, 0.083f, 0.088f);
-		background.MouseFilter = MouseFilterEnum.Ignore;
+		// 深色背景 token（#14161D）替代旧的灰绿色调。
+		var background = GEmueraTheme.CreateBackground();
 		background.SetAnchorsPreset(LayoutPreset.FullRect);
 		AddChild(background);
 
@@ -169,9 +172,25 @@ public partial class FirstWindow : Control
 		statusLabel = new Label();
 		statusLabel.HorizontalAlignment = HorizontalAlignment.Center;
 		statusLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-		statusLabel.AddThemeColorOverride("font_color", new Color(0.78f, 0.84f, 0.9f));
+		statusLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
 		statusLabel.AddThemeFontSizeOverride("font_size", 14);
 		root.AddChild(statusLabel);
+	}
+
+	/// <summary>启动器入场动效：fade + 轻微上移（300-400ms ease-out）。</summary>
+	void PlayLauncherEntrance()
+	{
+		if (launcherMargin == null)
+			return;
+		launcherMargin.Modulate = new Color(1, 1, 1, 0f);
+		launcherMargin.PivotOffset = launcherMargin.Size * 0.5f;
+		var tween = CreateTween();
+		tween.BindNode(launcherMargin);
+		tween.SetTrans(Tween.TransitionType.Cubic);
+		tween.SetEase(Tween.EaseType.Out);
+		tween.TweenProperty(launcherMargin, "modulate:a", 1.0f, GEmueraTheme.EnterSeconds);
+		tween.Parallel().TweenProperty(launcherMargin, "position:y", launcherMargin.Position.Y, GEmueraTheme.EnterSeconds)
+			.From(launcherMargin.Position.Y + 18);
 	}
 
 	void OnViewportSizeChanged()
@@ -211,15 +230,23 @@ public partial class FirstWindow : Control
 		title.Text = MultiLanguage.Get("FirstWindow.Title", "gEmuera(Emuera for Godot)");
 		title.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		title.AddThemeFontSizeOverride("font_size", 28);
-		title.AddThemeColorOverride("font_color", new Color(0.96f, 0.98f, 1.0f));
+		title.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
 		titleBlock.AddChild(title);
+
+		// 标题下的蓝紫强调渐变条（#6C8CFF → #9B6CFF），纯视觉装饰。
+		var accentBar = new ColorRect();
+		accentBar.CustomMinimumSize = new Vector2(96, 3);
+		accentBar.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+		accentBar.Color = GEmueraTheme.Accent;
+		accentBar.MouseFilter = MouseFilterEnum.Ignore;
+		titleBlock.AddChild(accentBar);
 
 		return header;
 	}
 
 	Control CreateLauncherTabs()
 	{
-		var panel = CreatePanel(new Color(0.105f, 0.118f, 0.118f), new Color(0.2f, 0.25f, 0.28f), true);
+		var panel = CreatePanel(GEmueraTheme.Surface, GEmueraTheme.Border, true);
 		panel.SizeFlagsVertical = SizeFlags.ExpandFill;
 
 		var margin = new MarginContainer();
@@ -285,9 +312,6 @@ public partial class FirstWindow : Control
 		button.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		button.AddThemeFontSizeOverride("font_size", text.Length > 4 ? 15 : 17);
 		button.Pressed += pressed;
-		button.ButtonDown += () => AnimateButtonScale(button, 0.97f);
-		button.ButtonUp += () => AnimateButtonScale(button, 1.0f);
-		button.MouseExited += () => AnimateButtonScale(button, 1.0f);
 		return button;
 	}
 
@@ -329,43 +353,8 @@ public partial class FirstWindow : Control
 		if (button == null)
 			return;
 
-		button.AddThemeStyleboxOverride("normal", CreateRailButtonStyle(active, false));
-		button.AddThemeStyleboxOverride("hover", CreateRailButtonStyle(true, false));
-		button.AddThemeStyleboxOverride("pressed", CreateRailButtonStyle(active, true));
-		button.AddThemeStyleboxOverride("focus", CreateRailButtonStyle(true, false));
-		button.AddThemeColorOverride("font_color", active ? new Color(0.98f, 0.98f, 0.94f) : new Color(0.74f, 0.79f, 0.8f));
-		button.AddThemeColorOverride("font_hover_color", new Color(1.0f, 0.97f, 0.86f));
-		button.AddThemeColorOverride("font_pressed_color", new Color(0.98f, 0.95f, 0.82f));
-	}
-
-	StyleBoxFlat CreateRailButtonStyle(bool active, bool pressed)
-	{
-		var style = new StyleBoxFlat();
-		style.BgColor = active ? new Color(0.22f, 0.27f, 0.25f) : new Color(0.12f, 0.14f, 0.14f);
-		style.BorderColor = active ? new Color(0.52f, 0.58f, 0.42f) : new Color(0.18f, 0.21f, 0.21f);
-		style.SetBorderWidthAll(active ? 1 : 0);
-		style.SetCornerRadiusAll(8);
-		style.ContentMarginLeft = 8;
-		style.ContentMarginRight = 8;
-		style.ContentMarginTop = 6;
-		style.ContentMarginBottom = 6;
-		style.ShadowColor = active ? new Color(0, 0, 0, 0.35f) : new Color(0, 0, 0, 0.2f);
-		style.ShadowSize = pressed ? 1 : active ? 5 : 2;
-		style.ShadowOffset = new Vector2(0, pressed ? 1 : 3);
-		return style;
-	}
-
-	void AnimateButtonScale(Button button, float targetScale)
-	{
-		if (button == null)
-			return;
-
-		button.PivotOffset = button.Size * 0.5f;
-		var tween = CreateTween();
-		tween.BindNode(button);
-		tween.SetTrans(Tween.TransitionType.Cubic);
-		tween.SetEase(Tween.EaseType.Out);
-		tween.TweenProperty(button, "scale", new Vector2(targetScale, targetScale), 0.08);
+		// 深色主题的 Tab 栏：选中态用强调蓝紫填充 + 边框，非选中态用中性表面。
+		GEmueraTheme.ApplyRailButton(button, active);
 	}
 
 	void FadeInContent(Control content)
@@ -380,7 +369,7 @@ public partial class FirstWindow : Control
 		tabFadeTween.BindNode(content);
 		tabFadeTween.SetTrans(Tween.TransitionType.Cubic);
 		tabFadeTween.SetEase(Tween.EaseType.Out);
-		tabFadeTween.TweenProperty(content, "modulate:a", 1.0, 0.16);
+		tabFadeTween.TweenProperty(content, "modulate:a", 1.0, 0.22);
 	}
 
 	Control CreateNoticeTab()
@@ -419,13 +408,14 @@ public partial class FirstWindow : Control
 		copyButton.Text = MultiLanguage.Get("FirstWindow.CopyQQ", "复制群号");
 		copyButton.CustomMinimumSize = new Vector2(0, 40);
 		copyButton.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		GEmueraTheme.ApplyButton(copyButton, GEmueraTheme.Surface, GEmueraTheme.Border);
 		copyButton.Pressed += CopyFeedbackGroup;
 		content.AddChild(copyButton);
 
 		announcementStatusLabel = new Label();
 		announcementStatusLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		announcementStatusLabel.AddThemeFontSizeOverride("font_size", 13);
-		announcementStatusLabel.AddThemeColorOverride("font_color", new Color(0.67f, 0.76f, 0.84f));
+		announcementStatusLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
 		content.AddChild(announcementStatusLabel);
 
 		return content;
@@ -463,7 +453,7 @@ public partial class FirstWindow : Control
 		label.Text = text;
 		label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		label.AddThemeFontSizeOverride("font_size", 15);
-		label.AddThemeColorOverride("font_color", new Color(0.88f, 0.92f, 0.96f));
+		label.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
 		return label;
 	}
 
@@ -500,7 +490,7 @@ public partial class FirstWindow : Control
 		categoryHintLabel = new Label();
 		categoryHintLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		categoryHintLabel.AddThemeFontSizeOverride("font_size", 13);
-		categoryHintLabel.AddThemeColorOverride("font_color", new Color(0.7f, 0.78f, 0.86f));
+		categoryHintLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
 		content.AddChild(categoryHintLabel);
 		UpdateCategoryHint();
 		content.AddChild(CreateCompatibilitySettings());
@@ -511,6 +501,7 @@ public partial class FirstWindow : Control
 		gameList.AddThemeFontSizeOverride("font_size", 20);
 		gameList.AddThemeConstantOverride("v_separation", 12);
 		gameList.AddThemeConstantOverride("line_separation", 8);
+		GEmueraTheme.ApplyItemList(gameList);
 		ApplyWideVerticalScrollbar(gameList.GetVScrollBar());
 		gameList.ItemSelected += OnGameSelected;
 		gameList.ItemActivated += OnGameActivated;
@@ -521,7 +512,7 @@ public partial class FirstWindow : Control
 		startButton.Disabled = true;
 		startButton.CustomMinimumSize = new Vector2(0, 52);
 		startButton.AddThemeFontSizeOverride("font_size", 18);
-		ApplyPrimaryButtonStyle(startButton);
+		GEmueraTheme.ApplyAccentButton(startButton);
 		startButton.Pressed += OnStartPressed;
 		content.AddChild(startButton);
 
@@ -668,55 +659,20 @@ public partial class FirstWindow : Control
 		var label = new Label();
 		label.Text = text;
 		label.AddThemeFontSizeOverride("font_size", 20);
-		label.AddThemeColorOverride("font_color", new Color(0.97f, 0.98f, 1.0f));
+		label.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
 		return label;
 	}
 
 	StyleBoxFlat CreatePanelStyle(Color backgroundColor, Color borderColor, bool shadow = false)
 	{
-		var style = new StyleBoxFlat();
-		style.BgColor = backgroundColor;
-		style.BorderColor = borderColor;
-		style.SetBorderWidthAll(1);
-		style.SetCornerRadiusAll(8);
-		if (shadow)
-		{
-			style.ShadowColor = new Color(0, 0, 0, 0.34f);
-			style.ShadowSize = 8;
-			style.ShadowOffset = new Vector2(0, 4);
-		}
-		return style;
-	}
-
-	void ApplyPrimaryButtonStyle(Button button)
-	{
-		if (button == null)
-			return;
-
-		button.AddThemeStyleboxOverride("normal", CreatePrimaryButtonStyle(new Color(0.33f, 0.39f, 0.31f), new Color(0.58f, 0.64f, 0.44f), 5));
-		button.AddThemeStyleboxOverride("hover", CreatePrimaryButtonStyle(new Color(0.38f, 0.45f, 0.35f), new Color(0.68f, 0.72f, 0.5f), 6));
-		button.AddThemeStyleboxOverride("pressed", CreatePrimaryButtonStyle(new Color(0.25f, 0.3f, 0.25f), new Color(0.5f, 0.56f, 0.4f), 2));
-		button.AddThemeStyleboxOverride("disabled", CreatePrimaryButtonStyle(new Color(0.16f, 0.18f, 0.18f), new Color(0.22f, 0.24f, 0.24f), 0));
-		button.AddThemeColorOverride("font_color", new Color(0.98f, 0.98f, 0.92f));
-		button.AddThemeColorOverride("font_disabled_color", new Color(0.5f, 0.54f, 0.54f));
-		button.ButtonDown += () => AnimateButtonScale(button, 0.985f);
-		button.ButtonUp += () => AnimateButtonScale(button, 1.0f);
-		button.MouseExited += () => AnimateButtonScale(button, 1.0f);
-	}
-
-	StyleBoxFlat CreatePrimaryButtonStyle(Color backgroundColor, Color borderColor, int shadowSize)
-	{
-		var style = new StyleBoxFlat();
-		style.BgColor = backgroundColor;
-		style.BorderColor = borderColor;
-		style.SetBorderWidthAll(1);
-		style.SetCornerRadiusAll(8);
-		style.ContentMarginTop = 8;
-		style.ContentMarginBottom = 8;
-		style.ShadowColor = new Color(0, 0, 0, shadowSize > 0 ? 0.28f : 0);
-		style.ShadowSize = shadowSize;
-		style.ShadowOffset = new Vector2(0, shadowSize > 0 ? 3 : 0);
-		return style;
+		// 卡片风格：8px 圆角 + 1px 边框 + 可选柔和阴影（深色主题 token）。
+		return GEmueraTheme.SurfaceStyle(
+			backgroundColor,
+			borderColor,
+			GEmueraTheme.CardRadius,
+			1,
+			shadow ? 8 : 0,
+			new Vector2(0, 4));
 	}
 
 	void ApplyWideVerticalScrollbar(VScrollBar scrollbar)
@@ -724,34 +680,7 @@ public partial class FirstWindow : Control
 		if (scrollbar == null)
 			return;
 
-		scrollbar.CustomMinimumSize = new Vector2(LauncherScrollBarWidth, 0);
-		scrollbar.AddThemeConstantOverride("scroll_width", LauncherScrollBarWidth);
-		scrollbar.AddThemeStyleboxOverride("scroll", CreateScrollTrackStyle());
-		scrollbar.AddThemeStyleboxOverride("grabber", CreateScrollGrabberStyle(new Color(0.42f, 0.48f, 0.45f)));
-		scrollbar.AddThemeStyleboxOverride("grabber_highlight", CreateScrollGrabberStyle(new Color(0.52f, 0.58f, 0.5f)));
-		scrollbar.AddThemeStyleboxOverride("grabber_pressed", CreateScrollGrabberStyle(new Color(0.6f, 0.64f, 0.52f)));
-	}
-
-	StyleBoxFlat CreateScrollTrackStyle()
-	{
-		var style = new StyleBoxFlat();
-		style.BgColor = new Color(0.065f, 0.072f, 0.072f, 0.9f);
-		style.SetCornerRadiusAll(8);
-		style.ContentMarginLeft = 4;
-		style.ContentMarginRight = 4;
-		return style;
-	}
-
-	StyleBoxFlat CreateScrollGrabberStyle(Color color)
-	{
-		var style = new StyleBoxFlat();
-		style.BgColor = color;
-		style.SetCornerRadiusAll(8);
-		style.ContentMarginLeft = 5;
-		style.ContentMarginRight = 5;
-		style.ContentMarginTop = 4;
-		style.ContentMarginBottom = 4;
-		return style;
+		GEmueraTheme.ApplyWideScrollbar(scrollbar, LauncherScrollBarWidth);
 	}
 
 	void CopyFeedbackGroup()

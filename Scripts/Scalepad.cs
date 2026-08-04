@@ -22,12 +22,14 @@ public partial class Scalepad : Control
         panel.MouseFilter = MouseFilterEnum.Stop;
         AddChild(panel);
 
-        var style = new StyleBoxFlat();
-        style.BgColor = new Color(0.03f, 0.03f, 0.035f, 0.88f);
-        style.CornerRadiusTopLeft = style.CornerRadiusTopRight = 6;
-        style.CornerRadiusBottomLeft = style.CornerRadiusBottomRight = 6;
-        style.ContentMarginLeft = style.ContentMarginRight = 8;
-        style.ContentMarginTop = style.ContentMarginBottom = 7;
+        var style = GEmueraTheme.SurfaceStyle(
+            GEmueraTheme.WithAlpha(GEmueraTheme.SurfaceRaised, 0.94f),
+            GEmueraTheme.Border,
+            GEmueraTheme.CardRadius,
+            1,
+            8,
+            new Vector2(0, 4),
+            8, 8, 7, 7);
         panel.AddThemeStyleboxOverride("panel", style);
 
         hbox = new HBoxContainer();

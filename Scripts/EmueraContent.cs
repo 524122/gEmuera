@@ -722,6 +722,9 @@ public partial class EmueraContent : Control
 		RefreshViewportMetrics();
 		GetViewport().SizeChanged += OnViewportSizeChanged;
 
+		// 统一深色主题：Theme 资源提供基线，交互控件用代码 overrides。
+		Theme = GEmueraTheme.LoadTheme();
+
 		mainFont = LoadConfiguredFont();
 		consoleRenderBackend = LoadConsoleRenderBackend();
 
@@ -769,12 +772,14 @@ public partial class EmueraContent : Control
 		// Placed BEFORE the toggle in the HBox so it sits on the toggle's left.
 		var menuPanel = new PanelContainer();
 		menuPanel.MouseFilter = MouseFilterEnum.Stop;
-		var menuPanelStyle = new StyleBoxFlat();
-		menuPanelStyle.BgColor = new Color(0.1f, 0.1f, 0.1f, 0.85f);
-		menuPanelStyle.CornerRadiusTopLeft = menuPanelStyle.CornerRadiusBottomLeft = 4;
-		menuPanelStyle.CornerRadiusTopRight = menuPanelStyle.CornerRadiusBottomRight = 4;
-		menuPanelStyle.ContentMarginLeft = menuPanelStyle.ContentMarginRight = 4;
-		menuPanelStyle.ContentMarginTop = menuPanelStyle.ContentMarginBottom = 2;
+		var menuPanelStyle = GEmueraTheme.SurfaceStyle(
+			GEmueraTheme.SurfaceRaised,
+			GEmueraTheme.Border,
+			GEmueraTheme.SmallRadius,
+			1,
+			6,
+			new Vector2(0, 3),
+			4, 4, 2, 2);
 		menuPanel.AddThemeStyleboxOverride("panel", menuPanelStyle);
 		menuPanel.Visible = false;
 		menuRoot.AddChild(menuPanel);
@@ -897,6 +902,7 @@ public partial class EmueraContent : Control
 		// Message box popup
 		msgBox = new PopupPanel();
 		msgBox.Size = new Vector2I(400, 220);
+		GEmueraTheme.ApplyPopup(msgBox);
 		AddChild(msgBox);
 
 		var msgVBox = new VBoxContainer();
@@ -1368,8 +1374,11 @@ public partial class EmueraContent : Control
 		return right;
 	}
 
-	// Transparent styles keep emuera buttons visually driven by their child text
-	// and image parts while still providing a Godot input target.
+	// Transparent styles keep emuera console buttons visually driven by their child
+	// text and image parts while still providing a Godot input target. This is the
+	// panel used by BuildConsoleButton (era buttons) — it MUST stay transparent so
+	// ERB-driven content (incl. hover srcb switching) renders exactly as the game
+	// defines it. Only the system-button path (StyleButton) uses the dark theme.
 	static StyleBoxFlat _btnNormalStyle;
 	static StyleBoxFlat _btnHoverStyle;
 
@@ -1394,14 +1403,17 @@ public partial class EmueraContent : Control
 		_btnHoverStyle.ContentMarginTop = _btnHoverStyle.ContentMarginBottom = 0;
 	}
 
+	/// <summary>
+	/// In-game system buttons (msgbox OK/Cancel, Inputpad OK/Repeat, Scalepad 1:1/Fit,
+	/// OptionWindow Close, VirtualCursor M). Re-themed to the dark design system:
+	/// surface fill + border + hover/pressed states + press-down tween. Hit rect stays
+	/// byte-identical (content margins remain zero) and signals are untouched.
+	/// </summary>
 	internal static void StyleButton(Button btn)
 	{
 		EnsureButtonStyles();
-		btn.AddThemeStyleboxOverride("normal", _btnNormalStyle);
-		btn.AddThemeStyleboxOverride("hover", _btnHoverStyle);
-		btn.AddThemeStyleboxOverride("pressed", _btnHoverStyle);
-		btn.AddThemeStyleboxOverride("focus", _btnHoverStyle);
-		btn.AddThemeColorOverride("font_color", new Color(1, 1, 1, 1));
+		GEmueraTheme.ApplySystemButton(btn);
+		// 保留游戏配置的 focus 色作为 hover/press 强调，避免改动行为语义。
 		var focusColor = Config.FocusColor.ToGodotColor();
 		btn.AddThemeColorOverride("font_hover_color", focusColor);
 		btn.AddThemeColorOverride("font_pressed_color", focusColor);

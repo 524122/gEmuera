@@ -161,6 +161,7 @@ namespace gEmuera.Diagnostics
             button.CustomMinimumSize = new Vector2(88, 44);
             button.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
             button.AddThemeFontSizeOverride("font_size", 15);
+            GEmueraTheme.ApplyButton(button, GEmueraTheme.Surface, GEmueraTheme.Border);
             return button;
         }
 
@@ -1352,7 +1353,7 @@ namespace gEmuera.Diagnostics
             label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
             label.MouseFilter = MouseFilterEnum.Ignore;
             label.AddThemeFontSizeOverride("font_size", 13);
-            label.AddThemeColorOverride("font_color", new Color(0.72f, 0.8f, 0.86f));
+            label.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
             return label;
         }
 
@@ -1560,26 +1561,23 @@ namespace gEmuera.Diagnostics
 
         StyleBoxFlat CreatePanelStyle()
         {
-            var style = new StyleBoxFlat();
-            style.BgColor = new Color(0.085f, 0.098f, 0.105f, 0.96f);
-            style.BorderColor = new Color(0.32f, 0.42f, 0.44f);
-            style.SetBorderWidthAll(1);
-            style.SetCornerRadiusAll(8);
-            style.ContentMarginLeft = 8;
-            style.ContentMarginRight = 8;
-            style.ContentMarginTop = 8;
-            style.ContentMarginBottom = 8;
-            return style;
+            // 深色现代卡片：表面 token + 边框 + 8px 圆角。
+            return GEmueraTheme.SurfaceStyle(
+                GEmueraTheme.WithAlpha(GEmueraTheme.Surface, 0.96f),
+                GEmueraTheme.Border,
+                GEmueraTheme.CardRadius,
+                1,
+                8,
+                new Vector2(0, 4),
+                8, 8, 8, 8);
         }
 
         StyleBoxFlat CreateRowStyle()
         {
-            var style = new StyleBoxFlat();
-            style.BgColor = new Color(0.115f, 0.13f, 0.135f, 0.95f);
-            style.BorderColor = new Color(0.2f, 0.26f, 0.27f);
-            style.SetBorderWidthAll(1);
-            style.SetCornerRadiusAll(6);
-            return style;
+            return GEmueraTheme.SurfaceStyle(
+                GEmueraTheme.Surface,
+                GEmueraTheme.Border,
+                GEmueraTheme.SmallRadius);
         }
     }
 
@@ -1925,20 +1923,23 @@ namespace gEmuera.Diagnostics
 
         static void ApplyFloatingBallStyle(Button button)
         {
-            var normal = CreateBallStyle(new Color(0.16f, 0.38f, 0.44f, 0.94f));
-            var hover = CreateBallStyle(new Color(0.20f, 0.46f, 0.52f, 0.98f));
-            var pressed = CreateBallStyle(new Color(0.10f, 0.30f, 0.36f, 1.0f));
+            // 悬浮诊断球：强调蓝紫填充 + 高亮边框（深色主题），hover 提亮。
+            var normal = CreateBallStyle(GEmueraTheme.WithAlpha(GEmueraTheme.Accent, 0.94f));
+            var hover = CreateBallStyle(GEmueraTheme.WithAlpha(GEmueraTheme.Lighten(GEmueraTheme.Accent), 0.98f));
+            var pressed = CreateBallStyle(GEmueraTheme.WithAlpha(GEmueraTheme.Darken(GEmueraTheme.Accent, 0.14f), 1.0f));
             button.AddThemeStyleboxOverride("normal", normal);
             button.AddThemeStyleboxOverride("hover", hover);
             button.AddThemeStyleboxOverride("pressed", pressed);
-            button.AddThemeColorOverride("font_color", new Color(0.95f, 1.0f, 1.0f));
+            button.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
+            button.AddThemeColorOverride("font_hover_color", GEmueraTheme.TextPrimary);
+            button.AddThemeColorOverride("font_pressed_color", GEmueraTheme.TextPrimary);
         }
 
         static StyleBoxFlat CreateBallStyle(Color color)
         {
             var style = new StyleBoxFlat();
             style.BgColor = color;
-            style.BorderColor = new Color(0.72f, 0.92f, 0.95f, 0.85f);
+            style.BorderColor = GEmueraTheme.AccentAlt;
             style.SetBorderWidthAll(2);
             style.SetCornerRadiusAll(32);
             return style;

@@ -26,6 +26,7 @@ public partial class OptionWindow : Control
 	{
 		popup = new PopupPanel();
 		popup.Size = new Vector2I(460, 560);
+		GEmueraTheme.ApplyPopup(popup);
 		AddChild(popup);
 
 		var vbox = new VBoxContainer();
