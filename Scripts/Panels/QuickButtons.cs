@@ -14,6 +14,7 @@ public partial class QuickButtons : CanvasLayer
 	Stack<Panel> buttonPool = new Stack<Panel>();
 	Stack<HBoxContainer> rowPool = new Stack<HBoxContainer>();
 	Dictionary<uint, StyleBoxFlat> quickButtonStyleCache = new Dictionary<uint, StyleBoxFlat>();
+	Dictionary<uint, StyleBoxFlat> quickButtonHoverStyleCache = new Dictionary<uint, StyleBoxFlat>();
 	Font fontFile;
 	int fontSize;
 	bool layoutUpdateQueued;
@@ -355,6 +356,9 @@ public partial class QuickButtons : CanvasLayer
 		btn.FocusMode = Control.FocusModeEnum.None;
 		btn.MouseForcePassScrollEvents = false;
 		btn.GuiInput += inputEvent => OnQuickButtonGuiInput(inputEvent, btn);
+		// hover/press 只影响视觉（stylebox 微提亮 + 下压缩放），不改变命中、value 或信号。
+		btn.MouseEntered += () => OnQuickButtonHoverChanged(btn, true);
+		btn.MouseExited += () => OnQuickButtonHoverChanged(btn, false);
 
 		var label = new Label();
 		label.SetAnchorsPreset(Control.LayoutPreset.FullRect);
@@ -374,6 +378,8 @@ public partial class QuickButtons : CanvasLayer
 	{
 		btn.MouseFilter = quickInputEnabled ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
 		StyleQuickButton(btn, color);
+		btn.SetMeta("quick_color", color);
+		btn.Scale = Vector2.One;
 		btn.Modulate = quickInputEnabled ? Colors.White : new Color(1, 1, 1, 0.55f);
 		btn.CustomMinimumSize = new Vector2(EffectiveButtonWidth, QuickButtonHeight);
 		btn.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
@@ -457,7 +463,9 @@ public partial class QuickButtons : CanvasLayer
 		// clearing all script-visible state before the next reuse.
 		btn.Visible = true;
 		btn.Modulate = Colors.White;
+		btn.Scale = Vector2.One;
 		btn.MouseFilter = Control.MouseFilterEnum.Ignore;
+		btn.RemoveThemeStyleboxOverride("panel");
 		btn.SetMeta("input_code", "");
 		btn.SetMeta("input_generation", -1L);
 		var label = GetButtonLabel(btn);
@@ -505,6 +513,7 @@ public partial class QuickButtons : CanvasLayer
 				if (button != null)
 				{
 					AcceptQuickInput(acceptEvent, eventSource);
+					AnimateQuickPress(button, GEmueraTheme.PressScale);
 					return true;
 				}
 				return false;
@@ -575,6 +584,8 @@ public partial class QuickButtons : CanvasLayer
 			StartQuickInertia();
 			handled = true;
 		}
+		if (activeButton != null)
+			AnimateQuickPress(activeButton, 1.0f);
 		scrollingByDrag = false;
 		dragMoved = false;
 		dragButton = null;
@@ -733,28 +744,93 @@ public partial class QuickButtons : CanvasLayer
 
 	int QuickButtonHeight => EffectiveFontSize * 3 + QuickButtonPadding * 2;
 
-	void StyleQuickButton(Panel btn, Color textColor)
+	/// <summary>
+	/// Quick button bg 由文字色的反色推导（era 快键语义：保证文字可读）。
+	/// 该推导逻辑与点击/拖拽/输入完全解耦，只改变背景呈现。
+	/// </summary>
+	Color ComputeQuickButtonBg(Color textColor)
 	{
 		var bgSource = IsMidGray(textColor)
 			? new Color(MinorShift.Emuera.Config.BackColor.r, MinorShift.Emuera.Config.BackColor.g, MinorShift.Emuera.Config.BackColor.b, 1)
 			: textColor;
-		var bgColor = new Color(1 - bgSource.R, 1 - bgSource.G, 1 - bgSource.B, 0.75f);
+		return new Color(1 - bgSource.R, 1 - bgSource.G, 1 - bgSource.B, 0.75f);
+	}
 
-		uint key = ColorCacheKey(bgColor);
+	StyleBoxFlat CreateQuickButtonStyle(Color bgColor)
+	{
+		var style = new StyleBoxFlat();
+		style.BgColor = bgColor;
+		// 细边框增强深色现代的按钮轮廓，透明部分不遮挡游戏文字。
+		style.BorderColor = new Color(0, 0, 0, 0.22f);
+		style.SetBorderWidthAll(1);
+		style.CornerRadiusTopLeft = style.CornerRadiusTopRight = 4;
+		style.CornerRadiusBottomLeft = style.CornerRadiusBottomRight = 4;
+		style.ContentMarginLeft = QuickButtonPadding;
+		style.ContentMarginRight = QuickButtonPadding;
+		style.ContentMarginTop = QuickButtonPadding;
+		style.ContentMarginBottom = QuickButtonPadding;
+		return style;
+	}
+
+	void StyleQuickButton(Panel btn, Color textColor)
+	{
+		uint key = ColorCacheKey(ComputeQuickButtonBg(textColor));
 		if (!quickButtonStyleCache.TryGetValue(key, out var normal))
 		{
-			normal = new StyleBoxFlat();
-			normal.BgColor = bgColor;
-			normal.CornerRadiusTopLeft = normal.CornerRadiusTopRight = 3;
-			normal.CornerRadiusBottomLeft = normal.CornerRadiusBottomRight = 3;
-			normal.ContentMarginLeft = QuickButtonPadding;
-			normal.ContentMarginRight = QuickButtonPadding;
-			normal.ContentMarginTop = QuickButtonPadding;
-			normal.ContentMarginBottom = QuickButtonPadding;
+			normal = CreateQuickButtonStyle(ComputeQuickButtonBg(textColor));
 			quickButtonStyleCache[key] = normal;
 		}
 
 		btn.AddThemeStyleboxOverride("panel", normal);
+	}
+
+	void OnQuickButtonHoverChanged(Panel btn, bool hovering)
+	{
+		if (btn == null || !IsControlAlive(btn))
+			return;
+
+		if (hovering)
+		{
+			// hover 只把背景微提亮（+8% 明度），命中/value/信号不变。
+			if (TryGetColorMeta(btn, "quick_color", out var color))
+			{
+				uint key = ColorCacheKey(ComputeQuickButtonBg(color));
+				if (!quickButtonHoverStyleCache.TryGetValue(key, out var hover))
+				{
+					hover = CreateQuickButtonStyle(GEmueraTheme.Lighten(ComputeQuickButtonBg(color), 0.08f));
+					quickButtonHoverStyleCache[key] = hover;
+				}
+				btn.AddThemeStyleboxOverride("panel", hover);
+			}
+		}
+		else if (TryGetColorMeta(btn, "quick_color", out var restoreColor))
+		{
+			StyleQuickButton(btn, restoreColor);
+		}
+	}
+
+	bool TryGetColorMeta(Control control, string name, out Color color)
+	{
+		color = Colors.White;
+		if (control == null || !IsControlAlive(control))
+			return false;
+		if (!control.HasMeta(name))
+			return false;
+		color = control.GetMeta(name).As<Godot.Color>();
+		return true;
+	}
+
+	/// <summary>按下/抬起的下压缩放动效（0.10s ease-out），仅视觉层。</summary>
+	void AnimateQuickPress(Control btn, float targetScale)
+	{
+		if (btn == null || !IsControlAlive(btn))
+			return;
+		btn.PivotOffset = btn.Size * 0.5f;
+		var tween = btn.CreateTween();
+		tween.BindNode(btn);
+		tween.SetTrans(Tween.TransitionType.Cubic);
+		tween.SetEase(Tween.EaseType.Out);
+		tween.TweenProperty(btn, "scale", new Vector2(targetScale, targetScale), GEmueraTheme.PressSeconds);
 	}
 
 	static uint ColorCacheKey(Color color)

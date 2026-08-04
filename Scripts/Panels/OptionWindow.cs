@@ -40,6 +40,7 @@ public partial class OptionWindow : Control
 		popup = new PopupPanel();
 		popup.Size = PopupSize;
 		popup.PopupHide += () => EmitSignal(SignalName.PopupClosed);
+		GEmueraTheme.ApplyPopup(popup);
 		AddChild(popup);
 
 		var vbox = new VBoxContainer();

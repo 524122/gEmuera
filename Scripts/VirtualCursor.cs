@@ -78,15 +78,14 @@ public partial class VirtualCursor : CanvasLayer
 		container.OffsetBottom = TopMargin + MiddleButtonSize + 8;
 		container.MouseFilter = Control.MouseFilterEnum.Ignore;
 
-		var panelStyle = new StyleBoxFlat();
-		panelStyle.BgColor = new Color(0.1f, 0.1f, 0.15f, 0.95f);
-		panelStyle.BorderColor = new Color(0.4f, 0.4f, 0.5f, 1.0f);
-		panelStyle.BorderWidthTop = panelStyle.BorderWidthBottom = 2;
-		panelStyle.BorderWidthLeft = panelStyle.BorderWidthRight = 2;
-		panelStyle.CornerRadiusTopLeft = panelStyle.CornerRadiusTopRight = 6;
-		panelStyle.CornerRadiusBottomLeft = panelStyle.CornerRadiusBottomRight = 6;
-		panelStyle.ContentMarginLeft = panelStyle.ContentMarginRight = 4;
-		panelStyle.ContentMarginTop = panelStyle.ContentMarginBottom = 4;
+		var panelStyle = GEmueraTheme.SurfaceStyle(
+			GEmueraTheme.WithAlpha(GEmueraTheme.SurfaceRaised, 0.95f),
+			GEmueraTheme.Accent,
+			6,
+			2,
+			0,
+			null,
+			4, 4, 4, 4);
 		container.AddThemeStyleboxOverride("panel", panelStyle);
 
 		middleButton = new Button();
