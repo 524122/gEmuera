@@ -431,6 +431,15 @@ public partial class EmueraContent : Control
 	static readonly Color ActiveSystemButtonColor = new Color(1.0f, 0.86f, 0.15f, 1.0f);
 	static readonly Color NormalSystemButtonColor = new Color(1, 1, 1, 1);
 
+	// Tool overlay panels are componentized as standalone .tscn scene assets so
+	// the same panel can be reused/mounted from any scene. Preloaded once and
+	// instantiated in _Ready, which replaces the previous `new X()` construction
+	// while keeping the exact same AddChild order and initialization contract.
+	static readonly PackedScene InputpadScene = GD.Load<PackedScene>("res://scenes/Inputpad.tscn");
+	static readonly PackedScene ScalepadScene = GD.Load<PackedScene>("res://scenes/Scalepad.tscn");
+	static readonly PackedScene QuickButtonsScene = GD.Load<PackedScene>("res://scenes/QuickButtons.tscn");
+	static readonly PackedScene OptionWindowScene = GD.Load<PackedScene>("res://scenes/OptionWindow.tscn");
+
 	public static int ContentWidth { get; private set; }
 	public static int ContentHeight { get; private set; }
 	public static int ContentSafeWidth { get; private set; }
@@ -834,19 +843,19 @@ public partial class EmueraContent : Control
 
 		// Tool overlays are siblings of the console so their CanvasLayer/z-order
 		// and input capture are independent from the scrollable console content.
-		quickButtons = new QuickButtons();
+		quickButtons = (QuickButtons)QuickButtonsScene.Instantiate();
 		AddChild(quickButtons);
 
 		virtualCursor = new VirtualCursor();
 		AddChild(virtualCursor);
 
-		inputpad = new Inputpad();
+		inputpad = (Inputpad)InputpadScene.Instantiate();
 		AddChild(inputpad);
 
-		scalepad = new Scalepad();
+		scalepad = (Scalepad)ScalepadScene.Instantiate();
 		AddChild(scalepad);
 
-		optionWindow = new OptionWindow();
+		optionWindow = (OptionWindow)OptionWindowScene.Instantiate();
 		AddChild(optionWindow);
 
 		// Main console viewport. Horizontal scrolling is enabled only while the

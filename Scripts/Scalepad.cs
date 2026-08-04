@@ -6,9 +6,23 @@ public partial class Scalepad : Control
     HBoxContainer hbox;
     HSlider slider;
     Label valueLabel;
-    const int PanelHeight = 58;
-    const int SideMargin = 10;
-    const int BottomMargin = 12;
+
+    // Component interface: panels advertise their own show/hide state changes so
+    // host scenes can react without polling. Emitted purely additively; callers
+    // that never connect are unaffected.
+    [Signal]
+    public delegate void PadShownEventHandler();
+
+    [Signal]
+    public delegate void PadHiddenEventHandler();
+
+    // Exported so the layout metrics are reusable/tunable per scene instance.
+    [Export]
+    public int PanelHeight = 58;
+    [Export]
+    public int SideMargin = 10;
+    [Export]
+    public int BottomMargin = 12;
 
     public override void _Ready()
     {
@@ -139,11 +153,13 @@ public partial class Scalepad : Control
         ApplyPanelLayout();
         Visible = true;
         GetParent()?.MoveChild(this, GetParent().GetChildCount() - 1);
+        EmitSignal(SignalName.PadShown);
     }
 
     public void HidePad()
     {
         Visible = false;
+        EmitSignal(SignalName.PadHidden);
     }
 
     public void ApplyFont(Font font, int fontSize)

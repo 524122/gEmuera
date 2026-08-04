@@ -69,6 +69,17 @@ public partial class QuickButtons : CanvasLayer
 	static int configuredButtonWidth = -1;
 	static int configuredFontSize = -1;
 
+	// Component interface: the panel advertises its own show/hide state changes
+	// so host scenes can react without polling. Emitted purely additively;
+	// callers that never connect are unaffected. Button sizing stays driven by
+	// the persisted settings (ConfiguredButtonWidth/ConfiguredFontSize), so no
+	// extra export parameters are added here.
+	[Signal]
+	public delegate void PadShownEventHandler();
+
+	[Signal]
+	public delegate void PadHiddenEventHandler();
+
 	public static int ConfiguredButtonWidth
 	{
 		get
@@ -634,11 +645,13 @@ public partial class QuickButtons : CanvasLayer
 	public void ShowPad()
 	{
 		Visible = true;
+		EmitSignal(SignalName.PadShown);
 	}
 
 	public void HidePad()
 	{
 		Visible = false;
+		EmitSignal(SignalName.PadHidden);
 	}
 
 	public bool IsShow => Visible;
