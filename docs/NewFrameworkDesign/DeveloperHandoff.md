@@ -38,7 +38,7 @@ project.godot
 - `PrototypeRuntimeNode -> CoreApplicationRuntime` 是候选 Core 的同场景 sidecar，用于验证 session、plan、bridge 和生命周期合同。
 - `AppBootstrap` 与 `PlatformGateway` 是 application-scoped Godot Autoload，只持 feature/capability 和平台生命周期信息，不应持有游戏业务状态。
 - `project.godot` 中的 `prototype_runtime`、`typed_ports`、`pixel_store` 当前会被 bootstrap/prototype 读取；它们不等同于 `m3-m7-current-status.json` 中默认关闭的生产迁移 feature route。
-- M2 起，`Inputpad`/`Scalepad`/`QuickButtons`/`OptionWindow`/`RuntimeDiagnosticsPanel` 五个工具面板组件化为 `scenes/*.tscn` 场景资产（面板脚本在 `Scripts/Panels/`，诊断面板在 `Scripts/Diagnostics/`），由 `EmueraContent` 预加载 `PackedScene` 后 `Instantiate()` 挂载；AddChild 顺序与行为 owner 不变。
+- M2 起，`Inputpad`/`Scalepad`/`QuickButtons`/`OptionWindow` 四个工具面板组件化为 `scenes/*.tscn` 场景资产（面板脚本在 `Scripts/Panels/`），由 `EmueraContent` 预加载 `PackedScene` 后 `Instantiate()` 挂载；AddChild 顺序与行为 owner 不变。`RuntimeDiagnosticsPanel`（`Scripts/Diagnostics/`）也有 `scenes/RuntimeDiagnosticsPanel.tscn` 资产，但当前仍由 `EmueraMain` 通过 `AttachFloatingTo` 代码挂载，场景资产仅供复用。
 
 ## 已有的可运行引擎能力
 
