@@ -112,11 +112,14 @@ public partial class EmueraContent
 		var lineSize = new Vector2(maxLineRight, lineHeight);
 
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		int previousRenderLineNo = activeRenderLineNo;
 		var newTexturePins = new List<SpriteManager.TextureInfo>();
+		var newGraphicsImagePins = new List<Texture2D>();
 		var newOverlayNodes = new List<CanvasImageOverlay>();
 		var newDivOverlayNodes = new List<CanvasDivOverlay>();
 		activeTexturePinCollector = newTexturePins;
+		activeGraphicsImagePinCollector = newGraphicsImagePins;
 		activeRenderLineNo = line.LineNo;
 		try
 		{
@@ -128,12 +131,14 @@ public partial class EmueraContent
 			ReleaseCanvasImageOverlayList(newOverlayNodes);
 			ReleaseCanvasDivOverlayList(newDivOverlayNodes);
 			ReleaseTexturePinList(newTexturePins);
+			UnpinGraphicsImageTextures(newGraphicsImagePins);
 			asyncTexturePendingLineNos.Remove(line.LineNo);
 			throw;
 		}
 		finally
 		{
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 			activeRenderLineNo = previousRenderLineNo;
 		}
 
@@ -144,6 +149,7 @@ public partial class EmueraContent
 			ReleaseCanvasImageOverlayList(newOverlayNodes);
 			ReleaseCanvasDivOverlayList(newDivOverlayNodes);
 			ReleaseTexturePinList(newTexturePins);
+			UnpinGraphicsImageTextures(newGraphicsImagePins);
 			return;
 		}
 
@@ -162,6 +168,7 @@ public partial class EmueraContent
 		RegisterCanvasImageOverlays(line.LineNo, newOverlayNodes);
 		RegisterCanvasDivOverlays(line.LineNo, newDivOverlayNodes);
 		RegisterLineTexturePins(line.LineNo, newTexturePins);
+		RegisterLineGraphicsImagePins(line.LineNo, newGraphicsImagePins);
 		if (asyncTexturePendingDuringRender)
 			asyncTexturePendingLineNos.Add(line.LineNo);
 		else
@@ -914,13 +921,20 @@ public partial class EmueraContent
 		// 动画帧可能来自不同 TextureInfo。刷新时临时复用该行的 pin 列表，
 		// 让新触达的帧纹理跟随行生命周期释放，避免缓存清理回收正在显示的帧。
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		int previousRenderLineNo = activeRenderLineNo;
 		if (!lineTexturePins.TryGetValue(overlay.LineNo, out var pins))
 		{
 			pins = new List<SpriteManager.TextureInfo>();
 			lineTexturePins[overlay.LineNo] = pins;
 		}
+		if (!lineGraphicsImagePins.TryGetValue(overlay.LineNo, out var graphicsPins))
+		{
+			graphicsPins = new List<Texture2D>();
+			lineGraphicsImagePins[overlay.LineNo] = graphicsPins;
+		}
 		activeTexturePinCollector = pins;
+		activeGraphicsImagePinCollector = graphicsPins;
 		activeRenderLineNo = overlay.LineNo;
 		try
 		{
@@ -929,6 +943,7 @@ public partial class EmueraContent
 		finally
 		{
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 			activeRenderLineNo = previousRenderLineNo;
 		}
 	}

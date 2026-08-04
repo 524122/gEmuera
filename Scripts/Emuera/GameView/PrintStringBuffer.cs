@@ -30,35 +30,38 @@ namespace MinorShift.Emuera.GameView
 		StringStyle lastStringStyle = new StringStyle();
 		List<ConsoleButtonString> m_buttonList = new List<ConsoleButtonString>();
 		bool isLastLineEnd = true;
+		// BufferStrLength 的增量缓存：PRINT 热路径每追加一次就全量遍历 m_stringList
+		// 是 O(n²)。改为在每次列表变更时维护累计长度，读取 O(1)，行结构完全不变。
+		int cachedBufferStrLength = 0;
 
 		public int BufferStrLength
 		{
-			get
-			{
-				int length = 0;
+			get { return cachedBufferStrLength; }
+		}
 
-				var count = m_stringList.Count;
-				AConsoleDisplayPart css = null;
-				for(var i=0; i<count; ++i)
-				{
-					css = m_stringList[i];
-					if (css is ConsoleStyledString)
-						length += css.Str.Length;
-					else
-						length += 1;
-				}
-				return length;
-			}
+		void AddDisplayPart(AConsoleDisplayPart part)
+		{
+			m_stringList.Add(part);
+			if (part is ConsoleStyledString css)
+				cachedBufferStrLength += css.Str.Length;
+			else
+				cachedBufferStrLength += 1;
+		}
+
+		void ClearDisplayParts()
+		{
+			m_stringList.Clear();
+			cachedBufferStrLength = 0;
 		}
 
 		public void Append(AConsoleDisplayPart part)
 		{
 			if (builder.Length != 0)
 			{
-				m_stringList.Add(new ConsoleStyledString(builder.ToString(), lastStringStyle));
+				AddDisplayPart(new ConsoleStyledString(builder.ToString(), lastStringStyle));
 				builder.Remove(0, builder.Length);
 			}
-			m_stringList.Add(part);
+			AddDisplayPart(part);
 		}
 
 		public void Append(string str, StringStyle style)
@@ -89,7 +92,7 @@ namespace MinorShift.Emuera.GameView
 			}
 			else
 			{
-				m_stringList.Add(new ConsoleStyledString(builder.ToString(), lastStringStyle));
+				AddDisplayPart(new ConsoleStyledString(builder.ToString(), lastStringStyle));
 				builder.Remove(0, builder.Length);
 				builder.Append(str);
 				lastStringStyle = style;
@@ -101,11 +104,11 @@ namespace MinorShift.Emuera.GameView
 		public void AppendButton(string str, StringStyle style, string input)
 		{
 			fromCssToButton();
-			m_stringList.Add(new ConsoleStyledString(str, style));
+			AddDisplayPart(new ConsoleStyledString(str, style));
 			if (m_stringList.Count == 0)
 				return;
 			m_buttonList.Add(createButton(m_stringList, input));
-			m_stringList.Clear();
+			ClearDisplayParts();
 		}
 
 
@@ -113,11 +116,11 @@ namespace MinorShift.Emuera.GameView
 		public void AppendButton(string str, StringStyle style, long input)
 		{
 			fromCssToButton();
-			m_stringList.Add(new ConsoleStyledString(str, style));
+			AddDisplayPart(new ConsoleStyledString(str, style));
 			if (m_stringList.Count == 0)
 				return;
 			m_buttonList.Add(createButton(m_stringList, input));
-			m_stringList.Clear();
+			ClearDisplayParts();
 		}
 
 		public void AppendButton(ConsoleButtonString button)
@@ -129,11 +132,11 @@ namespace MinorShift.Emuera.GameView
 		public void AppendPlainText(string str, StringStyle style)
 		{
 			fromCssToButton();
-			m_stringList.Add(new ConsoleStyledString(str, style));
+			AddDisplayPart(new ConsoleStyledString(str, style));
 			if (m_stringList.Count == 0)
 				return;
 			m_buttonList.Add(createPlainButton(m_stringList));
-			m_stringList.Clear();
+			ClearDisplayParts();
 		}
 
 		public bool IsEmpty
@@ -172,11 +175,11 @@ namespace MinorShift.Emuera.GameView
 		public ConsoleDisplayLine AppendAndFlushErrButton(string str, StringStyle style, string input, ScriptPosition pos, StringMeasure sm)
 		{
 			fromCssToButton();
-			m_stringList.Add(new ConsoleStyledString(str, style));
+			AddDisplayPart(new ConsoleStyledString(str, style));
 			if (m_stringList.Count == 0)
 				return null;
 			m_buttonList.Add(createButton(m_stringList, input, pos));
-			m_stringList.Clear();
+			ClearDisplayParts();
 			return FlushSingleLine(sm, false);
 		}
 
@@ -308,7 +311,7 @@ namespace MinorShift.Emuera.GameView
 		private void clearBuffer()
 		{
 			builder.Remove(0, builder.Length);
-			m_stringList.Clear();
+			ClearDisplayParts();
 			m_buttonList.Clear();
 		}
 
@@ -320,13 +323,13 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (builder.Length != 0)
 			{
-				m_stringList.Add(new ConsoleStyledString(builder.ToString(), lastStringStyle));
+				AddDisplayPart(new ConsoleStyledString(builder.ToString(), lastStringStyle));
 				builder.Remove(0, builder.Length);
 			}
 			if (m_stringList.Count == 0)
 				return;
 			m_buttonList.AddRange(createButtons(m_stringList));
-			m_stringList.Clear();
+			ClearDisplayParts();
 		}
 
 		/// <summary>

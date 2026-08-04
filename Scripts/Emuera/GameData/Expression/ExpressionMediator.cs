@@ -92,6 +92,10 @@ namespace MinorShift.Emuera.GameData.Expression
 
 		public string CheckEscape(string str)
 		{
+			// 快速路径：不含反斜杠时转义是恒等变换，直接返回原串。
+			// 与 v24 参考实现的语义完全一致（无 '\\' 时循环体从不命中 case '\\'）。
+			if (str.IndexOf('\\') < 0)
+				return str;
 			StringStream st = new StringStream(str);
 			StringBuilder buffer = new StringBuilder();
 

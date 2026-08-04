@@ -146,10 +146,17 @@ namespace MinorShift.Emuera.GameProc.Function
 					str = ((ExpressionArgument)func.Argument).Term.GetStrValue(exm);
 					if (isForms)
 					{
-						str = exm.CheckEscape(str);
-						StrFormWord wt = LexicalAnalyzer.AnalyseFormattedString(new StringStream(str), FormStrEndWith.EoL, false);
-						StrForm strForm = StrForm.FromWordToken(wt);
-						str = strForm.GetString(exm);
+						// 快速路径：运行时字符串不含任何格式令牌时，
+						// CheckEscape + AnalyseFormattedString + StrForm 是恒等变换，直接跳过完整管道。
+						// 判定条件与 AnalyseFormattedString 的 SubWord 触发条件一一对应，
+						// 覆盖 %、{}、\@、三连符号以及 \n/\0 的截断行为，保证输出文本完全不变。
+						if (NeedsFormattedStringProcessing(str))
+						{
+							str = exm.CheckEscape(str);
+							StrFormWord wt = LexicalAnalyzer.AnalyseFormattedString(new StringStream(str), FormStrEndWith.EoL, false);
+							StrForm strForm = StrForm.FromWordToken(wt);
+							str = strForm.GetString(exm);
+						}
 					}
 				}
 				if (func.Function.IsPrintKFunction())
@@ -161,6 +168,44 @@ namespace MinorShift.Emuera.GameProc.Function
 				else
 					exm.OutputToConsole(str, func.Function, isLineEnd);
 				exm.Console.UseSetColorStyle = true;
+			}
+
+			// 判断运行时格式串是否需要进入 CheckEscape + AnalyseFormattedString 管道。
+			// 返回 false 表示管道是恒等变换（输出 == 输入）。必须与 LexicalAnalyzer
+			// AnalyseFormattedString 的 SubWord 触发条件逐条对应，任何漏判都会改变输出。
+			static bool NeedsFormattedStringProcessing(string str)
+			{
+				if (string.IsNullOrEmpty(str))
+					return false;
+				// '%' 与 '{' 无条件触发 PercentSubWord / CurlyBraceSubWord。
+				if (str.IndexOf('%') >= 0 || str.IndexOf('{') >= 0)
+					return true;
+				// '\' 触发 CheckEscape 转义；与字面换行组合时 AnalyseFormattedString
+				// 会截断剩余文本，因此命中 '\' 也必须走完整管道。
+				if (str.IndexOf('\\') >= 0)
+					return true;
+				// '\n' 与 '\0' 在 FormStrEndWith.EoL 下会提前结束解析（截断），必须走完整管道。
+				if (str.IndexOf('\n') >= 0 || str.IndexOf('\0') >= 0)
+					return true;
+				// 三连符号（***/+++/===///$$$）在未禁用时触发 TripleSymbolSubWord。
+				if (!Config.SystemIgnoreTripleSymbol && ContainsTripleSymbol(str))
+					return true;
+				return false;
+			}
+
+			static bool ContainsTripleSymbol(string str)
+			{
+				int len = str.Length;
+				for (int i = 0; i + 2 < len; i++)
+				{
+					char c = str[i];
+					if (c == '*' || c == '+' || c == '=' || c == '/' || c == '$')
+					{
+						if (str[i + 1] == c && str[i + 2] == c)
+							return true;
+					}
+				}
+				return false;
 			}
 		}
 
