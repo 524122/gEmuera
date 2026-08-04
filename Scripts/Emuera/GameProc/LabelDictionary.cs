@@ -23,7 +23,12 @@ namespace MinorShift.Emuera.GameProc
 		/// </summary>
 		Dictionary<string, List<FunctionLabelLine>> labelAtDic = new Dictionary<string, List<FunctionLabelLine>>();
 		List<FunctionLabelLine> invalidList = new List<FunctionLabelLine>();
-		List<GotoLabelLine> labelDollarList = new List<GotoLabelLine>();
+		//v24/snake 参照実装と同じく $ラベルは (LabelName, ParentLabelLine) 複合キーで辞書化する。
+		//外層比較器は v24 の Config.StrComper 相当（ICVariable 時 OrdinalIgnoreCase、それ以外 Ordinal）。
+		//内層キーは参照等価（従来の == と同じ）。ParseLabelLine が ICVariable 時のみラベル名を大文字化するため、
+		//ICVariable=false では $Foo と $foo を別ラベルとして扱う必要があり、常時 OrdinalIgnoreCase にすると意味が変わる。
+		Dictionary<string, Dictionary<FunctionLabelLine, GotoLabelLine>> labelDollarList =
+			new Dictionary<string, Dictionary<FunctionLabelLine, GotoLabelLine>>(StringComparer.FromComparison(Config.SCVariable));
 		int count;
 
 		Dictionary<string, int> loadedFileDic = new Dictionary<string, int>();
@@ -235,8 +240,7 @@ namespace MinorShift.Emuera.GameProc
 				int sideListCapacity = Math.Max(4, estimatedLabels / 8);
 				if (invalidList.Capacity < sideListCapacity)
 					invalidList.Capacity = sideListCapacity;
-				if (labelDollarList.Capacity < sideListCapacity)
-					labelDollarList.Capacity = sideListCapacity;
+				labelDollarList.EnsureCapacity(sideListCapacity);
 			}
 			if (estimatedFiles > 0)
 				loadedFileDic.EnsureCapacity(estimatedFiles);
@@ -281,15 +285,39 @@ namespace MinorShift.Emuera.GameProc
 				}
 			}
 
-			for (int i = 0; i < labelDollarList.Count; i++)
 			{
-				GotoLabelLine label = labelDollarList[i];
-				if (string.Equals(label.Position.Filename, fname, Config.SCIgnoreCase)
-					|| (label.ParentLabelLine != null && string.Equals(label.ParentLabelLine.Position.Filename, fname, Config.SCIgnoreCase)))
+				List<string> removeDollarKeys = null;
+				foreach (KeyValuePair<string, Dictionary<FunctionLabelLine, GotoLabelLine>> pair in labelDollarList)
 				{
-					labelDollarList.RemoveAt(i);
-					removed = true;
-					i--;
+					List<FunctionLabelLine> removeInnerKeys = null;
+					foreach (KeyValuePair<FunctionLabelLine, GotoLabelLine> inner in pair.Value)
+					{
+						GotoLabelLine label = inner.Value;
+						if (string.Equals(label.Position.Filename, fname, Config.SCIgnoreCase)
+							|| (label.ParentLabelLine != null && string.Equals(label.ParentLabelLine.Position.Filename, fname, Config.SCIgnoreCase)))
+						{
+							if (removeInnerKeys == null)
+								removeInnerKeys = new List<FunctionLabelLine>();
+							removeInnerKeys.Add(inner.Key);
+							removed = true;
+						}
+					}
+					if (removeInnerKeys != null)
+					{
+						for (int i = 0; i < removeInnerKeys.Count; i++)
+							pair.Value.Remove(removeInnerKeys[i]);
+						if (pair.Value.Count == 0)
+						{
+							if (removeDollarKeys == null)
+								removeDollarKeys = new List<string>();
+							removeDollarKeys.Add(pair.Key);
+						}
+					}
+				}
+				if (removeDollarKeys != null)
+				{
+					for (int i = 0; i < removeDollarKeys.Count; i++)
+						labelDollarList.Remove(removeDollarKeys[i]);
 				}
 			}
 
@@ -330,13 +358,13 @@ namespace MinorShift.Emuera.GameProc
 		public bool AddLabelDollar(GotoLabelLine point)
 		{
 			string id = point.LabelName;
-			foreach (GotoLabelLine label in labelDollarList)
+			if (!labelDollarList.TryGetValue(id, out Dictionary<FunctionLabelLine, GotoLabelLine> dollarDic))
 			{
-				if (label.LabelName == id && label.ParentLabelLine == point.ParentLabelLine)
-					return false;
+				dollarDic = new Dictionary<FunctionLabelLine, GotoLabelLine>();
+				labelDollarList.Add(id, dollarDic);
 			}
-			labelDollarList.Add(point);
-			return true;
+			//TryAdd：既に同じ関数内に同名$ラベルがあれば複製とみなす（従来の線形走査と同じ意味）。
+			return dollarDic.TryAdd(point.ParentLabelLine, point);
 		}
 
 		#endregion
@@ -370,9 +398,9 @@ namespace MinorShift.Emuera.GameProc
 
 		public GotoLabelLine GetLabelDollar(string key, FunctionLabelLine labelAtLine)
 		{
-			foreach (GotoLabelLine label in labelDollarList)
+			if (labelDollarList.TryGetValue(key, out Dictionary<FunctionLabelLine, GotoLabelLine> dollarDic))
 			{
-				if ((label.LabelName == key) && (label.ParentLabelLine == labelAtLine))
+				if (dollarDic.TryGetValue(labelAtLine, out GotoLabelLine label))
 					return label;
 			}
 			return null;

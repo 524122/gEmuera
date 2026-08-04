@@ -11,8 +11,8 @@ namespace MinorShift.Emuera.GameProc
 	{
 		private readonly Dictionary<string, List<string>> lazyLoadingTable =
 			new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-		private readonly Dictionary<string, List<string>> lazyLoadingFileToFunctions =
-			new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, HashSet<string>> lazyLoadingFileToFunctions =
+			new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 		private readonly Dictionary<string, long> lazyLoadingFilesTable =
 			new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
@@ -183,11 +183,10 @@ namespace MinorShift.Emuera.GameProc
 			{
 				string relative = RelativeErbPath(file);
 				string normalizedFull = NormalizeFullPath(ErbPath(relative));
-				if (lazyLoadingFileToFunctions.TryGetValue(relative, out List<string> functions))
+				if (lazyLoadingFileToFunctions.TryGetValue(relative, out HashSet<string> functions))
 				{
-					for (int i = 0; i < functions.Count; i++)
+					foreach (string functionName in functions)
 					{
-						string functionName = functions[i];
 						if (!lazyLoadingTable.TryGetValue(functionName, out List<string> paths))
 							continue;
 						paths.RemoveAll(path => string.Equals(NormalizeFullPath(path), normalizedFull, StringComparison.OrdinalIgnoreCase));
@@ -228,13 +227,12 @@ namespace MinorShift.Emuera.GameProc
 			if (!ContainsIgnoreCase(paths, fullPath))
 				paths.Add(fullPath);
 
-			if (!lazyLoadingFileToFunctions.TryGetValue(relative, out List<string> functions))
+			if (!lazyLoadingFileToFunctions.TryGetValue(relative, out HashSet<string> functions))
 			{
-				functions = new List<string>();
+				functions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 				lazyLoadingFileToFunctions.Add(relative, functions);
 			}
-			if (!ContainsIgnoreCase(functions, functionName))
-				functions.Add(functionName);
+			functions.Add(functionName);
 
 			LazyLoadingFiles.Add(NormalizeFullPath(fullPath));
 		}

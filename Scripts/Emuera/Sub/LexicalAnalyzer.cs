@@ -207,12 +207,14 @@ namespace MinorShift.Emuera.Sub
 				while (!st.EOS && char.IsDigit(st.Current))
 					st.ShiftNext();
 			}
-			string str = st.Substring(startPos, st.CurrentPosition - startPos);
-			if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out double result))
+			//span 解析で Substring の一時文字列を回避する（エラー時のメッセージのみ文字列化）。
+			string row = st.RowString;
+			int length = st.CurrentPosition - startPos;
+			if (double.TryParse(row.AsSpan(startPos, length), NumberStyles.Float, CultureInfo.InvariantCulture, out double result))
 				return result;
 			if (retZero)
 				return 0.0;
-			throw new CodeEE("\"" + str + "\"は実数値に変換できません");
+			throw new CodeEE("\"" + row.Substring(startPos, length) + "\"は実数値に変換できません");
 		}
 
 		//static Regex reg = new Regex(@"[0-9A-Fa-f]+", RegexOptions.Compiled);
@@ -268,24 +270,29 @@ namespace MinorShift.Emuera.Sub
 					break;
 				}
 			}
-			string strInt = st.Substring(start, st.CurrentPosition - start);
+			//span 解析避免 Substring 的临时字符串分配。base10 是绝大多数路径，
+			//直接走 long.Parse 的 ReadOnlySpan 重载；base2/16 只有少量十六进制/二进制字面量，
+			//维持 Convert.ToInt64 的换算语义（与 Snake 参照实现一致）。
+			ReadOnlySpan<char> strInt = st.RowString.AsSpan(start, st.CurrentPosition - start);
 			try
 			{
-				return Convert.ToInt64(strInt, fromBase);
+				if (fromBase == 10)
+					return long.Parse(strInt, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
+				return Convert.ToInt64(strInt.ToString(), fromBase);
 			}
 			catch (FormatException)
 			{
-				throw new CodeEE("\"" + strInt + "\"は整数値に変換できません");
+				throw new CodeEE("\"" + strInt.ToString() + "\"は整数値に変換できません");
 			}
 			catch (OverflowException)
 			{
-				throw new CodeEE("\"" + strInt + "\"は64ビット符号付き整数の範囲を超えています");
+				throw new CodeEE("\"" + strInt.ToString() + "\"は64ビット符号付き整数の範囲を超えています");
 			}
 			catch (ArgumentOutOfRangeException)
 			{
-				if (string.IsNullOrEmpty(strInt))
+				if (strInt.IsEmpty)
 					throw new CodeEE("数値として認識できる文字が必要です");
-				throw new CodeEE("文字列\"" + strInt + "\"は数値として認識できません");
+				throw new CodeEE("文字列\"" + strInt.ToString() + "\"は数値として認識できません");
 			}
 		}
 
@@ -333,7 +340,8 @@ namespace MinorShift.Emuera.Sub
 					break;
 				}
 			}
-			return double.Parse(st.Substring(start, st.CurrentPosition - start), CultureInfo.InvariantCulture);
+			//span 解析避免 Substring 的临时字符串分配。
+			return double.Parse(st.RowString.AsSpan(start, st.CurrentPosition - start), CultureInfo.InvariantCulture);
 		}
 
 		/// <summary>
@@ -908,12 +916,32 @@ namespace MinorShift.Emuera.Sub
 							int pos = st.CurrentPosition;
 							while (!st.EOS && char.IsDigit(st.Current))
 								st.ShiftNext();
-							bool isFloat = !st.EOS && st.Current == '.';
-							st.CurrentPosition = pos;
-							if (isFloat)
-								ret.Add(new LiteralFloatWord(ReadDouble(st, false)));
+							if (!st.EOS && st.Current == '.')
+							{
+								//浮点数：预扫后不回卷，单遍扫描小数部与 e/E 指数（语义与 ReadDouble 一致）。
+								st.ShiftNext();
+								while (!st.EOS && char.IsDigit(st.Current))
+									st.ShiftNext();
+								if (st.Current == 'e' || st.Current == 'E')
+								{
+									st.ShiftNext();
+									if (st.Current == '+' || st.Current == '-')
+										st.ShiftNext();
+									while (!st.EOS && char.IsDigit(st.Current))
+										st.ShiftNext();
+								}
+								//span 解析避免 Substring 的临时字符串分配（成功路径零分配）。
+								ReadOnlySpan<char> str = st.RowString.AsSpan(pos, st.CurrentPosition - pos);
+								if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out double result))
+									ret.Add(new LiteralFloatWord(result));
+								else
+									throw new CodeEE("\"" + str.ToString() + "\"は実数値に変換できません");
+							}
 							else
+							{
+								st.CurrentPosition = pos;
 								ret.Add(new LiteralIntegerWord(ReadInt64(st, false)));
+							}
 						}
 						break;
 					case '>':
