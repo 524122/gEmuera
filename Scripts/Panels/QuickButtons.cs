@@ -465,7 +465,8 @@ public partial class QuickButtons : CanvasLayer
 		btn.Modulate = Colors.White;
 		// 按压缩放 tween（AnimateQuickPress）是 node-bound 且不随池重置停止；复用前
 		// 必须 Kill，否则运行中的 tween 会继续把 Scale 写回 0.97，复用按钮卡在缩小态。
-		if (btn.GetMeta("_press_tween", default(Variant)) is Tween pressTween)
+		var pressTween = btn.GetMeta("_press_tween", default(Variant)).As<Tween>();
+		if (pressTween != null && GodotObject.IsInstanceValid(pressTween))
 			pressTween.Kill();
 		btn.Scale = Vector2.One;
 		btn.MouseFilter = Control.MouseFilterEnum.Ignore;
@@ -832,7 +833,8 @@ public partial class QuickButtons : CanvasLayer
 		btn.PivotOffset = btn.Size * 0.5f;
 		// 记录 tween 引用：ResetButtonForPool 复用节点前 Kill，避免旧 press 动画
 		// 把复用的按钮写回缩放 0.97。
-		if (btn.GetMeta("_press_tween", default(Variant)) is Tween prevTween)
+		var prevTween = btn.GetMeta("_press_tween", default(Variant)).As<Tween>();
+		if (prevTween != null && GodotObject.IsInstanceValid(prevTween))
 			prevTween.Kill();
 		var tween = btn.CreateTween();
 		btn.SetMeta("_press_tween", tween);
