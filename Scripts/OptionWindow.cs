@@ -22,10 +22,24 @@ public partial class OptionWindow : Control
 	static readonly string[] languages = new string[] { "default", "zh_cn", "en_us", "jp" };
 	static readonly string[] languageNames = new string[] { "Default", "简体中文", "English", "日本語" };
 
+	// Component interface: the popup advertises its open/close state so host
+	// scenes can react without polling. Emitted purely additively; callers that
+	// never connect are unaffected.
+	[Signal]
+	public delegate void PopupOpenedEventHandler();
+
+	[Signal]
+	public delegate void PopupClosedEventHandler();
+
+	// Exported so the dialog size is reusable/tunable per scene instance.
+	[Export]
+	public Vector2I PopupSize = new Vector2I(460, 560);
+
 	public override void _Ready()
 	{
 		popup = new PopupPanel();
-		popup.Size = new Vector2I(460, 560);
+		popup.Size = PopupSize;
+		popup.PopupHide += () => EmitSignal(SignalName.PopupClosed);
 		AddChild(popup);
 
 		var vbox = new VBoxContainer();
@@ -200,6 +214,7 @@ public partial class OptionWindow : Control
 	{
 		popup.PopupCentered();
 		CallDeferred(nameof(ClampPopupToSafeArea));
+		EmitSignal(SignalName.PopupOpened);
 	}
 
 	void ClampPopupToSafeArea()

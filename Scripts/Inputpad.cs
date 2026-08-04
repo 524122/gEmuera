@@ -12,11 +12,24 @@ public partial class Inputpad : Control
 	Button repeatBtn;
 	string lastInput;
 	int lastKeyboardHeight = -1;
+	// Component interface: panels advertise their own show/hide state changes so
+	// host scenes can react without polling. Emitted purely additively; callers
+	// that never connect are unaffected.
+	[Signal]
+	public delegate void PadShownEventHandler();
+
+	[Signal]
+	public delegate void PadHiddenEventHandler();
+
 	// Controls are sized for touch operation in exported APKs. Keep these values
 	// coordinated with EmueraContent system-button minimums when changing UI scale.
-	const int PanelHeight = 64;
-	const int SideMargin = 10;
-	const int BottomMargin = 12;
+	// Exported so the layout metrics are reusable/tunable per scene instance.
+	[Export]
+	public int PanelHeight = 64;
+	[Export]
+	public int SideMargin = 10;
+	[Export]
+	public int BottomMargin = 12;
 
 	public override void _Ready()
 	{
@@ -177,6 +190,7 @@ public partial class Inputpad : Control
 		GetParent()?.MoveChild(this, GetParent().GetChildCount() - 1);
 		inputField.Text = "";
 		inputField.GrabFocus();
+		EmitSignal(SignalName.PadShown);
 	}
 
 	public void HidePad()
@@ -186,6 +200,7 @@ public partial class Inputpad : Control
 		lastKeyboardHeight = -1;
 		inputField.Text = "";
 		inputField.ReleaseFocus();
+		EmitSignal(SignalName.PadHidden);
 	}
 
 	public bool IsShow => Visible;
