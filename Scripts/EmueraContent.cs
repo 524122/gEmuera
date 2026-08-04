@@ -128,6 +128,27 @@ public partial class EmueraContent : Control
 	List<SpriteManager.TextureInfo> activeTexturePinCollector;
 	readonly Dictionary<string, Font> consoleFontCache = new Dictionary<string, Font>(StringComparer.OrdinalIgnoreCase);
 	readonly HashSet<string> missingConsoleFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	// #2 字体度量缓存：GetHeight/GetAscent 按 (font, size) 只做一次 native 查询，
+	// 滚动热路径每行×每 part 不再重复调用。度量在字体加载后是常量，缓存安全。
+	sealed class ConsoleFontMetricsEntry
+	{
+		public float Height;
+		public float Ascent;
+	}
+	static readonly Dictionary<(Font, int), ConsoleFontMetricsEntry> consoleFontMetricsCache = new Dictionary<(Font, int), ConsoleFontMetricsEntry>();
+	static (float Height, float Ascent) GetConsoleFontMetrics(Font font, int size)
+	{
+		var key = (font, size);
+		if (consoleFontMetricsCache.TryGetValue(key, out var cached))
+			return (cached.Height, cached.Ascent);
+		var entry = new ConsoleFontMetricsEntry
+		{
+			Height = font.GetHeight(size),
+			Ascent = font.GetAscent(size),
+		};
+		consoleFontMetricsCache[key] = entry;
+		return (entry.Height, entry.Ascent);
+	}
 	HashSet<int> asyncTexturePendingLineNos = new HashSet<int>();
 	Dictionary<int, ConsoleDisplayLine> pendingAsyncLineUpdates = new Dictionary<int, ConsoleDisplayLine>();
 	struct PureImageFallbackLine
@@ -151,6 +172,12 @@ public partial class EmueraContent : Control
 	HashSet<string> failedTextureSearches = new HashSet<string>();
 	Dictionary<string, string> resolvedTextureSearchPaths = new Dictionary<string, string>();
 	ulong lastCanvasAnimationRefreshMs = 0;
+
+	// #6 动画帧解析缓存：按 (sprite, 当前帧标识) 缓存已解析的纹理与帧布局。
+	// 帧未推进（baseImage/srcRect/offset/GraphicsImage revision 均不变）时跳过
+	// GetSpriteTexture 全链；缓存命中不持有 pin，仍由调用方按原逻辑重新 TrackTexturePin，
+	// 保证 TrackTexturePin/ReleaseTexturePin 配对与直接解析完全一致。
+	readonly Dictionary<ASprite, AnimatedSpriteFrameCacheEntry> animatedSpriteFrameCache = new Dictionary<ASprite, AnimatedSpriteFrameCacheEntry>();
 	const int MaxPureImageFallbackLines = 64;
 	const ulong PureImageFallbackTtlMs = 2000;
 	static readonly string[] CanvasImageFallbackExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tga" };
@@ -191,6 +218,16 @@ public partial class EmueraContent : Control
 		public int OffsetY;
 		public int SourceWidth;
 		public int SourceHeight;
+	}
+
+	sealed class AnimatedSpriteFrameCacheEntry
+	{
+		public AbstractImage BaseImage;
+		public uEmuera.Drawing.Rectangle SrcRect;
+		public uEmuera.Drawing.Point Offset;
+		public long GraphicsRevision;
+		public Texture2D Texture;
+		public SpriteAnimeFrameLayoutInfo Layout;
 	}
 
 	// Batched display updates defer expensive follow-up work until a group of
@@ -958,6 +995,8 @@ public partial class EmueraContent : Control
 		ClearSessionAudioState();
 		ClearGraphicsImageTextureCache();
 		ClearSessionFontCache();
+		// 会话切换时释放动画帧缓存持有的旧纹理引用，避免跨会话悬垂。
+		animatedSpriteFrameCache.Clear();
 	}
 
 	public override void _ExitTree()
@@ -4549,6 +4588,99 @@ public partial class EmueraContent : Control
 		return null;
 	}
 
+	// #6 动画帧解析缓存入口：SpriteAnime 按当前帧标识命中时直接复用纹理与布局，
+	// 跳过 GetCurrentFrameInfo 之外的纹理链；静态 sprite 与未就绪结果保持原解析行为。
+	// 帧推进时序（SpriteAnime 按时间推进）、pin 生命周期（命中仍重新 TrackTexturePin）、
+	// 异步解码挂起（未就绪不缓存）均与直接解析一致。
+	Texture2D GetCachedAnimatedSpriteTexture(ASprite sprite, out SpriteAnimeFrameLayoutInfo layout)
+	{
+		layout = default;
+		if (sprite is not SpriteAnime anime)
+			return GetSpriteTexture(sprite, out layout);
+
+		// GetCurrentFrameInfo 只是轻量时间计算；真正的开销在纹理链，帧未变时应跳过。
+		if (!anime.GetCurrentFrameInfo(out var baseImage, out var srcRect, out var offset))
+			return GetSpriteTexture(sprite, out layout);
+
+		long revision = baseImage is GraphicsImage g && g.godotImage != null ? g.DisplayRevision : 0L;
+		if (animatedSpriteFrameCache.TryGetValue(sprite, out var cached)
+			&& cached.Texture != null
+			&& GodotObject.IsInstanceValid(cached.Texture)
+			&& ReferenceEquals(cached.BaseImage, baseImage)
+			&& cached.SrcRect.X == srcRect.X && cached.SrcRect.Y == srcRect.Y
+			&& cached.SrcRect.Width == srcRect.Width && cached.SrcRect.Height == srcRect.Height
+			&& cached.Offset.X == offset.X && cached.Offset.Y == offset.Y
+			&& cached.GraphicsRevision == revision)
+		{
+			layout = cached.Layout;
+			ReTrackAnimatedSpritePinForCacheHit(baseImage);
+			TouchAndroidCroppedAtlasIfCached(sprite);
+			return cached.Texture;
+		}
+
+		Texture2D texture = GetSpriteTexture(sprite, out layout);
+		if (texture == null)
+			return null; // 不缓存未就绪结果，异步解码完成后下一轮再尝试。
+
+		// 解析期间后台计时可能已推进帧；只在与解析读取到的帧一致时才缓存，
+		// 避免把旧帧标识映射到新帧纹理。
+		if (!anime.GetCurrentFrameInfo(out var afterBase, out var afterRect, out var afterOffset)
+			|| !ReferenceEquals(afterBase, baseImage)
+			|| afterRect.X != srcRect.X || afterRect.Y != srcRect.Y
+			|| afterRect.Width != srcRect.Width || afterRect.Height != srcRect.Height
+			|| afterOffset.X != offset.X || afterOffset.Y != offset.Y)
+		{
+			return texture;
+		}
+
+		long afterRevision = afterBase is GraphicsImage ag && ag.godotImage != null ? ag.DisplayRevision : 0L;
+		animatedSpriteFrameCache[sprite] = new AnimatedSpriteFrameCacheEntry
+		{
+			BaseImage = afterBase,
+			SrcRect = afterRect,
+			Offset = afterOffset,
+			GraphicsRevision = afterRevision,
+			Texture = texture,
+			Layout = layout,
+		};
+		return texture;
+	}
+
+	// 缓存命中时重新获取与 GetSpriteTexture 相同的 TextureInfo pin，保持 pin 生命周期。
+	// GraphicsImage 常规路径由 graphicsImageTextureCache 管理，无 pin；Bitmap 路径与
+	// Android 裁剪路径都来自 frame.Bitmap 的 CachedTextureInfo。
+	void ReTrackAnimatedSpritePinForCacheHit(AbstractImage baseImage)
+	{
+		if (baseImage == null || activeTexturePinCollector == null)
+			return;
+		if (baseImage is GraphicsImage graphics && graphics.godotImage != null)
+			return;
+		if (baseImage.Bitmap is uEmuera.Drawing.BitmapTexture bt)
+		{
+			var ti = bt.CachedTextureInfo;
+			if (ti != null && !ti.IsPlaceholder)
+				TrackTexturePin(ti);
+		}
+		else if (baseImage.Bitmap != null)
+		{
+			var ti = GetDisplayTextureInfoForBitmap(baseImage.Bitmap);
+			if (ti != null)
+				TrackTexturePin(ti);
+		}
+	}
+
+	// 命中跳过解析时，Android 裁剪小纹理会失去 LastUsedMs 刷新，可能被闲置清理提前回收。
+	// 命中时主动触达，保证与直接解析相同的存活窗口。
+	void TouchAndroidCroppedAtlasIfCached(ASprite sprite)
+	{
+		if (UseAndroidCroppedAtlasTexture
+			&& androidCroppedAtlasTextures.TryGetValue(sprite, out var entry)
+			&& entry != null)
+		{
+			entry.LastUsedMs = Time.GetTicksMsec();
+		}
+	}
+
 	// CSV 的普通 .webp 资源通常仍按静态图片处理。只有完整引用、带 ANIM chunk 的
 	// 文件才交给 EmueraImage 的逐帧贴图路径，避免裁剪 sprite 或普通 WebP 改变原有显示语义。
 	static string GetAnimatedWebpSourcePath(ASprite sprite)
@@ -4967,7 +5099,8 @@ public partial class EmueraContent : Control
 				// Image.LoadWebpFromBuffer 的静态首帧，否则 Godot 不支持该文件时会在
 				// 此处提前跳过整层，导致动画样例只剩右侧的静态对照图。
 				SpriteAnimeFrameLayoutInfo animeFrameLayout = default;
-				var texture = animatedWebpPath == null ? GetSpriteTexture(cbg.Img, out animeFrameLayout) : null;
+				// SpriteAnime 帧未推进时直接复用上次解析结果，避免每轮刷新重复走纹理链。
+				var texture = animatedWebpPath == null ? GetCachedAnimatedSpriteTexture(cbg.Img, out animeFrameLayout) : null;
 				if (texture == null && animatedWebpPath == null)
 					continue;
 
@@ -7674,6 +7807,9 @@ public partial class EmueraContent : Control
 
 	sealed partial class ConsoleTextPart : Control
 	{
+		// #9a 与 Canvas 后端同一方案：静态预填充 char 的 ToString，网格逐字符绘制不再分配。
+		static readonly string[] GridGlyphTexts = new string[char.MaxValue + 1];
+
 		readonly Font font;
 		readonly int fontSize;
 		readonly FontVerticalAlign? verticalAlign;
@@ -7722,7 +7858,8 @@ public partial class EmueraContent : Control
 			if (font == null || string.IsNullOrEmpty(text))
 				return;
 
-			float fontHeight = font.GetHeight(fontSize);
+			var metrics = GetConsoleFontMetrics(font, fontSize);
+			float fontHeight = metrics.Height;
 			float baseline = GetTextBaseline(font, fontSize, Size.Y, fontHeight, verticalAlign);
 			Color drawColor = selected ? selectedColor : color;
 			if (selected && Config.UseButtonFocusBackgroundColor && !string.IsNullOrWhiteSpace(text))
@@ -7759,8 +7896,9 @@ public partial class EmueraContent : Control
 
 		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f, FontVerticalAlign? verticalAlign = null)
 		{
+			var metrics = GetConsoleFontMetrics(font, fontSize);
 			if (fontHeight < 0.0f)
-				fontHeight = font.GetHeight(fontSize);
+				fontHeight = metrics.Height;
 			float freeSpace = height - fontHeight;
 			float alignmentOffset = verticalAlign switch
 			{
@@ -7769,7 +7907,7 @@ public partial class EmueraContent : Control
 				FontVerticalAlign.Bottom => freeSpace,
 				_ => freeSpace * 0.5f,
 			};
-			float ascent = font.GetAscent(fontSize);
+			float ascent = metrics.Ascent;
 			return Mathf.Round(alignmentOffset + ascent);
 		}
 
@@ -7814,7 +7952,7 @@ public partial class EmueraContent : Control
 			// 若逐格裁剪会出现横线缺失。片段边界继续由本 Control 的 ClipContents 统一限制。
 			// 但 U+2580-U+259F 块字符在 TW 老虎机中被当作连续半角像素块使用，若也放宽到整段宽度，
 			// 一个 ▉ 会横向盖到后续 ; 背景格，所以下面仅对 Block Elements 收紧到当前格宽。
-			string glyph = value.ToString();
+			string glyph = GridGlyphTexts[value] ??= value.ToString();
 			float drawWidth = IsBlockElementChar(value)
 				? System.Math.Max(1.0f, cellWidth)
 				: System.Math.Max(1.0f, System.Math.Max(cellWidth, Size.X - x));

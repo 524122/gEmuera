@@ -203,6 +203,20 @@ internal static class AnimatedWebpSpriteFrames
 		Entry[] snapshot;
 		lock (syncRoot)
 		{
+			// 无待上传帧（也没有待记录的解码失败）时直接返回，避免每帧空快照分配。
+			// entries 的增删都发生在 syncRoot 内，锁内遍历是安全的。
+			bool hasPendingWork = false;
+			foreach (Entry candidate in entries.Values)
+			{
+				if (!candidate.ReadyFrames.IsEmpty || (candidate.Failure != null && !candidate.FailureLogged))
+				{
+					hasPendingWork = true;
+					break;
+				}
+			}
+			if (!hasPendingWork)
+				return;
+
 			snapshot = new Entry[entries.Count];
 			entries.Values.CopyTo(snapshot, 0);
 		}

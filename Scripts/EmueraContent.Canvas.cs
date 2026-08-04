@@ -485,7 +485,8 @@ public partial class EmueraContent
 		// Canvas 的图片会在需要时转为 EmueraImage overlay；动画资源必须在这里
 		// 直接保留该 overlay，不能把静态纹理解码失败误判为整个图片不可显示。
 		SpriteAnimeFrameLayoutInfo animeFrameLayout = default;
-		var texture = animatedWebpPath == null ? GetSpriteTexture(sprite, out animeFrameLayout) : null;
+		// SpriteAnime 帧未推进时复用上次解析，跳过纹理链；命中仍重新 TrackTexturePin。
+		var texture = animatedWebpPath == null ? GetCachedAnimatedSpriteTexture(sprite, out animeFrameLayout) : null;
 		if (texture == null && animatedWebpPath == null
 			&& ShouldUseRawImageResourceFallback(resourceName, sprite))
 		{
@@ -1448,7 +1449,8 @@ public partial class EmueraContent
 				return;
 			string text = plan.Text;
 			int actualFontSize = emuFont != null ? Math.Max(1, Mathf.RoundToInt(emuFont.Size)) : owner.FontSize;
-			float fontHeight = font.GetHeight(actualFontSize);
+			var fontMetrics = GetConsoleFontMetrics(font, actualFontSize);
+			float fontHeight = fontMetrics.Height;
 			float baseline = GetTextBaseline(font, actualFontSize, owner.EffectiveLineHeight, fontHeight, verticalAlign);
 			if (!plan.UsesGridDrawing)
 			{
@@ -1519,8 +1521,9 @@ public partial class EmueraContent
 
 		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f, FontVerticalAlign? verticalAlign = null)
 		{
+			var metrics = GetConsoleFontMetrics(font, fontSize);
 			if (fontHeight < 0.0f)
-				fontHeight = font.GetHeight(fontSize);
+				fontHeight = metrics.Height;
 			float freeSpace = height - fontHeight;
 			float alignmentOffset = verticalAlign switch
 			{
@@ -1529,7 +1532,7 @@ public partial class EmueraContent
 				FontVerticalAlign.Bottom => freeSpace,
 				_ => freeSpace * 0.5f,
 			};
-			float ascent = font.GetAscent(fontSize);
+			float ascent = metrics.Ascent;
 			return Mathf.Round(alignmentOffset + ascent);
 		}
 
