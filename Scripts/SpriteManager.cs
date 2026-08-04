@@ -55,12 +55,18 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 	// object identity before disposing.
 	internal class TextureInfo : IDisposable
 	{
-		internal TextureInfo(string b, Image img, bool isPlaceholder = false)
+		internal TextureInfo(string b, Image img, bool isPlaceholder = false, string srcPath = null)
 		{
 			imagename = b;
-			image = img;
+			sourcePath = srcPath;
 			IsPlaceholder = isPlaceholder;
-			estimatedBytes = EstimateImageBytes(img);
+			if (img != null)
+			{
+				_image = img;
+				cpuBytes = EstimateImageBytes(img);
+				cachedWidth = img.GetWidth();
+				cachedHeight = img.GetHeight();
+			}
 			if (isPlaceholder)
 				placeholderRetryAfterMs = Time.GetTicksMsec() + PlaceholderRetryIntervalMs;
 			Touch();
@@ -121,8 +127,11 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 
 			_texture?.Dispose();
 			_texture = null;
-			image?.Dispose();
-			image = null;
+			// 直接释放 _image 字段，避免走 image 属性（IsDisposed 已置位，不会再重解码）。
+			var img = _image;
+			_image = null;
+			img?.Dispose();
+			cpuBytes = 0;
 		}
 
 		internal void Touch()
@@ -163,31 +172,136 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 		internal int refcount = 0;
 		internal int pinCount = 0;
 		internal double pasttime = 0;
-		internal long estimatedBytes = 0;
 		internal bool IsDisposed { get; private set; }
 		internal bool IsPlaceholder { get; private set; }
-		internal int width { get { return image?.GetWidth() ?? 0; } }
-		internal int height { get { return image?.GetHeight() ?? 0; } }
-		internal Image image = null;
+
+		// H5：预算双份核算。cpuBytes 是当前在内存中的 CPU Image 估算字节（Android 上传后
+		// 释放则为 0），gpuBytes 是已上传 GPU 纹理的估算字节。estimatedBytes 取两者之和，
+		// 反映 TextureInfo 实际占用的主机内存 + GPU 显存，供 UpdateCleanup 字节预算淘汰。
+		long cpuBytes;
+		long gpuBytes;
+		internal long estimatedBytes { get { return cpuBytes + gpuBytes; } }
+
+		// Android 上传到 GPU 后释放 CPU image 副本以省内存。GetPixel/SetPixel/Save/
+		// RecreateTexture 访问 image 时会按 sourcePath 重新解码，语义与释放前一致。
+		Image _image;
+		readonly object imageReloadLock = new object();
+		string sourcePath;
+		bool cpuImageReleased;
+		int cachedWidth;
+		int cachedHeight;
+
+		internal int width { get { Image current = Volatile.Read(ref _image); return current != null ? current.GetWidth() : cachedWidth; } }
+		internal int height { get { Image current = Volatile.Read(ref _image); return current != null ? current.GetHeight() : cachedHeight; } }
+
+		internal Image image
+		{
+			get
+			{
+				Image current = Volatile.Read(ref _image);
+				if (current != null || IsDisposed || !cpuImageReleased || string.IsNullOrEmpty(sourcePath))
+					return current;
+				return ReloadCpuImage();
+			}
+		}
+
+		// 需要像素时（GetPixel/SetPixel/Save/RecreateTexture 或 GDraw 合成）按源文件重解码。
+		// 同文件同解码器，输出像素与释放前一致；Android 大图恢复首次上传时的缩放尺寸。
+		Image ReloadCpuImage()
+		{
+			lock (imageReloadLock)
+			{
+				Image current = Volatile.Read(ref _image);
+				if (current != null || IsDisposed)
+					return current;
+				try
+				{
+					if (!uEmuera.Utils.FileExists(sourcePath))
+						return null;
+					Image img = LoadImageOrPlaceholder(sourcePath, imagename, out _);
+					if (img == null || img.GetWidth() <= 0 || img.GetHeight() <= 0)
+					{
+						img?.Dispose();
+						return null;
+					}
+					// 与首次上传一致的缩放：Android 大图在 texture 创建时被 EnsureImageFitsGpu
+					// 缩小，重新解码必须恢复到相同尺寸，否则 GDraw 合成/GetPixel 坐标错位。
+					if (cachedWidth > 0 && cachedHeight > 0
+						&& (img.GetWidth() != cachedWidth || img.GetHeight() != cachedHeight))
+						img.Resize(cachedWidth, cachedHeight, Image.Interpolation.Bilinear);
+					cpuBytes = EstimateImageBytes(img);
+					cachedWidth = img.GetWidth();
+					cachedHeight = img.GetHeight();
+					Volatile.Write(ref _image, img);
+					cpuImageReleased = false;
+					return img;
+				}
+				catch
+				{
+					return null;
+				}
+			}
+		}
+
+		void ReleaseCpuImage()
+		{
+			if (IsDisposed)
+				return;
+			Image img = Volatile.Read(ref _image);
+			if (img == null)
+				return;
+			// 先置空再释放：并发读 image 的线程拿到 null 走缓存尺寸，不会碰到已释放对象。
+			Volatile.Write(ref _image, null);
+			img.Dispose();
+			cpuBytes = 0;
+			cpuImageReleased = true;
+		}
+
+		bool ShouldReleaseCpuImageAfterUpload()
+		{
+			if (cpuImageReleased || IsPlaceholder)
+				return false;
+			try
+			{
+				if (OS.GetName() != "Android")
+					return false;
+			}
+			catch
+			{
+				return false;
+			}
+			// 过小的图释放后重解码开销反而更高，保留 CPU 副本避免 GetPixel 频繁重解码。
+			return (long)cachedWidth * cachedHeight >= 128L * 128L;
+		}
+
 		ulong placeholderRetryAfterMs = 0;
 		private ImageTexture _texture = null;
 		internal ImageTexture texture
 		{
 			get
 			{
-				if (_texture == null && image != null)
+				if (_texture == null)
 				{
-					try
+					Image src = image;
+					if (src != null)
 					{
-						EnsureImageFitsGpu(image);
-						_texture = ImageTexture.CreateFromImage(image);
-					}
-					catch (Exception ex)
-					{
-						GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager] Failed to create ImageTexture for {imagename}: {ex.Message}");
-						if (GenericUtils.IsImageDebugEnabled("texture"))
-							GenericUtils.ImageTrace("IMAGE.TEXTURE.CREATE_FAIL", () => "texture create failed",
-								() => $"name={imagename} failure_kind=texture_create_fail error={ex.GetType().Name}");
+						try
+						{
+							EnsureImageFitsGpu(src);
+							_texture = ImageTexture.CreateFromImage(src);
+							gpuBytes = EstimateImageBytes(src);
+							cachedWidth = src.GetWidth();
+							cachedHeight = src.GetHeight();
+							if (ShouldReleaseCpuImageAfterUpload())
+								ReleaseCpuImage();
+						}
+						catch (Exception ex)
+						{
+							GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager] Failed to create ImageTexture for {imagename}: {ex.Message}");
+							if (GenericUtils.IsImageDebugEnabled("texture"))
+								GenericUtils.ImageTrace("IMAGE.TEXTURE.CREATE_FAIL", () => "texture create failed",
+									() => $"name={imagename} failure_kind=texture_create_fail error={ex.GetType().Name}");
+						}
 					}
 				}
 				return _texture;
@@ -198,10 +312,14 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 			_texture?.Dispose();
 			try
 			{
-				if (image != null)
+				Image src = image;
+				if (src != null)
 				{
-					EnsureImageFitsGpu(image);
-					_texture = ImageTexture.CreateFromImage(image);
+					EnsureImageFitsGpu(src);
+					_texture = ImageTexture.CreateFromImage(src);
+					gpuBytes = EstimateImageBytes(src);
+					cachedWidth = src.GetWidth();
+					cachedHeight = src.GetHeight();
 				}
 				else
 					_texture = null;
@@ -329,7 +447,7 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 		}
 
 		Image img = LoadImageOrPlaceholder(filename, name, out bool isPlaceholder);
-		ti = new TextureInfo(name, img, isPlaceholder);
+		ti = new TextureInfo(name, img, isPlaceholder, filename);
 		if (!isPlaceholder && GenericUtils.IsImageDebugEnabled("log_success"))
 			GenericUtils.ImageTrace("IMAGE.TEXTURE.LOAD_OK", () => "texture loaded",
 				() => $"name={name} filename={GenericUtils.RedactTracePath(filename)} size={img.GetWidth()}x{img.GetHeight()}");
@@ -363,7 +481,7 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 			img?.Dispose();
 			return null;
 		}
-		ti = new TextureInfo(name, img, false);
+		ti = new TextureInfo(name, img, false, filename);
 		return CacheTextureInfo(name, filename, ti);
 	}
 
@@ -473,7 +591,7 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 		if(uEmuera.Utils.FileExists(baseimage.path))
 		{
 			Image img = LoadImageOrPlaceholder(baseimage.path, baseimage.filename, out bool isPlaceholder);
-			ti = new TextureInfo(baseimage.path, img, isPlaceholder);
+			ti = new TextureInfo(baseimage.path, img, isPlaceholder, baseimage.path);
 			baseimage.size.Width = img.GetWidth();
 			baseimage.size.Height = img.GetHeight();
 		}
@@ -820,7 +938,7 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 				}
 
 				Image img = result.Image ?? CreatePlaceholderImage();
-				var ti = new TextureInfo(result.Name, img, result.IsPlaceholder || result.Image == null);
+				var ti = new TextureInfo(result.Name, img, result.IsPlaceholder || result.Image == null, result.Filename);
 				var cached = CacheTextureInfo(result.Name, result.Filename, ti);
 				if(!cached.IsPlaceholder && GenericUtils.IsImageDebugEnabled("log_success"))
 					GenericUtils.ImageTrace("IMAGE.TEXTURE.ASYNC_READY", () => "async texture decoded",

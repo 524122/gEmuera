@@ -52,6 +52,10 @@ internal sealed class AnimatedWebpFrameSequence
 
 	internal void Clear()
 	{
+		// 显式释放已上传的帧纹理，让 GPU 内存及时回收。Release 只在引用计数归零
+		// （没有任何 EmueraImage 节点还在用该序列）时调用，此时节点已不再持帧。
+		for (int i = 0; i < frames.Count; i++)
+			frames[i].Texture?.Dispose();
 		frames.Clear();
 	}
 }
@@ -59,6 +63,12 @@ internal sealed class AnimatedWebpFrameSequence
 internal static class AnimatedWebpSpriteFrames
 {
 	const int PendingFrameCapacity = 3;
+	// 动画帧 RGBA8 GPU 纹理的内存预算：超过上限后新动画只保留首帧（回退静态显示）。
+	// 移动端显存/内存更紧张，给更小预算；预算只约束"已上传保留"的帧，首帧永远保留。
+	const long MobileFrameBytesBudget = 64L * 1024L * 1024L;
+	const long DesktopFrameBytesBudget = 256L * 1024L * 1024L;
+	const int MobileDecodeConcurrency = 1;
+	const int DesktopDecodeConcurrency = 2;
 
 	sealed class RawFrame
 	{
@@ -88,6 +98,8 @@ internal static class AnimatedWebpSpriteFrames
 		public bool DecodeStarted;
 		public bool FirstFramePublished;
 		public bool FailureLogged;
+		public bool FallbackToStaticFirstFrame;
+		public long RetainedFrameBytes;
 		public string Failure;
 		public AnimatedWebpFrameSequence Frames;
 
@@ -101,6 +113,29 @@ internal static class AnimatedWebpSpriteFrames
 	static readonly object syncRoot = new object();
 	static readonly Dictionary<string, Entry> entries = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
 	static readonly Dictionary<string, bool> animationHeaderCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+	// 并发解码上限：多张动态立绘同时出现时，限制后台 Skia 解码任务数，避免小内存机型
+	// 同时解码多张全幅图。帧序/时长/循环/暂停不受影响，只是首帧就绪时间可能稍晚。
+	static readonly SemaphoreSlim decodeGate = new SemaphoreSlim(GetInitialDecodeConcurrency(), GetInitialDecodeConcurrency());
+	// 所有 entry 已上传保留的帧纹理字节总和（仅在 Godot 主线程增改）。
+	static long retainedFrameBytes;
+
+	static int GetInitialDecodeConcurrency()
+	{
+		try { return OS.HasFeature("mobile") ? MobileDecodeConcurrency : DesktopDecodeConcurrency; }
+		catch { return MobileDecodeConcurrency; }
+	}
+
+	static long GetFrameBytesBudget()
+	{
+		try { return OS.HasFeature("mobile") ? MobileFrameBytesBudget : DesktopFrameBytesBudget; }
+		catch { return MobileFrameBytesBudget; }
+	}
+
+	static bool WouldExceedFrameBudget(long frameBytes)
+	{
+		return Interlocked.Read(ref retainedFrameBytes) + frameBytes > GetFrameBytesBudget();
+	}
 
 	internal static bool IsAnimatedWebp(string path)
 	{
@@ -189,6 +224,9 @@ internal static class AnimatedWebpSpriteFrames
 
 		while (entry.ReadyFrames.TryDequeue(out _))
 			entry.ReadyFrameSlots.Release();
+		if (entry.RetainedFrameBytes > 0)
+			Interlocked.Add(ref retainedFrameBytes, -entry.RetainedFrameBytes);
+		entry.RetainedFrameBytes = 0;
 		entry.Frames?.Clear();
 		entry.Frames = null;
 	}
@@ -233,7 +271,9 @@ internal static class AnimatedWebpSpriteFrames
 			{
 				try
 				{
-					UploadFrame(entry, raw);
+					// 已回退静态首帧时，解码器可能还有排队的后续帧：直接丢弃，不再占用 GPU 内存。
+					if (!entry.FallbackToStaticFirstFrame)
+						UploadFrame(entry, raw);
 				}
 				catch (Exception ex)
 				{
@@ -255,6 +295,16 @@ internal static class AnimatedWebpSpriteFrames
 			return;
 		entry.Frames ??= new AnimatedWebpFrameSequence();
 
+		long frameBytes = (long)raw.Width * raw.Height * 4L;
+		if (entry.Frames.FrameCount >= 1 && WouldExceedFrameBudget(frameBytes))
+		{
+			// 内存预算超限：保留已上传的首帧作为静态回退，并取消该动画的后续解码。
+			// 首帧永远保留，保证至少有一帧可显示；正常预算内动画语义完全不变。
+			entry.FallbackToStaticFirstFrame = true;
+			entry.Cancellation.Cancel();
+			return;
+		}
+
 		Image image = Image.CreateFromData(raw.Width, raw.Height, false, Image.Format.Rgba8, raw.Pixels);
 		try
 		{
@@ -266,6 +316,8 @@ internal static class AnimatedWebpSpriteFrames
 		{
 			image.Dispose();
 		}
+		entry.RetainedFrameBytes += frameBytes;
+		Interlocked.Add(ref retainedFrameBytes, frameBytes);
 
 		if (entry.FirstFramePublished)
 			return;
@@ -282,8 +334,14 @@ internal static class AnimatedWebpSpriteFrames
 
 	static void DecodeFrames(Entry entry)
 	{
+		// 并发解码上限：同一时刻最多允许 decodeConcurrency 个后台解码任务。
+		// 队列中的任务等前一个解码结束（帧序/时长/循环/暂停不受影响）。
+		bool gateAcquired = false;
+		decodeGate.Wait();
+		gateAcquired = true;
 		try
 		{
+			entry.Cancellation.Token.ThrowIfCancellationRequested();
 			using var data = SKData.Create(entry.Path);
 			using var codec = SKCodec.Create(data);
 			if (codec == null || codec.FrameCount <= 1)
@@ -348,6 +406,11 @@ internal static class AnimatedWebpSpriteFrames
 		catch (Exception ex)
 		{
 			entry.Failure = $"解码动画 WebP 失败: {Path.GetFileName(entry.Path)}, {ex.Message}";
+		}
+		finally
+		{
+			if (gateAcquired)
+				decodeGate.Release();
 		}
 	}
 

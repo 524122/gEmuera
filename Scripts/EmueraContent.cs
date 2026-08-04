@@ -188,13 +188,39 @@ public partial class EmueraContent : Control
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> renderedCbgLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> lastCbgSourceLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	ConsoleDisplayLine[] lastHtmlIslandLines = null;
-	struct GraphicsImageTextureCacheEntry
+	sealed class GraphicsImageTextureCacheEntry
 	{
+		// Owner 记录创建该条目的 GraphicsImage 实例。清扫时只读 entry.Owner.IsCreated，
+		// 不能回查 AppContents.GetGraphics(id)：那会从 Godot 主线程无锁访问 ERB 脚本线程
+		// 维护的 gList 字典，构成并发读写竞态。IsCreated 与现有 RefreshCBG 的读取方式一致。
+		public GraphicsImage Owner;
 		public long Revision;
 		public Texture2D Texture;
+		// 最近一次被显示层命中（LastUsedMs）与估算字节，供字节预算 LRU 淘汰使用。
+		public ulong LastUsedMs;
+		public long EstimatedBytes;
 	}
 	Dictionary<int, GraphicsImageTextureCacheEntry> graphicsImageTextureCache = new Dictionary<int, GraphicsImageTextureCacheEntry>();
 	const ulong GraphicsImageDisplayStableDelayMs = 24;
+
+	// H4：graphicsImageTextureCache 原来按 GraphicsImage.ID 把死纹理保留到会话结束。
+	// 这里增加三件事：(a) 渲染作用域 pin（与 activeTexturePinCollector 平行），保证
+	// 正在显示的纹理不被淘汰；(b) 周期清扫 GDISPOSE/GCREATE 后不 created 的条目；
+	// (c) 字节预算 LRU 淘汰最久未用且未在显示的条目。语义上仍保持：动态图形稳定窗口
+	// 内继续返回旧纹理、GraphicsImage 重建后新 revision 触发重新上传。
+	const ulong GraphicsImageCacheCleanupIntervalMs = 3000;
+	const long MobileGraphicsImageBudgetBytes = 128L * 1024L * 1024L;
+	const long DesktopGraphicsImageBudgetBytes = 512L * 1024L * 1024L;
+	ulong lastGraphicsImageCacheCleanupMs = 0;
+	// 渲染作用域收集器：与 activeTexturePinCollector 同生命周期，作用域结束统一解除 pin。
+	List<Texture2D> activeGraphicsImagePinCollector;
+	// GraphicsImage 纹理的显示 pin 计数（按纹理对象）。displayed 纹理 pin 数 > 0。
+	Dictionary<Texture2D, int> graphicsImagePinCounts = new Dictionary<Texture2D, int>();
+	// 已从缓存退役（失效/被替换）但仍可能被显示节点持有一段窗口的纹理；pin 归零后释放。
+	HashSet<Texture2D> retiredGraphicsImageTextures = new HashSet<Texture2D>();
+	Dictionary<int, List<Texture2D>> lineGraphicsImagePins = new Dictionary<int, List<Texture2D>>();
+	List<Texture2D> cbgGraphicsImagePins = new List<Texture2D>();
+	List<Texture2D> htmlIslandGraphicsImagePins = new List<Texture2D>();
 
 	struct CbgRenderEntry
 	{
@@ -1491,9 +1517,12 @@ public partial class EmueraContent : Control
 		// committed only after the row is inserted, which keeps replacement/update
 		// flows balanced even when rendering throws before registration.
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		int previousRenderLineNo = activeRenderLineNo;
 		var newTexturePins = new List<SpriteManager.TextureInfo>();
+		var newGraphicsImagePins = new List<Texture2D>();
 		activeTexturePinCollector = newTexturePins;
+		activeGraphicsImagePinCollector = newGraphicsImagePins;
 		activeRenderLineNo = line.LineNo;
 		try
 		{
@@ -1532,12 +1561,14 @@ public partial class EmueraContent : Control
 		{
 			SafeQueueFree(lineControl);
 			ReleaseTexturePinList(newTexturePins);
+			UnpinGraphicsImageTextures(newGraphicsImagePins);
 			asyncTexturePendingLineNos.Remove(line.LineNo);
 			throw;
 		}
 		finally
 		{
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 			activeRenderLineNo = previousRenderLineNo;
 		}
 
@@ -1552,6 +1583,7 @@ public partial class EmueraContent : Control
 		{
 			SafeQueueFree(lineControl);
 			ReleaseTexturePinList(newTexturePins);
+			UnpinGraphicsImageTextures(newGraphicsImagePins);
 			return;
 		}
 
@@ -1576,6 +1608,7 @@ public partial class EmueraContent : Control
 		lineControl.SetMeta("line_no", line.LineNo);
 		RegisterLine(line.LineNo, line, lineControl, lineSize);
 		RegisterLineTexturePins(line.LineNo, newTexturePins);
+		RegisterLineGraphicsImagePins(line.LineNo, newGraphicsImagePins);
 		GenericUtils.RecordDisplayFallbackLineBuild(hasExistingLine);
 		if (asyncTexturePendingDuringRender)
 			asyncTexturePendingLineNos.Add(line.LineNo);
@@ -2436,9 +2469,12 @@ public partial class EmueraContent : Control
 		pendingHtmlIslandAsyncTextureRefresh = false;
 
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		var newHtmlIslandTexturePins = new List<SpriteManager.TextureInfo>();
+		var newHtmlIslandGraphicsImagePins = new List<Texture2D>();
 		var newControls = new List<Control>();
 		activeTexturePinCollector = newHtmlIslandTexturePins;
+		activeGraphicsImagePinCollector = newHtmlIslandGraphicsImagePins;
 		bool previousHtmlIslandRender = renderingHtmlIslandTextures;
 		renderingHtmlIslandTextures = true;
 		try
@@ -2480,12 +2516,14 @@ public partial class EmueraContent : Control
 		{
 			ReleaseControlList(newControls);
 			ReleaseTexturePinList(newHtmlIslandTexturePins);
+			UnpinGraphicsImageTextures(newHtmlIslandGraphicsImagePins);
 			throw;
 		}
 		finally
 		{
 			renderingHtmlIslandTextures = previousHtmlIslandRender;
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 		}
 
 		if (pendingHtmlIslandAsyncTextureRefresh)
@@ -2494,6 +2532,7 @@ public partial class EmueraContent : Control
 			// 没有旧 island 时也不提交透明占位，等纹理完成后一次性替换，避免白块闪烁。
 			ReleaseControlList(newControls);
 			ReleaseTexturePinList(newHtmlIslandTexturePins);
+			UnpinGraphicsImageTextures(newHtmlIslandGraphicsImagePins);
 			return;
 		}
 
@@ -2502,6 +2541,7 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < newControls.Count; i++)
 			htmlIslandContainer.AddChild(newControls[i]);
 		htmlIslandTexturePins = newHtmlIslandTexturePins;
+		htmlIslandGraphicsImagePins = newHtmlIslandGraphicsImagePins;
 		displayRevision++;
 		RefreshQuickInputGate();
 		QueueScaleBoundsUpdate();
@@ -2541,6 +2581,16 @@ public partial class EmueraContent : Control
 				entry.Texture.Dispose();
 		}
 		graphicsImageTextureCache.Clear();
+		graphicsImagePinCounts.Clear();
+		foreach (var texture in retiredGraphicsImageTextures)
+		{
+			if (texture != null)
+				texture.Dispose();
+		}
+		retiredGraphicsImageTextures.Clear();
+		ResetLineGraphicsImagePins();
+		UnpinGraphicsImageTextures(cbgGraphicsImagePins);
+		UnpinGraphicsImageTextures(htmlIslandGraphicsImagePins);
 	}
 
 	void ClearSessionFontCache()
@@ -3016,10 +3066,12 @@ public partial class EmueraContent : Control
 	{
 		// Release is tied to row removal, not cache pressure. SpriteManager decides
 		// later whether the now-unpinned texture is old enough to evict.
-		if (!lineTexturePins.TryGetValue(lineNo, out var pins))
-			return;
-		ReleaseTexturePinList(pins);
-		lineTexturePins.Remove(lineNo);
+		if (lineTexturePins.TryGetValue(lineNo, out var pins))
+		{
+			ReleaseTexturePinList(pins);
+			lineTexturePins.Remove(lineNo);
+		}
+		ReleaseLineGraphicsImagePins(lineNo);
 	}
 
 	void ResetLineTexturePins()
@@ -3027,6 +3079,7 @@ public partial class EmueraContent : Control
 		foreach (var pins in lineTexturePins.Values)
 			ReleaseTexturePinList(pins);
 		lineTexturePins.Clear();
+		ResetLineGraphicsImagePins();
 	}
 
 	void MarkLineLayoutDirty()
@@ -3154,6 +3207,8 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < cbgTexturePins.Count; i++)
 			SpriteManager.UnpinTextureInfo(cbgTexturePins[i]);
 		cbgTexturePins.Clear();
+		// GraphicsImage 纹理 pin 与 TextureInfo pin 同生命周期：CBG 层整体释放。
+		UnpinGraphicsImageTextures(cbgGraphicsImagePins);
 	}
 
 	void ReleaseHtmlIslandTexturePins()
@@ -3161,6 +3216,7 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < htmlIslandTexturePins.Count; i++)
 			SpriteManager.UnpinTextureInfo(htmlIslandTexturePins[i]);
 		htmlIslandTexturePins.Clear();
+		UnpinGraphicsImageTextures(htmlIslandGraphicsImagePins);
 	}
 
 	// Width is only rescanned when the removed row may have been the widest one.
@@ -4705,11 +4761,14 @@ public partial class EmueraContent : Control
 	{
 		if (image == null)
 			return null;
+		ulong nowMs = Time.GetTicksMsec();
 		long revision = image.DisplayRevision;
 		if (graphicsImageTextureCache.TryGetValue(image.ID, out var cached)
 			&& cached.Revision == revision
 			&& cached.Texture != null)
 		{
+			cached.LastUsedMs = nowMs;
+			PinGraphicsImageTextureForDisplay(cached.Texture);
 			return cached.Texture;
 		}
 
@@ -4727,16 +4786,163 @@ public partial class EmueraContent : Control
 		try
 		{
 			var texture = Godot.ImageTexture.CreateFromImage(snapshot);
-			graphicsImageTextureCache[image.ID] = new GraphicsImageTextureCacheEntry
+			var entry = new GraphicsImageTextureCacheEntry
 			{
+				Owner = image,
 				Revision = revision,
 				Texture = texture,
+				LastUsedMs = nowMs,
+				EstimatedBytes = (long)System.Math.Max(1, snapshot.GetWidth()) * System.Math.Max(1, snapshot.GetHeight()) * 4L,
 			};
+			// GCREATE/GDRAW 推进 revision 后旧纹理将被覆盖：未在显示的旧纹理立即释放，
+			// 仍在显示的（CBG/HTML/行内节点持有）退役等待 pin 归零，避免 GPU 泄漏。
+			if (cached != null && cached.Texture != null && !object.ReferenceEquals(cached.Texture, texture))
+				RetireGraphicsImageTexture(cached.Texture);
+			graphicsImageTextureCache[image.ID] = entry;
+			PinGraphicsImageTextureForDisplay(texture);
 			return texture;
 		}
 		finally
 		{
 			snapshot?.Dispose();
+		}
+	}
+
+	// 渲染作用域内把即将赋给显示节点的 GraphicsImage 纹理记入 pin，作用域结束统一解除。
+	// 与 activeTexturePinCollector 平行：作用域外（非显示）的命中不 pin。
+	void PinGraphicsImageTextureForDisplay(Texture2D texture)
+	{
+		if (texture == null || activeGraphicsImagePinCollector == null)
+			return;
+		for (int i = 0; i < activeGraphicsImagePinCollector.Count; i++)
+		{
+			if (object.ReferenceEquals(activeGraphicsImagePinCollector[i], texture))
+				return;
+		}
+		activeGraphicsImagePinCollector.Add(texture);
+		graphicsImagePinCounts.TryGetValue(texture, out int count);
+		graphicsImagePinCounts[texture] = count + 1;
+	}
+
+	void UnpinGraphicsImageTexture(Texture2D texture)
+	{
+		if (texture == null)
+			return;
+		if (!graphicsImagePinCounts.TryGetValue(texture, out int count) || count <= 0)
+			return;
+		count--;
+		if (count == 0)
+		{
+			graphicsImagePinCounts.Remove(texture);
+			if (retiredGraphicsImageTextures.Contains(texture))
+			{
+				retiredGraphicsImageTextures.Remove(texture);
+				texture.Dispose();
+			}
+		}
+		else
+			graphicsImagePinCounts[texture] = count;
+	}
+
+	void UnpinGraphicsImageTextures(List<Texture2D> pins)
+	{
+		if (pins == null)
+			return;
+		for (int i = 0; i < pins.Count; i++)
+			UnpinGraphicsImageTexture(pins[i]);
+		pins.Clear();
+	}
+
+	// 失效条目：正在显示的纹理退役（pin 归零后释放），否则立即释放。
+	void RetireGraphicsImageTexture(Texture2D texture)
+	{
+		if (texture == null)
+			return;
+		if (graphicsImagePinCounts.TryGetValue(texture, out int count) && count > 0)
+			retiredGraphicsImageTextures.Add(texture);
+		else
+			texture.Dispose();
+	}
+
+	void RegisterLineGraphicsImagePins(int lineNo, List<Texture2D> pins)
+	{
+		if (pins == null || pins.Count == 0)
+			return;
+		lineGraphicsImagePins[lineNo] = pins;
+	}
+
+	void ReleaseLineGraphicsImagePins(int lineNo)
+	{
+		if (!lineGraphicsImagePins.TryGetValue(lineNo, out var pins))
+			return;
+		UnpinGraphicsImageTextures(pins);
+		lineGraphicsImagePins.Remove(lineNo);
+	}
+
+	void ResetLineGraphicsImagePins()
+	{
+		foreach (var pins in lineGraphicsImagePins.Values)
+			UnpinGraphicsImageTextures(pins);
+		lineGraphicsImagePins.Clear();
+	}
+
+	// 主线程周期清扫：GDISPOSE/GCREATE 后不再 created 的死纹理退役 + 字节预算 LRU 淘汰。
+	// GDISPOSE 由 ERB 后台线程触发，EmueraContent 无法直接挂钩，改为按条目 Owner 轮询
+	// IsCreated 判定失效（与 v24 的 IsCreated 语义一致）。不能回查 AppContents.GetGraphics(id)：
+	// 那会从主线程无锁访问脚本线程维护的 gList 字典。
+	void ProcessGraphicsImageCacheCleanup()
+	{
+		if (graphicsImageTextureCache.Count == 0)
+			return;
+		ulong nowMs = Time.GetTicksMsec();
+		if (nowMs - lastGraphicsImageCacheCleanupMs < GraphicsImageCacheCleanupIntervalMs)
+			return;
+		lastGraphicsImageCacheCleanupMs = nowMs;
+
+		var retireIds = new List<int>();
+		foreach (var pair in graphicsImageTextureCache)
+		{
+			// 用条目创建时的 Owner 判断是否仍 created。GDISPOSE 会置 is_created=false，
+			// GCREATE 复用同一 ID 时同对象再置 true 并推进 revision——这里只负责在
+			// 非 created 时把死纹理退役；重建后的新 revision 由 GetGraphicsImageDisplayTexture
+			// 触发重新上传，语义与 v24 的 IsCreated 一致。
+			var owner = pair.Value.Owner;
+			if (owner == null || !owner.IsCreated)
+				retireIds.Add(pair.Key);
+		}
+
+		long budget = OS.HasFeature("mobile") ? MobileGraphicsImageBudgetBytes : DesktopGraphicsImageBudgetBytes;
+		long totalBytes = 0;
+		var entries = new List<KeyValuePair<int, GraphicsImageTextureCacheEntry>>(graphicsImageTextureCache);
+		for (int i = 0; i < entries.Count; i++)
+			totalBytes += entries[i].Value.EstimatedBytes;
+		if (totalBytes > budget)
+			entries.Sort((a, b) => a.Value.LastUsedMs.CompareTo(b.Value.LastUsedMs));
+
+		var retireSet = new HashSet<int>(retireIds);
+		if (totalBytes > budget)
+		{
+			for (int i = 0; i < entries.Count && totalBytes > budget; i++)
+			{
+				int id = entries[i].Key;
+				if (retireSet.Contains(id))
+					continue;
+				var texture = entries[i].Value.Texture;
+				if (texture != null && graphicsImagePinCounts.TryGetValue(texture, out int pins) && pins > 0)
+					continue; // 正在显示的纹理不能被淘汰
+				retireSet.Add(id);
+				totalBytes -= entries[i].Value.EstimatedBytes;
+			}
+		}
+
+		if (retireSet.Count == 0)
+			return;
+		foreach (int id in retireSet)
+		{
+			if (!graphicsImageTextureCache.TryGetValue(id, out var entry))
+				continue;
+			graphicsImageTextureCache.Remove(id);
+			RetireGraphicsImageTexture(entry.Texture);
 		}
 	}
 
@@ -5086,9 +5292,12 @@ public partial class EmueraContent : Control
 		// into this temporary collector, then the collector becomes cbgTexturePins
 		// only after all visible layers have been rebuilt.
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		var newCbgTexturePins = new List<SpriteManager.TextureInfo>();
+		var newCbgGraphicsImagePins = new List<Texture2D>();
 		var entries = new List<CbgRenderEntry>();
 		activeTexturePinCollector = newCbgTexturePins;
+		activeGraphicsImagePinCollector = newCbgGraphicsImagePins;
 		bool previousCbgRender = renderingCbgTextures;
 		bool previousCbgUnavailable = cbgTextureUnavailableDuringRender;
 		renderingCbgTextures = true;
@@ -5147,12 +5356,14 @@ public partial class EmueraContent : Control
 		{
 			cbgTextureUnavailableDuringRender = previousCbgUnavailable;
 			ReleaseTexturePinList(newCbgTexturePins);
+			UnpinGraphicsImageTextures(newCbgGraphicsImagePins);
 			throw;
 		}
 		finally
 		{
 			renderingCbgTextures = previousCbgRender;
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 		}
 
 		bool preservePreviousCbgForUnavailableTexture = cbgTextureUnavailableDuringRender;
@@ -5162,6 +5373,7 @@ public partial class EmueraContent : Control
 			// 刷新背景层时如果新纹理还没就绪，保留旧 CBG 节点和旧 pin。
 			// 初次显示时也不提交半成品图层，等异步完成后再一次性提交，避免标题/差分图白块闪烁。
 			ReleaseTexturePinList(newCbgTexturePins);
+			UnpinGraphicsImageTextures(newCbgGraphicsImagePins);
 			return;
 		}
 
@@ -5175,6 +5387,7 @@ public partial class EmueraContent : Control
 			renderedCbgLayers.Add(entry.Layer);
 		}
 		cbgTexturePins = newCbgTexturePins;
+		cbgGraphicsImagePins = newCbgGraphicsImagePins;
 		lastCbgScrollVertical = currentScrollY;
 		TrimCbgNodes(entries.Count);
 	}
@@ -6484,6 +6697,7 @@ public partial class EmueraContent : Control
 		RefreshCbgAnimationPauseState();
 		RefreshCanvasImageAnimations();
 		CleanupAndroidSpriteAnimeFrameTextures();
+		ProcessGraphicsImageCacheCleanup();
 		RefreshQuickInputGate();
 		RefreshUiDiagnosticOverlay();
 		ProcessAsyncTextureRefreshes();
