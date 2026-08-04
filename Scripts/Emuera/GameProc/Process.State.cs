@@ -103,6 +103,10 @@ namespace MinorShift.Emuera.GameProc
 		readonly List<CalledFunction> functionList = new List<CalledFunction>();
 		readonly Stack<ExecutionContext> contextStack = new Stack<ExecutionContext>();
 		private Stack<ExecutionContext> savedContextStack;
+		// LOCAL/ARG 解析缓存按此代际失效：每次上下文栈变化（入栈/出栈，
+		// 以及 variadic 重分配导致的 Arg 数组替换）自增。进程级单调递增，
+		// 避免跨 ProcessState（含调试求值克隆体）代际复用导致脏缓存命中。
+		internal static long ContextStackGeneration;
 		private LogicalLine currentLine;
 		//private LogicalLine nextLine;
 		public int lineCount = 0;
@@ -161,11 +165,15 @@ namespace MinorShift.Emuera.GameProc
 		public void PushContext(ExecutionContext context)
 		{
 			contextStack.Push(context);
+			ContextStackGeneration++;
 		}
 
 		public ExecutionContext PopContext()
 		{
-			return contextStack.Count > 0 ? contextStack.Pop() : null;
+			if (contextStack.Count == 0)
+				return null;
+			ContextStackGeneration++;
+			return contextStack.Pop();
 		}
 
 		public int ContextStackCount
@@ -190,6 +198,7 @@ namespace MinorShift.Emuera.GameProc
 			while (contextStack.Count > targetCtxCount)
 			{
 				ExecutionContext context = contextStack.Pop();
+				ContextStackGeneration++;
 				context?.Dispose();
 			}
 			currentLine = targetCurrentLine;
@@ -373,6 +382,7 @@ namespace MinorShift.Emuera.GameProc
 			while (contextStack.Count > 0)
 			{
 				ExecutionContext context = contextStack.Pop();
+				ContextStackGeneration++;
 				context.Dispose();
 			}
 			functionList.Clear();
@@ -387,6 +397,7 @@ namespace MinorShift.Emuera.GameProc
 			while (contextStack.Count > 0)
 			{
 				ExecutionContext context = contextStack.Pop();
+				ContextStackGeneration++;
 				context.Dispose();
 			}
 			functionList.Clear();
@@ -447,6 +458,7 @@ namespace MinorShift.Emuera.GameProc
 			while (contextStack.Count > 0)
 			{
 				ExecutionContext context = contextStack.Pop();
+				ContextStackGeneration++;
 				context.Dispose();
 			}
 			functionList.Clear();
@@ -1124,24 +1136,31 @@ namespace MinorShift.Emuera.GameProc
 					{
 						VariableTerm destArg = call.TopLabel.Arg[call.TopLabel.VariadicArgIndex];
 						int requiredSize = destArg.getEl1forArg + variadicArg.Count;
+						bool replaced = false;
 						if (destArg.Identifier.Code == VariableCode.ARG && requiredSize > context.ArgIntegers.Length)
 						{
 							long[] newArray = new long[requiredSize];
 							Array.Copy(context.ArgIntegers, newArray, context.ArgIntegers.Length);
 							context.ArgIntegers = newArray;
+							replaced = true;
 						}
 						else if (destArg.Identifier.Code == VariableCode.ARGS && requiredSize > context.ArgStrings.Length)
 						{
 							string[] newArray = new string[requiredSize];
 							Array.Copy(context.ArgStrings, newArray, context.ArgStrings.Length);
 							context.ArgStrings = newArray;
+							replaced = true;
 						}
 						else if (destArg.Identifier.Code == VariableCode.ARGF && requiredSize > context.ArgFloats.Length)
 						{
 							double[] newArray = new double[requiredSize];
 							Array.Copy(context.ArgFloats, newArray, context.ArgFloats.Length);
 							context.ArgFloats = newArray;
+							replaced = true;
 						}
+						// Arg 数组引用被替换，必须推进代际使已解析缓存失效。
+						if (replaced)
+							ContextStackGeneration++;
 					}
 				}
                 //プライベート変数更新

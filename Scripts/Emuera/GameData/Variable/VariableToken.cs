@@ -1965,8 +1965,23 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 			}
 			Int64[] array = null;
+			// 已解析数组缓存：仅在上下文栈代际变化时重新解析。
+			// 代际为进程级单调递增计数，跨 ProcessState（含调试求值克隆体）不会复用。
+			long cachedGeneration = long.MinValue;
+			Int64[] cachedArray;
 
 			Int64[] GetArrayLocal()
+			{
+				long generation = ProcessState.ContextStackGeneration;
+				if (generation == cachedGeneration)
+					return cachedArray;
+				Int64[] resolved = ResolveArray();
+				cachedGeneration = generation;
+				cachedArray = resolved;
+				return resolved;
+			}
+
+			Int64[] ResolveArray()
 			{
 				var procState = GlobalStatic.Process?.State;
 				var ctx = procState?.CurrentContext;
@@ -2056,6 +2071,8 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 				this.size = newSize;
 				array = null;
+				cachedGeneration = long.MinValue;
+				cachedArray = null;
 			}
 		}
 
@@ -2066,8 +2083,22 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 			}
 			double[] array = null;
+			// 已解析数组缓存：仅在上下文栈代际变化时重新解析。
+			long cachedGeneration = long.MinValue;
+			double[] cachedArray;
 
 			double[] GetArrayLocal()
+			{
+				long generation = ProcessState.ContextStackGeneration;
+				if (generation == cachedGeneration)
+					return cachedArray;
+				double[] resolved = ResolveArray();
+				cachedGeneration = generation;
+				cachedArray = resolved;
+				return resolved;
+			}
+
+			double[] ResolveArray()
 			{
 				var procState = GlobalStatic.Process?.State;
 				var ctx = procState?.CurrentContext;
@@ -2135,6 +2166,8 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 				this.size = newSize;
 				array = null;
+				cachedGeneration = long.MinValue;
+				cachedArray = null;
 			}
 		}
 
@@ -2145,8 +2178,22 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 			}
 			string[] array = null;
+			// 已解析数组缓存：仅在上下文栈代际变化时重新解析。
+			long cachedGeneration = long.MinValue;
+			string[] cachedArray;
 
 			string[] GetArrayLocal()
+			{
+				long generation = ProcessState.ContextStackGeneration;
+				if (generation == cachedGeneration)
+					return cachedArray;
+				string[] resolved = ResolveArray();
+				cachedGeneration = generation;
+				cachedArray = resolved;
+				return resolved;
+			}
+
+			string[] ResolveArray()
 			{
 				var procState = GlobalStatic.Process?.State;
 				var ctx = procState?.CurrentContext;
@@ -2228,6 +2275,8 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 				this.size = newSize;
 				array = null;
+				cachedGeneration = long.MinValue;
+				cachedArray = null;
 			}
 
 		}
