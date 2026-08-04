@@ -122,68 +122,70 @@ namespace MinorShift.Emuera.GameData.Variable
 			dataString[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CALLNAME] = tmpl.Callname;
 			dataString[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.NICKNAME] = tmpl.Nickname;
 			dataString[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MASTERNAME] = tmpl.Mastername;
-			SparseArray<Int64> array, array2;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE];
-			array2 = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Maxbase)
+			//M3: テンプレートは CSV 読込後に密配列へ折り畳まれている（既定値は焼き込み済み）ので、
+			//Array.Copy で直コピーし、旧来の Dictionary 逐条コピーを排除する。
+			//折り畳まれていないテンプレート（GetPseudoChara の擬似キャラ）は folded 配列が null → 既定値のまま（旧実装の空辞書と同じ）。
+			Int64[] folded;
+			//MAXBASE と BASE は同じ Maxbase データを共用する。
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.BASE);
+			if (folded != null)
 			{
-				array[pair.Key] = pair.Value;
-				array2[pair.Key] = pair.Value;
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE].FromArray(folded);
+				CopyIntArrayClamped(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE], folded);
 			}
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Mark)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Exp)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Abl)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Talent)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION];
-			for (int i = 0; i < array.Length; i++)
-				array[i] = Config.RelationDef;
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Relation)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.CFlag)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Equip)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Juel)
-				array[pair.Key] = pair.Value;
-			SparseArray<string> arrays = dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CSTR];
-			foreach (KeyValuePair<int, string> pair in tmpl.CStr)
-				arrays[pair.Key] = pair.Value;
-			/*
-			//tmpl.Maxbase.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE], 0);
-            Buffer.BlockCopy(tmpl.Maxbase, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE]);
-            //tmpl.Maxbase.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE], 0);
-            Buffer.BlockCopy(tmpl.Maxbase, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE]);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.MARK);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.EXP);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.ABL);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.TALENT);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.RELATION);
+			if (folded != null)
+			{
+				//折り畳み時に関係既定値 Config.RelationDef を焼き込んであるのでそのままコピー。
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION].FromArray(folded);
+			}
+			else
+			{
+				//未折り畳み（擬似キャラ）：旧実装どおり全域を Config.RelationDef で初期化。
+				SparseArray<Int64> relation = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION];
+				for (int i = 0; i < relation.Length; i++)
+					relation[i] = Config.RelationDef;
+			}
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.CFLAG);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.EQUIP);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.JUEL);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL].FromArray(folded);
+			string[] foldedStr = tmpl.GetFoldedStrArray();
+			if (foldedStr != null)
+				dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CSTR].FromArray(foldedStr);
+		}
 
-			//tmpl.Mark.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK], 0);
-            Buffer.BlockCopy(tmpl.Mark, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK]);
-			//tmpl.Exp.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP], 0);
-            Buffer.BlockCopy(tmpl.Exp, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP]);
-            //tmpl.Abl.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL], 0);
-            Buffer.BlockCopy(tmpl.Abl, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL]);
-            //tmpl.Talent.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT], 0);
-            Buffer.BlockCopy(tmpl.Talent, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT]);
-            //tmpl.Relation.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION], 0);
-            Buffer.BlockCopy(tmpl.Relation, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION]);
-            //tmpl.CFlag.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG], 0);
-            Buffer.BlockCopy(tmpl.CFlag, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG]);
-            //tmpl.Equip.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP], 0);
-            Buffer.BlockCopy(tmpl.Equip, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP]);
-            //tmpl.Juel.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL], 0);
-            Buffer.BlockCopy(tmpl.Juel, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL]);
-
-			tmpl.CStr.CopyTo(dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CSTR], 0);
-			*/
+		/// <summary>
+		/// BASE 側へ Maxbase の密配列をコピーする。ターゲット配列長でクランプする。
+		/// MAXBASE より短い場合、範囲外キーは SparseArray の overflow へ退避される旧実装の挙動を再現する
+		/// （密配列は「定義値 or 0」を区別しないが、値 0 の範囲外書込みは SparseArray が除去するため旧実装と完全一致する）。
+		/// </summary>
+		static void CopyIntArrayClamped(SparseArray<Int64> target, Int64[] folded)
+		{
+			target.CopyFrom(folded);
+			if (folded.Length > target.Length)
+			{
+				for (int i = target.Length; i < folded.Length; i++)
+					if (folded[i] != 0L)
+						target[i] = folded[i];
+			}
 		}
 
 		public static int[] CharacterVarLength(VariableCode code, ConstantData constant)
