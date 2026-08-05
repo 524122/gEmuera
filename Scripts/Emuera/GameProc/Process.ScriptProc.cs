@@ -388,6 +388,12 @@ namespace MinorShift.Emuera.GameProc
 						{
 							console.PrintError("SAVEDATA命令によるセーブ中に予期しないエラーが発生しました");
 						}
+						else
+						{
+							// 脚本 SAVEDATA 直写后使槽位头部缓存失效（与菜单/自动保存路径一致），
+							// 否则粗时间戳文件系统（FAT32/秒级）下存档列表可能显示旧 DataMes。
+							InvalidateSaveSlotHeaderCache((int)target);
+						}
 					}
 					break;
 
