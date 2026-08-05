@@ -32,6 +32,13 @@ public partial class OptionWindow : Control
 	Label langLabel;
 	Button closeBtn;
 
+	// Group section titles (Display / Quick / Input / System), also
+	// MultiLanguage-driven and refreshed by ApplyLanguageTexts.
+	Label displayGroupTitle;
+	Label quickGroupTitle;
+	Label inputGroupTitle;
+	Label systemGroupTitle;
+
 	static readonly string[] languages = new string[] { "default", "zh_cn", "en_us", "jp" };
 	static readonly string[] languageNames = new string[] { "Default", "简体中文", "English", "日本語" };
 
@@ -46,7 +53,7 @@ public partial class OptionWindow : Control
 
 	// Exported so the dialog size is reusable/tunable per scene instance.
 	[Export]
-	public Vector2I PopupSize = new Vector2I(460, 560);
+	public Vector2I PopupSize = new Vector2I(520, 640);
 
 	public override void _Ready()
 	{
@@ -56,16 +63,38 @@ public partial class OptionWindow : Control
 		GEmueraTheme.ApplyPopup(popup);
 		AddChild(popup);
 
-		var vbox = new VBoxContainer();
-		vbox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		vbox.SizeFlagsVertical = SizeFlags.ExpandFill;
-		popup.AddChild(vbox);
+		// Inner padding. PopupPanel's "panel" stylebox is drawn visually only —
+		// child layout starts at the window origin in Godot 4 — so the content
+		// inset comes from an explicit MarginContainer (16px, deep-modern spec).
+		var margin = new MarginContainer();
+		margin.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		margin.SizeFlagsVertical = SizeFlags.ExpandFill;
+		SetMargins(margin, 16);
+		popup.AddChild(margin);
 
-		// Font size
-		var fontHBox = new HBoxContainer();
-		vbox.AddChild(fontHBox);
-		fontLabel = new Label();
-		fontHBox.AddChild(fontLabel);
+		var rootVBox = new VBoxContainer();
+		rootVBox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		rootVBox.SizeFlagsVertical = SizeFlags.ExpandFill;
+		rootVBox.AddThemeConstantOverride("separation", 12);
+		margin.AddChild(rootVBox);
+
+		// Scrollable settings body: the grouped rows scroll on small screens /
+		// large fonts, while the Close footer stays pinned at the bottom.
+		var scroll = new ScrollContainer();
+		scroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+		rootVBox.AddChild(scroll);
+
+		var content = new VBoxContainer();
+		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		content.AddThemeConstantOverride("separation", 16); // 组间距
+		scroll.AddChild(content);
+
+		// ---- Display: 字体大小 / 最大行数 / 分辨率 / 帧率 ----
+		var displayGroup = CreateGroup(content, out displayGroupTitle);
+
+		var fontRow = CreateRow(displayGroup, out fontLabel);
 		fontSizeSlider = new HSlider();
 		fontSizeSlider.MinValue = 8;
 		fontSizeSlider.MaxValue = 48;
@@ -74,82 +103,12 @@ public partial class OptionWindow : Control
 		fontSizeSlider.CustomMinimumSize = new Vector2(120, 44);
 		fontSizeSlider.Editable = false;
 		fontSizeSlider.ValueChanged += OnFontSizeChanged;
-		fontHBox.AddChild(fontSizeSlider);
-		fontSizeLabel = new Label();
+		fontRow.AddChild(fontSizeSlider);
+		fontSizeLabel = CreateValueLabel();
 		fontSizeLabel.Text = fontSizeSlider.Value.ToString();
-		fontHBox.AddChild(fontSizeLabel);
+		fontRow.AddChild(fontSizeLabel);
 
-		// Quick button width
-		var quickWidthHBox = new HBoxContainer();
-		vbox.AddChild(quickWidthHBox);
-		quickWidthLabel = new Label();
-		quickWidthHBox.AddChild(quickWidthLabel);
-		quickButtonWidthSlider = new HSlider();
-		quickButtonWidthSlider.MinValue = QuickButtons.MinQuickButtonWidth;
-		quickButtonWidthSlider.MaxValue = QuickButtons.MaxQuickButtonWidth;
-		quickButtonWidthSlider.Step = 1;
-		quickButtonWidthSlider.Value = QuickButtons.ConfiguredButtonWidth;
-		quickButtonWidthSlider.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		quickButtonWidthSlider.CustomMinimumSize = new Vector2(120, 44);
-		quickButtonWidthSlider.ValueChanged += OnQuickButtonWidthChanged;
-		quickWidthHBox.AddChild(quickButtonWidthSlider);
-		quickButtonWidthLabel = new Label();
-		quickButtonWidthLabel.Text = quickButtonWidthSlider.Value.ToString();
-		quickWidthHBox.AddChild(quickButtonWidthLabel);
-
-		// Quick font size
-		var quickFontHBox = new HBoxContainer();
-		vbox.AddChild(quickFontHBox);
-		quickFontLabel = new Label();
-		quickFontHBox.AddChild(quickFontLabel);
-		quickFontSizeSlider = new HSlider();
-		quickFontSizeSlider.MinValue = QuickButtons.MinQuickButtonFontSize;
-		quickFontSizeSlider.MaxValue = QuickButtons.MaxQuickButtonFontSize;
-		quickFontSizeSlider.Step = 1;
-		quickFontSizeSlider.Value = QuickButtons.ConfiguredFontSize;
-		quickFontSizeSlider.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		quickFontSizeSlider.CustomMinimumSize = new Vector2(120, 44);
-		quickFontSizeSlider.ValueChanged += OnQuickFontSizeChanged;
-		quickFontHBox.AddChild(quickFontSizeSlider);
-		quickFontSizeLabel = new Label();
-		quickFontSizeLabel.Text = quickFontSizeSlider.Value.ToString();
-		quickFontHBox.AddChild(quickFontSizeLabel);
-
-		// Button drag sensitivity
-		var sensitivityHBox = new HBoxContainer();
-		vbox.AddChild(sensitivityHBox);
-		sensitivityLabel = new Label();
-		sensitivityHBox.AddChild(sensitivityLabel);
-		buttonDragSensitivitySlider = new HSlider();
-		buttonDragSensitivitySlider.MinValue = 0.5;
-		buttonDragSensitivitySlider.MaxValue = 2.0;
-		buttonDragSensitivitySlider.Step = 0.05;
-		buttonDragSensitivitySlider.Value = EmueraContent.ContentDragSensitivity;
-		buttonDragSensitivitySlider.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		buttonDragSensitivitySlider.CustomMinimumSize = new Vector2(120, 44);
-		buttonDragSensitivitySlider.ValueChanged += OnButtonDragSensitivityChanged;
-		sensitivityHBox.AddChild(buttonDragSensitivitySlider);
-		buttonDragSensitivityLabel = new Label();
-		buttonDragSensitivityLabel.Text = buttonDragSensitivitySlider.Value.ToString("0.00") + "x";
-		sensitivityHBox.AddChild(buttonDragSensitivityLabel);
-
-		// Pinch zoom
-		var pinchZoomHBox = new HBoxContainer();
-		vbox.AddChild(pinchZoomHBox);
-		pinchZoomLabel = new Label();
-		pinchZoomHBox.AddChild(pinchZoomLabel);
-		pinchZoomToggle = new CheckButton();
-		pinchZoomToggle.ButtonPressed = EmueraContent.ContentPinchZoomEnabled;
-		pinchZoomToggle.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		pinchZoomToggle.CustomMinimumSize = new Vector2(120, 44);
-		pinchZoomToggle.Toggled += OnPinchZoomToggled;
-		pinchZoomHBox.AddChild(pinchZoomToggle);
-
-		// Max visible lines
-		var maxLinesHBox = new HBoxContainer();
-		vbox.AddChild(maxLinesHBox);
-		maxLinesTextLabel = new Label();
-		maxLinesHBox.AddChild(maxLinesTextLabel);
+		var maxLinesRow = CreateRow(displayGroup, out maxLinesTextLabel);
 		maxVisibleLinesSlider = new HSlider();
 		maxVisibleLinesSlider.MinValue = EmueraContent.MinMaxVisibleLines;
 		maxVisibleLinesSlider.MaxValue = EmueraContent.MaxMaxVisibleLines;
@@ -158,16 +117,12 @@ public partial class OptionWindow : Control
 		maxVisibleLinesSlider.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		maxVisibleLinesSlider.CustomMinimumSize = new Vector2(120, 44);
 		maxVisibleLinesSlider.ValueChanged += OnMaxVisibleLinesChanged;
-		maxLinesHBox.AddChild(maxVisibleLinesSlider);
-		maxVisibleLinesLabel = new Label();
+		maxLinesRow.AddChild(maxVisibleLinesSlider);
+		maxVisibleLinesLabel = CreateValueLabel();
 		maxVisibleLinesLabel.Text = ((int)maxVisibleLinesSlider.Value).ToString();
-		maxLinesHBox.AddChild(maxVisibleLinesLabel);
+		maxLinesRow.AddChild(maxVisibleLinesLabel);
 
-		// Resolution
-		var resHBox = new HBoxContainer();
-		vbox.AddChild(resHBox);
-		resLabel = new Label();
-		resHBox.AddChild(resLabel);
+		var resRow = CreateRow(displayGroup, out resLabel);
 		resolutionOption = new OptionButton();
 		ResolutionHelper.RefreshResolutions();
 		for (int i = 0; i < ResolutionHelper.resolutions.Count; i++)
@@ -177,13 +132,10 @@ public partial class OptionWindow : Control
 		if (ResolutionHelper.resolution_index >= 0 && ResolutionHelper.resolution_index < ResolutionHelper.resolutions.Count)
 			resolutionOption.Select(ResolutionHelper.resolution_index);
 		resolutionOption.ItemSelected += OnResolutionSelected;
-		resHBox.AddChild(resolutionOption);
+		resolutionOption.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		resRow.AddChild(resolutionOption);
 
-		// Frame rate
-		var fpsHBox = new HBoxContainer();
-		vbox.AddChild(fpsHBox);
-		fpsLabel = new Label();
-		fpsHBox.AddChild(fpsLabel);
+		var fpsRow = CreateRow(displayGroup, out fpsLabel);
 		frameRateOption = new OptionButton();
 		for (int i = 0; i < FrameRateHelper.FrameRates.Count; i++)
 		{
@@ -191,13 +143,69 @@ public partial class OptionWindow : Control
 		}
 		frameRateOption.Select(FrameRateHelper.frame_rate_index);
 		frameRateOption.ItemSelected += OnFrameRateSelected;
-		fpsHBox.AddChild(frameRateOption);
+		frameRateOption.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		fpsRow.AddChild(frameRateOption);
 
-		// Language
-		var langHBox = new HBoxContainer();
-		vbox.AddChild(langHBox);
-		langLabel = new Label();
-		langHBox.AddChild(langLabel);
+		// ---- Quick: 快捷按钮宽度 / 快捷字体 ----
+		var quickGroup = CreateGroup(content, out quickGroupTitle);
+
+		var quickWidthRow = CreateRow(quickGroup, out quickWidthLabel);
+		quickButtonWidthSlider = new HSlider();
+		quickButtonWidthSlider.MinValue = QuickButtons.MinQuickButtonWidth;
+		quickButtonWidthSlider.MaxValue = QuickButtons.MaxQuickButtonWidth;
+		quickButtonWidthSlider.Step = 1;
+		quickButtonWidthSlider.Value = QuickButtons.ConfiguredButtonWidth;
+		quickButtonWidthSlider.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		quickButtonWidthSlider.CustomMinimumSize = new Vector2(120, 44);
+		quickButtonWidthSlider.ValueChanged += OnQuickButtonWidthChanged;
+		quickWidthRow.AddChild(quickButtonWidthSlider);
+		quickButtonWidthLabel = CreateValueLabel();
+		quickButtonWidthLabel.Text = quickButtonWidthSlider.Value.ToString();
+		quickWidthRow.AddChild(quickButtonWidthLabel);
+
+		var quickFontRow = CreateRow(quickGroup, out quickFontLabel);
+		quickFontSizeSlider = new HSlider();
+		quickFontSizeSlider.MinValue = QuickButtons.MinQuickButtonFontSize;
+		quickFontSizeSlider.MaxValue = QuickButtons.MaxQuickButtonFontSize;
+		quickFontSizeSlider.Step = 1;
+		quickFontSizeSlider.Value = QuickButtons.ConfiguredFontSize;
+		quickFontSizeSlider.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		quickFontSizeSlider.CustomMinimumSize = new Vector2(120, 44);
+		quickFontSizeSlider.ValueChanged += OnQuickFontSizeChanged;
+		quickFontRow.AddChild(quickFontSizeSlider);
+		quickFontSizeLabel = CreateValueLabel();
+		quickFontSizeLabel.Text = quickFontSizeSlider.Value.ToString();
+		quickFontRow.AddChild(quickFontSizeLabel);
+
+		// ---- Input: 滚动灵敏度 / 双指缩放 ----
+		var inputGroup = CreateGroup(content, out inputGroupTitle);
+
+		var sensitivityRow = CreateRow(inputGroup, out sensitivityLabel);
+		buttonDragSensitivitySlider = new HSlider();
+		buttonDragSensitivitySlider.MinValue = 0.5;
+		buttonDragSensitivitySlider.MaxValue = 2.0;
+		buttonDragSensitivitySlider.Step = 0.05;
+		buttonDragSensitivitySlider.Value = EmueraContent.ContentDragSensitivity;
+		buttonDragSensitivitySlider.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		buttonDragSensitivitySlider.CustomMinimumSize = new Vector2(120, 44);
+		buttonDragSensitivitySlider.ValueChanged += OnButtonDragSensitivityChanged;
+		sensitivityRow.AddChild(buttonDragSensitivitySlider);
+		buttonDragSensitivityLabel = CreateValueLabel();
+		buttonDragSensitivityLabel.Text = buttonDragSensitivitySlider.Value.ToString("0.00") + "x";
+		sensitivityRow.AddChild(buttonDragSensitivityLabel);
+
+		var pinchZoomRow = CreateRow(inputGroup, out pinchZoomLabel);
+		pinchZoomToggle = new CheckButton();
+		pinchZoomToggle.ButtonPressed = EmueraContent.ContentPinchZoomEnabled;
+		pinchZoomToggle.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		pinchZoomToggle.CustomMinimumSize = new Vector2(120, 44);
+		pinchZoomToggle.Toggled += OnPinchZoomToggled;
+		pinchZoomRow.AddChild(pinchZoomToggle);
+
+		// ---- System: 语言 ----
+		var systemGroup = CreateGroup(content, out systemGroupTitle);
+
+		var langRow = CreateRow(systemGroup, out langLabel);
 		languageOption = new OptionButton();
 		for (int i = 0; i < languages.Length; i++)
 		{
@@ -205,19 +213,84 @@ public partial class OptionWindow : Control
 		}
 		languageOption.Select(GetLanguageIndex(MultiLanguage.CurrentLanguage));
 		languageOption.ItemSelected += OnLanguageSelected;
-		langHBox.AddChild(languageOption);
+		languageOption.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		langRow.AddChild(languageOption);
 
-		// Close button
+		// Close button: pinned footer outside the scroll area.
 		closeBtn = new Button();
 		EmueraContent.StyleButton(closeBtn);
+		closeBtn.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		closeBtn.Pressed += () => popup.Hide();
-		vbox.AddChild(closeBtn);
+		rootVBox.AddChild(closeBtn);
 
 		ApplyLanguageTexts();
 	}
 
-	// Re-read every MultiLanguage-driven description label. Value labels
-	// (slider-derived numbers) are intentionally untouched. Idempotent.
+	/// <summary>分组容器：次级文字色标题 + 1px 分隔线，组内行间距 8。</summary>
+	VBoxContainer CreateGroup(VBoxContainer parent, out Label titleLabel)
+	{
+		var group = new VBoxContainer();
+		group.AddThemeConstantOverride("separation", 8);
+		parent.AddChild(group);
+
+		titleLabel = new Label();
+		titleLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
+		titleLabel.AddThemeFontSizeOverride("font_size", 15);
+		group.AddChild(titleLabel);
+
+		var sep = new HSeparator();
+		sep.AddThemeStyleboxOverride("separator", SeparatorStyle());
+		group.AddChild(sep);
+
+		return group;
+	}
+
+	/// <summary>组内行：描述 label 固定宽度对齐（160px），控件由调用方 ExpandFill。</summary>
+	HBoxContainer CreateRow(VBoxContainer group, out Label descLabel)
+	{
+		var row = new HBoxContainer();
+		row.AddThemeConstantOverride("separation", 8);
+		group.AddChild(row);
+
+		descLabel = new Label();
+		descLabel.CustomMinimumSize = new Vector2(160, 0);
+		descLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+		row.AddChild(descLabel);
+
+		return row;
+	}
+
+	/// <summary>行尾值 label：右对齐、次级文字色、固定最小宽度。</summary>
+	Label CreateValueLabel()
+	{
+		var label = new Label();
+		label.CustomMinimumSize = new Vector2(56, 0);
+		label.HorizontalAlignment = HorizontalAlignment.Right;
+		label.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+		label.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
+		return label;
+	}
+
+	static StyleBox SeparatorStyle()
+	{
+		var line = new StyleBoxLine();
+		line.Vertical = false; // 水平分隔线（HSeparator 用）
+		line.Color = GEmueraTheme.Border;
+		line.Thickness = 1;
+		return line;
+	}
+
+	static void SetMargins(MarginContainer margin, int padding)
+	{
+		margin.AddThemeConstantOverride("margin_left", padding);
+		margin.AddThemeConstantOverride("margin_top", padding);
+		margin.AddThemeConstantOverride("margin_right", padding);
+		margin.AddThemeConstantOverride("margin_bottom", padding);
+	}
+
+	// Re-read every MultiLanguage-driven description label and group title.
+	// Value labels (slider-derived numbers) are intentionally untouched.
+	// Idempotent.
 	void ApplyLanguageTexts()
 	{
 		if (fontLabel != null)
@@ -240,6 +313,14 @@ public partial class OptionWindow : Control
 			langLabel.Text = MultiLanguage.Get("OptionWindow.Language", "Language");
 		if (closeBtn != null)
 			closeBtn.Text = MultiLanguage.Get("OptionWindow.Close", "Close");
+		if (displayGroupTitle != null)
+			displayGroupTitle.Text = MultiLanguage.Get("OptionWindow.GroupDisplay", "Display");
+		if (quickGroupTitle != null)
+			quickGroupTitle.Text = MultiLanguage.Get("OptionWindow.GroupQuick", "Quick");
+		if (inputGroupTitle != null)
+			inputGroupTitle.Text = MultiLanguage.Get("OptionWindow.GroupInput", "Input");
+		if (systemGroupTitle != null)
+			systemGroupTitle.Text = MultiLanguage.Get("OptionWindow.GroupSystem", "System");
 	}
 
 	public void ShowPopup()

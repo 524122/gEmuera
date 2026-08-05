@@ -57,3 +57,7 @@ OptionWindow.Close=关闭
 OptionWindow.PinchZoom=双指缩放
 OptionWindow.MaxVisibleLines=最大行数
 OptionWindow.FrameRate=帧率
+OptionWindow.GroupDisplay=显示
+OptionWindow.GroupQuick=快捷
+OptionWindow.GroupInput=输入
+OptionWindow.GroupSystem=系统
