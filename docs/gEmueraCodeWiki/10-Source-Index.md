@@ -278,7 +278,9 @@
 | `Scripts/Panels/Inputpad.cs` | `Inputpad` |
 | `Scripts/Panels/OptionWindow.cs` | `OptionWindow` |
 | `Scripts/Panels/QuickButtons.cs` | `QuickButtons` |
+| `Scripts/Panels/SafeAreaApplicator.cs` | `SafeAreaApplicator, SafeInsets` |
 | `Scripts/Panels/Scalepad.cs` | `Scalepad` |
+| `Scripts/Panels/VirtualCursor.cs` | `VirtualCursor` |
 
 ## `Scripts/PerformanceBenchmark.cs`
 
@@ -329,7 +331,7 @@
 
 | 文件 | 识别到的类型声明 |
 | --- | --- |
-| `Scripts/VirtualCursor.cs` | `VirtualCursor` |
+| `Scripts/Panels/VirtualCursor.cs` | `VirtualCursor` |
 
 ## `src/Core/Application`
 
@@ -450,4 +452,5 @@
 | `scenes/QuickButtons.tscn` | `CanvasLayer` | `res://Scripts/Panels/QuickButtons.cs` |
 | `scenes/RuntimeDiagnosticsPanel.tscn` | `PanelContainer` | `res://Scripts/Diagnostics/RuntimeDiagnosticsPanel.cs` |
 | `scenes/Scalepad.tscn` | `Control` | `res://Scripts/Panels/Scalepad.cs` |
+| `scenes/VirtualCursor.tscn` | `CanvasLayer` | `res://Scripts/Panels/VirtualCursor.cs` |
 

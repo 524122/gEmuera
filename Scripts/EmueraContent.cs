@@ -34,6 +34,7 @@ public partial class EmueraContent : Control
 	// Overlay and tool UI. These are Canvas/Control overlays above the console and
 	// should not own emuera state directly.
 	HBoxContainer menuBar;
+	SafeAreaApplicator menuSafeArea;
 	Inputpad inputpad;
 	QuickButtons quickButtons;
 	Scalepad scalepad;
@@ -472,6 +473,7 @@ public partial class EmueraContent : Control
 	static readonly PackedScene ScalepadScene = GD.Load<PackedScene>("res://scenes/Scalepad.tscn");
 	static readonly PackedScene QuickButtonsScene = GD.Load<PackedScene>("res://scenes/QuickButtons.tscn");
 	static readonly PackedScene OptionWindowScene = GD.Load<PackedScene>("res://scenes/OptionWindow.tscn");
+	static readonly PackedScene VirtualCursorScene = GD.Load<PackedScene>("res://scenes/VirtualCursor.tscn");
 
 	public static int ContentWidth { get; private set; }
 	public static int ContentHeight { get; private set; }
@@ -636,7 +638,7 @@ public partial class EmueraContent : Control
 
 		ApplySafeRect(rootContent, safeRect);
 		ApplySafeRect(cbgContainer, safeRect);
-		ApplySystemMenuSafeArea(safeRect);
+		menuSafeArea?.Apply();
 		inputpad?.RefreshSafeAreaLayout();
 		scalepad?.RefreshSafeAreaLayout();
 		quickButtons?.RefreshSafeAreaLayout();
@@ -645,18 +647,6 @@ public partial class EmueraContent : Control
 		if (safeChanged || widthChanged)
 			QueueScaleBoundsUpdate();
 		return safeChanged || widthChanged;
-	}
-
-	void ApplySystemMenuSafeArea(Rect2 safeRect)
-	{
-		if (menuRoot == null)
-			return;
-
-		Vector2 viewportSize = GetViewportRect().Size;
-		float rightInset = Mathf.Max(0, viewportSize.X - (safeRect.Position.X + safeRect.Size.X));
-		float topInset = Mathf.Max(0, safeRect.Position.Y);
-		menuRoot.OffsetRight = -4 - rightInset;
-		menuRoot.OffsetTop = 4 + topInset;
 	}
 
 	bool ApplyAndroidDynamicWindowWidth(bool requestRefresh)
@@ -879,12 +869,29 @@ public partial class EmueraContent : Control
 		WireSystemButton(menuToggleBtn, OnMenuTogglePressed);
 		menuRoot.AddChild(menuToggleBtn);
 
+		// 系统菜单贴右上角：只应用上/右两条安全区 inset，基值 4 与创建时的
+		// OffsetTop/OffsetRight 一致。由 ApplySafeAreaLayout 显式驱动
+		// （AutoRefresh=false），时机与旧的 ApplySystemMenuSafeArea 完全一致。
+		menuSafeArea = new SafeAreaApplicator
+		{
+			Target = menuRoot,
+			Mode = SafeAreaApplicator.ApplyMode.OffsetOverrides,
+			ApplyLeft = false,
+			ApplyTop = true,
+			ApplyRight = true,
+			ApplyBottom = false,
+			BaseTop = 4,
+			BaseRight = 4,
+			AutoRefresh = false,
+		};
+		AddChild(menuSafeArea);
+
 		// Tool overlays are siblings of the console so their CanvasLayer/z-order
 		// and input capture are independent from the scrollable console content.
 		quickButtons = (QuickButtons)QuickButtonsScene.Instantiate();
 		AddChild(quickButtons);
 
-		virtualCursor = new VirtualCursor();
+		virtualCursor = (VirtualCursor)VirtualCursorScene.Instantiate();
 		AddChild(virtualCursor);
 
 		inputpad = (Inputpad)InputpadScene.Instantiate();

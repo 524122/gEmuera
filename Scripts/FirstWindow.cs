@@ -105,6 +105,7 @@ public partial class FirstWindow : Control
 	CheckButton advancedCompatibilityToggle;
 	OptionButton compatibilityProfileOption;
 	MarginContainer launcherMargin;
+	SafeAreaApplicator launcherSafeArea;
 	Button v24TabButton;
 	Button snakeTabButton;
 	Button announcementTabButton;
@@ -131,9 +132,7 @@ public partial class FirstWindow : Control
 		Theme = GEmueraTheme.LoadTheme();
 
 		BuildLauncherUi();
-		ApplyLauncherSafeArea();
 		PlayLauncherEntrance();
-		GetViewport().SizeChanged += OnViewportSizeChanged;
 
 		if (OS.GetName() == "Android")
 		{
@@ -175,6 +174,20 @@ public partial class FirstWindow : Control
 		statusLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
 		statusLabel.AddThemeFontSizeOverride("font_size", 14);
 		root.AddChild(statusLabel);
+
+		// 安全区组件：整页内容按系统安全区收边（刘海/挖孔/圆角裁切），数值与
+		// 旧内联实现逐位一致（基值 + inset），进入场景树与视口 SizeChanged 时
+		// 自动刷新，替代原来的 ApplyLauncherSafeArea/OnViewportSizeChanged。
+		launcherSafeArea = new SafeAreaApplicator
+		{
+			Target = launcherMargin,
+			Mode = SafeAreaApplicator.ApplyMode.ThemeMargins,
+			BaseLeft = LauncherBaseMarginLeft,
+			BaseTop = LauncherBaseMarginTop,
+			BaseRight = LauncherBaseMarginRight,
+			BaseBottom = LauncherBaseMarginBottom,
+		};
+		AddChild(launcherSafeArea);
 	}
 
 	/// <summary>启动器入场动效：fade + 轻微上移（300-400ms ease-out）。</summary>
@@ -191,29 +204,6 @@ public partial class FirstWindow : Control
 		tween.TweenProperty(launcherMargin, "modulate:a", 1.0f, GEmueraTheme.EnterSeconds);
 		tween.Parallel().TweenProperty(launcherMargin, "position:y", launcherMargin.Position.Y, GEmueraTheme.EnterSeconds)
 			.From(launcherMargin.Position.Y + 18);
-	}
-
-	void OnViewportSizeChanged()
-	{
-		ApplyLauncherSafeArea();
-	}
-
-	void ApplyLauncherSafeArea()
-	{
-		if (launcherMargin == null)
-			return;
-
-		Rect2 safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
-		Vector2 viewportSize = GetViewport().GetVisibleRect().Size;
-		int left = LauncherBaseMarginLeft + Mathf.RoundToInt(System.Math.Max(0, safeRect.Position.X));
-		int top = LauncherBaseMarginTop + Mathf.RoundToInt(System.Math.Max(0, safeRect.Position.Y));
-		int right = LauncherBaseMarginRight + Mathf.RoundToInt(System.Math.Max(0, viewportSize.X - (safeRect.Position.X + safeRect.Size.X)));
-		int bottom = LauncherBaseMarginBottom + Mathf.RoundToInt(System.Math.Max(0, viewportSize.Y - (safeRect.Position.Y + safeRect.Size.Y)));
-
-		launcherMargin.AddThemeConstantOverride("margin_left", left);
-		launcherMargin.AddThemeConstantOverride("margin_top", top);
-		launcherMargin.AddThemeConstantOverride("margin_right", right);
-		launcherMargin.AddThemeConstantOverride("margin_bottom", bottom);
 	}
 
 	Control CreateHeader()
@@ -712,7 +702,6 @@ public partial class FirstWindow : Control
 
 	public override void _ExitTree()
 	{
-		GetViewport().SizeChanged -= OnViewportSizeChanged;
 		if (OS.GetName() == "Android")
 			GetTree().OnRequestPermissionsResult -= OnPermissionsResult;
 	}

@@ -1,8 +1,10 @@
 using Godot;
 
 /// <summary>
-/// Android 端虚拟光标：单指拖动移动光标，短按提交左键，长按未移动提交右键，
+/// Android 端虚拟光标组件：单指拖动移动光标，短按提交左键，长按未移动提交右键，
 /// 长按后继续拖动则进入真实滑动模式，复用 EmueraContent 的滚动链路。
+/// 以 scenes/VirtualCursor.tscn 场景资产挂载，边距/按钮尺寸为导出参数，
+/// 可在编辑器按机型微调；默认值与旧常量一致，行为零漂移。
 /// </summary>
 public partial class VirtualCursor : CanvasLayer
 {
@@ -14,9 +16,16 @@ public partial class VirtualCursor : CanvasLayer
 	const float LongPressDuration = 0.45f;
 	const float DragThreshold = 10.0f;
 	const float MinDragDeltaSquared = 0.0001f;
-	const int MiddleButtonSize = 48;
-	const int TopMargin = 68;
-	const int RightMargin = 8;
+
+	// 组件接口：布局参数可导出微调（旧实现为常量，默认值完全一致）。
+	[Export]
+	public int MiddleButtonSize = 48;
+
+	[Export]
+	public int TopMargin = 68;
+
+	[Export]
+	public int RightMargin = 8;
 
 	Control layerRoot;
 	TextureRect cursorVisual;
