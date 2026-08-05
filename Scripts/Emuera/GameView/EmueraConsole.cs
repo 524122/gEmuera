@@ -1231,14 +1231,16 @@ namespace MinorShift.Emuera.GameView
 
 		private void tickRedrawTimer(object sender, EventArgs e)
 		{
-			if (!redrawTimer.Enabled)
-				return;
-			//INPUT待ちでないとき、又はタイマー付きINPUT状態の場合はこれ以外の処理に任せる
-			if (!IsWaitInputState || timer.Enabled)
-			{
-				return;
-			}
-			window.Refresh();//OnPaint発行
+			// Godot 管线中本定时器为 no-op：SETANIMETIMER 期间的动画重绘已由 Godot 侧
+			// 每帧自驱动（RefreshCanvasImageAnimations / EmueraImage._Process 推进
+			// SpriteAnime / AnimatedWebp 帧并 QueueRedraw），不再需要 window.Refresh()
+			// 置 dirty 触发 MainWindow.Update() 的全量显示快照+diff（INPUT 等待时每帧
+			// 扫描全部显示行是纯开销）。定时器状态机（setRedrawTimer / AnimeTimer /
+			// GETANIMETIMER）语义保持原样：Enable/Interval 照常维护。
+			// 原实现（Windows 版）：
+			//   if (!redrawTimer.Enabled) return;
+			//   if (!IsWaitInputState || timer.Enabled) return;
+			//   window.Refresh();//OnPaint発行
 		}
 
 		/// <summary>

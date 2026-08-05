@@ -53,6 +53,39 @@ public partial class EmueraContent : Control
 	bool bgmPausedBeforeApplicationPause = false;
 	List<bool> soundPausedBeforeApplicationPause = new List<bool>();
 
+	// ---- AudioStream LRU 缓存（N2）----
+	// LoadAudioStream 原本每次 PLAYSOUND/PLAYBGM 都主线程同步读盘+解码；这里按
+	// (path, loop) 键缓存（BGM 与 SFX 共用），带字节预算与周期清扫，参照
+	// graphicsImageTextureCache 的 LRU 模式。语义不变：同 path 不同 loop 分条目，
+	// 播放行为不受影响；正在播放的流不淘汰（播放器持有引用，淘汰只影响后续重载）。
+	readonly struct AudioStreamCacheKey : IEquatable<AudioStreamCacheKey>
+	{
+		public readonly string Path;
+		public readonly bool Loop;
+		public AudioStreamCacheKey(string path, bool loop) { Path = path; Loop = loop; }
+		public bool Equals(AudioStreamCacheKey other) => Loop == other.Loop && string.Equals(Path, other.Path, StringComparison.Ordinal);
+		public override bool Equals(object obj) => obj is AudioStreamCacheKey other && Equals(other);
+		public override int GetHashCode() => (Path != null ? Path.GetHashCode() : 0) ^ (Loop ? 1 : 0);
+	}
+	sealed class AudioStreamCacheEntry
+	{
+		public AudioStream Stream;
+		public ulong LastUsedMs;
+		public long EstimatedBytes;
+	}
+	readonly Dictionary<AudioStreamCacheKey, AudioStreamCacheEntry> audioStreamCache = new Dictionary<AudioStreamCacheKey, AudioStreamCacheEntry>();
+	const ulong AudioStreamCacheCleanupIntervalMs = 5000;
+	const long MobileAudioStreamCacheBudgetBytes = 32L * 1024L * 1024L;
+	const long DesktopAudioStreamCacheBudgetBytes = 96L * 1024L * 1024L;
+	const int MaxAudioStreamCacheEntries = 32;
+	ulong lastAudioStreamCacheCleanupMs = 0;
+
+	// BGM 后台加载状态（M3）。PlayBgmFile 只发起 ResourceLoader 后台加载请求，
+	// _Process 轮询 LoadThreadedGetStatus，加载完成且仍是最新请求时才接上播放器；
+	// 期间的新请求（含 StopBgm）会令旧请求失效（pendingBgmPath 置空即取消）。
+	// 所有状态变更都在主线程串行发生（PlayBgmFile/StopBgm 经 EnqueueUI 到达）。
+	string pendingBgmPath;
+
 	// Rendered line indexes. The dictionaries let update/remove operations target
 	// a line by emuera LineNo without scanning the Godot child list on every call.
 	// lineSizes/lineNumbers 记录当前保留行；Canvas 额外维护一份 prefix 布局快照，
@@ -2649,6 +2682,10 @@ public partial class EmueraContent : Control
 		applicationPauseActive = false;
 		bgmPausedBeforeApplicationPause = false;
 		soundPausedBeforeApplicationPause.Clear();
+		// M3/N2：取消未完成的 BGM 后台加载并清空音频流缓存，避免跨会话残留播放/引用。
+		pendingBgmPath = null;
+		audioStreamCache.Clear();
+		lastAudioStreamCacheCleanupMs = 0;
 		if (bgmPlayer != null)
 		{
 			bgmPlayer.Stop();
@@ -5612,14 +5649,42 @@ public partial class EmueraContent : Control
 	}
 
 	// Start BGM, replacing any existing track.
+	// M3：主线程不再同步读盘+解码（1-10MB 文件会阻塞 UI 帧）。命中缓存立即播放；
+	// 未命中则发起 ResourceLoader.LoadThreadedRequest 后台加载，由
+	// ProcessPendingBgmLoad 在 _Process 里轮询完成并接线播放。语义不变：
+	// 播放/切换行为与原来一致，播放开始时机允许略延迟。
 	public void PlayBgmFile(string path)
 	{
-		var stream = LoadAudioStream(path, true);
-		if (stream == null)
+		string resolved = string.IsNullOrEmpty(path) ? null : uEmuera.Utils.ResolveExistingFilePath(path);
+		if (string.IsNullOrEmpty(resolved) || !uEmuera.Utils.FileExists(resolved))
 		{
 			GenericUtils.NotifyBgmPlaybackFailed(path);
 			return;
 		}
+		var cacheKey = new AudioStreamCacheKey(resolved, true);
+		if (audioStreamCache.TryGetValue(cacheKey, out var cached) && cached != null && cached.Stream != null)
+		{
+			cached.LastUsedMs = Time.GetTicksMsec();
+			StartBgmStream(cached.Stream, path);
+			return;
+		}
+		// 只有最新请求生效；旧请求完成时发现路径已被替换/清除则丢弃。
+		pendingBgmPath = resolved;
+		Error startError = ResourceLoader.LoadThreadedRequest(resolved);
+		if (startError == Error.Ok)
+			return;
+		// 该路径不被 ResourceLoader 支持（无对应格式加载器）——回退同步加载保持行为。
+		pendingBgmPath = null;
+		var fallback = LoadAudioStream(resolved, true);
+		if (fallback == null)
+			GenericUtils.NotifyBgmPlaybackFailed(path);
+		else
+			StartBgmStream(fallback, path);
+	}
+
+	// Wire a loaded stream onto the BGM player (replaces the old track).
+	void StartBgmStream(AudioStream stream, string path)
+	{
 		if (bgmPlayer == null)
 		{
 			bgmPlayer = new AudioStreamPlayer();
@@ -5634,9 +5699,60 @@ public partial class EmueraContent : Control
 		GenericUtils.NotifyBgmPlaybackStarted(path, GetAudioStreamLengthMs(stream));
 	}
 
-	// Stop the active BGM track.
+	// Main-thread poll for the pending background BGM load.
+	void ProcessPendingBgmLoad()
+	{
+		if (pendingBgmPath == null)
+			return;
+		string path = pendingBgmPath;
+		ResourceLoader.ThreadLoadStatus status;
+		try
+		{
+			status = ResourceLoader.LoadThreadedGetStatus(path);
+		}
+		catch
+		{
+			status = ResourceLoader.ThreadLoadStatus.Failed;
+		}
+		if (status == ResourceLoader.ThreadLoadStatus.InProgress)
+			return;
+		pendingBgmPath = null;
+		if (status != ResourceLoader.ThreadLoadStatus.Loaded)
+		{
+			GenericUtils.NotifyBgmPlaybackFailed(path);
+			return;
+		}
+		Resource loaded = null;
+		try
+		{
+			loaded = ResourceLoader.LoadThreadedGet(path);
+		}
+		catch
+		{
+			// 加载结果不可用时按失败处理。
+		}
+		if (loaded is not AudioStream stream)
+		{
+			GenericUtils.NotifyBgmPlaybackFailed(path);
+			return;
+		}
+		// 与同步路径一致：BGM 恒为 loop=true。
+		ApplyAudioStreamLoop(stream, true);
+		// 并入 N2 缓存，后续同 path 播放（BGM/SFX）直接命中。
+		audioStreamCache[new AudioStreamCacheKey(path, true)] = new AudioStreamCacheEntry
+		{
+			Stream = stream,
+			LastUsedMs = Time.GetTicksMsec(),
+			EstimatedBytes = EstimateAudioStreamBytes(path, stream)
+		};
+		StartBgmStream(stream, path);
+	}
+
+	// Stop the active BGM track and cancel any pending background load.
 	public void StopBgm()
 	{
+		// M3：取消未完成的异步加载请求，防止加载完成后又把停掉的 BGM 播起来。
+		pendingBgmPath = null;
 		bgmPlayer?.Stop();
 	}
 
@@ -5714,6 +5830,8 @@ public partial class EmueraContent : Control
 	// Load a Godot AudioStream from an emuera file path. This stays synchronous
 	// because sound commands expect immediate playback, so callers should avoid
 	// using very large audio files in hot loops on mobile.
+	// N2：按 (path, loop) LRU 缓存复用已加载的 AudioStream，重复 PLAYSOUND/PLAYBGM
+	// 不再反复读盘+解码；MB 预算 + 周期清扫防止大文件占满（参照纹理 LRU 模式）。
 	AudioStream LoadAudioStream(string path, bool loop)
 	{
 		if (string.IsNullOrEmpty(path))
@@ -5724,6 +5842,37 @@ public partial class EmueraContent : Control
 			GenericUtils.Warn(EmueraLogCategory.Audio, () => $"[AUDIO] File not found: {path}");
 			return null;
 		}
+		var cacheKey = new AudioStreamCacheKey(path, loop);
+		ulong nowMs = Time.GetTicksMsec();
+		if (audioStreamCache.TryGetValue(cacheKey, out var cached)
+			&& cached != null && cached.Stream != null)
+		{
+			cached.LastUsedMs = nowMs;
+			return cached.Stream;
+		}
+		var stream = LoadAudioStreamFromFile(path, loop);
+		if (stream == null)
+			return null;
+		long estimatedBytes = EstimateAudioStreamBytes(path, stream);
+		long budget = OS.HasFeature("mobile") ? MobileAudioStreamCacheBudgetBytes : DesktopAudioStreamCacheBudgetBytes;
+		if (estimatedBytes > budget)
+		{
+			// 单文件超过整个预算时不入缓存，避免大文件占满缓存。
+			return stream;
+		}
+		EvictAudioStreamCacheEntries(nowMs, estimatedBytes);
+		audioStreamCache[cacheKey] = new AudioStreamCacheEntry
+		{
+			Stream = stream,
+			LastUsedMs = nowMs,
+			EstimatedBytes = estimatedBytes
+		};
+		return stream;
+	}
+
+	// Actual per-extension file load (no cache).
+	AudioStream LoadAudioStreamFromFile(string path, bool loop)
+	{
 		string ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
 		switch (ext)
 		{
@@ -5748,6 +5897,85 @@ public partial class EmueraContent : Control
 				GenericUtils.Warn(EmueraLogCategory.Audio, () => $"[AUDIO] Unsupported audio extension \"{ext}\": {path}");
 				return null;
 		}
+	}
+
+	// Set the loop flag on a stream by its concrete type (BGM 后台加载完成后使用，
+	// 与 LoadAudioStreamFromFile 的语义一致)。
+	static void ApplyAudioStreamLoop(AudioStream stream, bool loop)
+	{
+		if (stream is AudioStreamWav wav)
+			wav.LoopMode = loop ? AudioStreamWav.LoopModeEnum.Forward : AudioStreamWav.LoopModeEnum.Disabled;
+		else if (stream is AudioStreamOggVorbis ogg)
+			ogg.Loop = loop;
+		else if (stream is AudioStreamMP3 mp3)
+			mp3.Loop = loop;
+	}
+
+	// Estimated cached memory for budget accounting. Falls back to the on-disk
+	// file size, which is a good approximation of the decoded footprint.
+	static long EstimateAudioStreamBytes(string path, AudioStream stream)
+	{
+		try
+		{
+			var info = new System.IO.FileInfo(path);
+			if (info.Exists)
+				return Math.Max(1024L, info.Length);
+		}
+		catch
+		{
+			// 文件信息不可读时按 1MB 估算，避免缓存无界增长。
+		}
+		return 1024L * 1024L;
+	}
+
+	bool IsAudioStreamInUse(AudioStream stream)
+	{
+		if (stream == null)
+			return false;
+		if (bgmPlayer != null && bgmPlayer.Stream == stream)
+			return true;
+		for (int i = 0; i < soundPlayers.Count; i++)
+		{
+			if (soundPlayers[i] != null && soundPlayers[i].Stream == stream)
+				return true;
+		}
+		return false;
+	}
+
+	// LRU 淘汰：最久未用者先出；正在播放的流保留（播放器持有引用，淘汰只会造成
+	// 后续重复加载，不会中断当前播放）。
+	void EvictAudioStreamCacheEntries(ulong nowMs, long incomingBytes)
+	{
+		long budget = OS.HasFeature("mobile") ? MobileAudioStreamCacheBudgetBytes : DesktopAudioStreamCacheBudgetBytes;
+		long totalBytes = incomingBytes;
+		foreach (var pair in audioStreamCache)
+			totalBytes += pair.Value.EstimatedBytes;
+		// 入缓存前调用时 incoming 已计入：达到条目上限（将在插入后超限）时也要先腾位。
+		if (audioStreamCache.Count < MaxAudioStreamCacheEntries && totalBytes <= budget)
+			return;
+		var entries = new List<KeyValuePair<AudioStreamCacheKey, AudioStreamCacheEntry>>(audioStreamCache);
+		entries.Sort((a, b) => a.Value.LastUsedMs.CompareTo(b.Value.LastUsedMs));
+		foreach (var pair in entries)
+		{
+			if (audioStreamCache.Count < MaxAudioStreamCacheEntries && totalBytes <= budget)
+				break;
+			if (IsAudioStreamInUse(pair.Value.Stream))
+				continue;
+			audioStreamCache.Remove(pair.Key);
+			totalBytes -= pair.Value.EstimatedBytes;
+		}
+	}
+
+	// 主线程周期清扫：与纹理缓存清理同步点执行，按预算/条目上限做 LRU 淘汰。
+	void ProcessAudioStreamCacheCleanup()
+	{
+		if (audioStreamCache.Count == 0)
+			return;
+		ulong nowMs = Time.GetTicksMsec();
+		if (nowMs - lastAudioStreamCacheCleanupMs < AudioStreamCacheCleanupIntervalMs)
+			return;
+		lastAudioStreamCacheCleanupMs = nowMs;
+		EvictAudioStreamCacheEntries(nowMs, 0);
 	}
 
 	// Convert Godot stream length to milliseconds for status callbacks.
@@ -6745,6 +6973,8 @@ public partial class EmueraContent : Control
 		RefreshCanvasImageAnimations();
 		CleanupAndroidSpriteAnimeFrameTextures();
 		ProcessGraphicsImageCacheCleanup();
+		ProcessPendingBgmLoad();
+		ProcessAudioStreamCacheCleanup();
 		RefreshQuickInputGate();
 		RefreshUiDiagnosticOverlay();
 		ProcessAsyncTextureRefreshes();
@@ -6942,11 +7172,7 @@ public partial class EmueraContent : Control
 
 		if (motion && !contentDragActive)
 		{
-			if (TryFindConsoleButtonAtGlobalPosition(pointerPosition, out _, out var hoverInput, out var hoverGeneration,
-				out _, out _))
-				SetCanvasVisualButton(hoverInput, hoverGeneration);
-			else
-				ClearCanvasVisualButton();
+			UpdateCanvasHoverFromPointer(pointerPosition);
 			return false;
 		}
 
@@ -7127,6 +7353,76 @@ public partial class EmueraContent : Control
 				GetViewport().SetInputAsHandled();
 		}
 		return handled;
+	}
+
+	// ---- M2：motion hover 命中测试缓存 ----
+	// 鼠标 motion 每次进入都做全树命中测试（TryFindConsoleButtonAtGlobalPosition）。
+	// 这里缓存上一结果：指针未离开上一命中按钮矩形（或未命中时移动 < 阈值）直接
+	// 复用，避免每帧全树扫描。显示内容（displayRevision）或滚动位置变化即失效。
+	// 语义不变：hover/点击判定路径与未缓存时一致，仅减少重复命中测试。
+	const float HoverCacheMoveThresholdPx = 4.0f;
+	Rect2 lastHoverHitRect;
+	bool lastHoverHitRectValid;
+	Vector2 lastHoverPointer;
+	bool lastHoverCached;
+	bool lastHoverHit;
+	string lastHoverInput;
+	long lastHoverGeneration;
+	int lastHoverDisplayRevision = int.MinValue;
+	int lastHoverScrollY = int.MinValue;
+
+	void UpdateCanvasHoverFromPointer(Vector2 pointerPosition)
+	{
+		int revision = displayRevision;
+		int scrollY = scrollContainer != null ? scrollContainer.ScrollVertical : 0;
+		if (lastHoverCached && lastHoverDisplayRevision == revision && lastHoverScrollY == scrollY)
+		{
+			if (lastHoverHit)
+			{
+				// 上一命中按钮的矩形仍包含指针 → 复用命中结果（高亮刷新走原逻辑，
+				// SetCanvasVisualButton 内部有同值短路，开销可忽略）。
+				if (lastHoverHitRectValid && lastHoverHitRect.HasPoint(pointerPosition))
+				{
+					SetCanvasVisualButton(lastHoverInput, lastHoverGeneration);
+					return;
+				}
+			}
+			else if (pointerPosition.DistanceTo(lastHoverPointer) < HoverCacheMoveThresholdPx)
+			{
+				// 上一结果未命中且指针仅小幅移动 → 复用未命中结果。
+				ClearCanvasVisualButton();
+				return;
+			}
+		}
+		// 缓存失效或指针离开上一区域：重新命中测试并更新缓存。
+		lastHoverHit = TryHitHoverButton(pointerPosition, out var hitRect, out var input, out var generation);
+		lastHoverHitRect = hitRect;
+		lastHoverHitRectValid = lastHoverHit && hitRect.Size.X > 0 && hitRect.Size.Y > 0;
+		lastHoverInput = input;
+		lastHoverGeneration = generation;
+		lastHoverPointer = pointerPosition;
+		lastHoverDisplayRevision = revision;
+		lastHoverScrollY = scrollY;
+		lastHoverCached = true;
+		if (lastHoverHit)
+			SetCanvasVisualButton(input, generation);
+		else
+			ClearCanvasVisualButton();
+	}
+
+	// 命中测试并返回可复用的按钮矩形（canvas 命中无 Control 节点时矩形无效，
+	// 由 UpdateCanvasHoverFromPointer 回退到移动阈值复用）。
+	bool TryHitHoverButton(Vector2 pointerPosition, out Rect2 hitRect, out string input, out long generation)
+	{
+		hitRect = default;
+		input = null;
+		generation = 0;
+		if (!TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var button, out input, out generation,
+			out _, out _))
+			return false;
+		if (button != null && GodotObject.IsInstanceValid(button))
+			hitRect = button.GetGlobalRect();
+		return true;
 	}
 
 	// Android 上触摸事件有时只到达 ScrollContainer/root，绕过按钮 Panel.GuiInput。

@@ -12,6 +12,30 @@ namespace MinorShift._Library
 		static readonly Dictionary<int, short> toggleStates = new Dictionary<int, short>();
 		static readonly Dictionary<int, int> keyLatch = new Dictionary<int, int>();
 		static readonly object syncRoot = new object();
+		// 按需轮询标记：VM 线程在 GETKEY/GETKEYTRIGGERED 前请求一次轮询，
+		// Godot 主线程仅在收到请求的帧执行 UpdateKeyState()，INPUT 等待期间不再
+		// 每帧空转轮询 42 个键。语义保持：主线程轮询（Godot.Input 只能主线程访问）
+		// 后缓存照常被 VM 线程读取，GETKEY 结果最多滞后一帧——与原有逐帧轮询一致。
+		static volatile bool keyRefreshRequested;
+
+		/// <summary>
+		/// 请求主线程在下一帧补一次按键轮询。可在任意线程调用。
+		/// </summary>
+		public static void RequestKeyRefresh()
+		{
+			keyRefreshRequested = true;
+		}
+
+		/// <summary>
+		/// 主线程每帧调用：有轮询请求则消费并执行轮询，否则跳过。
+		/// </summary>
+		public static bool ConsumeKeyRefreshRequest()
+		{
+			if (!keyRefreshRequested)
+				return false;
+			keyRefreshRequested = false;
+			return true;
+		}
 
 		public static void UpdateKeyState()
 		{
@@ -107,6 +131,8 @@ namespace MinorShift._Library
 
 		public static int ConsumeKeyLatch(int nVirtKey)
 		{
+			// 读取前请求主线程补一次轮询（按需轮询）。
+			RequestKeyRefresh();
 			lock (syncRoot)
 			{
 				if (!keyLatch.TryGetValue(nVirtKey, out int value))
@@ -139,10 +165,14 @@ namespace MinorShift._Library
 				toggleStates.Clear();
 				keyLatch.Clear();
 			}
+			keyRefreshRequested = false;
 		}
 
 		public static short GetKeyState(int nVirtKey)
 		{
+			// 读取前请求主线程补一次轮询（按需轮询）。返回的缓存值最多滞后一帧，
+			// 与原有逐帧轮询的读取时机一致，GETKEY 语义不变。
+			RequestKeyRefresh();
 			lock (syncRoot)
 			{
 				if (virtualPressedUntilMs.TryGetValue(nVirtKey, out long until) && until >= Environment.TickCount64)
