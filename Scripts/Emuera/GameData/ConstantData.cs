@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
+using System.Threading.Tasks;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameView;
 using MinorShift.Emuera.GameData.Variable;
@@ -636,36 +637,9 @@ check1break:
 				aliases[i] = null;
 			}
 			ItemPrice = new Int64[MaxDataList[itemIndex]];
-			loadDataWithAliases(csvDir, "ABL", ablIndex, null, disp);
-			loadDataWithAliases(csvDir, "EXP", expIndex, null, disp);
-			loadDataWithAliases(csvDir, "TALENT", talentIndex, null, disp);
-			loadDataWithAliases(csvDir, "PALAM", paramIndex, null, disp);
-			loadDataWithAliases(csvDir, "TRAIN", trainIndex, null, disp);
-			loadDataWithAliases(csvDir, "MARK", markIndex, null, disp);
-			loadDataWithAliases(csvDir, "ITEM", itemIndex, ItemPrice, disp);
-			loadDataWithAliases(csvDir, "BASE", baseIndex, null, disp);
-			loadDataWithAliases(csvDir, "SOURCE", sourceIndex, null, disp);
-			loadDataWithAliases(csvDir, "EX", exIndex, null, disp);
-			loadDataWithAliases(csvDir, "STR", strIndex, null, disp);
-			loadDataWithAliases(csvDir, "EQUIP", equipIndex, null, disp);
-			loadDataWithAliases(csvDir, "TEQUIP", tequipIndex, null, disp);
-			loadDataWithAliases(csvDir, "FLAG", flagIndex, null, disp);
-			loadDataWithAliases(csvDir, "TFLAG", tflagIndex, null, disp);
-			loadDataWithAliases(csvDir, "CFLAG", cflagIndex, null, disp);
-			loadDataWithAliases(csvDir, "TCVAR", tcvarIndex, null, disp);
-			loadDataWithAliases(csvDir, "CSTR", cstrIndex, null, disp);
-			loadDataWithAliases(csvDir, "STAIN", stainIndex, null, disp);
-			loadDataWithAliases(csvDir, "CDFLAG1", cdflag1Index, null, disp);
-			loadDataWithAliases(csvDir, "CDFLAG2", cdflag2Index, null, disp);
-			
-			loadDataWithAliases(csvDir, "STRNAME", strnameIndex, null, disp);
-			loadDataWithAliases(csvDir, "TSTR", tstrnameIndex, null, disp);
-			loadDataWithAliases(csvDir, "SAVESTR", savestrnameIndex, null, disp);
-			loadDataWithAliases(csvDir, "GLOBAL", globalIndex, null, disp);
-			loadDataWithAliases(csvDir, "GLOBALS", globalsIndex, null, disp);
-			loadDataWithAliases(csvDir, "DAY", dayIndex, null, disp);
-			loadDataWithAliases(csvDir, "TIME", timeIndex, null, disp);
-			loadDataWithAliases(csvDir, "MONEY", moneyIndex, null, disp);
+			//N5: 名称/别名 CSV 每文件状态完全独立（各自的 names[i]/aliases[i]/ItemPrice），改为并行解析。
+			//警告/控制台输出等副作用按原文件顺序捕获，解析完成后统一串行重放，顺序语义与串行完全一致。
+			loadNameCsvsInParallel(csvDir, disp);
 			//逆引き辞書を作成
 			for (int i = 0; i < names.Length; i++)
 			{
@@ -689,6 +663,10 @@ check1break:
 			//if (!Program.AnalysisMode)
 			loadCharacterData(csvDir, disp);
 			loadGlobalVarExSetting(csvDir, disp);
+			//M8: CSV/ALS 解析已全部完成（VariableSize/名称 CSV/ALS/CHARA/VarExt），
+			//释放 Preload 中整会话驻留的 CSV/ALS 解码文本；后续任何再读都会回退到直接磁盘读取。
+			Preload.RemoveByExtension(".csv");
+			Preload.RemoveByExtension(".als");
 
 			//逆引き辞書を作成2 (RELATION)
 			relationDic.EnsureCapacity(CharacterTmplList.Count * 3);
@@ -702,6 +680,62 @@ check1break:
 				if (!string.IsNullOrEmpty(tmpl.Nickname))
                     relationDic.TryAdd(tmpl.Nickname, (int)tmpl.No);
 			}
+		}
+
+		private static ParallelOptions GetCsvParallelOptions()
+		{
+			// 移动端压低并发（与 Preload 预读同一策略），桌面限制在 4 以内避免启动期争抢。
+			int degree = global::Godot.OS.HasFeature("mobile") ? 2 : Math.Max(1, Math.Min(Environment.ProcessorCount, 4));
+			return new ParallelOptions { MaxDegreeOfParallelism = degree };
+		}
+
+		/// <summary>
+		/// N5: 名称 CSV 与别名 ALS 的并行解析。每文件状态独立（各自的 names[i]/aliases[i]/ItemPrice），
+		/// 警告/打印等副作用捕获到 CsvLoadContext，全部完成后按原文件顺序重放。
+		/// </summary>
+		private void loadNameCsvsInParallel(string csvDir, bool disp)
+		{
+			var csvList = new (string BaseName, int TargetIndex, Int64[] TargetI)[]
+			{
+				("ABL", ablIndex, null),
+				("EXP", expIndex, null),
+				("TALENT", talentIndex, null),
+				("PALAM", paramIndex, null),
+				("TRAIN", trainIndex, null),
+				("MARK", markIndex, null),
+				("ITEM", itemIndex, ItemPrice),
+				("BASE", baseIndex, null),
+				("SOURCE", sourceIndex, null),
+				("EX", exIndex, null),
+				("STR", strIndex, null),
+				("EQUIP", equipIndex, null),
+				("TEQUIP", tequipIndex, null),
+				("FLAG", flagIndex, null),
+				("TFLAG", tflagIndex, null),
+				("CFLAG", cflagIndex, null),
+				("TCVAR", tcvarIndex, null),
+				("CSTR", cstrIndex, null),
+				("STAIN", stainIndex, null),
+				("CDFLAG1", cdflag1Index, null),
+				("CDFLAG2", cdflag2Index, null),
+				("STRNAME", strnameIndex, null),
+				("TSTR", tstrnameIndex, null),
+				("SAVESTR", savestrnameIndex, null),
+				("GLOBAL", globalIndex, null),
+				("GLOBALS", globalsIndex, null),
+				("DAY", dayIndex, null),
+				("TIME", timeIndex, null),
+				("MONEY", moneyIndex, null),
+			};
+			CsvLoadContext[] contexts = new CsvLoadContext[csvList.Length];
+			Parallel.For(0, csvList.Length, GetCsvParallelOptions(), i =>
+			{
+				CsvLoadContext ctx = new CsvLoadContext();
+				contexts[i] = ctx;
+				loadDataWithAliases(csvDir, csvList[i].BaseName, csvList[i].TargetIndex, csvList[i].TargetI, disp, ctx);
+			});
+			for (int i = 0; i < contexts.Length; i++)
+				contexts[i].Replay(output);
 		}
 
 		private void loadGlobalVarExSetting(string csvDir, bool disp)
@@ -724,8 +758,23 @@ check1break:
 			List<string> csvPaths = uEmuera.Utils.GetFilePaths(csvDir, "VarExt*.csv", SearchOption.AllDirectories);
 			if (Config.SortWithFilename)
 				csvPaths.Sort(StringComparer.OrdinalIgnoreCase);
-			for (int i = 0; i < csvPaths.Count; i++)
-				loadGlobalVarExSettingFile(csvPaths[i], getRelativeVarExtPath(csvDir, csvPaths[i]), disp);
+			//N5: VarExt*.csv 每文件独立解析，名字记录与副作用按原文件顺序串行回填/重放。
+			int fileCount = csvPaths.Count;
+			var nameRecords = new List<KeyValuePair<HashSet<string>, string>>[fileCount];
+			var contexts = new CsvLoadContext[fileCount];
+			Parallel.For(0, fileCount, GetCsvParallelOptions(), i =>
+			{
+				CsvLoadContext ctx = new CsvLoadContext();
+				contexts[i] = ctx;
+				nameRecords[i] = loadGlobalVarExSettingFile(csvPaths[i], getRelativeVarExtPath(csvDir, csvPaths[i]), disp, ctx);
+			});
+			for (int i = 0; i < fileCount; i++)
+			{
+				List<KeyValuePair<HashSet<string>, string>> records = nameRecords[i];
+				for (int j = 0; j < records.Count; j++)
+					records[j].Key.Add(records[j].Value);
+				contexts[i].Replay(output);
+			}
 		}
 
 		private static string getRelativeVarExtPath(string rootDir, string fullPath)
@@ -741,17 +790,18 @@ check1break:
 			return Path.GetFileName(fullPath);
 		}
 
-		private void loadGlobalVarExSettingFile(string csvPath, string csvName, bool disp)
+		private List<KeyValuePair<HashSet<string>, string>> loadGlobalVarExSettingFile(string csvPath, string csvName, bool disp, CsvLoadContext ctx)
 		{
+			List<KeyValuePair<HashSet<string>, string>> records = new List<KeyValuePair<HashSet<string>, string>>();
 			EraStreamReader eReader = new EraStreamReader(false);
 			if (!eReader.OpenOnCache(csvPath, csvName))
 			{
-				output.PrintError(eReader.Filename + "のオープンに失敗しました");
-				return;
+				ctx.PrintError(eReader.Filename + "のオープンに失敗しました");
+				return records;
 			}
 			ScriptPosition position = null;
 			if (disp)
-				output.PrintSystemLine(eReader.Filename + "読み込み中・・・");
+				ctx.Print(eReader.Filename + "読み込み中・・・");
 			try
 			{
 				StringStream st = null;
@@ -765,13 +815,13 @@ check1break:
 					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
-						ParserMediator.Warn("\",\"が必要です", position, 1);
+						ctx.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
 					CsvFieldRange f0 = fields[0];
 					if (f0.Length == 0)
 					{
-						ParserMediator.Warn("\",\"で始まっています", position, 1);
+						ctx.Warn("\",\"で始まっています", position, 1);
 						continue;
 					}
 
@@ -783,36 +833,66 @@ check1break:
 					while (keyEnd > keyStart && char.IsWhiteSpace(source[keyEnd - 1]))
 						keyEnd--;
 					if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "GLOBAL_MAPS", Config.SCVariable))
-						addVarExtNames(GlobalSaveMaps, source, startOffset);
+						addVarExtNamesCollect(GlobalSaveMaps, source, startOffset, records);
 					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "SAVE_MAPS", Config.SCVariable))
-						addVarExtNames(SaveMaps, source, startOffset);
+						addVarExtNamesCollect(SaveMaps, source, startOffset, records);
 					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "GLOBAL_XMLS", Config.SCVariable))
-						addVarExtNames(GlobalSaveXmls, source, startOffset);
+						addVarExtNamesCollect(GlobalSaveXmls, source, startOffset, records);
 					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "SAVE_XMLS", Config.SCVariable))
-						addVarExtNames(SaveXmls, source, startOffset);
+						addVarExtNamesCollect(SaveXmls, source, startOffset, records);
 					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "GLOBAL_DTS", Config.SCVariable))
-						addVarExtNames(GlobalSaveDTs, source, startOffset);
+						addVarExtNamesCollect(GlobalSaveDTs, source, startOffset, records);
 					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "SAVE_DTS", Config.SCVariable))
-						addVarExtNames(SaveDTs, source, startOffset);
+						addVarExtNamesCollect(SaveDTs, source, startOffset, records);
 					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "STATIC_MAPS", Config.SCVariable))
-						addVarExtNames(StaticMaps, source, startOffset);
+						addVarExtNamesCollect(StaticMaps, source, startOffset, records);
 					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "STATIC_XMLS", Config.SCVariable))
-						addVarExtNames(StaticXmls, source, startOffset);
+						addVarExtNamesCollect(StaticXmls, source, startOffset, records);
 					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "STATIC_DTS", Config.SCVariable))
-						addVarExtNames(StaticDTs, source, startOffset);
+						addVarExtNamesCollect(StaticDTs, source, startOffset, records);
 				}
 			}
 			catch
 			{
-				uEmuera.Media.SystemSounds.Hand.Play();
+				ctx.PlayHandSound();
 				if (position != null)
-					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+					ctx.Warn("予期しないエラーが発生しました", position, 3);
 				else
-					output.PrintError("予期しないエラーが発生しました");
+					ctx.PrintError("予期しないエラーが発生しました");
 			}
 			finally
 			{
 				eReader.Close();
+			}
+			return records;
+		}
+
+		/// <summary>
+		/// 与 addVarExtNames 完全相同的逐字段扫描语义，但把 (目标 HashSet, 名字) 记录收集到列表，
+		/// 由调用方在并行阶段结束后按原文件顺序串行回填，避免并行写共享 HashSet。
+		/// </summary>
+		private static void addVarExtNamesCollect(HashSet<string> target, string source, int startOffset, List<KeyValuePair<HashSet<string>, string>> records)
+		{
+			if (source == null)
+				source = "";
+			int fieldIndex = 0;
+			int start = startOffset;
+			for (int i = startOffset; i <= source.Length; i++)
+			{
+				if (i < source.Length && source[i] != ',')
+					continue;
+				if (fieldIndex > 0)
+				{
+					int s = start;
+					int e = i;
+					while (s < e && char.IsWhiteSpace(source[s]))
+						s++;
+					while (e > s && char.IsWhiteSpace(source[e - 1]))
+						e--;
+					records.Add(new KeyValuePair<HashSet<string>, string>(target, source.Substring(s, e - s)));
+				}
+				fieldIndex++;
+				start = i + 1;
 			}
 		}
 
@@ -1436,22 +1516,31 @@ check1break:
 			}
 			List<KeyValuePair<string, string>> csvPaths = Config.GetFiles(csvDir, "CHARA*.CSV");
 			EnsureCharacterTemplateListCapacity(csvPaths.Count);
-			for (int i = 0; i < csvPaths.Count; i++)
-				loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
 #if(UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
-            csvPaths = Config.GetFiles(csvDir, "Chara*.CSV");
+            csvPaths.AddRange(Config.GetFiles(csvDir, "Chara*.CSV"));
             EnsureCharacterTemplateListCapacity(csvPaths.Count);
-            for(int i = 0; i < csvPaths.Count; i++)
-                loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
-            csvPaths = Config.GetFiles(csvDir, "CHARA*.csv");
+            csvPaths.AddRange(Config.GetFiles(csvDir, "CHARA*.csv"));
             EnsureCharacterTemplateListCapacity(csvPaths.Count);
-            for(int i = 0; i < csvPaths.Count; i++)
-                loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
-            csvPaths = Config.GetFiles(csvDir, "Chara*.csv");
+            csvPaths.AddRange(Config.GetFiles(csvDir, "Chara*.csv"));
             EnsureCharacterTemplateListCapacity(csvPaths.Count);
-            for(int i = 0; i < csvPaths.Count; i++)
-                loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
 #endif
+            //N5: 角色 CSV 每文件独立解析（各自产出 CharacterTemplate 与副作用记录），
+            //并行完成后按原文件顺序合并进 CharacterTmplList 并按原顺序重放警告/打印，
+            //CharacterTmplList 顺序（含 SortCharacterTmplList 的输入）与串行完全一致。
+            int fileCount = csvPaths.Count;
+            var templateLists = new List<CharacterTemplate>[fileCount];
+            var contexts = new CsvLoadContext[fileCount];
+            Parallel.For(0, fileCount, GetCsvParallelOptions(), i =>
+            {
+                CsvLoadContext ctx = new CsvLoadContext();
+                contexts[i] = ctx;
+                templateLists[i] = loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp, ctx);
+            });
+            for (int i = 0; i < fileCount; i++)
+            {
+                CharacterTmplList.AddRange(templateLists[i]);
+                contexts[i].Replay(output);
+            }
             SortCharacterTmplList();
 
             var count = CharacterTmplList.Count;
@@ -1505,18 +1594,19 @@ check1break:
 				CharacterTmplList.Capacity = target;
 		}
 
-		private void loadCharacterDataFile(string csvPath, string csvName, bool disp)
+		private List<CharacterTemplate> loadCharacterDataFile(string csvPath, string csvName, bool disp, CsvLoadContext ctx)
 		{
+			List<CharacterTemplate> templates = new List<CharacterTemplate>();
 			CharacterTemplate tmpl = null;
 			EraStreamReader eReader = new EraStreamReader(false);
 			if (!eReader.OpenOnCache(csvPath, csvName))
 			{
-				output.PrintError(eReader.Filename + "のオープンに失敗しました");
-				return;
+				ctx.PrintError(eReader.Filename + "のオープンに失敗しました");
+				return templates;
 			}
 			ScriptPosition position = null;
 			if (disp)
-				output.PrintSystemLine(eReader.Filename + "読み込み中・・・");
+				ctx.Print(eReader.Filename + "読み込み中・・・");
 			try
 			{
 				Int64 index = -1;
@@ -1531,13 +1621,13 @@ check1break:
 					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
-						ParserMediator.Warn("\",\"が必要です", position, 1);
+						ctx.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
 					CsvFieldRange f0 = fields[0];
 					if (f0.Length == 0)
 					{
-						ParserMediator.Warn("\",\"で始まっています", position, 1);
+						ctx.Warn("\",\"で始まっています", position, 1);
 						continue;
 					}
 					if ((FieldEquals(source, f0, "NO", Config.SCVariable))
@@ -1545,13 +1635,13 @@ check1break:
 					{
 						if (tmpl != null)
 						{
-							ParserMediator.Warn("番号が二重に定義されました", position, 1);
+							ctx.Warn("番号が二重に定義されました", position, 1);
 							continue;
 						}
 						int noTrimEnd = TrimEndLength(source, fields[1]);
 						if (!Int64.TryParse(source.AsSpan(fields[1].Start, noTrimEnd), out index))
 						{
-							ParserMediator.Warn(GetFieldString(source, fields[1]) + "を整数値に変換できません", position, 1);
+							ctx.Warn(GetFieldString(source, fields[1]) + "を整数値に変換できません", position, 1);
 							continue;
 						}
 						tmpl = new CharacterTemplate(index, this);
@@ -1569,30 +1659,31 @@ check1break:
 						else
 							tmpl.csvNo = 0;
 							//tmpl.csvNo = index;
-						CharacterTmplList.Add(tmpl);
+						templates.Add(tmpl);
 						continue;
 					}
 					if (tmpl == null)
 					{
-						ParserMediator.Warn("番号が定義される前に他のデータが始まりました", position, 1);
+						ctx.Warn("番号が定義される前に他のデータが始まりました", position, 1);
 						continue;
 					}
-					toCharacterTemplate(position, tmpl, source, fields, tokenCount);
+					toCharacterTemplate(position, tmpl, source, fields, tokenCount, ctx);
 				}
 			}
 			catch
 			{
-				uEmuera.Media.SystemSounds.Hand.Play();
+				ctx.PlayHandSound();
 				if (position != null)
-					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+					ctx.Warn("予期しないエラーが発生しました", position, 3);
 				else
-					output.PrintError("予期しないエラーが発生しました");
-				return;
+					ctx.PrintError("予期しないエラーが発生しました");
+				return templates;
 			}
 			finally
 			{
 				eReader.Dispose();
 			}
+			return templates;
 		}
 
 		/// <summary>CSV 字段在源字符串中的 (start,len) 切片。零分配：只在真正需要时 materialize 成 string。</summary>
@@ -1911,7 +2002,7 @@ check1break:
 			}
 		}
 
-		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string source, Span<CsvFieldRange> fields, int tokenCount)
+		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string source, Span<CsvFieldRange> fields, int tokenCount, CsvLoadContext ctx)
 		{
 			if (chara == null)
 				return;
@@ -2015,24 +2106,24 @@ check1break:
 			}
 			else
 			{
-				ParserMediator.Warn("\"" + GetFieldString(source, f0) + "\"は解釈できない識別子です", position, 1);
+				ctx.Warn("\"" + GetFieldString(source, f0) + "\"は解釈できない識別子です", position, 1);
 				return;
 			}
 			if (length < 0)
 			{
-				ParserMediator.Warn("プログラムミス", position, 3);
+				ctx.Warn("プログラムミス", position, 3);
 				return;
 			}
 			if (length == 0)
 			{
-				ParserMediator.Warn(GetFieldString(source, f0).ToUpper() + "は禁止設定された変数です", position, 2);
+				ctx.Warn(GetFieldString(source, f0).ToUpper() + "は禁止設定された変数です", position, 2);
 				return;
 			}
 			CsvFieldRange f1 = fields[1];
 			bool p1isNumeric = tryToInt64(source, f1.Start, TrimEndLength(source, f1), out long p1);
 			if (p1isNumeric && ((p1 < 0) || (p1 >= length)))
 			{
-				ParserMediator.Warn(p1.ToString() + "は配列の範囲外です", position, 1);
+				ctx.Warn(p1.ToString() + "は配列の範囲外です", position, 1);
 				return;
 			}
 			int index = (int)p1;
@@ -2042,13 +2133,13 @@ check1break:
 				token1 = GetFieldString(source, f1);
 				if (!namearray.TryGetValue(token1, out index))
 				{
-					ParserMediator.Warn(errPos + "に\"" + token1 + "\"の定義がありません", position, 1);
+					ctx.Warn(errPos + "に\"" + token1 + "\"の定義がありません", position, 1);
 					//ParserMediator.Warn("\"" + tokens[1] + "\"は解釈できない識別子です", position, 1);
 					return;
 				}
 				else if (index >= length)
 				{
-					ParserMediator.Warn("\"" + token1 + "\"は配列の範囲外です", position, 1);
+					ctx.Warn("\"" + token1 + "\"は配列の範囲外です", position, 1);
 					return;
 				}
 			}
@@ -2056,23 +2147,23 @@ check1break:
 			if ((index < 0) || (index >= length))
 			{
 				if (p1isNumeric)
-					ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
+					ctx.Warn(index.ToString() + "は配列の範囲外です", position, 1);
 				else if (f1.Length == 0)
-					ParserMediator.Warn("二つ目の識別子がありません", position, 1);
+					ctx.Warn("二つ目の識別子がありません", position, 1);
 				else
 				{
 					if (token1 == null)
 						token1 = GetFieldString(source, f1);
-					ParserMediator.Warn("\"" + token1 + "\"は解釈できない識別子です", position, 1);
+					ctx.Warn("\"" + token1 + "\"は解釈できない識別子です", position, 1);
 				}
 				return;
 			}
 			if (strArray != null)
 			{
 				if (tokenCount < 3)
-					ParserMediator.Warn("三つ目の識別子がありません", position, 1);
+					ctx.Warn("三つ目の識別子がありません", position, 1);
 				if (strArray.ContainsKey(index))
-					ParserMediator.Warn(GetFieldString(source, f0).ToUpper() + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
+					ctx.Warn(GetFieldString(source, f0).ToUpper() + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
 				strArray[index] = tokenCount >= 3 ? GetFieldString(source, fields[2]) : "";
 			}
 			else
@@ -2080,16 +2171,96 @@ check1break:
 				if ((tokenCount < 3) || !tryToInt64(source, fields[2].Start, fields[2].Length, out long p2))
 					p2 = 1;
 				if (intArray.ContainsKey(index))
-					ParserMediator.Warn(GetFieldString(source, f0).ToUpper() + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
+					ctx.Warn(GetFieldString(source, f0).ToUpper() + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
 				intArray[index] = p2;
 			}
 		}
 
 
-		private void loadDataWithAliases(string csvDir, string baseName, int targetIndex, Int64[] targetI, bool disp)
+		private enum CsvEffectKind : byte
 		{
-			loadDataTo(Path.Combine(csvDir, baseName + ".CSV"), targetIndex, targetI, disp);
-			loadAliases(Path.Combine(csvDir, baseName + ".ALS"), targetIndex);
+			Print,
+			PrintError,
+			Warn,
+			HandSound,
+		}
+
+		private readonly struct CsvSideEffect
+		{
+			public readonly CsvEffectKind Kind;
+			public readonly string Message;
+			public readonly ScriptPosition Position;
+			public readonly int Level;
+			public CsvSideEffect(CsvEffectKind kind, string message, ScriptPosition position, int level)
+			{
+				Kind = kind;
+				Message = message;
+				Position = position;
+				Level = level;
+			}
+		}
+
+		/// <summary>
+		/// N5: CSV 并行解析的副作用捕获器。警告/控制台输出/提示音等副作用不再于工作线程直接执行，
+		/// 而是按每文件顺序记录，全部文件解析完成后由主线程按原文件顺序统一重放。
+		/// ParserMediator.warningList 与 EmueraConsole 输出均非线程安全，因此必须串行重放。
+		/// </summary>
+		private sealed class CsvLoadContext
+		{
+			private readonly List<CsvSideEffect> effects = new List<CsvSideEffect>();
+
+			public void Print(string message)
+			{
+				effects.Add(new CsvSideEffect(CsvEffectKind.Print, message, null, 0));
+			}
+
+			public void PrintError(string message)
+			{
+				effects.Add(new CsvSideEffect(CsvEffectKind.PrintError, message, null, 0));
+			}
+
+			public void Warn(string message, ScriptPosition position, int level)
+			{
+				effects.Add(new CsvSideEffect(CsvEffectKind.Warn, message, position, level));
+			}
+
+			public void PlayHandSound()
+			{
+				effects.Add(new CsvSideEffect(CsvEffectKind.HandSound, null, null, 0));
+			}
+
+			public void Replay(EmueraConsole output)
+			{
+				for (int i = 0; i < effects.Count; i++)
+				{
+					CsvSideEffect effect = effects[i];
+					switch (effect.Kind)
+					{
+						case CsvEffectKind.Print:
+							output.PrintSystemLine(effect.Message);
+							break;
+						case CsvEffectKind.PrintError:
+							output.PrintError(effect.Message);
+							break;
+						case CsvEffectKind.Warn:
+							// 与原串行流程走完全相同的过滤与入队路径；LoadData 期间
+							// Config.DisplayWarningLevel / console.RunERBFromMemory 等状态不变，
+							// 因此延迟重放与串行即时调用结果一致。
+							ParserMediator.Warn(effect.Message, effect.Position, effect.Level);
+							break;
+						case CsvEffectKind.HandSound:
+							uEmuera.Media.SystemSounds.Hand.Play();
+							break;
+					}
+				}
+				effects.Clear();
+			}
+		}
+
+		private void loadDataWithAliases(string csvDir, string baseName, int targetIndex, Int64[] targetI, bool disp, CsvLoadContext ctx)
+		{
+			loadDataTo(Path.Combine(csvDir, baseName + ".CSV"), targetIndex, targetI, disp, ctx);
+			loadAliases(Path.Combine(csvDir, baseName + ".ALS"), targetIndex, ctx);
 		}
 
 		private void loadUserDefinedNameData(string csvPath, string[] target, bool disp)
@@ -2152,7 +2323,7 @@ check1break:
 			}
 		}
 
-		private void loadDataTo(string csvPath, int targetIndex, Int64[] targetI, bool disp)
+		private void loadDataTo(string csvPath, int targetIndex, Int64[] targetI, bool disp, CsvLoadContext ctx)
 		{
 
 			string resolvedCsvPath = uEmuera.Utils.ResolveExistingFilePath(csvPath);
@@ -2165,13 +2336,13 @@ check1break:
 			EraStreamReader eReader = new EraStreamReader(false);
 			if (!eReader.OpenOnCache(csvPath))
 			{
-				output.PrintError(eReader.Filename + "のオープンに失敗しました");
+				ctx.PrintError(eReader.Filename + "のオープンに失敗しました");
 				return;
 			}
 			ScriptPosition position = null;
 
 			if (disp || Program.AnalysisMode)
-				output.PrintSystemLine(eReader.Filename + "読み込み中・・・");
+				ctx.Print(eReader.Filename + "読み込み中・・・");
 			try
 			{
 				StringStream st = null;
@@ -2185,26 +2356,26 @@ check1break:
 					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
-						ParserMediator.Warn("\",\"が必要です", position, 1);
+						ctx.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
                     if (!Int32.TryParse(source.AsSpan(fields[0].Start, fields[0].Length), out int index))
                     {
-                        ParserMediator.Warn("一つ目の値を整数値に変換できません", position, 1);
+                        ctx.Warn("一つ目の値を整数値に変換できません", position, 1);
                         continue;
                     }
                     if (target.Length == 0)
 					{
-						ParserMediator.Warn("禁止設定された名前配列です", position, 2);
+						ctx.Warn("禁止設定された名前配列です", position, 2);
 						break;
 					}
 					if ((index < 0) || (target.Length <= index))
 					{
-						ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
+						ctx.Warn(index.ToString() + "は配列の範囲外です", position, 1);
 						continue;
                     }
                     if (!defined.Add(index))
-                        ParserMediator.Warn(index.ToString() + "番目の要素はすでに定義されています（新しい値で上書きします）", position, 1);
+                        ctx.Warn(index.ToString() + "番目の要素はすでに定義されています（新しい値で上書きします）", position, 1);
 					target[index] = GetFieldString(source, fields[1]);
 					if ((targetI != null) && (tokenCount >= 3))
 					{
@@ -2212,7 +2383,7 @@ check1break:
                         int priceTrimEnd = TrimEndLength(source, fields[2]);
                         if (!Int64.TryParse(source.AsSpan(fields[2].Start, priceTrimEnd), out long price))
                         {
-                            ParserMediator.Warn("金額が読み取れません", position, 1);
+                            ctx.Warn("金額が読み取れません", position, 1);
                             continue;
                         }
 
@@ -2222,11 +2393,11 @@ check1break:
 			}
 			catch
 			{
-				uEmuera.Media.SystemSounds.Hand.Play();
+				ctx.PlayHandSound();
 				if (position != null)
-					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+					ctx.Warn("予期しないエラーが発生しました", position, 3);
 				else
-					output.PrintError("予期しないエラーが発生しました");
+					ctx.PrintError("予期しないエラーが発生しました");
 				return;
 			}
 			finally
@@ -2237,7 +2408,7 @@ check1break:
 
 		}
 
-		private void loadAliases(string aliasPath, int targetIndex)
+		private void loadAliases(string aliasPath, int targetIndex, CsvLoadContext ctx)
 		{
 			string resolvedAliasPath = uEmuera.Utils.ResolveExistingFilePath(aliasPath);
 			if (!string.IsNullOrEmpty(resolvedAliasPath))
@@ -2250,7 +2421,7 @@ check1break:
 			EraStreamReader eReader = new EraStreamReader(false);
 			if (!eReader.OpenOnCache(aliasPath))
 			{
-				output.PrintError(eReader.Filename + "のオープンに失敗しました");
+				ctx.PrintError(eReader.Filename + "のオープンに失敗しました");
 				return;
 			}
 			ScriptPosition position = null;
@@ -2267,12 +2438,12 @@ check1break:
 					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
-						ParserMediator.Warn("\",\"が必要です", position, 1);
+						ctx.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
 					if (!Int32.TryParse(source.AsSpan(fields[0].Start, fields[0].Length), out int index))
 					{
-						ParserMediator.Warn("一つ目の値を整数値に変換できません", position, 1);
+						ctx.Warn("一つ目の値を整数値に変換できません", position, 1);
 						continue;
 					}
 					string aliasName = GetTrimmedFieldString(source, fields[1]);
@@ -2280,18 +2451,18 @@ check1break:
 						continue;
 						if (!target.TryAdd(aliasName, index))
 						{
-							ParserMediator.Warn("別名\"" + aliasName + "\"は既に定義されています", position, 1);
+							ctx.Warn("別名\"" + aliasName + "\"は既に定義されています", position, 1);
 							continue;
 						}
 					}
 			}
 			catch
 			{
-				uEmuera.Media.SystemSounds.Hand.Play();
+				ctx.PlayHandSound();
 				if (position != null)
-					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+					ctx.Warn("予期しないエラーが発生しました", position, 3);
 				else
-					output.PrintError("予期しないエラーが発生しました");
+					ctx.PrintError("予期しないエラーが発生しました");
 				return;
 			}
 			finally
