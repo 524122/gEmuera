@@ -55,3 +55,6 @@ OptionWindow.Close=閉じる
 [Failure]=失敗
 [Exit]=ゲームを終了します
 [ExitContent]=ゲームを終了しますか？
+OptionWindow.PinchZoom=ピンチズーム
+OptionWindow.MaxVisibleLines=最大行数
+OptionWindow.FrameRate=フレームレート

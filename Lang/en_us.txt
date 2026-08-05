@@ -55,3 +55,6 @@ OptionWindow.Close=Close
 [Failure]=Failure
 [Exit]=Exit
 [ExitContent]=Will exit. Are you sure?
+OptionWindow.PinchZoom=Pinch Zoom
+OptionWindow.MaxVisibleLines=Max Lines
+OptionWindow.FrameRate=Frame Rate

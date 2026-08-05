@@ -54,3 +54,6 @@ OptionWindow.Close=关闭
 [Failure]=失败
 [Exit]=退出游戏
 [ExitContent]=是否退出游戏？
+OptionWindow.PinchZoom=双指缩放
+OptionWindow.MaxVisibleLines=最大行数
+OptionWindow.FrameRate=帧率
