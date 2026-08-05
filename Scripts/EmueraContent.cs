@@ -7230,6 +7230,33 @@ public partial class EmueraContent : Control
 			return false;
 		}
 
+		// 系统取消的触摸（Android 手势导航/通知栏/应用中断等，Canceled=true）：
+		// 只做状态清理并吞掉事件，绝不能落入普通指针释放路径触发点击/推进，
+		// 因为用户并没有完成这次点击。
+		if (touch.Canceled)
+		{
+			bool tracked = contentTouchPositions.Remove(touch.Index);
+			if (contentTouchGestureActive)
+			{
+				if (contentTouchPositions.Count >= ContentPinchTouchCount)
+					BeginContentPinch();
+				else if (contentTouchPositions.Count == 0)
+					EndContentTouchGesture();
+				else
+				{
+					contentPinchActive = false;
+					contentPinchDirty = false;
+				}
+			}
+			else if (tracked && contentDragActive)
+			{
+				// 单指按下后被系统取消：清掉普通拖拽状态，避免泄漏到下一次触摸。
+				ResetContentDragState();
+			}
+			ConsumeContentPointerEvent(acceptEvent);
+			return true;
+		}
+
 		if (!contentTouchPositions.ContainsKey(touch.Index))
 		{
 			if (!contentTouchGestureActive)
@@ -7261,14 +7288,26 @@ public partial class EmueraContent : Control
 	{
 		if (!contentTouchPositions.ContainsKey(drag.Index))
 		{
-			if (!contentTouchGestureActive)
+			if (!contentTouchGestureActive && contentTouchPositions.Count == 0)
 				return false;
-			ConsumeContentPointerEvent(acceptEvent);
-			CaptureInputReplayEvent("screen_drag", "", drag.Position, true);
-			return true;
+			// 未知手指：它的按下事件可能被其他控件（快速按钮面板等）消费而未被
+			// 本状态机跟踪。若它已进入内容区域，补录位置并落入下方公共手势路径，
+			// 让跨面板的双指缩放仍然成立，而不是用过期位置产生漂移。
+			bool lateTracked = scrollContainer != null
+				&& scrollContainer.GetGlobalRect().HasPoint(drag.Position);
+			if (lateTracked)
+				contentTouchPositions[drag.Index] = drag.Position;
+			if (!lateTracked || contentTouchPositions.Count < ContentPinchTouchCount)
+			{
+				ConsumeContentPointerEvent(acceptEvent);
+				CaptureInputReplayEvent("screen_drag", "", drag.Position, true);
+				return true;
+			}
 		}
-
-		contentTouchPositions[drag.Index] = drag.Position;
+		else
+		{
+			contentTouchPositions[drag.Index] = drag.Position;
+		}
 		if (!contentTouchGestureActive && contentTouchPositions.Count < ContentPinchTouchCount)
 			return false;
 
