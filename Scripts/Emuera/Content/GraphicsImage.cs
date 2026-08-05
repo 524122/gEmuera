@@ -39,6 +39,52 @@ namespace MinorShift.Emuera.Content
 		public long DisplayRevision => Interlocked.Read(ref displayRevision);
 		bool IsCurrentDisplaySuppressed => DisplayRevision == Interlocked.Read(ref suppressedDisplayRevision);
 
+		// M6：批量像素操作需要把 Godot 原生 SetPixel 的浮点→字节转换精确复刻到内存写入。
+		// 这里用 1x1 probe 图直接向引擎查询转换结果（truncation/rounding 由引擎自身决定），
+		// 保证批量化后的输出与逐点 SetPixel 逐位一致，不依赖对引擎实现的猜测。
+		static readonly object colorProbeLock = new object();
+		static Godot.Image colorProbe;
+		static byte[] byteRoundTripTable;
+
+		static byte[] ColorToRgba8Bytes(Godot.Color c)
+		{
+			lock (colorProbeLock)
+			{
+				if (colorProbe == null)
+					colorProbe = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
+				colorProbe.SetPixel(0, 0, c);
+				return colorProbe.GetData();
+			}
+		}
+
+		// GetPixel(byte → float) + SetPixel(float → byte) 的往返结果。
+		// 对 GRotate/GDrawGWithRotate 逐像素复制：直接复制字节可能与往返结果差 1，
+		// 因此按字节值建 256 项表，逐项用 probe 精确探测引擎转换。
+		static byte RoundTripChannel(byte b)
+		{
+			var table = byteRoundTripTable;
+			if (table != null)
+				return table[b];
+			lock (colorProbeLock)
+			{
+				table = byteRoundTripTable;
+				if (table == null)
+				{
+					if (colorProbe == null)
+						colorProbe = Godot.Image.CreateEmpty(1, 1, false, Godot.Image.Format.Rgba8);
+					table = new byte[256];
+					for (int i = 0; i < 256; i++)
+					{
+						colorProbe.SetPixel(0, 0, new Godot.Color(i / 255f, 0, 0, 1));
+						var d = colorProbe.GetData();
+						table[i] = d[0];
+					}
+					byteRoundTripTable = table;
+				}
+				return table[b];
+			}
+		}
+
 		#region Bitmap書き込み・作成
 
 		/// <summary>
@@ -187,6 +233,9 @@ namespace MinorShift.Emuera.Content
 			Godot.Rect2I srcRegion = new Godot.Rect2I(0, 0, img.DestBaseSize.Width, img.DestBaseSize.Height);
 			Rectangle drawRect = destRect;
 			bool needsCm = cm != null && cm.Length >= 5;
+			// M5：源内容版本。GraphicsImage 用 DisplayRevision（每次改写递增），
+			// 纹理源无可达的原地改写路径，恒为 0；两者都以图对象身份参与缓存 key。
+			long srcVersion = 0;
 
 			if (img is ASpriteSingle single)
 			{
@@ -195,7 +244,9 @@ namespace MinorShift.Emuera.Content
 					var ti = bt.EnsureTextureInfoForScriptComposition();
 					if (ti == null || ti.IsPlaceholder || ti.image == null)
 						return false;
-					srcImage = needsCm ? ti.image.Duplicate() as Godot.Image : ti.image;
+					// N4：needsCm 不再整图 Duplicate；颜色矩阵只读源区域，GPU/CPU 路径
+					// 各自只拷贝所需区域，共享纹理源不会被改写。
+					srcImage = ti.image;
 					srcRegion = new Godot.Rect2I(single.SrcRectangle.X, single.SrcRectangle.Y,
 						single.SrcRectangle.Width, single.SrcRectangle.Height);
 				}
@@ -203,7 +254,8 @@ namespace MinorShift.Emuera.Content
 				{
 					if (gImg.IsCurrentDisplaySuppressed)
 						return false;
-					srcImage = needsCm ? gImg.godotImage.Duplicate() as Godot.Image : gImg.godotImage;
+					srcImage = gImg.godotImage;
+					srcVersion = gImg.DisplayRevision;
 					srcRegion = new Godot.Rect2I(single.SrcRectangle.X, single.SrcRectangle.Y,
 						single.SrcRectangle.Width, single.SrcRectangle.Height);
 				}
@@ -214,7 +266,7 @@ namespace MinorShift.Emuera.Content
 						ti = SpriteManager.GetTextureInfoForScriptComposition(bmp.filename, bmp.path);
 					if (ti != null && !ti.IsPlaceholder && ti.image != null)
 					{
-						srcImage = needsCm ? ti.image.Duplicate() as Godot.Image : ti.image;
+						srcImage = ti.image;
 						srcRegion = new Godot.Rect2I(single.SrcRectangle.X, single.SrcRectangle.Y,
 							single.SrcRectangle.Width, single.SrcRectangle.Height);
 					}
@@ -243,14 +295,15 @@ namespace MinorShift.Emuera.Content
 						var ti = bt.EnsureTextureInfoForScriptComposition();
 						if (ti == null || ti.IsPlaceholder || ti.image == null)
 							return false;
-						srcImage = needsCm ? ti.image.Duplicate() as Godot.Image : ti.image;
+						srcImage = ti.image;
 						srcRegion = new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
 					}
 					else if (baseImage is GraphicsImage gImg && gImg.godotImage != null)
 					{
 						if (gImg.IsCurrentDisplaySuppressed)
 							return false;
-						srcImage = needsCm ? gImg.godotImage.Duplicate() as Godot.Image : gImg.godotImage;
+						srcImage = gImg.godotImage;
+						srcVersion = gImg.DisplayRevision;
 						srcRegion = new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
 					}
 					else if (baseImage?.Bitmap is Bitmap bmp && !string.IsNullOrEmpty(bmp.path))
@@ -260,7 +313,7 @@ namespace MinorShift.Emuera.Content
 							ti = SpriteManager.GetTextureInfoForScriptComposition(bmp.filename, bmp.path);
 						if (ti != null && !ti.IsPlaceholder && ti.image != null)
 						{
-							srcImage = needsCm ? ti.image.Duplicate() as Godot.Image : ti.image;
+							srcImage = ti.image;
 							srcRegion = new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
 						}
 						else if (ti?.IsPlaceholder == true)
@@ -279,8 +332,20 @@ namespace MinorShift.Emuera.Content
 
 			if (srcImage.GetFormat() != Godot.Image.Format.Rgba8)
 			{
-				if (!needsCm)
+				if (needsCm)
+				{
+					// N4：非 Rgba8 的共享源只拷贝 srcRegion 区域并就地转换，避免整图 Duplicate。
+					// 私有拷贝随后对 GPU/CPU 颜色矩阵路径只读。
+					srcImage = srcImage.GetRegion(srcRegion) ?? srcImage.Duplicate() as Godot.Image;
+					if (srcImage == null)
+						return false;
+					srcRegion = new Godot.Rect2I(0, 0, srcImage.GetWidth(), srcImage.GetHeight());
+					srcVersion = 0;
+				}
+				else
+				{
 					srcImage = srcImage.Duplicate() as Godot.Image;
+				}
 				srcImage.Convert(Godot.Image.Format.Rgba8);
 			}
 
@@ -299,7 +364,9 @@ namespace MinorShift.Emuera.Content
 						}
 					}
 				}
-				srcImage = ApplyColorMatrix(srcImage, srcRegion, cm);
+				// M5：CPU 路径按 (源图, 版本, region, 矩阵位级 key) memoize，
+				// 重复合成同一 (region, 矩阵) 时跳过 GetRegion+GetData+SetData 三份拷贝。
+				srcImage = ApplyColorMatrixMemoized(srcImage, srcVersion, srcRegion, cm);
 				srcRegion = new Godot.Rect2I(0, 0, srcImage.GetWidth(), srcImage.GetHeight());
 				skip_cpu_cm: ;
 			}
@@ -391,6 +458,98 @@ namespace MinorShift.Emuera.Content
 			return (byte)Godot.Mathf.Clamp(Godot.Mathf.RoundToInt(value * 255.0f), 0, 255);
 		}
 
+		#region ColorMatrix memoize
+
+		// M5：CPU ApplyColorMatrix 结果 memoize。key = (源图对象身份, 内容版本, region, 矩阵位级 key)。
+		// 内容版本：
+		//  - GraphicsImage 源传 DisplayRevision（每次改写递增，版本不匹配即重新合成，保证无陈旧结果）；
+		//  - 纹理源（SpriteManager TextureInfo / BitmapTexture）无可达的原地改写路径（Drawing.Bitmap.SetPixel
+		//    无任何调用方），身份相同即内容相同；TextureInfo 重解码/淘汰会产生新对象 → 身份不同 → miss 重算。
+		// 缓存只保存 ApplyColorMatrix 的返回值（region 私有拷贝），调用方不得改写（GDrawG-with-cm 缩放前先 Duplicate）。
+		const int ColorMatrixMemoizeCapacity = 64;
+		static readonly object colorMatrixMemoizeLock = new object();
+		static readonly Dictionary<ColorMatrixMemoizeKey, ColorMatrixMemoizeEntry> colorMatrixMemoize =
+			new Dictionary<ColorMatrixMemoizeKey, ColorMatrixMemoizeEntry>();
+		static readonly LinkedList<ColorMatrixMemoizeKey> colorMatrixMemoizeLru = new LinkedList<ColorMatrixMemoizeKey>();
+
+		readonly struct ColorMatrixMemoizeKey
+		{
+			public readonly Godot.Image Source;
+			public readonly long Version;
+			public readonly Godot.Rect2I Region;
+			public readonly ulong MatrixKey;
+			public ColorMatrixMemoizeKey(Godot.Image source, long version, Godot.Rect2I region, ulong matrixKey)
+			{
+				Source = source;
+				Version = version;
+				Region = region;
+				MatrixKey = matrixKey;
+			}
+		}
+
+		sealed class ColorMatrixMemoizeEntry
+		{
+			public readonly LinkedListNode<ColorMatrixMemoizeKey> LruNode;
+			public readonly Godot.Image Result;
+			public ColorMatrixMemoizeEntry(LinkedListNode<ColorMatrixMemoizeKey> node, Godot.Image result)
+			{
+				LruNode = node;
+				Result = result;
+			}
+		}
+
+		/// <summary>
+		/// CPU ColorMatrix 合成 + memoize。version &lt; 0 时直接计算（GPU 后备路径使用，
+		/// 该路径运行在主线程、源内容可能并发改写，不缓存以保证零漂移）。
+		/// </summary>
+		static Godot.Image ApplyColorMatrixMemoized(Godot.Image src, long version, Godot.Rect2I region, float[][] cm)
+		{
+			if (version < 0)
+				return ApplyColorMatrix(src, region, cm);
+			var key = new ColorMatrixMemoizeKey(src, version, region, ColorMatrixGPU.GetMatrixKey(cm));
+			lock (colorMatrixMemoizeLock)
+			{
+				if (colorMatrixMemoize.TryGetValue(key, out var entry))
+				{
+					var node = entry.LruNode;
+					colorMatrixMemoizeLru.Remove(node);
+					colorMatrixMemoizeLru.AddLast(node);
+					return entry.Result;
+				}
+				var result = ApplyColorMatrix(src, region, cm);
+				// 别名保护：ApplyColorMatrix 在 GetRegion 失败时可能返回源图本身，
+				// 缓存源图引用会让后续调用拿到被外部改写的对象，因此不缓存别名结果。
+				if (result != null && result.GetWidth() > 0 && result.GetHeight() > 0 && !ReferenceEquals(result, src))
+				{
+					var node = new LinkedListNode<ColorMatrixMemoizeKey>(key);
+					colorMatrixMemoize.Add(key, new ColorMatrixMemoizeEntry(node, result));
+					colorMatrixMemoizeLru.AddLast(node);
+					if (colorMatrixMemoize.Count > ColorMatrixMemoizeCapacity)
+					{
+						// 只移除引用不 Dispose：调用方可能仍持有结果图。
+						var oldest = colorMatrixMemoizeLru.First;
+						colorMatrixMemoizeLru.RemoveFirst();
+						colorMatrixMemoize.Remove(oldest.Value);
+					}
+				}
+				return result;
+			}
+		}
+
+		/// <summary>
+		/// 会话边界清理：canary 切换时丢弃旧会话合成的缓存（结果只读共享，直接丢弃引用即可）。
+		/// </summary>
+		internal static void ResetColorMatrixMemoize()
+		{
+			lock (colorMatrixMemoizeLock)
+			{
+				colorMatrixMemoize.Clear();
+				colorMatrixMemoizeLru.Clear();
+			}
+		}
+
+		#endregion
+
 		static bool IsIdentityColorMatrix(float[][] cm)
 		{
 			const float epsilon = 0.00001f;
@@ -467,20 +626,30 @@ namespace MinorShift.Emuera.Content
 					return;
 				}
 				var srcRegion = new Godot.Rect2I(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
-				var processed = ApplyColorMatrix(srcGra.godotImage, srcRegion, cm);
-				bool needsScale = destRect.Width > 0 && destRect.Height > 0 &&
-					(destRect.Width != srcRect.Width || destRect.Height != srcRect.Height);
-				if (needsScale)
+				// M5：按 (源图, DisplayRevision, region, 矩阵) memoize，源未改写时直接命中缓存。
+				var processed = ApplyColorMatrixMemoized(srcGra.godotImage, srcGra.DisplayRevision, srcRegion, cm);
+				if (processed != null && processed.GetWidth() > 0 && processed.GetHeight() > 0)
 				{
-					processed.Resize(destRect.Width, destRect.Height, Godot.Image.Interpolation.Bilinear);
-					BlendRect(godotImage, processed, new Godot.Rect2I(0, 0, destRect.Width, destRect.Height),
-						new Godot.Vector2I(destRect.X, destRect.Y));
+					bool needsScale = destRect.Width > 0 && destRect.Height > 0 &&
+						(destRect.Width != srcRect.Width || destRect.Height != srcRect.Height);
+					if (needsScale)
+					{
+						// 缓存结果只读共享：Resize 前先 Duplicate，绝不改写 memoize 缓存图。
+						var scaled = processed.Duplicate() as Godot.Image;
+						if (scaled != null)
+						{
+							scaled.Resize(destRect.Width, destRect.Height, Godot.Image.Interpolation.Bilinear);
+							BlendRect(godotImage, scaled, new Godot.Rect2I(0, 0, destRect.Width, destRect.Height),
+								new Godot.Vector2I(destRect.X, destRect.Y));
+						}
+					}
+					else
+					{
+						var dstPos = new Godot.Vector2I(destRect.X, destRect.Y);
+						BlendRect(godotImage, processed, new Godot.Rect2I(0, 0, processed.GetWidth(), processed.GetHeight()), dstPos);
+					}
 				}
-				else
-				{
-					var dstPos = new Godot.Vector2I(destRect.X, destRect.Y);
-					BlendRect(godotImage, processed, new Godot.Rect2I(0, 0, processed.GetWidth(), processed.GetHeight()), dstPos);
-				}
+				// 与原实现一致：调用后标记图像已变更（即使绘制区域退化）。
 				MarkImageMutated();
 			}
 		}
@@ -591,6 +760,14 @@ namespace MinorShift.Emuera.Content
 			lock (imageSync)
 			{
 				if (godotImage == null) return;
+				// M6：GetData 一次 + 内存写入 + SetData 一次，替代逐点 SetPixel 原生调用。
+				// 绘制语义与逐点版本一致：Bresenham 步进、DashOn 掩码、笔头方形/圆形范围与裁剪完全相同。
+				var penBytes = ColorToRgba8Bytes(penColor.ToGodotColor());
+				byte[] data = godotImage.GetData();
+				int imgW = godotImage.GetWidth();
+				int imgH = godotImage.GetHeight();
+				int radius = Math.Max(0, (int)penWidth / 2);
+				bool roundCap = dashCap == DashCap.Round && radius > 0;
 				int dx = Math.Abs(destX - fromX);
 				int dy = Math.Abs(destY - fromY);
 				int sx = fromX < destX ? 1 : -1;
@@ -602,7 +779,7 @@ namespace MinorShift.Emuera.Content
 				while (true)
 				{
 					if (DashOn(step))
-						DrawPenPoint(x, y);
+						WritePenPoint(data, imgW, imgH, x, y, radius, roundCap, penBytes);
 					if (x == destX && y == destY)
 						break;
 					int e2 = err * 2;
@@ -618,6 +795,7 @@ namespace MinorShift.Emuera.Content
 					}
 					step++;
 				}
+				godotImage.SetData(imgW, imgH, false, Godot.Image.Format.Rgba8, data);
 				MarkImageMutated();
 			}
 		}
@@ -638,12 +816,57 @@ namespace MinorShift.Emuera.Content
 			{
 				if (polygonPoints.Count < 2)
 					return;
+				if (godotImage == null)
+					return;
+				// M6：所有边共享一次 GetData/SetData，避免每条边重复整图拷贝。
+				// 输出与逐边调用 GDrawLine 逐位一致（同色覆盖，写入顺序无关）。
+				var penBytes = ColorToRgba8Bytes(penColor.ToGodotColor());
+				byte[] data = godotImage.GetData();
+				int imgW = godotImage.GetWidth();
+				int imgH = godotImage.GetHeight();
+				int radius = Math.Max(0, (int)penWidth / 2);
+				bool roundCap = dashCap == DashCap.Round && radius > 0;
 				for (int i = 0; i < polygonPoints.Count; i++)
 				{
 					Point a = polygonPoints[i];
 					Point b = polygonPoints[(i + 1) % polygonPoints.Count];
-					GDrawLine(a.X, a.Y, b.X, b.Y);
+					DrawLineInto(data, imgW, imgH, a.X, a.Y, b.X, b.Y, radius, roundCap, penBytes);
 				}
+				godotImage.SetData(imgW, imgH, false, Godot.Image.Format.Rgba8, data);
+				MarkImageMutated();
+			}
+		}
+
+		void DrawLineInto(byte[] data, int imgW, int imgH, int fromX, int fromY, int destX, int destY,
+			int radius, bool roundCap, byte[] penBytes)
+		{
+			int dx = Math.Abs(destX - fromX);
+			int dy = Math.Abs(destY - fromY);
+			int sx = fromX < destX ? 1 : -1;
+			int sy = fromY < destY ? 1 : -1;
+			int err = dx - dy;
+			int step = 0;
+			int x = fromX;
+			int y = fromY;
+			while (true)
+			{
+				// GDrawPolygon 的每条边独立计步，与逐边调用 GDrawLine 的 DashOn 语义一致。
+				if (DashOn(step))
+					WritePenPoint(data, imgW, imgH, x, y, radius, roundCap, penBytes);
+				if (x == destX && y == destY)
+					break;
+				int e2 = err * 2;
+				if (e2 > -dy)
+				{
+					err -= dy;
+					x += sx;
+				}
+				if (e2 < dx)
+				{
+					err += dx;
+					y += sy;
+				}
+				step++;
 			}
 		}
 
@@ -654,8 +877,12 @@ namespace MinorShift.Emuera.Content
 				if (godotImage == null || polygonPoints.Count < 3)
 					return;
 				int minY = Math.Max(0, polygonPoints.Min(p => p.Y));
-				int maxY = Math.Min(height - 1, polygonPoints.Max(p => p.Y));
-				var fill = brushColor.ToGodotColor();
+				int maxY = Math.Min(Math.Min(height - 1, godotImage.GetHeight() - 1), polygonPoints.Max(p => p.Y));
+				// M6：扫描线填充改为一次 GetData + 内存写入 + 一次 SetData，输出与逐点 SetPixel 逐位一致。
+				var fillBytes = ColorToRgba8Bytes(brushColor.ToGodotColor());
+				byte[] data = godotImage.GetData();
+				int imgW = godotImage.GetWidth();
+				bool anyWrite = false;
 				for (int y = minY; y <= maxY; y++)
 				{
 					var nodes = new List<int>();
@@ -675,11 +902,21 @@ namespace MinorShift.Emuera.Content
 					for (int i = 0; i + 1 < nodes.Count; i += 2)
 					{
 						int x1 = Math.Max(0, nodes[i]);
-						int x2 = Math.Min(width - 1, nodes[i + 1]);
+						int x2 = Math.Min(Math.Min(width - 1, imgW - 1), nodes[i + 1]);
 						for (int x = x1; x <= x2; x++)
-							godotImage.SetPixel(x, y, fill);
+						{
+							int di = (y * imgW + x) * 4;
+							data[di] = fillBytes[0];
+							data[di + 1] = fillBytes[1];
+							data[di + 2] = fillBytes[2];
+							data[di + 3] = fillBytes[3];
+							anyWrite = true;
+						}
 					}
 				}
+				if (anyWrite)
+					godotImage.SetData(imgW, godotImage.GetHeight(), false, Godot.Image.Format.Rgba8, data);
+				// 与原实现一致：无论是否写出像素，调用后都标记图像已变更。
 				MarkImageMutated();
 			}
 		}
@@ -695,24 +932,41 @@ namespace MinorShift.Emuera.Content
 					SuppressCurrentDisplayRevision();
 					return;
 				}
+				// M6：源与目标各一次 GetData + 一次 SetData。逐像素复制时用 256 项
+				// 字节回环表精确复刻 GetPixel+SetPixel 的浮点往返，输出逐位一致。
+				var srcImg = srcGra.godotImage;
+				int srcW = srcImg.GetWidth();
+				int srcH = srcImg.GetHeight();
+				int dstW = godotImage.GetWidth();
+				int dstH = godotImage.GetHeight();
+				byte[] srcData = srcImg.GetData();
+				byte[] dstData = godotImage.GetData();
 				double radians = angleDegrees * Math.PI / 180.0;
 				double cos = Math.Cos(radians);
 				double sin = Math.Sin(radians);
-				for (int sy = 0; sy < srcGra.Height; sy++)
+				for (int sy = 0; sy < srcH; sy++)
 				{
-					for (int sx = 0; sx < srcGra.Width; sx++)
+					for (int sx = 0; sx < srcW; sx++)
 					{
-						var c = srcGra.godotImage.GetPixel(sx, sy);
-						if (c.A <= 0f)
+						int si = (sy * srcW + sx) * 4;
+						// GetPixel 返回 A<=0 即 alpha 字节为 0。
+						if (srcData[si + 3] == 0)
 							continue;
 						double dx = sx - pivotX;
 						double dy = sy - pivotY;
 						int tx = pivotX + (int)Math.Round(dx * cos - dy * sin);
 						int ty = pivotY + (int)Math.Round(dx * sin + dy * cos);
-						if (tx >= 0 && tx < width && ty >= 0 && ty < height)
-							godotImage.SetPixel(tx, ty, c);
+						if (tx >= 0 && tx < dstW && ty >= 0 && ty < dstH)
+						{
+							int di = (ty * dstW + tx) * 4;
+							dstData[di] = RoundTripChannel(srcData[si]);
+							dstData[di + 1] = RoundTripChannel(srcData[si + 1]);
+							dstData[di + 2] = RoundTripChannel(srcData[si + 2]);
+							dstData[di + 3] = RoundTripChannel(srcData[si + 3]);
+						}
 					}
 				}
+				godotImage.SetData(dstW, dstH, false, Godot.Image.Format.Rgba8, dstData);
 				MarkImageMutated();
 			}
 		}
@@ -723,26 +977,38 @@ namespace MinorShift.Emuera.Content
 			{
 				if (godotImage == null)
 					return;
+				// M6：源数据一次 GetData；目标用全零缓冲（等价于 Fill(0,0,0,0)），
+				// 写入后一次 SetData 提交。逐像素字节回环与逐点 GetPixel+SetPixel 一致。
 				var src = godotImage.Duplicate() as Godot.Image;
-				godotImage.Fill(new Godot.Color(0, 0, 0, 0));
+				int imgW = godotImage.GetWidth();
+				int imgH = godotImage.GetHeight();
+				byte[] srcData = src.GetData();
+				byte[] dstData = new byte[srcData.Length];
 				double radians = angleDegrees * Math.PI / 180.0;
 				double cos = Math.Cos(radians);
 				double sin = Math.Sin(radians);
-				for (int sy = 0; sy < height; sy++)
+				for (int sy = 0; sy < imgH; sy++)
 				{
-					for (int sx = 0; sx < width; sx++)
+					for (int sx = 0; sx < imgW; sx++)
 					{
-						var c = src.GetPixel(sx, sy);
-						if (c.A <= 0f)
+						int si = (sy * imgW + sx) * 4;
+						if (srcData[si + 3] == 0)
 							continue;
 						double dx = sx - pivotX;
 						double dy = sy - pivotY;
 						int tx = pivotX + (int)Math.Round(dx * cos - dy * sin);
 						int ty = pivotY + (int)Math.Round(dx * sin + dy * cos);
-						if (tx >= 0 && tx < width && ty >= 0 && ty < height)
-							godotImage.SetPixel(tx, ty, c);
+						if (tx >= 0 && tx < imgW && ty >= 0 && ty < imgH)
+						{
+							int di = (ty * imgW + tx) * 4;
+							dstData[di] = RoundTripChannel(srcData[si]);
+							dstData[di + 1] = RoundTripChannel(srcData[si + 1]);
+							dstData[di + 2] = RoundTripChannel(srcData[si + 2]);
+							dstData[di + 3] = RoundTripChannel(srcData[si + 3]);
+						}
 					}
 				}
+				godotImage.SetData(imgW, imgH, false, Godot.Image.Format.Rgba8, dstData);
 				src.Dispose();
 				MarkImageMutated();
 			}
@@ -761,24 +1027,26 @@ namespace MinorShift.Emuera.Content
 			};
 		}
 
-		void DrawPenPoint(int x, int y)
+		static void WritePenPoint(byte[] data, int imgW, int imgH, int x, int y, int radius, bool roundCap, byte[] penBytes)
 		{
-			int radius = Math.Max(0, (int)penWidth / 2);
-			var c = penColor.ToGodotColor();
 			for (int yy = y - radius; yy <= y + radius; yy++)
 			{
-				if (yy < 0 || yy >= height) continue;
+				if (yy < 0 || yy >= imgH) continue;
 				for (int xx = x - radius; xx <= x + radius; xx++)
 				{
-					if (xx < 0 || xx >= width) continue;
-					if (dashCap == DashCap.Round && radius > 0)
+					if (xx < 0 || xx >= imgW) continue;
+					if (roundCap)
 					{
 						int rx = xx - x;
 						int ry = yy - y;
 						if (rx * rx + ry * ry > radius * radius)
 							continue;
 					}
-					godotImage.SetPixel(xx, yy, c);
+					int di = (yy * imgW + xx) * 4;
+					data[di] = penBytes[0];
+					data[di + 1] = penBytes[1];
+					data[di + 2] = penBytes[2];
+					data[di + 3] = penBytes[3];
 				}
 			}
 		}

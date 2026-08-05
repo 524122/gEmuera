@@ -37,6 +37,8 @@ public sealed partial class EmueraGpuRenderComponent : Node
             item.Completed.Set();
         }
         currentInstance?.ResetPendingRenderState();
+        // M5：丢弃旧会话合成的 CPU ColorMatrix 结果缓存，避免新会话引用过期内容。
+        GraphicsImage.ResetColorMatrixMemoize();
         GpuReady = false;
     }
 
