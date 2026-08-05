@@ -222,7 +222,12 @@ public static class GEmueraTheme
 		// 连点/快速移出会在 100ms 内连续创建多个 tween，复用前必须 Kill 旧 tween，
 		// 否则旧动效会继续把 Scale 写回 0.97，按钮卡在缩小态。tween 已 BindNode，
 		// 节点释放时自动终止，meta 引用不泄漏。
-		var prevTween = button.GetMeta("_press_tween", default(Variant)).As<Tween>();
+		// Godot 4 C# 的 GetMeta(name, default) 绑定实际走无默认的 C++ get_meta(name)，
+		// 键不存在时会打印 "The object does not have any 'meta' values..." 错误。
+		// 首次点击时 meta 尚不存在，必须先用 HasMeta 检查再取。
+		var prevTween = button.HasMeta("_press_tween")
+			? button.GetMeta("_press_tween", default(Variant)).As<Tween>()
+			: null;
 		if (prevTween != null && GodotObject.IsInstanceValid(prevTween))
 			prevTween.Kill();
 		var tween = button.CreateTween();
