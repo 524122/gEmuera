@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Godot desktop uses net8.0; Android and local validation use the repository-supported net9.0 SDK. -->
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <RootNamespace>GEmuera.Core</RootNamespace>
+    <AssemblyName>GEmuera.Core</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

@@ -107,6 +107,12 @@ namespace MinorShift.Emuera.GameProc
 		public bool flowinputString = false;
 		public bool flowinputForceSkip = false;
 
+
+		// Snake/EE input extensions: state is owned by the legacy Process for the current session.
+		internal string SequenceInputValue { get; set; }
+		internal bool HasSequenceInput { get; set; }
+		internal bool InputMacroEnabled { get; set; } = true;
+
 		void setWaitInput()
 		{
 			InputRequest req = new InputRequest();
@@ -168,7 +174,10 @@ namespace MinorShift.Emuera.GameProc
 				console.ThrowTitleError(false);
 				return;
 			}
-			if ((!noError) && (!Config.CompatiErrorLine) && Program.IsSnakeProfile)
+			// TODO: Snake compatibility fallback — allow startup to continue despite ERB parse warnings.
+			// Standard v24 behavior is to exit on unrecoverable parse errors (see else-if below).
+			// Remove once snake scripts are cleaned up; use CompatiErrorLine config in the meantime.
+			if ((!noError) && (!Config.CompatiErrorLine) && Program.Compatibility.Snake.ContinuesAfterStartupFault)
 			{
 				console.PrintSystemLine("Snake互換モード: ERB解析警告がありますが起動を継続します");
 				console.PrintSystemLine("emuera.logにログを出力します");
@@ -688,6 +697,8 @@ namespace MinorShift.Emuera.GameProc
 					console.PrintError("オートセーブをスキップします");
 					console.ReadAnyKey();
 				}
+				//M4: 保存后该槽位文件已变化，缓存（可能受文件系统时间戳粒度影响）显式失效
+				InvalidateSaveSlotHeaderCache(saveTarget);
 			}
 			endAutoSave();
 		}
@@ -782,13 +793,20 @@ namespace MinorShift.Emuera.GameProc
 		void beginDataLoaded()
 		{
 			state.SystemState = SystemStateCode.LoadData_CallSystemLoad;
+			loadSystemLoadStartTick = Environment.TickCount;
 			
 			if (!callFunction("SYSTEM_LOADEND", false, false))
 				endSystemLoad();//存在しなければスキップ
 		}
 		void endSystemLoad()
 		{
+			GenericUtils.Info($"[LOADSAVE] SYSTEM_LOADEND: {Environment.TickCount - loadSystemLoadStartTick}ms");
 			state.SystemState = SystemStateCode.LoadData_CallEventLoad;
+			loadEventLoadStartTick = Environment.TickCount;
+			ResetLazyLoadingRuntimeStats();
+			// Snake 原核心在 EVENTLOAD 中按函数命中懒加载。这里如果提前同步加载所有热标签文件，
+			// Android 上会把一次读档卡顿放大到几十秒，且会触发用户看到的强制中断提示。
+			// 保持按需加载，避免 EVENTLOAD 前出现无界批量 I/O。
 			//EVENTLOADを呼び出してLoadData_CallEventLoadへ移行。
 			if (!callFunction("EVENTLOAD", false, true))
 			{
@@ -799,6 +817,8 @@ namespace MinorShift.Emuera.GameProc
 
 		void endEventLoad()
 		{
+			LogLazyLoadingRuntimeStats("EVENTLOAD");
+			GenericUtils.Info($"[LOADSAVE] EVENTLOAD: {Environment.TickCount - loadEventLoadStartTick}ms, total-after-file: {Environment.TickCount - loadDataStartTick}ms");
 			//@EVENTLOAD中にBEGIN命令が行われればここには来ない。
 			//ここに来たらBEGIN SHOP扱い。オートセーブはしない。
 			endAutoSave();
@@ -829,6 +849,16 @@ namespace MinorShift.Emuera.GameProc
 		bool isFirstTime = true;
 		const int AutoSaveIndex = 99;
 		int page = 0;
+		//M4: 存档槽位头部结果缓存。printSaveDataText 原实现对 20+1 个槽位各做一次
+		//CheckData（每次重开文件；zip 模式还要整档解压）。这里以 (路径, 最后写入时间) 为键缓存结果，
+		//槽位文件未变化时直接复用；SaveTo 后显式失效（时间戳粒度可能不足以区分同一秒内的写入）。
+		readonly Dictionary<int, SaveSlotHeaderCacheEntry> saveSlotHeaderCache = new Dictionary<int, SaveSlotHeaderCacheEntry>();
+		sealed class SaveSlotHeaderCacheEntry
+		{
+			public string Path;
+			public long Stamp;
+			public EraDataResult Result;
+		}
 		void printSaveDataText()
 		{
 			if (isFirstTime)
@@ -885,6 +915,9 @@ namespace MinorShift.Emuera.GameProc
 		}
 
 		int saveTarget = -1;
+		int loadDataStartTick = 0;
+		int loadSystemLoadStartTick = 0;
+		int loadEventLoadStartTick = 0;
 		void saveGameWaitInput()
 		{
 			if (systemResult == 100)
@@ -955,6 +988,8 @@ namespace MinorShift.Emuera.GameProc
 				console.PrintError("セーブ中に予期しないエラーが発生しました");
 				console.ReadAnyKey();
 			}
+			//M4: 保存后该槽位文件已变化，缓存（可能受文件系统时间戳粒度影响）显式失效
+			InvalidateSaveSlotHeaderCache(saveTarget);
 			loadPrevState();
 		}
 
@@ -1008,8 +1043,10 @@ namespace MinorShift.Emuera.GameProc
 				return;
 			}
 
+			loadDataStartTick = Environment.TickCount;
 			if (!vEvaluator.LoadFrom((int)systemResult))
 				throw new ExeEE("ファイルのロード中に予期しないエラーが発生しました");
+			GenericUtils.Info($"[LOADSAVE] file load save{(int)systemResult:00}: {Environment.TickCount - loadDataStartTick}ms");
 			deletePrevState();
 			beginDataLoaded();
 		}
@@ -1028,10 +1065,48 @@ namespace MinorShift.Emuera.GameProc
 
 		private bool writeSavedataTextFrom(int saveIndex)
 		{
-			EraDataResult result = vEvaluator.CheckData(saveIndex, EraSaveFileType.Normal);
+			EraDataResult result = GetCachedCheckDataResult(saveIndex);
 			console.Print(result.DataMes);
 			console.NewLine();
 			return result.State == EraDataState.OK;
+		}
+
+		/// <summary>
+		/// M4: 按 (路径, 最后写入时间) 缓存槽位头部结果。槽位文件未被重写过时直接返回缓存，
+		/// 避免每次显示存档列表都重开文件读取头部；路径与 vEvaluator.getSaveDataPath 格式一致。
+		/// </summary>
+		EraDataResult GetCachedCheckDataResult(int saveIndex)
+		{
+			string path = GetSaveSlotPath(saveIndex);
+			long stamp = GetSaveSlotStamp(path);
+			if (saveSlotHeaderCache.TryGetValue(saveIndex, out SaveSlotHeaderCacheEntry entry)
+				&& string.Equals(entry.Path, path, StringComparison.OrdinalIgnoreCase)
+				&& entry.Stamp == stamp)
+			{
+				return entry.Result;
+			}
+			EraDataResult result = vEvaluator.CheckData(saveIndex, EraSaveFileType.Normal);
+			saveSlotHeaderCache[saveIndex] = new SaveSlotHeaderCacheEntry { Path = path, Stamp = stamp, Result = result };
+			return result;
+		}
+
+		static string GetSaveSlotPath(int saveIndex)
+		{
+			return string.Format("{0}save{1:00}.sav", Config.SavDir, saveIndex);
+		}
+
+		static long GetSaveSlotStamp(string path)
+		{
+			if (!File.Exists(path))
+				return long.MinValue;
+			return uEmuera.Utils.GetLastWriteTimeKey(path);
+		}
+
+		void InvalidateSaveSlotHeaderCache(int saveIndex)
+		{
+			if (saveIndex < 0)
+				return;
+			saveSlotHeaderCache.Remove(saveIndex);
 		}
 
 		//1808 vEvaluator.SaveTo()などに移動

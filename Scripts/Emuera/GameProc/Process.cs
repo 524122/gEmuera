@@ -11,6 +11,7 @@ using MinorShift.Emuera.GameData.Variable;
 using MinorShift.Emuera.GameProc.Function;
 using MinorShift.Emuera.GameData.Function;
 using System.Linq;
+using System.Threading.Tasks;
 using uEmuera.Forms;
 using MinorShift.Emuera.Runtime.Utils.PluginSystem;
 using System.Diagnostics;
@@ -44,13 +45,19 @@ namespace MinorShift.Emuera.GameProc
 		readonly EmueraConsole console;
 		private IdentifierDictionary idDic;
 		ProcessState state;
+		public ProcessState State { get { return state; } }
 		ProcessState originalState;//リセットする時のために
         bool noError = false;
         //色々あって復活させてみる
         bool initialiing;
         public bool inInitializeing { get { return initialiing;  } }
 
-        public bool Initialize()
+		public bool Initialize()
+		{
+			return InitializeAsync().GetAwaiter().GetResult();
+		}
+
+		public async Task<bool> InitializeAsync()
 		{
 			LexicalAnalyzer.UseMacro = false;
             state = new ProcessState(console);
@@ -59,12 +66,19 @@ namespace MinorShift.Emuera.GameProc
             Stopwatch loadStopwatch = Stopwatch.StartNew();
             void MarkLoad(string stage)
             {
-                if (Program.IsSnakeProfile)
+                if (Config.DisplayReport)
                     GenericUtils.Info($"[LOADTIME] {stage}: {loadStopwatch.ElapsedMilliseconds}ms");
             }
-            try
-            {
+			try
+			{
 				ParserMediator.Initialize(console);
+				ParserMediator.BindCompatibilityPlan(Program.CurrentCompatibilityPlan);
+				if (ParserMediator.CurrentCompatibilityPlan != null)
+					GenericUtils.Info($"[LOAD] CompatibilityPlan={ParserMediator.CurrentCompatibilityPlan.CanonicalHash}");
+				Preload.Clear();
+				Preload.Load(Program.CsvDir);
+				Preload.Load(Program.ErbDir, !Config.UseLazyLoading);
+				MarkLoad("preload");
 				//コンフィグファイルに関するエラーの処理（コンフィグファイルはこの関数に入る前に読込済み）
 				if (ParserMediator.HasWarning)
 				{
@@ -156,11 +170,21 @@ namespace MinorShift.Emuera.GameProc
 				GlobalStatic.ConstantData = constant;
 				TrainName = constant.GetCsvNameList(VariableCode.TRAINNAME);
 
-                vEvaluator = new VariableEvaluator(gamebase, constant);
+                Int64? m0RunnerRandomSeed = null;
+                if (global::gEmuera.M0.LegacyRunnerDeterminism.TryGetRandomSeed(out int configuredRandomSeed))
+                    m0RunnerRandomSeed = configuredRandomSeed;
+                vEvaluator = new VariableEvaluator(gamebase, constant, m0RunnerRandomSeed);
 				GlobalStatic.VEvaluator = vEvaluator;
 
 				idDic = new IdentifierDictionary(vEvaluator.VariableData);
 				GlobalStatic.IdentifierDictionary = idDic;
+				if (Program.CurrentCompatibilityPlan != null)
+				{
+					ParserMediator.ConsumeCompatibilityPlan(
+						idDic.GetLegacyInstructionNames(),
+						idDic.GetLegacyFunctionNames());
+					idDic.BindCompatibilityPlan(Program.CurrentCompatibilityPlan);
+				}
 
 				StrForm.Initialize();
 				VariableParser.Initialize();
@@ -174,11 +198,10 @@ namespace MinorShift.Emuera.GameProc
 
 				LexicalAnalyzer.UseMacro = false;
 
-				if (Program.IsSnakeProfile)
-				{
-					PluginManager.GetInstance().SetParent(this, state, exm);
-					PluginManager.GetInstance().LoadPlugins();
-				}
+				PluginManager.GetInstance().SetParent(this, state, exm);
+				PluginManager.GetInstance().LoadPlugins();
+				if (GlobalStatic.ExistPlugin && Config.PluginAvailableWarn)
+					console.PrintSingleLine("注意：外部プラグイン機能が有効になっています。この機能で生じた不具合等はEmueraのサポート対象外となります");
 
 				//ERH読込
 				GenericUtils.Info($"[LOAD] Loading ERH from: {Program.ErbDir}");
@@ -199,9 +222,9 @@ namespace MinorShift.Emuera.GameProc
 				GenericUtils.Info("[LOAD] Loading ERB files...");
 				ErbLoader loader = new ErbLoader(console, exm, this);
                 if (Program.AnalysisMode)
-                    noError = loader.loadErbs(Program.AnalysisFiles, labelDic);
+                    noError = await loader.LoadErbsAsync(Program.AnalysisFiles, labelDic);
                 else
-                    noError = loader.LoadErbFiles(Program.ErbDir, Config.DisplayReport, labelDic, Config.UseLazyLoading);
+                    noError = await loader.LoadErbFilesAsync(Program.ErbDir, Config.DisplayReport, labelDic, Config.UseLazyLoading && Program.SupportsLazyLoading);
 				GenericUtils.Info($"[LOAD] ERB loaded, noError={noError}");
 				MarkLoad("erb");
                 initSystemProcess();
@@ -227,19 +250,32 @@ namespace MinorShift.Emuera.GameProc
 
 		public void ReloadErb()
 		{
+			ReloadErbAsync().GetAwaiter().GetResult();
+		}
+
+		public async Task ReloadErbAsync()
+		{
 			saveCurrentState(false);
 			state.SystemState = SystemStateCode.System_Reloaderb;
+			// 会话中途 reload 必须重新枚举 ERB 目录：目录快照缓存（启动期 M4 优化）
+			// 若不清除会看不到新增/删除的 .ERB 文件。
+			uEmuera.Utils.InvalidateRecursiveDirListing(Program.ErbDir);
 			ErbLoader loader = new ErbLoader(console, exm, this);
-            loader.LoadErbFiles(Program.ErbDir, false, labelDic, Config.UseLazyLoading);
+            await loader.LoadErbFilesAsync(Program.ErbDir, false, labelDic, Config.UseLazyLoading && Program.SupportsLazyLoading);
 			console.ReadAnyKey();
 		}
 
 		public void ReloadPartialErb(List<string> path)
 		{
+			ReloadPartialErbAsync(path).GetAwaiter().GetResult();
+		}
+
+		public async Task ReloadPartialErbAsync(List<string> path)
+		{
 			saveCurrentState(false);
 			state.SystemState = SystemStateCode.System_Reloaderb;
 			ErbLoader loader = new ErbLoader(console, exm, this);
-			loader.loadErbs(path, labelDic);
+			await loader.LoadErbsAsync(path, labelDic);
 			console.ReadAnyKey();
 		}
 
@@ -247,7 +283,7 @@ namespace MinorShift.Emuera.GameProc
 		{
 			coms = new List<long>((int)count);
 			isCTrain = true;
-			Int64[] selectcom = vEvaluator.SELECTCOM_ARRAY;
+			var selectcom = vEvaluator.SELECTCOM_ARRAY;
 			if (count >= selectcom.Length)
 			{
 				throw new CodeEE("CALLTRAIN命令の引数の値がSELECTCOMの要素数を超えています");
@@ -267,26 +303,53 @@ namespace MinorShift.Emuera.GameProc
             return (callFunction("CALLTRAINEND", false, false));
         }
 
-		public void InputResult5(int r0, int r1, int r2, int r3, int r4)
+		public void InputResult5(int r0, int r1, int r2, int r3, int r4, long r5)
 		{
-			long[] result = vEvaluator.RESULT_ARRAY;
+			var result = vEvaluator.RESULT_ARRAY;
 			result[0] = r0;
 			result[1] = r1;
 			result[2] = r2;
 			result[3] = r3;
 			result[4] = r4;
+			result[5] = r5;
 		}
 		public void InputInteger(Int64 i)
 		{
+			GlobalStatic.ctrlZ.Add(i.ToString());
 			vEvaluator.RESULT = i;
+		}
+		public void InputInteger(Int64 index, Int64 i)
+		{
+			if (GlobalStatic.ctrlZ != null)
+				GlobalStatic.ctrlZ.Add(i.ToString());
+			if (index >= 0 && index < vEvaluator.RESULT_ARRAY.Length)
+				vEvaluator.RESULT_ARRAY[index] = i;
 		}
 		public void InputSystemInteger(Int64 i)
 		{
+			GlobalStatic.ctrlZ.Add(i.ToString());
 			systemResult = i;
 		}
 		public void InputString(string s)
 		{
+			GlobalStatic.ctrlZ.Add(s);
 			vEvaluator.RESULTS = s;
+		}
+		public void InputStringWithPointerMetadata(string s)
+		{
+			// eraFL 的 INPUTS ,1 兼容：多数界面仍读取 RESULTS:0，战斗技能则读取 RESULTS:1。
+			// 两个槽位必须在一次提交中同步写入，并且 ctrl-Z 输入历史只能记录一次。
+			GlobalStatic.ctrlZ.Add(s);
+			vEvaluator.RESULTS = s;
+			if (vEvaluator.RESULTS_ARRAY.Length > 1)
+				vEvaluator.RESULTS_ARRAY[1] = s;
+		}
+		public void InputString(long idx, string i)
+		{
+			if (GlobalStatic.ctrlZ != null)
+				GlobalStatic.ctrlZ.Add(i);
+			if (idx < vEvaluator.RESULTS_ARRAY.Length)
+				vEvaluator.RESULTS_ARRAY[idx] = i;
 		}
 
 		private uint startTime = 0;
@@ -296,9 +359,9 @@ namespace MinorShift.Emuera.GameProc
 			startTime = _Library.WinmmTimer.TickCount;
 			state.lineCount = 0;
 			bool systemProcRunning = true;
-			try
+			while (true)
 			{
-				while (true)
+				try
 				{
 					methodStack = 0;
 					systemProcRunning = true;
@@ -309,16 +372,71 @@ namespace MinorShift.Emuera.GameProc
 					systemProcRunning = false;
 					runScriptProc();
 				}
-			}
-			catch (Exception ec)
-			{
-				LogicalLine currentLine = state.ErrorLine;
-				if (currentLine != null && currentLine is NullLine)
-					currentLine = null;
-				if (systemProcRunning)
-					handleExceptionInSystemProc(ec, currentLine, true);
-				else
-					handleException(ec, currentLine, true);
+				catch (Exception ec)
+				{
+					LogicalLine currentLine = state.ErrorLine;
+					if (currentLine != null && currentLine is NullLine)
+						currentLine = null;
+					if (state.InBeforeError)
+					{
+						LogicalLine errorLine = state.PendingErrorCurrentLine;
+						if (errorLine != null && errorLine is NullLine)
+							errorLine = null;
+						if (errorLine == null)
+							errorLine = currentLine;
+						if (state.PendingErrorSystemProc)
+							handleExceptionInSystemProc(ec, errorLine, true);
+						else
+							handleException(ec, errorLine, true);
+						state.ClearFunctionListPreserveTrace();
+						return;
+					}
+					if (state.SkipBeforeError)
+					{
+						state.SkipBeforeError = false;
+						LogicalLine throwLine = state.PendingThrowLine ?? currentLine;
+						state.PendingThrowLine = null;
+						if (systemProcRunning)
+							handleExceptionInSystemProc(ec, throwLine, true);
+						else
+							handleException(ec, throwLine, true);
+						state.ClearFunctionListPreserveTrace();
+						return;
+					}
+					if (state.InBeforeThrow)
+					{
+						state.InBeforeThrow = false;
+						string throwMessage = state.PendingThrowMessage ?? ec.Message;
+						LogicalLine throwLine = state.PendingThrowLine ?? currentLine;
+						state.PendingThrowMessage = null;
+						state.PendingThrowLine = null;
+						var throwException = new CodeEE(throwMessage);
+						if (systemProcRunning)
+							handleExceptionInSystemProc(throwException, throwLine, true);
+						else
+							handleException(throwException, throwLine, true);
+						state.ClearFunctionListPreserveTrace();
+						return;
+					}
+					state.InBeforeError = true;
+					var beforeError = Config.DisableBeforeErrorThrow
+						? null
+						: CalledFunction.CallEventFunction(this, "BEFORE_ERROR", null);
+					if (beforeError != null)
+					{
+						state.IntoFunction(beforeError, null, null);
+						state.PendingErrorException = ec;
+						state.PendingErrorCurrentLine = currentLine;
+						state.PendingErrorSystemProc = systemProcRunning;
+						continue;
+					}
+					state.InBeforeError = false;
+					if (systemProcRunning)
+						handleExceptionInSystemProc(ec, currentLine, true);
+					else
+						handleException(ec, currentLine, true);
+					return;
+				}
 			}
 		}
 		
@@ -382,22 +500,52 @@ namespace MinorShift.Emuera.GameProc
                 //環境によっては100以前にStackOverflowExceptionがでるかも？
                 throw new CodeEE("関数の呼び出しスタックが溢れました(無限に再帰呼び出しされていませんか？)");
             }
-            SingleTerm ret = null;
+			SingleTerm ret = null;
             int temp_current = state.currentMin;
             state.currentMin = state.functionCount;
-            udmt.Call.updateRetAddress(state.CurrentLine);
+			// UserDefinedMethodTerm 会被表达式树缓存，CalledFunction 只能作为模板复用。
+			// v24/Snake 参考实现均直接复用模板（只 updateRetAddress），不每次 Clone。
+			// 但 GetValue 重入（递归/嵌套的同函数表达式）会改写模板的可变字段
+			// （returnAddress / VariadicArgCount / EraFlQuestStartLookup / IsJump），
+			// 因此进入前保存、退出后恢复，确保外层帧与下一次调用从一致状态开始。
+			CalledFunction call = udmt.Call;
+			LogicalLine savedReturnAddress = call.ReturnAddress;
+			bool savedIsJump = call.IsJump;
+			int savedVariadicArgCount = call.VariadicArgCount;
+			EraFlQuestStartLookupContext savedEraFlLookup = call.EraFlQuestStartLookup;
+            call.updateRetAddress(state.CurrentLine);
+			bool success = false;
+			var savedState = state.CaptureCallState();
             try
             {
-				state.IntoFunction(udmt.Call, udmt.Argument, exm);
+				// fallthrough や隠れた早期リターンで前回の RETURNF 値が残らないよう事前にクリア
+			state.MethodReturnValue = null;
+			state.IntoFunction(call, udmt.Argument, exm);
                 //do whileの中でthrow されたエラーはここではキャッチされない。
 				//#functionを全て抜けてDoScriptでキャッチされる。
     			runScriptProc();
                 ret = state.MethodReturnValue;
+				success = true;
 			}
 			finally
 			{
-				if (udmt.Call.TopLabel.hasPrivDynamicVar)
-					udmt.Call.TopLabel.Out();
+				if (success)
+				{
+					if (call.TopLabel.hasPrivDynamicVar)
+						call.TopLabel.Out();
+					// RETURNF 已在 ProcessState.ReturnF() 中移除当前函数帧。
+					// 这里不能再 PopContext，否则会误弹父调用栈，导致后续 LOCAL/ARG 和返回流程错乱。
+					state.CurrentLine = savedState.currentLine;
+				}
+				else
+				{
+					state.RollbackToState(savedState.funcCount, savedState.ctxCount, savedState.currentLine);
+				}
+				// 恢复模板可变字段（成功与失败路径都要恢复）
+				call.updateRetAddress(savedReturnAddress);
+				call.IsJump = savedIsJump;
+				call.VariadicArgCount = savedVariadicArgCount;
+				call.EraFlQuestStartLookup = savedEraFlLookup;
                 //1756beta2+v3:こいつらはここにないとデバッグコンソールで式中関数が事故った時に大事故になる
                 state.currentMin = temp_current;
                 methodStack--;
@@ -470,7 +618,7 @@ namespace MinorShift.Emuera.GameProc
 		
 		private void handleException(Exception exc, LogicalLine current, bool playSound)
 		{
-            uEmuera.Logger.Info(exc);
+            uEmuera.Logger.Error(exc, EmueraLogCategory.Script);
 
 			console.ThrowError(playSound);
 			ScriptPosition position = null;

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 //using System.Drawing;
 using System.Collections.Generic;
 using System.IO;
@@ -118,9 +118,18 @@ namespace MinorShift.Emuera
 			if (SystemSaveInUTF8)
 				SaveEncode = Encoding.UTF8;
 			SystemSaveInBinary = instance.GetConfigValue<bool>(ConfigCode.SystemSaveInBinary);
+			ZipSaveData = instance.GetConfigValue<bool>(ConfigCode.ZipSaveData);
 			SystemIgnoreTripleSymbol = instance.GetConfigValue<bool>(ConfigCode.SystemIgnoreTripleSymbol);
 			SystemIgnoreStringSet = instance.GetConfigValue<bool>(ConfigCode.SystemIgnoreStringSet);
-			UseLazyLoading = Program.IsSnakeProfile || instance.GetConfigValue<bool>(ConfigCode.UseLazyLoading);
+			UseLazyLoading = instance.GetConfigValue<bool>(ConfigCode.UseLazyLoading);
+			UseERD = instance.GetConfigValue<bool>(ConfigCode.UseERD);
+			VarsizeDimConfig = instance.GetConfigValue<bool>(ConfigCode.VarsizeDimConfig);
+			CheckDuplicateIdentifier = instance.GetConfigValue<bool>(ConfigCode.CheckDuplicateIdentifier);
+			ForbidUpdateCheck = instance.GetConfigValue<bool>(ConfigCode.ForbidUpdateCheck);
+			PluginAvailableWarn = instance.GetConfigValue<bool>(ConfigCode.PluginAvailableWarn);
+			DisableBeforeErrorThrow = instance.GetConfigValue<bool>(ConfigCode.DisableBeforeErrorThrow);
+			UseScopedVariableInstruction = instance.GetConfigValue<bool>(ConfigCode.UseScopedVariableInstruction);
+			LoadTextValidExtensions = ParseLoadTextValidExtensions(instance.GetConfigValue<string>(ConfigCode.LoadTextValidExtensions));
 			
 			CompatiFuncArgAutoConvert = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgAutoConvert);
 			CompatiFuncArgOptional = instance.GetConfigValue<bool>(ConfigCode.CompatiFuncArgOptional);
@@ -185,15 +194,6 @@ namespace MinorShift.Emuera
 			if (TextDrawingMode != TextDrawingMode.WINAPI)
 				DrawingParam_ShapePositionShift = Math.Max(2, FontSize / 6);
 			DrawableWidth = WindowX - DrawingParam_ShapePositionShift;
-			if (Godot.OS.GetName() == "Android")
-			{
-				int contentWidth = EmueraContent.ContentWidth;
-				if (contentWidth > 0)
-				{
-					WindowX = Math.Max(WindowX, contentWidth);
-					DrawableWidth = WindowX - DrawingParam_ShapePositionShift;
-				}
-			}
 			ForceSavDir = Program.ExeDir + "sav\\";
 			if (UseSaveFolder)
 				SavDir = Program.ExeDir + "sav/";
@@ -204,6 +204,50 @@ namespace MinorShift.Emuera
 
 			if (Godot.OS.GetName() == "Android" && InfiniteLoopAlertTime < 20000)
 				InfiniteLoopAlertTime = 20000;
+		}
+
+		private static HashSet<string> ParseLoadTextValidExtensions(string configValue)
+		{
+			var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			if (!string.IsNullOrWhiteSpace(configValue))
+			{
+				string[] parts = configValue.Split(',');
+				for (int i = 0; i < parts.Length; i++)
+				{
+					string extension = NormalizeLoadTextExtension(parts[i]);
+					if (extension.Length != 0)
+						extensions.Add(extension);
+				}
+			}
+			if (extensions.Count == 0)
+				extensions.Add("txt");
+			return extensions;
+		}
+
+		private static string NormalizeLoadTextExtension(string extension)
+		{
+			if (string.IsNullOrWhiteSpace(extension))
+				return "";
+			return extension.Trim().TrimStart('.');
+		}
+
+		public static bool IsLoadTextExtensionAllowed(string extension)
+		{
+			string normalized = NormalizeLoadTextExtension(extension);
+			return normalized.Length != 0 && LoadTextValidExtensions.Contains(normalized);
+		}
+
+		internal static void SetJsonConfig(JSONConfigData data)
+		{
+			if (data == null)
+				return;
+
+			// setting.json 是 v24/snake 的新增配置层。Godot 移植版只直接消耗能稳定映射的选项；
+			// 渲染后端保留为兼容状态，实际渲染仍由 Godot 管线负责。
+			UseButtonFocusBackgroundColor = data.UseButtonFocusBackgroundColor;
+			UseNewRandom = data.UseNewRandom;
+			UseScopedVariableInstruction = data.UseScopedVariableInstruction;
+			RenderingBackend = data.RenderingBackend;
 		}
 
 
@@ -238,6 +282,25 @@ namespace MinorShift.Emuera
 			return styledFont;
 		}
 
+		public static Font GetFont(string theFontname, FontStyle style, float? fontSize)
+		{
+			if (!fontSize.HasValue || Math.Abs(fontSize.Value - FontSize) < 0.001f)
+				return GetFont(theFontname, style);
+
+			float actualSize = fontSize.Value;
+			if (actualSize <= 0 || float.IsNaN(actualSize) || float.IsInfinity(actualSize))
+				return null;
+			string fontName = string.IsNullOrEmpty(theFontname) ? FontName : theFontname;
+			try
+			{
+				return new Font(fontName, actualSize, style, GraphicsUnit.Pixel);
+			}
+			catch
+			{
+				return null;
+			}
+		}
+
 		public static void ClearFont()
 		{
 			foreach (KeyValuePair<string, Dictionary<FontStyle, Font>> fontStyleDicPair in fontDic)
@@ -249,6 +312,19 @@ namespace MinorShift.Emuera
 				fontStyleDicPair.Value.Clear();
 			}
 			fontDic.Clear();
+		}
+
+		/// <summary>
+		/// Restores the legacy configuration projection to defaults after a
+		/// canary session. The next candidate loads its own files through
+		/// ConfigData.LoadConfig, so previous values are not visible during the
+		/// transition window.
+		/// </summary>
+		internal static void ResetCanarySessionState()
+		{
+			ConfigData.Instance.Clear();
+			SetConfig(ConfigData.Instance);
+			ClearFont();
 		}
 
 		/// <summary>
@@ -527,6 +603,7 @@ namespace MinorShift.Emuera
 		public static bool SystemAllowFullSpace { get; private set; }
 		public static bool SystemSaveInUTF8 { get; private set; }
 		public static bool SystemSaveInBinary { get; private set; }
+		public static bool ZipSaveData { get; private set; }
 		public static bool CompatiFuncArgAutoConvert { get; private set; }
 		public static bool CompatiFuncArgOptional { get; private set; }
 		public static bool CompatiCallEvent { get; private set; }
@@ -535,6 +612,17 @@ namespace MinorShift.Emuera
 		public static bool SystemNoTarget { get; private set; }
 		public static bool SystemIgnoreStringSet { get; private set; }
 		public static bool UseLazyLoading { get; private set; }
+		public static bool UseERD { get; private set; }
+		public static bool VarsizeDimConfig { get; private set; }
+		public static bool CheckDuplicateIdentifier { get; private set; }
+		public static bool PluginAvailableWarn { get; private set; }
+		public static bool DisableBeforeErrorThrow { get; private set; }
+		public static bool UseScopedVariableInstruction { get; private set; } = true;
+		public static HashSet<string> LoadTextValidExtensions { get; private set; } =
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "txt" };
+		public static bool UseButtonFocusBackgroundColor { get; private set; }
+		public static bool UseNewRandom { get; private set; }
+		public static RenderingBackend RenderingBackend { get; private set; } = RenderingBackend.Auto;
 
 		public static int Language { get; private set; }
 
@@ -548,6 +636,7 @@ namespace MinorShift.Emuera
         public static bool TimesNotRigorousCalculation { get; private set; }
         //一文字変数の禁止オプションを考えた名残
         //public static bool ForbidOneCodeVariable { get; private set; }
+		public static bool ForbidUpdateCheck { get; private set; }
 		#endregion
 
 		#region debug

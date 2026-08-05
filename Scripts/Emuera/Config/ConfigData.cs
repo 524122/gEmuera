@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
@@ -20,9 +20,9 @@ namespace MinorShift.Emuera
 	internal sealed class ConfigData
 	{
 		static string configPath
-        { get { return Program.ExeDir + "emuera.config"; } }
+		{ get { return Program.ExeDir + "emuera.config"; } }
 		static string configdebugPath
-        { get { return Program.DebugDir + "debug.config"; } }
+		{ get { return Program.DebugDir + "debug.config"; } }
 
 static ConfigData() { }
 		private static ConfigData instance = new ConfigData();
@@ -30,10 +30,21 @@ static ConfigData() { }
 
 		private ConfigData() { setDefault(); }
 
-		//適当に大き目の配列を作っておく。
-		private AConfigItem[] configArray = new AConfigItem[71];
-		private AConfigItem[] replaceArray = new AConfigItem[50];
-		private AConfigItem[] debugArray = new AConfigItem[20];
+		private const int ConfigItemCapacity = 80;
+		private const int ReplaceItemCapacity = 50;
+		private const int DebugItemCapacity = 20;
+
+		// Keep the legacy arrays as the ordered source of truth for save/export
+		// compatibility, and build lookup indexes after defaults are populated.
+		private AConfigItem[] configArray = new AConfigItem[ConfigItemCapacity];
+		private AConfigItem[] replaceArray = new AConfigItem[ReplaceItemCapacity];
+		private AConfigItem[] debugArray = new AConfigItem[DebugItemCapacity];
+		private readonly Dictionary<ConfigCode, AConfigItem> configItemsByCode = new Dictionary<ConfigCode, AConfigItem>();
+		private readonly Dictionary<ConfigCode, AConfigItem> replaceItemsByCode = new Dictionary<ConfigCode, AConfigItem>();
+		private readonly Dictionary<ConfigCode, AConfigItem> debugItemsByCode = new Dictionary<ConfigCode, AConfigItem>();
+		private readonly Dictionary<string, AConfigItem> configItemsByName = new Dictionary<string, AConfigItem>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, AConfigItem> replaceItemsByName = new Dictionary<string, AConfigItem>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, AConfigItem> debugItemsByName = new Dictionary<string, AConfigItem>(StringComparer.OrdinalIgnoreCase);
 		private System.Text.StringBuilder configDebugLog = new System.Text.StringBuilder();
 
 		private static readonly Dictionary<string, ConfigCode> englishConfigAliases = new Dictionary<string, ConfigCode>(StringComparer.OrdinalIgnoreCase)
@@ -103,6 +114,7 @@ static ConfigData() { }
 			{ "ALLOW CALL ON EVENT FUNCTIONS", ConfigCode.CompatiCallEvent },
 			{ "ALLOW SP CHARACTERS", ConfigCode.CompatiSPChara },
 			{ "USE THE BINARY FORMAT FOR SAVING DATA", ConfigCode.SystemSaveInBinary },
+			{ "COMPRESS SAVE DATA", ConfigCode.ZipSaveData },
 			{ "ALLOW ARGUMENTS OMISSION FOR USER FUNCTIONS", ConfigCode.CompatiFuncArgOptional },
 			{ "AUTO TOSTR CONVERSION FOR USER FUNCTION ARGUMENTS", ConfigCode.CompatiFuncArgAutoConvert },
 			{ "DO NOT PROCESS TRIPLE SYMBOLS INSIDE FORM", ConfigCode.SystemIgnoreTripleSymbol },
@@ -110,6 +122,18 @@ static ConfigData() { }
 			{ "DO NOT AUTO-COMPLETE ARGUMENTS FOR CHARACTER VARIABLES", ConfigCode.SystemNoTarget },
 			{ "STRING VARIABLE ASSIGNMENT ON VALID WITH STRING EXPRESSION", ConfigCode.SystemIgnoreStringSet },
 			{ "USELAZYLOADING", ConfigCode.UseLazyLoading },
+			{ "USE ERD", ConfigCode.UseERD },
+			{ "USE ERD FUNCTION", ConfigCode.UseERD },
+			{ "IMITATE ERD TO VARSIZE DIMENSION SPECIFICATION", ConfigCode.VarsizeDimConfig },
+			{ "CHECK DUPLICATED IDENTIFIERS DEFINED BY ERD", ConfigCode.CheckDuplicateIdentifier },
+			{ "CHECK DUPLICATE ERD IDENTIFIER AND PRIVATE VARIABLE", ConfigCode.CheckDuplicateIdentifier },
+			{ "CHECK DUPLICATE ERD IDENTIFIER AND PRIVATE VARIABLEA", ConfigCode.CheckDuplicateIdentifier },
+			{ "DISALLOW UPDATECHECK", ConfigCode.ForbidUpdateCheck },
+			{ "PLUGIN AVAILABLE WARNING", ConfigCode.PluginAvailableWarn },
+			{ "DISABLE BEFORE_ERROR/THROW EVENTS", ConfigCode.DisableBeforeErrorThrow },
+			{ "USE SCOPED VARIABLE INSTRUCTION", ConfigCode.UseScopedVariableInstruction },
+			{ "USESCOPEDVARIABLEINSTRUCTION", ConfigCode.UseScopedVariableInstruction },
+			{ "VALID EXTENSIONS FOR LOADTEXT AND SAVETEXT", ConfigCode.LoadTextValidExtensions },
 		};
 
 		private static readonly Dictionary<string, ConfigCode> englishReplaceAliases = new Dictionary<string, ConfigCode>(StringComparer.OrdinalIgnoreCase)
@@ -145,6 +169,62 @@ static ConfigData() { }
 			{ "DEBUG WINDOW Y POSITION", ConfigCode.DebugWindowPosY },
 		};
 
+		// GETCONFIG 热路径：启动时把别名表预归一化（NormalizeEnglishConfigKey 对固定
+		// 别名表是一次性成本），查询时直接按归一化键 O(1) 命中，不再逐次做 O(n²)
+		// 空白折叠。语义与逐次归一化完全一致（别名表键本身就是归一化形态）。
+		private static readonly Dictionary<string, ConfigCode> englishConfigAliasesNormalized =
+			BuildNormalizedConfigAliases(englishConfigAliases);
+		private static readonly Dictionary<string, ConfigCode> englishReplaceAliasesNormalized =
+			BuildNormalizedConfigAliases(englishReplaceAliases);
+		private static readonly Dictionary<string, ConfigCode> englishDebugAliasesNormalized =
+			BuildNormalizedConfigAliases(englishDebugAliases);
+
+		private static Dictionary<string, ConfigCode> BuildNormalizedConfigAliases(
+			Dictionary<string, ConfigCode> aliases)
+		{
+			var normalized = new Dictionary<string, ConfigCode>(aliases.Count, StringComparer.OrdinalIgnoreCase);
+			foreach (KeyValuePair<string, ConfigCode> pair in aliases)
+			{
+				string key = NormalizeEnglishConfigKey(pair.Key);
+				// 首个归一化键优先，与原始表“精确命中唯一键”的取法一致。
+				if (!normalized.ContainsKey(key))
+					normalized.Add(key, pair.Value);
+			}
+			return normalized;
+		}
+
+		private static readonly HashSet<string> ignoredEnglishConfigKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		{
+			"SKIASHARP IMAGE QUALITY",
+			"SKIASHARP FONT HINTING",
+			"SKIASHARP FONT EDGING",
+			"RENDERING BACKEND",
+			"STRING OF REPLACING NEW LINE CODE INSIDE CONTINUATION",
+			"OUTPUT ENGLISH ITEMS IN THE CONFIG FILE",
+			"EMUERA INTERFACE LANGUAGE",
+			"PATH TO A CUSTOM WINDOW ICON",
+			"CLIPBOARD- COPY TEXT TO CLIPBOARD DURING GAME",
+			"CLIPBOARD- IGNORE <> TAGS IN TEXT",
+			"CLIPBOARD- REPLACE <> WITH THIS",
+			"CLIPBOARD- SHOW NEW LINES ONLY",
+			"CLIPBOARD- CLEAR BUFFER WHEN GAME CLEARS SCREEN",
+			"CLIPBOARD- LEFTCLICK TRIGGER",
+			"CLIPBOARD- MIDDLECLICK TRIGGER",
+			"CLIPBOARD- DOUBLE LEFT CLICK TRIGGER",
+			"CLIPBOARD- ANYKEY WAIT TRIGGER",
+			"CLIPBOARD- WAIT FOR INPUT TRIGGER",
+			"CLIPBOARD- LENGTH OF CLIPBOARD",
+			"CLIPBOARD- BUFFER SIZE",
+			"CLIPBOARD- SCROLLED LINES PER KEY",
+			"CLIPBOARD- MIN TIME BETWEEN PASTES",
+			"RIKAI- ENABLED",
+			"RIKAI- DICTIONARY FILENAME",
+			"RIKAI- BACK COLOR",
+			"RIKAI- TEXT COLOR",
+			"RIKAI- USE SEPARATE BOXES",
+			"ENABLE UNDO WITH CTRL-Z",
+		};
+
 		private void setDefault()
 		{
 			int i = 0;
@@ -158,7 +238,7 @@ static ConfigData() { }
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.AutoSave, "オートセーブを行なう", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseKeyMacro, "キーボードマクロを使用する", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SizableWindow, "ウィンドウの高さを可変にする", true);
-			configArray[i++] = new ConfigItem<TextDrawingMode>(ConfigCode.TextDrawingMode, "描画インターフェース", TextDrawingMode.TEXTRENDERER);
+			configArray[i++] = new ConfigItem<TextDrawingMode>(ConfigCode.TextDrawingMode, "描画インターフェース", TextDrawingMode.SKIASHARP);
 			//configArray[i++] = new ConfigItem<bool>(ConfigCode.UseImageBuffer, "イメージバッファを使用する", true);
 			configArray[i++] = new ConfigItem<int>(ConfigCode.WindowX, "ウィンドウ幅", 760);
 			configArray[i++] = new ConfigItem<int>(ConfigCode.WindowY, "ウィンドウ高さ", 480);
@@ -198,7 +278,7 @@ static ConfigData() { }
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.AllowFunctionOverloading, "システム関数の上書きを許可する", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.WarnFunctionOverloading, "システム関数が上書きされたとき警告を表示する", true);
 			configArray[i++] = new ConfigItem<string>(ConfigCode.TextEditor, "関連づけるテキストエディタ", "notepad");
-            configArray[i++] = new ConfigItem<TextEditorType>(ConfigCode.EditorType, "テキストエディタコマンドライン指定", TextEditorType.USER_SETTING);
+			configArray[i++] = new ConfigItem<TextEditorType>(ConfigCode.EditorType, "テキストエディタコマンドライン指定", TextEditorType.USER_SETTING);
 			configArray[i++] = new ConfigItem<string>(ConfigCode.EditorArgument, "エディタに渡す行指定引数", "");
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.WarnNormalFunctionOverloading, "同名の非イベント関数が複数定義されたとき警告する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.CompatiErrorLine, "解釈不可能な行があっても実行する", false);
@@ -210,21 +290,30 @@ static ConfigData() { }
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SystemAllowFullSpace, "全角スペースをホワイトスペースに含める", true);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SystemSaveInUTF8, "セーブデータをUTF-8で保存する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.CompatiLinefeedAs1739, "ver1739以前の非ボタン折り返しを再現する", false);
-            configArray[i++] = new ConfigItem<UseLanguage>(ConfigCode.useLanguage, "内部で使用する東アジア言語", UseLanguage.JAPANESE);
-            configArray[i++] = new ConfigItem<bool>(ConfigCode.AllowLongInputByMouse, "ONEINPUT系命令でマウスによる2文字以上の入力を許可する", false);
+			configArray[i++] = new ConfigItem<UseLanguage>(ConfigCode.useLanguage, "内部で使用する東アジア言語", UseLanguage.JAPANESE);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.AllowLongInputByMouse, "ONEINPUT系命令でマウスによる2文字以上の入力を許可する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.CompatiCallEvent, "イベント関数のCALLを許可する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.CompatiSPChara, "SPキャラを使用する", false);
 			
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SystemSaveInBinary, "セーブデータをバイナリ形式で保存する", true);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.ZipSaveData, "セーブデータを圧縮して保存する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.CompatiFuncArgOptional, "ユーザー関数の全ての引数の省略を許可する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.CompatiFuncArgAutoConvert, "ユーザー関数の引数に自動的にTOSTRを補完する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SystemIgnoreTripleSymbol, "FORM中の三連記号を展開しない", false);
-            configArray[i++] = new ConfigItem<bool>(ConfigCode.TimesNotRigorousCalculation, "TIMESの計算をeramakerにあわせる", false);
-            //一文字変数の禁止オプションを考えた名残
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.TimesNotRigorousCalculation, "TIMESの計算をeramakerにあわせる", false);
+			//一文字変数の禁止オプションを考えた名残
 			//configArray[i++] = new ConfigItem<bool>(ConfigCode.ForbidOneCodeVariable, "一文字変数の使用を禁止する", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SystemNoTarget, "キャラクタ変数の引数を補完しない", false);
 			configArray[i++] = new ConfigItem<bool>(ConfigCode.SystemIgnoreStringSet, "文字列変数の代入に文字列式を強制する", false);
-			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseLazyLoading, "UseLazyLoading", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseLazyLoading, "UseLazyLoading", true);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseERD, "ERD機能を利用する", true);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.VarsizeDimConfig, "VARSIZEの次元指定をERD機能に合わせる", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.CheckDuplicateIdentifier, "ERDで定義した識別子とローカル変数の重複を確認する", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.ForbidUpdateCheck, "UPDATECHECKを許可しない", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.PluginAvailableWarn, "外部プラグインが有効時に警告を表示する", true);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.DisableBeforeErrorThrow, "BEFORE_ERROR/THROWイベントを無効化する", false);
+			configArray[i++] = new ConfigItem<bool>(ConfigCode.UseScopedVariableInstruction, "VARI/VARS命令を利用する", true);
+			configArray[i++] = new ConfigItem<string>(ConfigCode.LoadTextValidExtensions, "LOADTEXTとSAVETEXTで使える拡張子", "txt");
 
 			i = 0;
 			debugArray[i++] = new ConfigItem<bool>(ConfigCode.DebugShowWindow, "起動時にデバッグウインドウを表示する", true);
@@ -251,16 +340,18 @@ static ConfigData() { }
 			replaceArray[i++] = new ConfigItem<List<Int64>>(ConfigCode.ExpLvDef, "EXPLVの初期値", new List<long>(new Int64[] { 0, 1, 4, 20, 50, 200 }));
 			replaceArray[i++] = new ConfigItem<List<Int64>>(ConfigCode.PalamLvDef, "PALAMLVの初期値", new List<long>(new Int64[] { 0, 100, 500, 3000, 10000, 30000, 60000, 100000, 150000, 250000 }));
 			replaceArray[i++] = new ConfigItem<Int64>(ConfigCode.pbandDef, "PBANDの初期値", 4);
-            replaceArray[i++] = new ConfigItem<Int64>(ConfigCode.RelationDef, "RELATIONの初期値", 0);
+			replaceArray[i++] = new ConfigItem<Int64>(ConfigCode.RelationDef, "RELATIONの初期値", 0);
+
+			RebuildLookupIndexes();
 		}
 
-        public void Clear()
-        {
-            configArray = new AConfigItem[71];
-            replaceArray = new AConfigItem[50];
-            debugArray = new AConfigItem[20];
-            setDefault();
-        }
+		public void Clear()
+		{
+			configArray = new AConfigItem[ConfigItemCapacity];
+			replaceArray = new AConfigItem[ReplaceItemCapacity];
+			debugArray = new AConfigItem[DebugItemCapacity];
+			setDefault();
+		}
 
 		public ConfigData Copy()
 		{
@@ -268,9 +359,9 @@ static ConfigData() { }
 			for (int i = 0; i < configArray.Length; i++)
 				if ((this.configArray[i] != null) && (config.configArray[i] != null))
 					this.configArray[i].CopyTo(config.configArray[i]);
-			for (int i = 0; i < configArray.Length; i++)
-				if ((this.configArray[i] != null) && (config.configArray[i] != null))
-					this.configArray[i].CopyTo(config.configArray[i]);
+			for (int i = 0; i < debugArray.Length; i++)
+				if ((this.debugArray[i] != null) && (config.debugArray[i] != null))
+					this.debugArray[i].CopyTo(config.debugArray[i]);
 			for (int i = 0; i < replaceArray.Length; i++)
 				if ((this.replaceArray[i] != null) && (config.replaceArray[i] != null))
 					this.replaceArray[i].CopyTo(config.replaceArray[i]);
@@ -291,23 +382,23 @@ static ConfigData() { }
 		public T GetConfigValue<T>(ConfigCode code)
 		{
 			AConfigItem item = GetItem(code);
-            //if ((item != null) && (item is ConfigItem<T>))
+			//if ((item != null) && (item is ConfigItem<T>))
 				return ((ConfigItem<T>)item).Value;
-            //throw new ExeEE("GetConfigValueのCodeまたは型が不適切");
+			//throw new ExeEE("GetConfigValueのCodeまたは型が不適切");
 		}
 
 #region getitem
 		public AConfigItem GetItem(ConfigCode code)
 		{
 			AConfigItem item = GetConfigItem(code);
-            if (item == null)
-            {
-                item = GetReplaceItem(code);
-	            if (item == null)
-	            {
-	                item = GetDebugItem(code);
-	            }
-            }
+			if (item == null)
+			{
+				item = GetReplaceItem(code);
+				if (item == null)
+				{
+					item = GetDebugItem(code);
+				}
+			}
 			return item;
 		}
 		public AConfigItem GetItem(string key)
@@ -316,105 +407,101 @@ static ConfigData() { }
 			if (item == null)
 			{
 				item = GetReplaceItem(key);
-	            if (item == null)
-	            {
+				if (item == null)
+				{
 					item = GetDebugItem(key);
-	            }
-	        }
+				}
+			}
 			return item;
 		}
 
 		public AConfigItem GetConfigItem(ConfigCode code)
 		{
-			foreach (AConfigItem item in configArray)
-			{
-				if (item == null)
-					continue;
-				if (item.Code == code)
-					return item;
-			}
-			return null;
+			AConfigItem item;
+			return configItemsByCode.TryGetValue(code, out item) ? item : null;
 		}
 		public AConfigItem GetConfigItem(string key)
 		{
 			if (key == null)
 				return null;
 			key = key.Trim();
-			foreach (AConfigItem item in configArray)
-			{
-				if (item == null)
-					continue;
-				if (string.Equals(item.Name, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-				if (string.Equals(item.Text, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-			}
+			AConfigItem item;
+			if (configItemsByName.TryGetValue(key, out item))
+				return item;
 			ConfigCode aliasCode;
-			if (TryGetEnglishConfigAlias(key, englishConfigAliases, out aliasCode))
+			if (TryGetEnglishConfigAlias(key, englishConfigAliasesNormalized, out aliasCode))
 				return GetConfigItem(aliasCode);
 			return null;
 		}
 
 		public AConfigItem GetReplaceItem(ConfigCode code)
 		{
-			foreach (AConfigItem item in replaceArray)
-			{
-				if (item == null)
-					continue;
-				if (item.Code == code)
-					return item;
-			}
-			return null;
+			AConfigItem item;
+			return replaceItemsByCode.TryGetValue(code, out item) ? item : null;
 		}
 		public AConfigItem GetReplaceItem(string key)
 		{
 			if (key == null)
 				return null;
 			key = key.Trim();
-			foreach (AConfigItem item in replaceArray)
-			{
-				if (item == null)
-					continue;
-				if (string.Equals(item.Name, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-				if (string.Equals(item.Text, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-			}
+			AConfigItem item;
+			if (replaceItemsByName.TryGetValue(key, out item))
+				return item;
 			ConfigCode aliasCode;
-			if (TryGetEnglishConfigAlias(key, englishReplaceAliases, out aliasCode))
+			if (TryGetEnglishConfigAlias(key, englishReplaceAliasesNormalized, out aliasCode))
 				return GetReplaceItem(aliasCode);
 			return null;
 		}
 		
 		public AConfigItem GetDebugItem(ConfigCode code)
 		{
-			foreach (AConfigItem item in debugArray)
-			{
-				if (item == null)
-					continue;
-				if (item.Code == code)
-					return item;
-			}
-			return null;
+			AConfigItem item;
+			return debugItemsByCode.TryGetValue(code, out item) ? item : null;
 		}
 		public AConfigItem GetDebugItem(string key)
 		{
 			if (key == null)
 				return null;
 			key = key.Trim();
-			foreach (AConfigItem item in debugArray)
+			AConfigItem item;
+			if (debugItemsByName.TryGetValue(key, out item))
+				return item;
+			ConfigCode aliasCode;
+			if (TryGetEnglishConfigAlias(key, englishDebugAliasesNormalized, out aliasCode))
+				return GetDebugItem(aliasCode);
+			return null;
+		}
+
+		private void RebuildLookupIndexes()
+		{
+			// Config item identity is stable after setDefault(); values mutate in
+			// place during load. Rebuilding only at lifecycle boundaries keeps all
+			// hot-path lookups O(1) without changing save-order semantics.
+			RebuildLookupIndex(configArray, configItemsByCode, configItemsByName);
+			RebuildLookupIndex(replaceArray, replaceItemsByCode, replaceItemsByName);
+			RebuildLookupIndex(debugArray, debugItemsByCode, debugItemsByName);
+		}
+
+		private static void RebuildLookupIndex(AConfigItem[] items, Dictionary<ConfigCode, AConfigItem> byCode, Dictionary<string, AConfigItem> byName)
+		{
+			byCode.Clear();
+			byName.Clear();
+			foreach (AConfigItem item in items)
 			{
 				if (item == null)
 					continue;
-				if (string.Equals(item.Name, key, StringComparison.OrdinalIgnoreCase))
-					return item;
-				if (string.Equals(item.Text, key, StringComparison.OrdinalIgnoreCase))
-					return item;
+				if (!byCode.ContainsKey(item.Code))
+					byCode.Add(item.Code, item);
+				AddNameLookup(byName, item.Name, item);
+				AddNameLookup(byName, item.Text, item);
 			}
-			ConfigCode aliasCode;
-			if (TryGetEnglishConfigAlias(key, englishDebugAliases, out aliasCode))
-				return GetDebugItem(aliasCode);
-			return null;
+		}
+
+		private static void AddNameLookup(Dictionary<string, AConfigItem> byName, string key, AConfigItem item)
+		{
+			if (string.IsNullOrWhiteSpace(key) || byName.ContainsKey(key))
+				return;
+			byName.Add(key, item);
 		}
 
 		private static bool TryGetEnglishConfigAlias(string key, Dictionary<string, ConfigCode> aliases, out ConfigCode code)
@@ -422,7 +509,11 @@ static ConfigData() { }
 			code = default(ConfigCode);
 			if (string.IsNullOrWhiteSpace(key))
 				return false;
-			string normalized = NormalizeEnglishConfigKey(key);
+			// 无空白快速路径：不含 tab 且不含连续空格时，归一化退化为 Trim + 大写，
+			// 跳过 O(n²) 的空白折叠 while 循环，结果与完整归一化逐字节一致。
+			string normalized = (key.IndexOf('\t') < 0 && key.IndexOf("  ") < 0)
+				? key.Trim().ToUpperInvariant()
+				: NormalizeEnglishConfigKey(key);
 			return aliases.TryGetValue(normalized, out code);
 		}
 
@@ -432,6 +523,13 @@ static ConfigData() { }
 			while (normalized.Contains("  "))
 				normalized = normalized.Replace("  ", " ");
 			return normalized.ToUpper(CultureInfo.InvariantCulture);
+		}
+
+		private static bool IsIgnoredEnglishConfigKey(string key)
+		{
+			if (string.IsNullOrWhiteSpace(key))
+				return false;
+			return ignoredEnglishConfigKeys.Contains(NormalizeEnglishConfigKey(key));
 		}
 		
 		public SingleTerm GetConfigValueInERB(string text, ref string errMes)
@@ -555,19 +653,19 @@ static ConfigData() { }
 			return true;
 		}
 
-        public bool ReLoadConfig()
-        {
-            //_fixed.configの中身が変わった場合、非固定になったものが保持されてしまうので、ここで一旦すべて解除
-            foreach (AConfigItem item in configArray)
-            {
-                if (item == null)
-                    continue;
-                if (item.Fixed)
-                    item.Fixed = false;
-            }
-            LoadConfig();
-            return true;
-        }
+		public bool ReLoadConfig()
+		{
+			//_fixed.configの中身が変わった場合、非固定になったものが保持されてしまうので、ここで一旦すべて解除
+			foreach (AConfigItem item in configArray)
+			{
+				if (item == null)
+					continue;
+				if (item.Fixed)
+					item.Fixed = false;
+			}
+			LoadConfig();
+			return true;
+		}
 
 		public bool LoadConfig()
 		{
@@ -579,24 +677,21 @@ static ConfigData() { }
 			if (!uEmuera.Utils.FileExists(fixedConfigPath))
 				fixedConfigPath = Program.CsvDir + "fixed.config";
 
-			GenericUtils.Info($"[CONFIG] default={defaultConfigPath} exists={uEmuera.Utils.FileExists(defaultConfigPath)}");
-			GenericUtils.Info($"[CONFIG] user={configPath} exists={uEmuera.Utils.FileExists(configPath)}");
-			GenericUtils.Info($"[CONFIG] fixed={fixedConfigPath} exists={uEmuera.Utils.FileExists(fixedConfigPath)}");
-
 			loadConfig(defaultConfigPath, false);
 			loadConfig(configPath, false);
 			loadConfig(fixedConfigPath, true);
 
 			Config.SetConfig(this);
-			GenericUtils.Info($"[CONFIG] SystemSaveInBinary={Config.SystemSaveInBinary}");
 
-			// Write debug log to file for Android diagnosis
-			try
+			if (Program.DebugMode)
 			{
-				var debugPath = Program.ExeDir + "config_debug.log";
-				System.IO.File.WriteAllText(debugPath, configDebugLog.ToString());
+				try
+				{
+					var debugPath = Program.ExeDir + "config_debug.log";
+					System.IO.File.WriteAllText(debugPath, configDebugLog.ToString());
+				}
+				catch { }
 			}
-			catch { }
 
 			bool needSave = false;
 			if (!uEmuera.Utils.FileExists(configPath))
@@ -608,7 +703,7 @@ static ConfigData() { }
 			}
 			if (needSave)
 				SaveConfig();
-            return true;
+			return true;
 		}
 
 		private bool loadConfig(string confPath, bool fix)
@@ -619,14 +714,12 @@ static ConfigData() { }
 			if (!eReader.Open(confPath))
 				return false;
 
-			GenericUtils.Info($"[CONFIG] Loading: {confPath}");
 			configDebugLog.AppendLine($"=== Loading: {confPath} ===");
 
 			//加载二进制数据
 			var bytes = uEmuera.Utils.ReadAllBytes(confPath);
 			var keyOnlyMd5s = CalcKeyOnlyMd5List(bytes);
 
-			GenericUtils.Info($"[CONFIG] bytes={bytes.Length}, md5count={keyOnlyMd5s.Count}");
 			configDebugLog.AppendLine($"bytes={bytes.Length}, md5count={keyOnlyMd5s.Count}");
 
 			ScriptPosition pos = null;
@@ -657,22 +750,29 @@ static ConfigData() { }
 						configDebugLog.AppendLine($"  NO_COLON: '{line}'");
 						continue;
 					}
-                    var token_0 = tokens[0].Trim();
-                    AConfigItem item = GetConfigItem(token_0);
-                    if(item == null)
-                    {
-                        var translated = uEmuera.Utils.SHIFTJIS_to_UTF8(token_0, md5);
-                        if(!string.IsNullOrEmpty(translated))
-                        {
-                            token_0 = translated;
-                            item = GetConfigItem(token_0);
-                        }
-                        else
-                        {
-                            configDebugLog.AppendLine($"  TRANSLATE_FAIL: key='{token_0}', md5={md5}");
-                            GenericUtils.Warn($"[CONFIG] SHIFTJIS translate failed: key='{token_0}', md5={md5}");
-                        }
-                    }
+					var token_0 = tokens[0].Trim();
+					AConfigItem item = GetConfigItem(token_0);
+					bool ignoredConfigKey = item == null && IsIgnoredEnglishConfigKey(token_0);
+					if(item == null && !ignoredConfigKey)
+					{
+						var translated = uEmuera.Utils.SHIFTJIS_to_UTF8(token_0, md5);
+						if(!string.IsNullOrEmpty(translated))
+						{
+							token_0 = translated;
+							item = GetConfigItem(token_0);
+							ignoredConfigKey = item == null && IsIgnoredEnglishConfigKey(token_0);
+						}
+						else if (!IsIgnoredEnglishConfigKey(token_0))
+						{
+							configDebugLog.AppendLine($"  TRANSLATE_FAIL: key='{token_0}', md5={md5}");
+							GenericUtils.Warn($"[CONFIG] SHIFTJIS translate failed: key='{token_0}', md5={md5}");
+						}
+					}
+					if (ignoredConfigKey)
+					{
+						configDebugLog.AppendLine($"  IGNORED_UNSUPPORTED: '{token_0}'");
+						continue;
+					}
 					if (item == null)
 					{
 						configDebugLog.AppendLine($"  UNMATCHED: '{token_0}'");
@@ -684,8 +784,6 @@ static ConfigData() { }
 					}
 					if (item != null)
 					{
-						if (item.Code == ConfigCode.SystemSaveInBinary)
-							GenericUtils.Info($"[CONFIG] Found SystemSaveInBinary, value='{tokens[1]}', fix={fix}");
 						//1806beta001 CompatiDRAWLINEの廃止、CompatiLinefeedAs1739へ移行
 						if(item.Code == ConfigCode.CompatiDRAWLINE)
 						{
@@ -722,11 +820,11 @@ static ConfigData() { }
 							((ConfigItem<string>)item).Value = tokens[1];
 							continue;
 						}
-                        if (item.Code == ConfigCode.MaxLog && Program.AnalysisMode)
-                        {
-                            //解析モード時はここを上書きして十分な長さを確保する
-                            tokens[1] = "10000";
-                        }
+						if (item.Code == ConfigCode.MaxLog && Program.AnalysisMode)
+						{
+							//解析モード時はここを上書きして十分な長さを確保する
+							tokens[1] = "10000";
+						}
 						if ((item.TryParse(tokens[1])) && (fix))
 							item.Fixed = true;
 					}
@@ -747,7 +845,6 @@ static ConfigData() { }
 				ParserMediator.ConfigWarn(exc.GetType().ToString() + ":" + exc.Message, pos, 1, exc.StackTrace);
 			}
 			finally { eReader.Dispose(); }
-			GenericUtils.Info($"[CONFIG] Done: {confPath}, lines={lineCount}, md5used={md5i}");
 			return true;
 		}
 
@@ -828,16 +925,16 @@ static ConfigData() { }
 					if ((line.Length == 0) || (line[0] == ';'))
 						continue;
 					pos = new ScriptPosition(eReader.Filename, eReader.LineNo);
-                    string[] tokens = line.Split(new char[] { ',', ':' });
+					string[] tokens = line.Split(new char[] { ',', ':' });
 					if (tokens.Length < 2)
 						continue;
-                    string itemName = tokens[0].Trim();
-                    tokens[1] = line.Substring(tokens[0].Length + 1);
-                    if (string.IsNullOrEmpty(tokens[1].Trim()))
-                        continue;
-                    AConfigItem item = GetReplaceItem(itemName);
-                    if (item != null)
-                        item.TryParse(tokens[1]);
+					string itemName = tokens[0].Trim();
+					tokens[1] = line.Substring(tokens[0].Length + 1);
+					if (string.IsNullOrEmpty(tokens[1].Trim()))
+						continue;
+					AConfigItem item = GetReplaceItem(itemName);
+					if (item != null)
+						item.TryParse(tokens[1]);
 				}
 			}
 			catch (EmueraException ee)
@@ -924,7 +1021,7 @@ static ConfigData() { }
 			}
 			finally { eReader.Dispose(); }
 			Config.SetDebugConfig(this);
-            return true;
+			return true;
 		err:
 			Config.SetDebugConfig(this);
 			return false;

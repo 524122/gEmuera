@@ -1,7 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Text;
 using System.IO;
+using System.IO.Compression;
+using System.Xml;
+using MinorShift.Emuera.GameData.Variable;
 
 namespace MinorShift.Emuera.Sub
 {
@@ -15,20 +19,35 @@ namespace MinorShift.Emuera.Sub
 	/// </summary>
 	internal sealed class EraBinaryDataWriter : IDisposable
 	{
-		public EraBinaryDataWriter(FileStream fs)
+		public EraBinaryDataWriter(Stream fs)
 		{
-			writer = new BinaryWriter(fs, Encoding.Unicode);
+			if (Config.SystemSaveInBinary && Config.ZipSaveData)
+			{
+				memoryStream = new MemoryStream();
+				writer = new BinaryWriter(memoryStream, Encoding.Unicode, true);
+				fileWriter = new BinaryWriter(fs, Encoding.Unicode, true);
+			}
+			else
+			{
+				writer = new BinaryWriter(fs, Encoding.Unicode);
+				fileWriter = writer;
+			}
 		}
 		BinaryWriter writer = null;
+		BinaryWriter fileWriter = null;
+		MemoryStream memoryStream = null;
+		const byte EmMapDataType = 0x20;
+		const byte EmXmlDataType = 0x21;
+		const byte EmDataTableDataType = 0x22;
 		
 		public void WriteHeader()
 		{
-			writer.Write(EraBDConst.Header);
-			writer.Write(EraBDConst.Version1808);
-			writer.Write(EraBDConst.DataCount);
+			fileWriter.Write((Config.SystemSaveInBinary && Config.ZipSaveData) ? EraBDConst.ZipHeader : EraBDConst.Header);
+			fileWriter.Write(EraBDConst.Version1808);
+			fileWriter.Write(EraBDConst.DataCount);
 			for (int i = 0; i < EraBDConst.DataCount; i++)
 			{
-				writer.Write((UInt32)0);
+				fileWriter.Write((UInt32)0);
 			}
 		}
 
@@ -84,6 +103,12 @@ namespace MinorShift.Emuera.Sub
 				writer.Write(key);
 				writeData((Int64[])v);
 			}
+			else if (v is SparseArray<Int64>)
+			{
+				writer.Write((byte)EraSaveDataType.IntArray);
+				writer.Write(key);
+				writeData((SparseArray<Int64>)v);
+			}
 			else if (v is Int64[,])
 			{
 				writer.Write((byte)EraSaveDataType.IntArray2D);
@@ -108,6 +133,12 @@ namespace MinorShift.Emuera.Sub
 				writer.Write(key);
 				writeData((string[])v);
 			}
+			else if (v is SparseArray<string>)
+			{
+				writer.Write((byte)EraSaveDataType.StrArray);
+				writer.Write(key);
+				writeData((SparseArray<string>)v);
+			}
 			else if (v is string[,])
 			{
 				writer.Write((byte)EraSaveDataType.StrArray2D);
@@ -119,6 +150,70 @@ namespace MinorShift.Emuera.Sub
 				writer.Write((byte)EraSaveDataType.StrArray3D);
 				writer.Write(key);
 				writeData((string[, ,])v);
+			}
+			else if (v is double)
+			{
+				writer.Write((byte)EraSaveDataType.PcFloat);
+				writer.Write(key);
+				writeData((double)v);
+			}
+			else if (v is double[])
+			{
+				writer.Write((byte)EraSaveDataType.PcFloatArray);
+				writer.Write(key);
+				writeData((double[])v);
+			}
+			else if (v is SparseArray<double>)
+			{
+				writer.Write((byte)EraSaveDataType.PcFloatArray);
+				writer.Write(key);
+				writeData((SparseArray<double>)v);
+			}
+			else if (v is double[,])
+			{
+				writer.Write((byte)EraSaveDataType.PcFloatArray2D);
+				writer.Write(key);
+				writeData((double[,])v);
+			}
+			else if (v is double[, ,])
+			{
+				writer.Write((byte)EraSaveDataType.PcFloatArray3D);
+				writer.Write(key);
+				writeData((double[, ,])v);
+			}
+			else if (v is Dictionary<string, string>)
+			{
+				var map = (Dictionary<string, string>)v;
+				writer.Write(EmMapDataType);
+				writer.Write(key);
+				writer.Write(map.Count);
+				foreach (var pair in map)
+				{
+					writer.Write(pair.Key ?? "");
+					writer.Write(pair.Value ?? "");
+				}
+			}
+			else if (v is XmlDocument)
+			{
+				var doc = (XmlDocument)v;
+				writer.Write(EmXmlDataType);
+				writer.Write(key);
+				writer.Write(doc.OuterXml ?? "");
+			}
+			else if (v is DataTable)
+			{
+				var table = (DataTable)v;
+				writer.Write(EmDataTableDataType);
+				writer.Write(key);
+				var builder = new StringBuilder();
+				using (var stringWriter = new StringWriter(builder))
+				{
+					table.WriteXmlSchema(stringWriter);
+					writer.Write(builder.ToString());
+					builder.Clear();
+					table.WriteXml(stringWriter);
+					writer.Write(builder.ToString());
+				}
 			}
 		}
 
@@ -402,14 +497,125 @@ namespace MinorShift.Emuera.Sub
 			}
 			writer.Write(Ebdb.EoD);
 		}
+
+		private void writeData(double v)
+		{
+			writer.Write(v);
+		}
+
+		private void writeData(double[] array)
+		{
+			writer.Write((Int32)array.Length);
+			for(int x = 0; x < array.Length; x++)
+				writer.Write(array[x]);
+		}
+
+		private void writeData(double[,] array)
+		{
+			int length0 = array.GetLength(0);
+			int length1 = array.GetLength(1);
+			writer.Write(length0);
+			writer.Write(length1);
+			for(int x = 0; x < length0; x++)
+				for(int y = 0; y < length1; y++)
+					writer.Write(array[x,y]);
+		}
+
+		private void writeData(double[, ,] array)
+		{
+			int length0 = array.GetLength(0);
+			int length1 = array.GetLength(1);
+			int length2 = array.GetLength(2);
+			writer.Write(length0);
+			writer.Write(length1);
+			writer.Write(length2);
+			for(int x = 0; x < length0; x++)
+				for(int y = 0; y < length1; y++)
+					for(int z = 0; z < length2; z++)
+						writer.Write(array[x,y,z]);
+		}
+
+		// 1D 変数は SparseArray が密集化されているため、ToArray() の全量コピーを挟まず
+		// 内部の密集バッファ（RawData）を直接走査する（生成バイト列は ToArray() 経由と同一）。
+		// 不変条件により RawData.Length == Length かつ overflow は範囲外キーのみなので、
+		// ToArray() の結果と要素内容が一致する。
+		private void writeData(SparseArray<Int64> array)
+		{
+			Int64[] data = array.RawData;
+			//配列の記憶。0が連続する場合には圧縮を試みる。
+			writer.Write((Int32)data.Length);
+			int countZero = 0;//0については0が連続する数を記憶する。その他の数はそのまま記憶する。
+			for(int x = 0; x < data.Length; x++)
+			{
+				if (data[x] == 0)
+					countZero++;
+				else
+				{
+					if (countZero > 0)
+					{
+						writer.Write(Ebdb.Zero);
+						this.m_WriteInt(countZero);
+						countZero = 0;
+					}
+					this.m_WriteInt(data[x]);
+				}
+			}
+			//記憶途中で配列の残りが全部0であるなら0の数も記憶せず配列の終わりを記憶
+			writer.Write(Ebdb.EoD);
+		}
+
+		private void writeData(SparseArray<string> array)
+		{
+			string[] data = array.RawData;
+			int countZero = 0;
+			writer.Write((int)data.Length);
+			for(int x = 0; x < data.Length; x++)
+			{
+				if (data[x] == null || data[x].Length == 0)
+					countZero++;
+				else
+				{
+					if (countZero > 0)
+					{
+						writer.Write(Ebdb.Zero);
+						this.m_WriteInt(countZero);
+						countZero = 0;
+					}
+					writer.Write(Ebdb.String);
+					writer.Write(data[x]);
+				}
+			}
+			writer.Write(Ebdb.EoD);
+		}
+
+		private void writeData(SparseArray<double> array)
+		{
+			double[] data = array.RawData;
+			writer.Write((Int32)data.Length);
+			for(int x = 0; x < data.Length; x++)
+				writer.Write(data[x]);
+		}
 		#endregion
 		#region IDisposable メンバ
 
 		public void Dispose()
 		{
-			if (writer != null)
+			if (Config.SystemSaveInBinary && Config.ZipSaveData && writer != null)
+			{
+				writer.Flush();
+				memoryStream.Position = 0;
+				using (GZipStream gzip = new GZipStream(fileWriter.BaseStream, CompressionMode.Compress, true))
+					memoryStream.CopyTo(gzip);
 				writer.Close();
+				memoryStream = null;
+				fileWriter.Close();
+			}
+			else if (writer != null)
+			{
+				writer.Close();
+			}
 			writer = null;
+			fileWriter = null;
 		}
 
 		#endregion

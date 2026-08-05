@@ -38,16 +38,17 @@ namespace MinorShift.Emuera.Runtime.Utils.PluginSystem
 		public void LoadPlugins()
 		{
 			ClearMethods();
+			RegisterBuiltinMethods();
 			string pluginDir = GetPluginDirectory();
+			GlobalStatic.ExistPlugin = false;
 			if (!Directory.Exists(pluginDir))
 				return;
 
-			bool pluginsAware = File.Exists(Path.Combine(Program.ExeDir ?? "", "pluginsAware.txt"));
+			string[] pluginFiles = Directory.GetFiles(pluginDir, "*.dll");
+			GlobalStatic.ExistPlugin = pluginFiles.Length > 0;
 			currentPluginDir = pluginDir;
-			foreach (string pluginPath in Directory.GetFiles(pluginDir, "*.dll"))
+			foreach (string pluginPath in pluginFiles)
 			{
-				if (!pluginsAware)
-					throw new ExeEE("This game comes prepackaged with plugins. Create pluginsAware.txt in the game root if you trust these plugins.");
 				try
 				{
 					Assembly dll = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(pluginPath));
@@ -195,6 +196,64 @@ namespace MinorShift.Emuera.Runtime.Utils.PluginSystem
 			methods.Clear();
 		}
 
+		void RegisterBuiltinMethods()
+		{
+			AddMethod(new BuiltinPluginMethod("LAUNCH_BROWSER", "Open a URL or local file with the platform shell.", LaunchBrowser));
+			AddMethod(new BuiltinPluginMethod("CALL_GEMINI", "Built-in LLM fallback when no external plugin is installed.", MarkLlmUnavailable));
+			AddMethod(new BuiltinPluginMethod("CALL_OLLAMA", "Built-in LLM fallback when no external plugin is installed.", MarkLlmUnavailable));
+			AddMethod(new BuiltinPluginMethod("CALL_GENERIC_LLM_API", "Built-in LLM fallback when no external plugin is installed.", MarkLlmUnavailable));
+		}
+
+		void LaunchBrowser(PluginMethodParameter[] args)
+		{
+			string target = ReadPluginStringArg(args, 0);
+			if (string.IsNullOrWhiteSpace(target))
+			{
+				SetPluginResult(0, "");
+				return;
+			}
+
+			global::GenericUtils.ShellOpen(ResolveShellOpenTarget(target));
+			SetPluginResult(1, "");
+		}
+
+		void MarkLlmUnavailable(PluginMethodParameter[] args)
+		{
+			SetPluginResult(-1, "");
+		}
+
+		void SetPluginResult(long result, string results)
+		{
+			if (expressionMediator?.VEvaluator == null)
+				return;
+			expressionMediator.VEvaluator.RESULT = result;
+			expressionMediator.VEvaluator.RESULTS = results ?? "";
+		}
+
+		static string ReadPluginStringArg(PluginMethodParameter[] args, int index)
+		{
+			if (args == null || index < 0 || index >= args.Length || args[index] == null)
+				return "";
+			if (args[index].isString)
+				return args[index].strValue ?? "";
+			if (args[index].isFloat)
+				return args[index].floatValue.ToString(CultureInfo.InvariantCulture);
+			return args[index].intValue.ToString(CultureInfo.InvariantCulture);
+		}
+
+		static string ResolveShellOpenTarget(string target)
+		{
+			string trimmed = (target ?? "").Trim();
+			if (trimmed.Length == 0)
+				return "";
+			if (Uri.TryCreate(trimmed, UriKind.Absolute, out _))
+				return trimmed;
+			string root = Program.ExeDir ?? "";
+			if (Path.IsPathRooted(trimmed) || string.IsNullOrEmpty(root))
+				return Path.GetFullPath(trimmed);
+			return Path.GetFullPath(Path.Combine(root, trimmed));
+		}
+
 		void AddMethod(IPluginMethod method)
 		{
 			methods[getKey(method.Name)] = method;
@@ -263,6 +322,26 @@ namespace MinorShift.Emuera.Runtime.Utils.PluginSystem
 					return AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(candidate));
 			}
 			return null;
+		}
+
+		sealed class BuiltinPluginMethod : IPluginMethod
+		{
+			public BuiltinPluginMethod(string name, string description, Action<PluginMethodParameter[]> execute)
+			{
+				Name = name;
+				Description = description;
+				this.execute = execute;
+			}
+
+			readonly Action<PluginMethodParameter[]> execute;
+
+			public string Name { get; }
+			public string Description { get; }
+
+			public void Execute(PluginMethodParameter[] args)
+			{
+				execute(args);
+			}
 		}
 
 		sealed class ReflectionPluginMethod : IPluginMethod

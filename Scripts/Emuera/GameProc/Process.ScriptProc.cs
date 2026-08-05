@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text;
 //using System.Drawing;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameData;
@@ -14,12 +15,19 @@ namespace MinorShift.Emuera.GameProc
 {
 	internal sealed partial class Process
 	{
+		// PUTFORM による SAVEDATA_TEXT 累積用。SAVEDATA_TEXT は文字列変数として常に現在値を保持する必要が
+		// あるため、StringBuilder 累積＋書き戻し方式で += の逐次文字列連結を避ける。
+		// PUTFORM 以外（SystemProc の初期化や ERB からの代入）で SAVEDATA_TEXT が書き換えられた場合は
+		// 参照比較で検出してバッファを再同期する（結果は従来の += と同一）。
+		StringBuilder saveTextBuilder = null;
+		string lastSaveTextMaterialized = null;
+
 		private void runScriptProc()
 		{
 			uint snakeStart = 0;
 			uint snakeLastLog = 0;
 			int snakeStartLineCount = state.lineCount;
-			if (Program.IsSnakeProfile)
+			if (Config.DisplayReport)
 			{
 				snakeStart = _Library.WinmmTimer.TickCount;
 				snakeLastLog = snakeStart;
@@ -32,7 +40,7 @@ namespace MinorShift.Emuera.GameProc
 				if (Config.InfiniteLoopAlertTime > 0 && (state.lineCount % 10000 == 0))
 					checkInfiniteLoop();
 				LogicalLine line = state.CurrentLine;
-				if (Program.IsSnakeProfile && state.lineCount % 5000 == 0)
+				if (Config.DisplayReport && state.lineCount % 5000 == 0)
 				{
 					uint now = _Library.WinmmTimer.TickCount;
 					if (now - snakeLastLog >= 2000)
@@ -43,6 +51,8 @@ namespace MinorShift.Emuera.GameProc
 						GenericUtils.Info($"[PROC] runScriptProc {(now - snakeStart)}ms lines={state.lineCount - snakeStartLineCount} at {position}{label}");
 					}
 				}
+				if (GenericUtils.TryConsumeScrollTraceCoreLine())
+					GenericUtils.ScrollTrace("core", BuildCoreLineTrace(line));
 				InstructionLine func = line as InstructionLine;
 				//これがNULLになる様な処理は現状ないはず
 				//if (line == null)
@@ -59,7 +69,18 @@ namespace MinorShift.Emuera.GameProc
 					{
 						ArgumentParser.SetArgumentTo(func);
 						if (func.IsError)
+						{
+							// Snake/v24 兼容：某些游戏会把 PRINT/PRINTFORM 等命令名当作变量使用。
+							// 如果参数解析失败的原因是"命令名...が変数/関数のように使われています"，
+							// 降级为警告并跳过该行，而不是终止执行。
+							string err = func.ErrMes ?? "";
+							if (err.Contains("が変数のように使われています") || err.Contains("が関数のように使われています"))
+							{
+								ParserMediator.Warn(err, func, 2, true, false);
+								continue;
+							}
 							throw new CodeEE(func.ErrMes);
+						}
 					}
 					if ((skipPrint) && (func.Function.IsPrint()))
 					{
@@ -82,7 +103,7 @@ namespace MinorShift.Emuera.GameProc
 				{//（関数終端） or ファイル終端
 					//if (sequential)
 					//{//流れ落ちてきた
-					if (!state.IsFunctionMethod)
+					if (!state.IsCurrentFunctionMethod)
 						vEvaluator.RESULT = 0;
 					state.Return(0);
 					//}
@@ -105,6 +126,16 @@ namespace MinorShift.Emuera.GameProc
 				if (!console.IsRunning || state.ScriptEnd)
 					return;
 			}
+		}
+
+		string BuildCoreLineTrace(LogicalLine line)
+		{
+			if (line == null)
+				return $"exec count={state.lineCount} line=<null>";
+			string position = line.Position == null ? "<unknown>" : $"{line.Position.Filename}:{line.Position.LineNo}";
+			string label = line.ParentLabelLine == null ? "" : $"@{line.ParentLabelLine.LabelName}";
+			string op = line is InstructionLine instruction ? instruction.Function.Name : line.GetType().Name;
+			return $"exec count={state.lineCount} pos={position} label={label} op={op} system={state.SystemState}";
 		}
 
 		public void DoDebugNormalFunction(InstructionLine func, bool munchkin)
@@ -136,7 +167,7 @@ namespace MinorShift.Emuera.GameProc
 						str = bArg.PrintStrTerm.GetStrValue(exm);
 						//ボタン処理に絡んで表示がおかしくなるため、PRINTBUTTONでの改行コードはオミット
 						str = str.Replace("\n", "");
-						if (bArg.ButtonWord.GetOperandType() == typeof(long))
+						if (bArg.ButtonWord.GetEraType() == EraType.Integer)
 							exm.Console.PrintButton(str, bArg.ButtonWord.GetIntValue(exm));
 						else
 							exm.Console.PrintButton(str, bArg.ButtonWord.GetStrValue(exm));
@@ -154,7 +185,7 @@ namespace MinorShift.Emuera.GameProc
 						//ボタン処理に絡んで表示がおかしくなるため、PRINTBUTTONでの改行コードはオミット
 						str = str.Replace("\n", "");
 						bool isRight = (func.FunctionCode == FunctionCode.PRINTBUTTONC) ? true : false;
-						if (bArg.ButtonWord.GetOperandType() == typeof(long))
+						if (bArg.ButtonWord.GetEraType() == EraType.Integer)
 							exm.Console.PrintButtonC(str, bArg.ButtonWord.GetIntValue(exm), isRight);
 						else
 							exm.Console.PrintButtonC(str, bArg.ButtonWord.GetStrValue(exm), isRight);
@@ -177,7 +208,6 @@ namespace MinorShift.Emuera.GameProc
 					exm.Console.PrintBar();
 					exm.Console.NewLine();
 					break;
-				case FunctionCode.CUSTOMDRAWLINE:
 				case FunctionCode.DRAWLINEFORM:
 					{
 						if (skipPrint)
@@ -308,10 +338,19 @@ namespace MinorShift.Emuera.GameProc
 					{
 						term = ((ExpressionArgument)func.Argument).Term;
 						str = term.GetStrValue(exm);
-						if (vEvaluator.SAVEDATA_TEXT != null)
-							vEvaluator.SAVEDATA_TEXT += str;
-						else
-							vEvaluator.SAVEDATA_TEXT = str;
+						string current = vEvaluator.SAVEDATA_TEXT;
+						// 外部（SystemProc の初期化・ERB からの代入）で書き換えられた場合はバッファを再同期。
+						// 通常の PUTFORM 連続時は参照一致のため再同期不要（結果は従来の += と同一）。
+						if (saveTextBuilder == null)
+							saveTextBuilder = new StringBuilder(current ?? "");
+						else if (!object.ReferenceEquals(current, lastSaveTextMaterialized))
+						{
+							saveTextBuilder.Length = 0;
+							saveTextBuilder.Append(current ?? "");
+						}
+						saveTextBuilder.Append(str);
+						lastSaveTextMaterialized = saveTextBuilder.ToString();
+						vEvaluator.SAVEDATA_TEXT = lastSaveTextMaterialized;
 						break;
 					}
 				case FunctionCode.QUIT://ゲームを終了
@@ -349,6 +388,12 @@ namespace MinorShift.Emuera.GameProc
 						{
 							console.PrintError("SAVEDATA命令によるセーブ中に予期しないエラーが発生しました");
 						}
+						else
+						{
+							// 脚本 SAVEDATA 直写后使槽位头部缓存失效（与菜单/自动保存路径一致），
+							// 否则粗时间戳文件系统（FAT32/秒级）下存档列表可能显示旧 DataMes。
+							InvalidateSaveSlotHeaderCache((int)target);
+						}
 					}
 					break;
 
@@ -374,15 +419,16 @@ namespace MinorShift.Emuera.GameProc
 						//値を読み出す前に添え字を確定させておかないと、RANDが添え字にある場合正しく処理できない
 						FixedVariableTerm vTerm1 = arg.var1.GetFixedVariableTerm(exm);
 						FixedVariableTerm vTerm2 = arg.var2.GetFixedVariableTerm(exm);
-						if (vTerm1.GetOperandType() != vTerm2.GetOperandType())
+						EraType swapType = vTerm1.GetEraType();
+						if (swapType != vTerm2.GetEraType())
 							throw new CodeEE("入れ替える変数の型が異なります");
-						if (vTerm1.GetOperandType() == typeof(Int64))
+						if (swapType == EraType.Integer)
 						{
 							Int64 temp = vTerm1.GetIntValue(exm);
 							vTerm1.SetValue(vTerm2.GetIntValue(exm), exm);
 							vTerm2.SetValue(temp, exm);
 						}
-						else if (arg.var1.GetOperandType() == typeof(string))
+						else if (swapType == EraType.String)
 						{
 							string temps = vTerm1.GetStrValue(exm);
 							vTerm1.SetValue(vTerm2.GetStrValue(exm), exm);
@@ -396,15 +442,18 @@ namespace MinorShift.Emuera.GameProc
 					}
 				case FunctionCode.GETTIME:
 					{
-						long date = DateTime.Now.Year;
-						date = date * 100 + DateTime.Now.Month;
-						date = date * 100 + DateTime.Now.Day;
-						date = date * 100 + DateTime.Now.Hour;
-						date = date * 100 + DateTime.Now.Minute;
-						date = date * 100 + DateTime.Now.Second;
-						date = date * 1000 + DateTime.Now.Millisecond;
+						// 取一次 DateTime.Now 复用：同一条 GETTIME 内的 8 个字段来自同一
+						// 时刻，值不变，且省去 7 次系统时钟调用。
+						DateTime now = DateTime.Now;
+						long date = now.Year;
+						date = date * 100 + now.Month;
+						date = date * 100 + now.Day;
+						date = date * 100 + now.Hour;
+						date = date * 100 + now.Minute;
+						date = date * 100 + now.Second;
+						date = date * 1000 + now.Millisecond;
 						vEvaluator.RESULT = date;//17桁。2京くらい。
-						vEvaluator.RESULTS = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
+						vEvaluator.RESULTS = now.ToString("yyyy/MM/dd HH:mm:ss");
 					}
 					break;
 				case FunctionCode.SETCOLOR:
@@ -506,9 +555,9 @@ namespace MinorShift.Emuera.GameProc
 						if ((iValue & 2) != 0)
 							fs |= FontStyle.Italic;
 						if ((iValue & 4) != 0)
-							fs |= FontStyle.Strikeout;
-						if ((iValue & 8) != 0)
 							fs |= FontStyle.Underline;
+						if ((iValue & 8) != 0)
+							fs |= FontStyle.Strikeout;
 						exm.Console.SetStringStyle(fs);
 					}
 					break;
@@ -635,15 +684,20 @@ namespace MinorShift.Emuera.GameProc
 						}
 						else
 							num = -1;
-						if (dest.Identifier.IsInteger)
+						if (dest.Identifier.IsFloat)
 						{
-							Int64 def = arrayArg.Num2.GetIntValue(exm);
+							double def = arrayArg.Num2.GetFloatValue(exm);
 							vEvaluator.ShiftArray(dest, shift, def, start, num);
 						}
-						else
+						else if (dest.Identifier.IsString)
 						{
 							string defs = arrayArg.Num2.GetStrValue(exm);
 							vEvaluator.ShiftArray(dest, shift, defs, start, num);
+						}
+						else
+						{
+							Int64 def = arrayArg.Num2.GetIntValue(exm);
+							vEvaluator.ShiftArray(dest, shift, def, start, num);
 						}
 						break;
 					}
@@ -714,14 +768,14 @@ namespace MinorShift.Emuera.GameProc
 								throw new CodeEE("ARRAYCOPY命令の第２引数\"" + names[1] + "\"は値を変更できない変数です");
 							if ((vars[0].IsArray1D && !vars[1].IsArray1D) || (vars[0].IsArray2D && !vars[1].IsArray2D) || (vars[0].IsArray3D && !vars[1].IsArray3D))
 								throw new CodeEE("ARRAYCOPY命令の２つの配列変数の次元数が一致していません");
-							if ((vars[0].IsInteger && vars[1].IsString) || (vars[0].IsString && vars[1].IsInteger))
+							if (vars[0].GetEraType() != vars[1].GetEraType())
 								throw new CodeEE("ARRAYCOPY命令の２つの配列変数の型が一致していません");
 						}
 						else
 						{
 							vars[0] = GlobalStatic.IdentifierDictionary.GetVariableToken(((SingleTerm)varName1).Str, null, true);
 							vars[1] = GlobalStatic.IdentifierDictionary.GetVariableToken(((SingleTerm)varName2).Str, null, true);
-							if ((vars[0].IsInteger && vars[1].IsString) || (vars[0].IsString && vars[1].IsInteger))
+							if (vars[0].GetEraType() != vars[1].GetEraType())
 								throw new CodeEE("ARRAYCOPY命令の２つの配列変数の型が一致していません");
 						}
 						vEvaluator.CopyArray(vars[0], vars[1]);
@@ -752,7 +806,28 @@ namespace MinorShift.Emuera.GameProc
 						throw new CodeEE("ASSERT文の引数が0です");
 					break;
 				case FunctionCode.THROW:
-					throw new CodeEE(((ExpressionArgument)func.Argument).Term.GetStrValue(exm));
+					{
+						string throwMessage = ((ExpressionArgument)func.Argument).Term.GetStrValue(exm);
+						bool inBeforeThrow = state.IsInBeforeThrow;
+						if (inBeforeThrow || state.InBeforeError)
+						{
+							console.PrintSingleLine(throwMessage);
+							break;
+						}
+						state.PendingThrowMessage = throwMessage;
+						state.PendingThrowLine = func;
+						var beforeThrow = Config.DisableBeforeErrorThrow
+							? null
+							: CalledFunction.CallEventFunction(this, "BEFORE_THROW", func);
+						if (beforeThrow == null)
+						{
+							state.ClearPendingThrow();
+							throw new CodeEE(throwMessage);
+						}
+						state.IntoFunction(beforeThrow, null, null);
+						state.InBeforeThrow = true;
+						break;
+					}
 				case FunctionCode.CLEARTEXTBOX:
 					GlobalStatic.MainWindow.clear_richText();
 					break;
@@ -815,8 +890,10 @@ namespace MinorShift.Emuera.GameProc
 						if (result.State != EraDataState.OK)
 							throw new CodeEE("不正なデータをロードしようとしました");
 
+						loadDataStartTick = Environment.TickCount;
 						if (!vEvaluator.LoadFrom((int)target))
 							throw new ExeEE("ファイルのロード中に予期しないエラーが発生しました");
+						GenericUtils.Info($"[LOADSAVE] file load save{(int)target:00}: {Environment.TickCount - loadDataStartTick}ms");
 						state.ClearFunctionList();
 						state.SystemState = SystemStateCode.LoadData_DataLoaded;
 						return false;

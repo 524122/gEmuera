@@ -60,6 +60,34 @@ namespace MinorShift.Emuera.Content
 			SrcRectangle = rect;
 			BaseImage = img;
 		}
+		public ASpriteSingle(string name, AbstractImage img, Rectangle rect, Size destSize)
+			: base(name, ResolveDestSize(rect, destSize))
+		{
+			SrcRectangle = rect;
+			BaseImage = img;
+		}
+		private static Size ResolveDestSize(Rectangle rect, Size destSize)
+		{
+			if (destSize.Width > 0 && destSize.Height > 0)
+				return destSize;
+			return rect.Size;
+		}
+		internal bool UsesDestBaseCanvas()
+		{
+			if (DestBaseSize.Width <= 0 || DestBaseSize.Height <= 0)
+				return false;
+			return !DestBasePosition.IsEmpty;
+		}
+		internal Rectangle ApplyDestBaseCanvas(Rectangle destRect)
+		{
+			if (!UsesDestBaseCanvas())
+				return destRect;
+			destRect.X = destRect.X + DestBasePosition.X * destRect.Width / DestBaseSize.Width;
+			destRect.Y = destRect.Y + DestBasePosition.Y * destRect.Height / DestBaseSize.Height;
+			destRect.Width = destRect.Width * SrcRectangle.Width / DestBaseSize.Width;
+			destRect.Height = destRect.Height * SrcRectangle.Height / DestBaseSize.Height;
+			return destRect;
+		}
 		public AbstractImage BaseImage;
 
 		/// <summary>
@@ -101,25 +129,17 @@ namespace MinorShift.Emuera.Content
 		public override void GraphicsDraw(Graphics g, Point offset)
 		{
 			offset.Offset(DestBasePosition);
-			g.DrawImage(Bitmap, new Rectangle(offset, DestBaseSize), SrcRectangle, GraphicsUnit.Pixel);
+			g.DrawImage(Bitmap, new Rectangle(offset, SrcRectangle.Size), SrcRectangle, GraphicsUnit.Pixel);
 		}
 		public override void GraphicsDraw(Graphics g, Rectangle destRect)
 		{
-			if (!DestBasePosition.IsEmpty)
-			{
-				destRect.X = destRect.X + DestBasePosition.X * destRect.Width / SrcRectangle.Width;
-				destRect.Y = destRect.Y + DestBasePosition.Y * destRect.Height / SrcRectangle.Height;
-			}
+			destRect = ApplyDestBaseCanvas(destRect);
 			g.DrawImage(Bitmap, destRect, SrcRectangle, GraphicsUnit.Pixel);
 		}
 
 		public override void GraphicsDraw(Graphics g, Rectangle destRect, ImageAttributes attr)
 		{
-			if (!DestBasePosition.IsEmpty)
-			{
-				destRect.X = destRect.X + DestBasePosition.X * destRect.Width / SrcRectangle.Width;
-				destRect.Y = destRect.Y + DestBasePosition.Y * destRect.Height / SrcRectangle.Height;
-			}
+			destRect = ApplyDestBaseCanvas(destRect);
 			//g.DrawImage(Bitmap, destRect, SrcRectangle, GraphicsUnit.Pixel, attr);←このパターンがない
 			g.DrawImage(Bitmap, destRect, SrcRectangle.X, SrcRectangle.Y, SrcRectangle.Width, SrcRectangle.Height, GraphicsUnit.Pixel, attr);
 		}
@@ -145,6 +165,11 @@ namespace MinorShift.Emuera.Content
 	{
 		public SpriteF(string name, ConstImage image, Rectangle rect, Point pos)
 			: base(name, image, rect)
+		{
+			this.DestBasePosition = pos;
+		}
+		public SpriteF(string name, ConstImage image, Rectangle rect, Point pos, Size destSize)
+			: base(name, image, rect, destSize)
 		{
 			this.DestBasePosition = pos;
 		}
@@ -213,6 +238,29 @@ namespace MinorShift.Emuera.Content
 			StartTime = -1;
 			lastFrameTime = 0;
 			lastFrame = -1;
+			_paused = false;
+			_pausedAt = 0;
+		}
+
+		private bool _paused;
+		private uint _pausedAt;
+
+		internal void PauseAnimation()
+		{
+			if (_paused) return;
+			_paused = true;
+			_pausedAt = MinorShift._Library.WinmmTimer.CurrentFrameTime;
+		}
+
+		internal void ResumeAnimation()
+		{
+			if (!_paused) return;
+			_paused = false;
+			if (StartTime >= 0)
+			{
+				uint pausedDuration = MinorShift._Library.WinmmTimer.CurrentFrameTime - _pausedAt;
+				StartTime += pausedDuration;
+			}
 		}
 
 		/// <summary>
@@ -297,6 +345,8 @@ namespace MinorShift.Emuera.Content
 			lastFrameTime = 0;
 			StartTime = -1;
 			lastFrame = -1;
+			_paused = false;
+			_pausedAt = 0;
 		}
 
 

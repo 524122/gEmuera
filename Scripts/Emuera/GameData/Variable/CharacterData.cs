@@ -11,31 +11,75 @@ namespace MinorShift.Emuera.GameData.Variable
 	{
 		readonly Int64[] dataInteger;
 		readonly string[] dataString;
-		readonly Int64[][] dataIntegerArray;
-		readonly string[][] dataStringArray;
+		readonly double[] dataFloat;
+		readonly SparseArray<Int64>[] dataIntegerArray;
+		readonly SparseArray<string>[] dataStringArray;
+		readonly double[][] dataFloatArray;
 		readonly Int64[][,] dataIntegerArray2D;
 		readonly string[][,] dataStringArray2D;
 		public Int64[] DataInteger { get { return dataInteger; } }
 		public string[] DataString { get { return dataString; } }
-		public Int64[][] DataIntegerArray { get { return dataIntegerArray; } }
-		public string[][] DataStringArray { get { return dataStringArray; } }
+		public double[] DataFloat { get { return dataFloat; } }
+		public SparseArray<Int64>[] DataIntegerArray { get { return dataIntegerArray; } }
+		public SparseArray<string>[] DataStringArray { get { return dataStringArray; } }
+		public double[][] DataFloatArray { get { return dataFloatArray; } }
 		public Int64[][,] DataIntegerArray2D { get { return dataIntegerArray2D; } }
 		public string[][,] DataStringArray2D { get { return dataStringArray2D; } }
 
 		public List<object> UserDefCVarDataList { get; set; }
 
+		// 保存キーの静的キャッシュ。code.ToString()（列挙体のボックス化＋フォーマット）の実結果を
+		// キャッシュするため、生成文字列は ToString() と完全に同一。セーブはメインスレッドでのみ実行される。
+		static Dictionary<VariableCode, string> varCodeNameCache = null;
+		static string GetVarCodeName(VariableCode code)
+		{
+			Dictionary<VariableCode, string> cache = varCodeNameCache;
+			if (cache == null)
+				cache = varCodeNameCache = new Dictionary<VariableCode, string>();
+			if (cache.TryGetValue(code, out string name))
+				return name;
+			name = code.ToString();
+			cache[code] = name;
+			return name;
+		}
+
+		// ロード時の変数トークン解決キャッシュ。GetVariableToken は string ハッシュ＋複数辞書引きを
+		// 変数ごとに行うため、同一キー（キャラ数分繰り返し現れる）をキャッシュで打ち切る。
+		// IdentifierDictionary はセッション（プロセス再生成）ごとに再構築されるため、
+		// 参照が変わった時点でキャッシュを破棄して再構築する。ロードはメインスレッドのみで実行される。
+		static IdentifierDictionary loadTokenCacheOwner = null;
+		static Dictionary<string, VariableToken> loadTokenCache = null;
+		static VariableToken GetLoadVariableToken(string key)
+		{
+			IdentifierDictionary idDic = GlobalStatic.IdentifierDictionary;
+			if (!object.ReferenceEquals(loadTokenCacheOwner, idDic))
+			{
+				loadTokenCacheOwner = idDic;
+				loadTokenCache = new Dictionary<string, VariableToken>();
+			}
+			if (loadTokenCache.TryGetValue(key, out VariableToken cached))
+				return cached;
+			VariableToken token = null;
+			if (!idDic.getVarTokenIsForbid(key))
+				token = idDic.GetVariableToken(key, null, false);
+			loadTokenCache[key] = token;
+			return token;
+		}
+
 		public CharacterData(ConstantData constant, VariableData varData)
 		{
 			dataInteger = new Int64[(int)VariableCode.__COUNT_CHARACTER_INTEGER__];
 			dataString = new string[(int)VariableCode.__COUNT_CHARACTER_STRING__];
-			dataIntegerArray = new Int64[(int)VariableCode.__COUNT_CHARACTER_INTEGER_ARRAY__][];
-			dataStringArray = new string[(int)VariableCode.__COUNT_CHARACTER_STRING_ARRAY__][];
+			dataFloat = new double[0];
+			dataIntegerArray = new SparseArray<Int64>[(int)VariableCode.__COUNT_CHARACTER_INTEGER_ARRAY__];
+			dataStringArray = new SparseArray<string>[(int)VariableCode.__COUNT_CHARACTER_STRING_ARRAY__];
+			dataFloatArray = new double[(int)VariableCode.__COUNT_FLOAT_ARRAY__][];
 			dataIntegerArray2D = new Int64[(int)VariableCode.__COUNT_CHARACTER_INTEGER_ARRAY_2D__][,];
 			dataStringArray2D = new string[(int)VariableCode.__COUNT_CHARACTER_STRING_ARRAY_2D__][,];
 			for (int i = 0; i < dataIntegerArray.Length; i++)
-				dataIntegerArray[i] = new Int64[constant.CharacterIntArrayLength[i]];
+				dataIntegerArray[i] = new SparseArray<Int64>() { Length = constant.CharacterIntArrayLength[i] };
 			for (int i = 0; i < dataStringArray.Length; i++)
-				dataStringArray[i] = new string[constant.CharacterStrArrayLength[i]];
+				dataStringArray[i] = new SparseArray<string>() { Length = constant.CharacterStrArrayLength[i] };
 			for (int i = 0; i < dataIntegerArray2D.Length; i++)
 			{
 				Int64 length64 = constant.CharacterIntArray2DLength[i];
@@ -70,6 +114,21 @@ namespace MinorShift.Emuera.GameData.Variable
 							break;
 					}
 				}
+				else if (d.TypeIsFloat)
+				{
+					switch (d.Dimension)
+					{
+						case 1:
+							array = new double[d.Lengths[0]];
+							break;
+						case 2:
+							array = new double[d.Lengths[0], d.Lengths[1]];
+							break;
+						case 3:
+							array = new double[d.Lengths[0], d.Lengths[1], d.Lengths[2]];
+							break;
+					}
+				}
 				else
 				{
 					switch (d.Dimension)
@@ -101,68 +160,70 @@ namespace MinorShift.Emuera.GameData.Variable
 			dataString[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CALLNAME] = tmpl.Callname;
 			dataString[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.NICKNAME] = tmpl.Nickname;
 			dataString[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MASTERNAME] = tmpl.Mastername;
-			Int64[] array, array2;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE];
-			array2 = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Maxbase)
+			//M3: テンプレートは CSV 読込後に密配列へ折り畳まれている（既定値は焼き込み済み）ので、
+			//Array.Copy で直コピーし、旧来の Dictionary 逐条コピーを排除する。
+			//折り畳まれていないテンプレート（GetPseudoChara の擬似キャラ）は folded 配列が null → 既定値のまま（旧実装の空辞書と同じ）。
+			Int64[] folded;
+			//MAXBASE と BASE は同じ Maxbase データを共用する。
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.BASE);
+			if (folded != null)
 			{
-				array[pair.Key] = pair.Value;
-				array2[pair.Key] = pair.Value;
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE].FromArray(folded);
+				CopyIntArrayClamped(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE], folded);
 			}
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Mark)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Exp)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Abl)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Talent)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION];
-			for (int i = 0; i < array.Length; i++)
-				array[i] = Config.RelationDef;
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Relation)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.CFlag)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Equip)
-				array[pair.Key] = pair.Value;
-			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL];
-			foreach (KeyValuePair<int, Int64> pair in tmpl.Juel)
-				array[pair.Key] = pair.Value;
-			string[] arrays = dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CSTR];
-			foreach (KeyValuePair<int, string> pair in tmpl.CStr)
-				arrays[pair.Key] = pair.Value;
-			/*
-			//tmpl.Maxbase.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE], 0);
-            Buffer.BlockCopy(tmpl.Maxbase, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MAXBASE]);
-            //tmpl.Maxbase.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE], 0);
-            Buffer.BlockCopy(tmpl.Maxbase, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.BASE]);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.MARK);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.EXP);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.ABL);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.TALENT);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.RELATION);
+			if (folded != null)
+			{
+				//折り畳み時に関係既定値 Config.RelationDef を焼き込んであるのでそのままコピー。
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION].FromArray(folded);
+			}
+			else
+			{
+				//未折り畳み（擬似キャラ）：旧実装どおり全域を Config.RelationDef で初期化。
+				SparseArray<Int64> relation = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION];
+				for (int i = 0; i < relation.Length; i++)
+					relation[i] = Config.RelationDef;
+			}
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.CFLAG);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.EQUIP);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP].FromArray(folded);
+			folded = tmpl.GetFoldedIntArray(CharacterIntData.JUEL);
+			if (folded != null)
+				dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL].FromArray(folded);
+			string[] foldedStr = tmpl.GetFoldedStrArray();
+			if (foldedStr != null)
+				dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CSTR].FromArray(foldedStr);
+		}
 
-			//tmpl.Mark.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK], 0);
-            Buffer.BlockCopy(tmpl.Mark, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MARK]);
-			//tmpl.Exp.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP], 0);
-            Buffer.BlockCopy(tmpl.Exp, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXP]);
-            //tmpl.Abl.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL], 0);
-            Buffer.BlockCopy(tmpl.Abl, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ABL]);
-            //tmpl.Talent.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT], 0);
-            Buffer.BlockCopy(tmpl.Talent, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TALENT]);
-            //tmpl.Relation.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION], 0);
-            Buffer.BlockCopy(tmpl.Relation, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.RELATION]);
-            //tmpl.CFlag.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG], 0);
-            Buffer.BlockCopy(tmpl.CFlag, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG]);
-            //tmpl.Equip.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP], 0);
-            Buffer.BlockCopy(tmpl.Equip, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EQUIP]);
-            //tmpl.Juel.CopyTo(dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL], 0);
-            Buffer.BlockCopy(tmpl.Juel, 0, dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL], 0, 8 * constant.CharacterIntArrayLength[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.JUEL]);
-
-			tmpl.CStr.CopyTo(dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CSTR], 0);
-			*/
+		/// <summary>
+		/// BASE 側へ Maxbase の密配列をコピーする。ターゲット配列長でクランプする。
+		/// MAXBASE より短い場合、範囲外キーは SparseArray の overflow へ退避される旧実装の挙動を再現する
+		/// （密配列は「定義値 or 0」を区別しないが、値 0 の範囲外書込みは SparseArray が除去するため旧実装と完全一致する）。
+		/// </summary>
+		static void CopyIntArrayClamped(SparseArray<Int64> target, Int64[] folded)
+		{
+			target.CopyFrom(folded);
+			if (folded.Length > target.Length)
+			{
+				for (int i = target.Length; i < folded.Length; i++)
+					if (folded[i] != 0L)
+						target[i] = folded[i];
+			}
 		}
 
 		public static int[] CharacterVarLength(VariableCode code, ConstantData constant)
@@ -258,6 +319,23 @@ namespace MinorShift.Emuera.GameData.Variable
                             for (int i = 0; i < length1; i++)
                                 for (int j = 0; j < length2; j++)
                                     ((string[,])(other.UserDefCVarDataList[var.ArrayIndex]))[i, j] = ((string[,])(UserDefCVarDataList[var.ArrayIndex]))[i, j];
+                        }
+                    }
+                    else if (var.IsFloat)
+                    {
+                        if (var.IsArray1D)
+                        {
+                            int length = ((double[])(UserDefCVarDataList[var.ArrayIndex])).GetLength(0);
+                            for (int i = 0; i < length; i++)
+                                ((double[])(other.UserDefCVarDataList[var.ArrayIndex]))[i] = ((double[])(UserDefCVarDataList[var.ArrayIndex]))[i];
+                        }
+                        else if (var.IsArray2D)
+                        {
+                            int length1 = ((double[,])UserDefCVarDataList[var.ArrayIndex]).GetLength(0);
+                            int length2 = ((double[,])UserDefCVarDataList[var.ArrayIndex]).GetLength(1);
+                            for (int i = 0; i < length1; i++)
+                                for (int j = 0; j < length2; j++)
+                                    ((double[,])(other.UserDefCVarDataList[var.ArrayIndex]))[i, j] = ((double[,])(UserDefCVarDataList[var.ArrayIndex]))[i, j];
                         }
                     }
                     else
@@ -443,22 +521,28 @@ namespace MinorShift.Emuera.GameData.Variable
 				switch (flag)
 				{
 					case VariableCode.__INTEGER__:
-						writer.WriteWithKey(code.ToString(), dataInteger[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataInteger[CodeInt]);
 						break;
 					case VariableCode.__STRING__:
-						writer.WriteWithKey(code.ToString(), dataString[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataString[CodeInt]);
+						break;
+					case VariableCode.__FLOAT__:
+						writer.WriteWithKey(GetVarCodeName(code), dataFloat[CodeInt]);
 						break;
 					case VariableCode.__INTEGER__ | VariableCode.__ARRAY_1D__:
-						writer.WriteWithKey(code.ToString(), dataIntegerArray[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataIntegerArray[CodeInt]);
 						break;
 					case VariableCode.__STRING__ | VariableCode.__ARRAY_1D__:
-						writer.WriteWithKey(code.ToString(), dataStringArray[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataStringArray[CodeInt]);
+						break;
+					case VariableCode.__FLOAT__ | VariableCode.__ARRAY_1D__:
+						writer.WriteWithKey(GetVarCodeName(code), dataFloatArray[CodeInt]);
 						break;
 					case VariableCode.__INTEGER__ | VariableCode.__ARRAY_2D__:
-						writer.WriteWithKey(code.ToString(), dataIntegerArray2D[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataIntegerArray2D[CodeInt]);
 						break;
 					case VariableCode.__STRING__ | VariableCode.__ARRAY_2D__:
-						writer.WriteWithKey(code.ToString(), dataStringArray2D[CodeInt]);
+						writer.WriteWithKey(GetVarCodeName(code), dataStringArray2D[CodeInt]);
 						break;
 					//case VariableCode.__INTEGER__ | VariableCode.__ARRAY_3D__:
 					//    writer.Write(code.ToString(), dataIntegerArray3D[CodeInt]);
@@ -496,8 +580,8 @@ namespace MinorShift.Emuera.GameData.Variable
 				object array = null;
 				if (nameAndType.Key != null)
 				{
-                    if (!GlobalStatic.IdentifierDictionary.getVarTokenIsForbid(nameAndType.Key))
-                        vToken = GlobalStatic.IdentifierDictionary.GetVariableToken(nameAndType.Key, null, false);
+					// getVarTokenIsForbid + GetVariableToken の解決結果を per-load キャッシュする
+					vToken = GetLoadVariableToken(nameAndType.Key);
 					if (userDefineData)
 					{
 						if (vToken == null || !vToken.IsSavedata || !vToken.IsCharacterData || !(vToken is UserDefinedCharaVariableToken))
@@ -521,6 +605,34 @@ namespace MinorShift.Emuera.GameData.Variable
 					case EraSaveDataType.EOF:
 					case EraSaveDataType.EOC:
 						goto whilebreak;
+					case EraSaveDataType.PcFloat:
+						if (vToken == null || !vToken.IsFloat || vToken.Dimension != 0)
+							reader.ReadFloat();
+						else
+							dataFloat[codeInt] = reader.ReadFloat();
+						break;
+					case EraSaveDataType.PcFloatArray:
+						if (userDefineData && array != null)
+							reader.ReadPcFloatArray(array as double[], true);
+						else if (vToken == null || !vToken.IsFloat || vToken.Dimension != 1)
+							reader.ReadPcFloatArray((double[])null, true);
+						else
+							reader.ReadPcFloatArray(dataFloatArray[codeInt], true);
+						break;
+					case EraSaveDataType.PcFloatArray2D:
+						if (userDefineData && array != null)
+							reader.ReadPcFloatArray2D(array as double[,], true);
+						else if (vToken == null || !vToken.IsFloat || vToken.Dimension != 2)
+							reader.ReadPcFloatArray2D(null, true);
+						else
+							throw new FileEE("組み込みの2次元小数配列型キャラ変数は存在しません");
+						break;
+					case EraSaveDataType.PcFloatArray3D:
+						if (userDefineData && array != null)
+							reader.ReadPcFloatArray3D(array as double[, ,], true);
+						else
+							reader.ReadPcFloatArray3D(null, true);
+						break;
 					case EraSaveDataType.Int:
 						if (vToken == null || !vToken.IsInteger || vToken.Dimension != 0)
 							reader.ReadInt();
@@ -533,19 +645,51 @@ namespace MinorShift.Emuera.GameData.Variable
 						else
 							dataString[codeInt] = reader.ReadString();
 						break;
+					case EraSaveDataType.Float:
+						if (vToken == null || !vToken.IsFloat || vToken.Dimension != 0)
+							reader.ReadFloat();
+						else
+							dataFloat[codeInt] = reader.ReadFloat();
+						break;
+					case EraSaveDataType.FloatArray:
+						if (userDefineData && array != null)
+							reader.ReadFloatArray(array as double[], true);
+						else if (vToken == null || !vToken.IsFloat || vToken.Dimension != 1)
+							reader.ReadFloatArray((double[])null, true);
+						else
+							reader.ReadFloatArray(dataFloatArray[codeInt], true);
+						break;
+					case EraSaveDataType.FloatArray2D:
+						if (userDefineData && array != null)
+							reader.ReadFloatArray2D(array as double[,], true);
+						else if (vToken == null || !vToken.IsFloat || vToken.Dimension != 2)
+							reader.ReadFloatArray2D(null, true);
+						else
+							throw new FileEE("組み込みの2次元小数配列型キャラ変数は存在しません");
+						break;
 					case EraSaveDataType.IntArray:
 						if (userDefineData && array != null)
-							reader.ReadIntArray(array as Int64[], true);
+						{
+							if (array is SparseArray<Int64> sparseArray)
+								reader.ReadIntArray(sparseArray, true);
+							else
+								reader.ReadIntArray(array as Int64[], true);
+						}
 						else if (vToken == null || !vToken.IsInteger || vToken.Dimension != 1)
-							reader.ReadIntArray(null, true);
+							reader.ReadIntArray((Int64[])null, true);
 						else
 							reader.ReadIntArray(dataIntegerArray[codeInt], true);
 						break;
 					case EraSaveDataType.StrArray:
 						if (userDefineData && array != null)
-							reader.ReadStrArray(array as string[], true);
+						{
+							if (array is SparseArray<string> sparseArray)
+								reader.ReadStrArray(sparseArray, true);
+							else
+								reader.ReadStrArray(array as string[], true);
+						}
 						else if (vToken == null || !vToken.IsString || vToken.Dimension != 1)
-							reader.ReadStrArray(null, true);
+							reader.ReadStrArray((string[])null, true);
 						else
 							reader.ReadStrArray(dataStringArray[codeInt], true);
 						break;
@@ -595,6 +739,14 @@ namespace MinorShift.Emuera.GameData.Variable
 			//    destArray[i] = srcList[i];
 			//}
 		}
+
+		private void copyListToArray<T>(List<T> srcList, SparseArray<T> destArray)
+		{
+			destArray.Clear();
+			int count = Math.Min(srcList.Count, destArray.Length);
+			for (int i = 0; i < count; i++)
+				destArray[i] = srcList[i];
+		}
 		private void copyListToArray2D<T>(List<T[]> srcList, T[,] destArray)
 		{
 			int countX = Math.Min(srcList.Count, destArray.GetLength(0));
@@ -622,14 +774,14 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public void setValueAll1D(int varInt, Int64 value, int start, int end)
 		{
-			Int64[] array = dataIntegerArray[varInt];
+			SparseArray<Int64> array = dataIntegerArray[varInt];
 			for (int i = start; i < end; i++)
 				array[i] = value;
 		}
 
 		public void setValueAll1D(int varInt, string value, int start, int end)
 		{
-			string[] array = dataStringArray[varInt];
+			SparseArray<string> array = dataStringArray[varInt];
 			for (int i = start; i < end; i++)
 				array[i] = value;
 		}
@@ -667,7 +819,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		}
 
 		#endregion
-		public Int64[] CFlag
+		public SparseArray<Int64> CFlag
 		{
 			get { return dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.CFLAG]; }
 		}
@@ -717,15 +869,17 @@ namespace MinorShift.Emuera.GameData.Variable
                 }
                 else if (sortkey.IsArray1D)
                 {
-                    string[] array;
+                    object array;
                     if (sortkey is UserDefinedCharaVariableToken)
-                        array = (string[])UserDefCVarDataList[((UserDefinedCharaVariableToken)sortkey).ArrayIndex];
+                        array = UserDefCVarDataList[((UserDefinedCharaVariableToken)sortkey).ArrayIndex];
                     else
                         array = dataStringArray[sortkey.CodeInt];
-                    if (elem64 < 0 || elem64 >= array.Length)
+                    int length = Get1DLength(array);
+                    if (elem64 < 0 || elem64 >= length)
                         throw new CodeEE("ソートキーが配列外を参照しています");
-                    if (array[(int)elem64] != null)
-                        temp_SortKey = array[(int)elem64];
+                    string value = GetString1D(array, elem64);
+                    if (value != null)
+                        temp_SortKey = value;
                     else
                         temp_SortKey = "";
                 }
@@ -755,14 +909,15 @@ namespace MinorShift.Emuera.GameData.Variable
 				}
 				else if (sortkey.IsArray1D)
 				{
-                    Int64[] array;
+                    object array;
                     if (sortkey is UserDefinedCharaVariableToken)
-                        array = (Int64[])UserDefCVarDataList[((UserDefinedCharaVariableToken)sortkey).ArrayIndex];
+                        array = UserDefCVarDataList[((UserDefinedCharaVariableToken)sortkey).ArrayIndex];
                     else
                         array = dataIntegerArray[sortkey.CodeInt];
-					if (elem64 < 0 || elem64 >= array.Length)
+					int length = Get1DLength(array);
+					if (elem64 < 0 || elem64 >= length)
 						throw new CodeEE("ソートキーが配列外を参照しています");
-					temp_SortKey = array[(int)elem64];
+					temp_SortKey = GetInt1D(array, elem64);
 				}
 				else
 				{
@@ -771,5 +926,32 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 		}
 		#endregion
+
+		static int Get1DLength(object array)
+		{
+			if (array is SparseArray<Int64> sparseLong)
+				return sparseLong.Length;
+			if (array is SparseArray<string> sparseString)
+				return sparseString.Length;
+			if (array is SparseArray<double> sparseDouble)
+				return sparseDouble.Length;
+			if (array is Array denseArray)
+				return denseArray.Length;
+			throw new ExeEE("キャラクタ配列データの型が不正です");
+		}
+
+		static Int64 GetInt1D(object array, long index)
+		{
+			if (array is SparseArray<Int64> sparseArray)
+				return sparseArray[index];
+			return ((Int64[])array)[index];
+		}
+
+		static string GetString1D(object array, long index)
+		{
+			if (array is SparseArray<string> sparseArray)
+				return sparseArray[index];
+			return ((string[])array)[index];
+		}
 	}
 }

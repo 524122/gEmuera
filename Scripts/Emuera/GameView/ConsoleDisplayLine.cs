@@ -53,14 +53,13 @@ namespace MinorShift.Emuera.GameView
 		readonly public bool IsTemporary = false;
 		public bool IsLineEnd = true;
 		public Color? TextBackgroundColor = null;
-		public bool BitmapCacheEnabled = false;
 		//EmueraConsole parent;
 		ConsoleButtonString[] buttons;
 		DisplayLineAlignment align;
 		public ConsoleButtonString[] Buttons{get{return buttons;}}
 		public DisplayLineAlignment Align{get{return align;}}
 		bool aligned = false;
-		public void SetAlignment(DisplayLineAlignment align)
+		public void SetAlignment(DisplayLineAlignment align, int customWidth = -1)
 		{
 			if (aligned)
 				return;
@@ -85,9 +84,15 @@ namespace MinorShift.Emuera.GameView
 				movetoX = 0;
 			}
 			else if (align == DisplayLineAlignment.CENTER)
-				movetoX = Config.WindowX / 2 - width / 2;
+			{
+				int targetWidth = customWidth > 0 ? customWidth : Config.DrawableWidth;
+				movetoX = targetWidth / 2 - width / 2;
+			}
 			else if (align == DisplayLineAlignment.RIGHT)
-				movetoX = Config.WindowX - width;
+			{
+				int targetWidth = customWidth > 0 ? customWidth : Config.DrawableWidth;
+				movetoX = targetWidth - width;
+			}
 
 			//移動距離
 			int shiftX = movetoX - pointX;
@@ -175,6 +180,16 @@ namespace MinorShift.Emuera.GameView
 			StringBuilder builder = new StringBuilder();
 			for(var i=0; i<buttons.Length; ++i)
 				builder.Append(buttons[i].ToString());
+			return builder.ToString();
+		}
+
+		public string ToLogString()
+		{
+			if (buttons == null)
+				return "";
+			StringBuilder builder = new StringBuilder();
+			for (int i = 0; i < buttons.Length; ++i)
+				builder.Append(buttons[i]?.ToLogString());
 			return builder.ToString();
 		}
 	}

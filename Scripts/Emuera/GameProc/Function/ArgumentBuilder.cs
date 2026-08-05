@@ -36,9 +36,10 @@ namespace MinorShift.Emuera.GameProc.Function
 			ParserMediator.Warn(mes, line, level, isError, isBackComp);
 		}
 		/// <summary>
-		/// 引数の型と数。typeof(void)で任意の型（あるいは個別にチェックするべき引数）。nullでその引数は省略可能
+		/// 引数の型と数。EraType.Voidで任意の型（あるいは個別にチェックするべき引数）。
 		/// </summary>
-		protected Type[] argumentTypeArray;//
+		protected EraType[] argumentTypeArray;//
+		protected bool[] nullableArgumentArray;
 		/// <summary>
 		/// 最低限必要な引数の数。設定しないと全て省略不可。
 		/// </summary>
@@ -68,21 +69,21 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 			for (int i = 0; i < length; i++)
 			{
-				Type allowType;
-				if ((!argAny) && (argumentTypeArray[i] == null))
-					continue;
-				else if (argAny && i >= argumentTypeArray.Length)
+				EraType allowType;
+				if (argAny && i >= argumentTypeArray.Length)
 					allowType = argumentTypeArray[argumentTypeArray.Length - 1];
 				else
 					allowType = argumentTypeArray[i];
+				if (!argAny && allowType == EraType.Void)
+					continue;
 				if (arguments[i] == null)
 				{
-					if (allowType == null)
+					if (allowType == EraType.Void)
 						continue;
 					warn("第" + (i + 1).ToString() + "引数を認識できません", line, 2, false);
 					return false;
 				}
-				if ((allowType != typeof(void)) && (allowType != arguments[i].GetOperandType()))
+				if ((allowType != EraType.Void) && (allowType != arguments[i].GetEraType()))
 				{
 					warn("第" + (i + 1).ToString() + "引数の型が正しくありません", line, 2, false);
 					return false;
@@ -141,6 +142,10 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			return argb[key];
 		}
+		internal static ArgumentBuilder CreateForNextArgumentBuilder(bool allowsOmittedStart)
+		{
+			return new SP_FOR_NEXT_ArgumentBuilder(allowsOmittedStart);
+		}
 		readonly static Dictionary<string, ArgumentBuilder> nargb = new Dictionary<string, ArgumentBuilder>();
 
 		/// <summary>
@@ -157,13 +162,13 @@ namespace MinorShift.Emuera.GameProc.Function
             ArgumentBuilder argbuilder = null;
 			if (nargb.TryGetValue(key, out argbuilder))
 				return argbuilder;
-			Type[] types = new Type[argstr.Length];
+			EraType[] types = new EraType[argstr.Length];
 			for (int i = 0; i < argstr.Length; i++)
 			{
 				if (argstr[i] == 'I')
-					types[i] = typeof(Int64);
+					types[i] = EraType.Integer;
 				else if (argstr[i] == 'S')
-					types[i] = typeof(string);
+					types[i] = EraType.String;
 				else
 					throw new ExeEE("異常な指定");
 			}
@@ -198,7 +203,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_CALLF] = new SP_CALL_ArgumentBuilder(true, false);
 			argb[FunctionArgType.SP_CALLFORM] = new SP_CALL_ArgumentBuilder(false, true);
 			argb[FunctionArgType.SP_CALLFORMF] = new SP_CALL_ArgumentBuilder(true, true);
-			argb[FunctionArgType.SP_FOR_NEXT] = new SP_FOR_NEXT_ArgumentBuilder();
+			argb[FunctionArgType.SP_FOR_NEXT] = new SP_FOR_NEXT_ArgumentBuilder(false);
 			argb[FunctionArgType.SP_POWER] = new SP_POWER_ArgumentBuilder();
 			argb[FunctionArgType.SP_SWAPVAR] = new SP_SWAPVAR_ArgumentBuilder();
 			argb[FunctionArgType.EXPRESSION] = new EXPRESSION_ArgumentBuilder(false);
@@ -210,6 +215,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_VAR_SET] = new SP_VAR_SET_ArgumentBuilder();
 			argb[FunctionArgType.SP_BUTTON] = new SP_BUTTON_ArgumentBuilder();
 			argb[FunctionArgType.SP_COLOR] = new SP_COLOR_ArgumentBuilder();
+			argb[FunctionArgType.SP_COLOR_ALPHA] = new SP_COLOR_ALPHA_ArgumentBuilder();
 			argb[FunctionArgType.SP_SPLIT] = new SP_SPLIT_ArgumentBuilder();
 			argb[FunctionArgType.SP_GETINT] = new SP_GETINT_ArgumentBuilder();
 			argb[FunctionArgType.SP_CVAR_SET] = new SP_CVAR_SET_ArgumentBuilder();
@@ -226,10 +232,225 @@ namespace MinorShift.Emuera.GameProc.Function
 			argb[FunctionArgType.SP_SAVECHARA] = new SP_SAVECHARA_ArgumentBuilder();
 			argb[FunctionArgType.SP_REF] = new SP_REF_ArgumentBuilder(false);
 			argb[FunctionArgType.SP_REFBYNAME] = new SP_REF_ArgumentBuilder(true);
+			argb[FunctionArgType.SP_SETBGIMAGE] = new SP_SETBGIMAGE_ArgumentBuilder();
+			argb[FunctionArgType.SP_SETIMAGELAYERL] = new SP_SETIMAGELAYERL_ArgumentBuilder();
 			argb[FunctionArgType.SP_HTMLSPLIT] = new SP_HTMLSPLIT_ArgumentBuilder();
+			argb[FunctionArgType.SP_DT_COLUMN_OPTIONS] = new SP_DT_COLUMN_OPTIONS_ArgumentBuilder();
+			argb[FunctionArgType.SP_PRINT_IMG] = new SP_PRINT_IMG_ArgumentBuilder();
+			argb[FunctionArgType.SP_PRINT_RECT] = new SP_PRINT_SHAPE_ArgumentBuilder(4);
+			argb[FunctionArgType.SP_PRINT_SPACE] = new SP_PRINT_SHAPE_ArgumentBuilder(1);
 			
         }
-		
+
+		private sealed class SP_PRINT_IMG_ArgumentBuilder : ArgumentBuilder
+		{
+			public SP_PRINT_IMG_ArgumentBuilder()
+			{
+				argumentTypeArray = null;
+				minArg = 1;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				WordCollection words = popWords(line);
+				if (words.EOL)
+				{
+					warn("第1引数を省略することはできません", line, 2, false);
+					return null;
+				}
+
+				IOperandTerm name = ExpressionParser.ReduceExpressionTerm(words, TermEndWith.Comma);
+				if (name == null)
+				{
+					warn("第1引数を省略することはできません", line, 2, false);
+					return null;
+				}
+				if (Config.NeedReduceArgumentOnLoad)
+					name = name.Restructure(exm);
+				words.ShiftNext();
+
+				IOperandTerm buttonName = null;
+				IOperandTerm mappingName = null;
+				var parameters = new List<MixedIntegerExprTerm>();
+				int argumentIndex = 2;
+				while (!words.EOL)
+				{
+					if (parameters.Count == 3)
+					{
+						warn("引数が多すぎます", line, 2, false);
+						return null;
+					}
+
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(words, TermEndWith.Comma | TermEndWith.KeyWordPx);
+					if (term == null)
+					{
+						warn("第" + argumentIndex.ToString() + "引数を省略することはできません", line, 2, false);
+						return null;
+					}
+					if (Config.NeedReduceArgumentOnLoad)
+						term = term.Restructure(exm);
+
+					if (term.GetEraType() == EraType.String)
+					{
+						if (parameters.Count > 0 || argumentIndex > 3)
+						{
+							warn("第" + argumentIndex.ToString() + "引数の型が正しくありません", line, 2, false);
+							return null;
+						}
+						if (argumentIndex == 2)
+							buttonName = term;
+						else
+							mappingName = term;
+					}
+					else
+					{
+						parameters.Add(new MixedIntegerExprTerm
+						{
+							Num = term,
+							IsPx = words.Current.Type != '\0' && words.Current.Type != ',',
+						});
+					}
+
+					if (words.Current.Type != '\0' && words.Current.Type != ',')
+						words.ShiftNext();
+					words.ShiftNext();
+					argumentIndex++;
+				}
+
+				return new SpPrintImgArgument(
+					name,
+					buttonName,
+					mappingName,
+					parameters.Count > 0 ? parameters.ToArray() : null);
+			}
+		}
+
+		private sealed class SP_PRINT_SHAPE_ArgumentBuilder : ArgumentBuilder
+		{
+			private readonly int maxArguments;
+
+			public SP_PRINT_SHAPE_ArgumentBuilder(int maxArguments)
+			{
+				this.maxArguments = maxArguments;
+				argumentTypeArray = new EraType[]
+				{
+					EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer
+				};
+				minArg = 1;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				WordCollection words = popWords(line);
+				var parameters = new List<MixedIntegerExprTerm>();
+				while (!words.EOL)
+				{
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(words, TermEndWith.Comma | TermEndWith.KeyWordPx);
+					if (term == null)
+					{
+						warn("引数を認識できません", line, 2, false);
+						return null;
+					}
+					if (Config.NeedReduceArgumentOnLoad)
+						term = term.Restructure(exm);
+					parameters.Add(new MixedIntegerExprTerm
+					{
+						Num = term,
+						IsPx = words.Current.Type != '\0' && words.Current.Type != ',',
+					});
+					if (words.Current.Type != '\0' && words.Current.Type != ',')
+						words.ShiftNext();
+					words.ShiftNext();
+				}
+
+				if (parameters.Count != 1 && parameters.Count != maxArguments)
+				{
+					warn("引数の数が正しくありません", line, 2, false);
+					return null;
+				}
+				return new SpPrintShapeArgument(parameters.ToArray());
+			}
+		}
+			
+		private sealed class SP_DT_COLUMN_OPTIONS_ArgumentBuilder : ArgumentBuilder
+		{
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				WordCollection wc = popWords(line);
+				IOperandTerm dataTable = ReduceRequiredStringTerm(wc, line, exm, 1);
+				if (dataTable == null)
+					return null;
+				IOperandTerm column = ReduceRequiredStringTerm(wc, line, exm, 2);
+				if (column == null)
+					return null;
+
+				List<SpDtColumnOptionsArgument.OptionType> options = new List<SpDtColumnOptionsArgument.OptionType>();
+				List<IOperandTerm> values = new List<IOperandTerm>();
+				int argIndex = 3;
+				while (!wc.EOL)
+				{
+					string keyword = wc.Current.ToString().ToLowerInvariant();
+					wc.ShiftNext();
+					wc.ShiftNext();
+					if (wc.EOL)
+					{
+						warn("引数が足りません", line, 2, false);
+						return null;
+					}
+
+					IOperandTerm value;
+					switch (keyword)
+					{
+						case "default":
+							options.Add(SpDtColumnOptionsArgument.OptionType.Default);
+							value = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.Comma);
+							wc.ShiftNext();
+							break;
+						default:
+							warn("解釈できないオプションです", line, 2, false);
+							return null;
+					}
+
+					if (value == null)
+					{
+						warn("第" + argIndex.ToString() + "引数を省略することはできません", line, 2, false);
+						return null;
+					}
+					values.Add(value.Restructure(exm));
+					argIndex += 2;
+				}
+
+				if (options.Count == 0)
+				{
+					warn("引数が足りません", line, 2, false);
+					return null;
+				}
+				return new SpDtColumnOptionsArgument(dataTable, column, options.ToArray(), values.ToArray());
+			}
+
+			private IOperandTerm ReduceRequiredStringTerm(WordCollection wc, InstructionLine line, ExpressionMediator exm, int index)
+			{
+				if (wc.EOL)
+				{
+					warn("第" + index.ToString() + "引数を省略することはできません", line, 2, false);
+					return null;
+				}
+				IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.Comma);
+				if (term == null)
+				{
+					warn("第" + index.ToString() + "引数を認識できません", line, 2, false);
+					return null;
+				}
+				if (!term.IsString)
+				{
+					warn("第" + index.ToString() + "引数の型が正しくありません", line, 2, false);
+					return null;
+				}
+				wc.ShiftNext();
+				return term.Restructure(exm);
+			}
+		}
+
 		private sealed class SP_PRINTV_ArgumentBuilder : ArgumentBuilder
 		{
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -257,20 +478,13 @@ namespace MinorShift.Emuera.GameProc.Function
 				st.ShiftNext();
 				if (st.EOS)
 					{warn("引数が足りません", line, 2, false); return null;}
-				double d ;
-				try
-				{
-					LexicalAnalyzer.SkipWhiteSpace(st);
-					d = LexicalAnalyzer.ReadDouble(st);
-					LexicalAnalyzer.SkipWhiteSpace(st);
-					if (!st.EOS)
-						warn("引数が多すぎます", line, 1, false);
-				}
-				catch
-				{
-					warn("第２引数が実数値ではありません（常に0と解釈されます）", line, 1, false);
-					d = 0.0;
-				}
+				WordCollection wc2 = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
+				IOperandTerm multiplier = ExpressionParser.ReduceExpressionTerm(wc2, TermEndWith.EoL);
+				if (multiplier == null)
+				{ warn("書式が間違っています", line, 2, false); return null; }
+				if (multiplier.IsString)
+				{ warn("第２引数を文字列式にすることはできません", line, 2, false); return null; }
+				multiplier = multiplier.Restructure(exm);
 				IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
 				if (term == null)
 				{ warn("書式が間違っています", line, 2, false); return null; }
@@ -281,7 +495,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				{ warn("第１引数を文字列変数にすることはできません", line, 2, false); return null; }
 				else if (varTerm.Identifier.IsConst)
 				{ warn("第１引数に変更できない変数を指定することはできません", line, 2, false); return null; }
-				return new SpTimesArgument(varTerm, d);
+				return new SpTimesArgument(varTerm, multiplier);
 			}
 		}
 		
@@ -689,10 +903,10 @@ namespace MinorShift.Emuera.GameProc.Function
                     st = new StringStream("");
                 OperatorCode op = line.AssignOperator;
 				IOperandTerm src;
-				if(varTerm.IsInteger)
+				if(varTerm.IsInteger || varTerm.IsFloat)
 				{
 					if (op == OperatorCode.AssignmentStr)
-						{ assignwarn("整数型の代入に演算子"+OperatorManager.ToOperatorString(op) + "は使用できません", line, 2, false); return null; }
+						{ assignwarn("数値型の代入に演算子"+OperatorManager.ToOperatorString(op) + "は使用できません", line, 2, false); return null; }
 					if((op == OperatorCode.Increment)||(op == OperatorCode.Decrement))
 					{
 						LexicalAnalyzer.SkipWhiteSpace(st);
@@ -706,9 +920,12 @@ namespace MinorShift.Emuera.GameProc.Function
 						ret = new SpSetArgument(varTerm, null)
 						{
 							IsConst = true,
-							ConstInt = op == OperatorCode.Increment ? 1 : -1,
 							AddConst = true
                         };
+						if (varTerm.IsFloat)
+							ret.ConstFloat = op == OperatorCode.Increment ? 1.0 : -1.0;
+						else
+							ret.ConstInt = op == OperatorCode.Increment ? 1 : -1;
 						return ret;
 					}
 					WordCollection srcWc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
@@ -721,26 +938,50 @@ namespace MinorShift.Emuera.GameProc.Function
 						if(op != OperatorCode.Assignment)
 						{assignwarn("複合代入演算では右辺に複数の値を含めることはできません", line, 2, false); return null;}
 						bool allConst = true;
-						Int64[] constValues = new Int64[srcTerms.Length];
-						for (int i = 0; i < srcTerms.Length; i++)
+						if (varTerm.IsFloat)
 						{
-							if (srcTerms[i] == null)
-							{ assignwarn("代入式の右辺の値は省略できません", line, 2, false); return null; }
-							if (!srcTerms[i].IsInteger)
-							{ assignwarn("数値型変数に文字列は代入できません", line, 2, false); return null; }
-							srcTerms[i] = srcTerms[i].Restructure(exm);
-							if (allConst && (srcTerms[i] is SingleTerm))
-								constValues[i] = srcTerms[i].GetIntValue(null);
-							else
-								allConst = false;
+							double[] constValues = new double[srcTerms.Length];
+							for (int i = 0; i < srcTerms.Length; i++)
+							{
+								if (srcTerms[i] == null)
+								{ assignwarn("代入式の右辺の値は省略できません", line, 2, false); return null; }
+								if (srcTerms[i].IsString)
+								{ assignwarn("数値型変数に文字列は代入できません", line, 2, false); return null; }
+								srcTerms[i] = srcTerms[i].Restructure(exm);
+								if (allConst && (srcTerms[i] is SingleTerm))
+									constValues[i] = srcTerms[i].GetFloatValue(null);
+								else
+									allConst = false;
+							}
+							SpSetArrayArgument arrayarg = new SpSetArrayArgument(varTerm, srcTerms, constValues)
+							{
+								IsConst = allConst
+							};
+							return arrayarg;
 						}
-                        SpSetArrayArgument arrayarg = new SpSetArrayArgument(varTerm, srcTerms, constValues)
-                        {
-                            IsConst = allConst
-                        };
-                        return arrayarg;
+						else
+						{
+							Int64[] constValues = new Int64[srcTerms.Length];
+							for (int i = 0; i < srcTerms.Length; i++)
+							{
+								if (srcTerms[i] == null)
+								{ assignwarn("代入式の右辺の値は省略できません", line, 2, false); return null; }
+								if (srcTerms[i].IsString)
+								{ assignwarn("数値型変数に文字列は代入できません", line, 2, false); return null; }
+								srcTerms[i] = srcTerms[i].Restructure(exm);
+								if (allConst && (srcTerms[i] is SingleTerm))
+									constValues[i] = srcTerms[i].GetIntValue(null);
+								else
+									allConst = false;
+							}
+							SpSetArrayArgument arrayarg = new SpSetArrayArgument(varTerm, srcTerms, constValues)
+							{
+								IsConst = allConst
+							};
+							return arrayarg;
+						}
 					}
-					if(!srcTerms[0].IsInteger)
+					if(srcTerms[0].IsString)
 						{assignwarn("数値型変数に文字列は代入できません", line, 2, false); return null;}
 					src = srcTerms[0].Restructure(exm);
 					if(op == OperatorCode.Assignment)
@@ -750,7 +991,10 @@ namespace MinorShift.Emuera.GameProc.Function
 						{
 							ret.IsConst = true;
 							ret.AddConst = false;
-							ret.ConstInt = src.GetIntValue(null);
+							if (varTerm.IsFloat)
+								ret.ConstFloat = src.GetFloatValue(null);
+							else
+								ret.ConstInt = src.GetIntValue(null);
 						}
 						return ret;
 					}
@@ -761,9 +1005,12 @@ namespace MinorShift.Emuera.GameProc.Function
                             ret = new SpSetArgument(varTerm, null)
                             {
                                 IsConst = true,
-								ConstInt = op == OperatorCode.Plus ? src.GetIntValue(null) : -src.GetIntValue(null),
 								AddConst = true
                             };
+							if (varTerm.IsFloat)
+								ret.ConstFloat = op == OperatorCode.Plus ? src.GetFloatValue(null) : -src.GetFloatValue(null);
+							else
+								ret.ConstInt = op == OperatorCode.Plus ? src.GetIntValue(null) : -src.GetIntValue(null);
 							return ret;
 						}
 					}
@@ -802,7 +1049,7 @@ namespace MinorShift.Emuera.GameProc.Function
 						{
 							if (srcTerms.Length == 1)
 							{
-								if (srcTerms[0].IsInteger)
+								if (!srcTerms[0].IsString)
 								{ assignwarn("文字列変数に数値型は代入できません", line, 2, false); return null; }
 								src = srcTerms[0].Restructure(exm);
 								ret = new SpSetArgument(varTerm, src);
@@ -820,7 +1067,7 @@ namespace MinorShift.Emuera.GameProc.Function
 							{
 								if (srcTerms[i] == null)
 								{ assignwarn("代入式の右辺の値は省略できません", line, 2, false); return null; }
-								if (srcTerms[i].IsInteger)
+								if (!srcTerms[i].IsString)
 								{ assignwarn("文字列変数に数値型は代入できません", line, 2, false); return null; }
 								srcTerms[i] = srcTerms[i].Restructure(exm);
 								if (allConst && (srcTerms[i] is SingleTerm))
@@ -864,7 +1111,7 @@ namespace MinorShift.Emuera.GameProc.Function
         {
             public SP_INPUTS_ArgumentBuilder()
             {
-                argumentTypeArray = new Type[] { typeof(string) };
+                argumentTypeArray = new EraType[] { EraType.String };
                 //if (nullable)妥協
                 minArg = 0;
             }
@@ -876,6 +1123,20 @@ namespace MinorShift.Emuera.GameProc.Function
                 {
                     ret = new ExpressionArgument(null);
                     return ret;
+                }
+                LexicalAnalyzer.SkipWhiteSpace(st);
+                if (st.EOS)
+                    return new ExpressionArgument(null);
+                // eraFL 的 "INPUTS ,1" 同时表示省略默认字符串并启用鼠标扩展结果。
+                // 该标记必须跟随等待请求进入提交链，不能只丢弃第二参数，否则技能按钮值无法写入 RESULTS:1。
+				if (!st.EOS && Program.Compatibility.EraFl.IsOmittedDefaultArgument(st.Current))
+				{
+					st.ShiftNext();
+					bool enablePointerInputMetadata = Program.Compatibility.EraFl
+						.IsPointerInputMetadataOption(st.Substring());
+                    if (!enablePointerInputMetadata)
+                        warn("eraFLのINPUTS省略引数にはマウス拡張オプション1を指定してください", line, 1, false);
+                    return new ExpressionArgument(null, enablePointerInputMetadata);
                 }
                 StrFormWord sfwt = LexicalAnalyzer.AnalyseFormattedString(st, FormStrEndWith.EoL, false);
                 if (!st.EOS)
@@ -913,7 +1174,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public INT_EXPRESSION_ArgumentBuilder(bool nullable)
 			{
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				//if (nullable)妥協
 				minArg = 0;
 				this.nullable = nullable;
@@ -979,7 +1240,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public INT_ANY_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				minArg = 0;
 				argAny = true;
 			}
@@ -1033,7 +1294,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public STR_EXPRESSION_ArgumentBuilder(bool nullable)
 			{
-				argumentTypeArray = new Type[] { typeof(string) };
+				argumentTypeArray = new EraType[] { EraType.String };
 				if (nullable)
 					minArg = 0;
 			}
@@ -1060,7 +1321,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public EXPRESSION_ArgumentBuilder(bool nullable)
 			{
-				argumentTypeArray = new Type[] { typeof(void) };
+				argumentTypeArray = new EraType[] { EraType.Void };
 				if (nullable)
 					minArg = 0;
 			}
@@ -1087,7 +1348,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_BAR_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
 				//minArg = 3;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1104,7 +1365,7 @@ namespace MinorShift.Emuera.GameProc.Function
             //emuera1803beta2+v1 第2引数省略型に対応
 			public SP_SWAP_ArgumentBuilder(bool nullable)
 			{
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
                 if (nullable)
                     minArg = 1;
 			}
@@ -1124,7 +1385,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_SAVEDATA_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(string) };
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.String };
 			}
 
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1140,7 +1401,7 @@ namespace MinorShift.Emuera.GameProc.Function
         {
             public SP_TINPUT_ArgumentBuilder()
             {
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64), typeof(string) };
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.String, EraType.Integer, EraType.Integer };
                 minArg = 2;
             }
             public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1162,7 +1423,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_TINPUTS_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(string), typeof(Int64), typeof(string) };
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.String, EraType.Integer, EraType.String, EraType.Integer, EraType.Integer };
 				minArg = 2;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1181,9 +1442,11 @@ namespace MinorShift.Emuera.GameProc.Function
 
 		private sealed class SP_FOR_NEXT_ArgumentBuilder : ArgumentBuilder
 		{
-			public SP_FOR_NEXT_ArgumentBuilder()
+			public SP_FOR_NEXT_ArgumentBuilder(bool allowsOmittedStart)
 			{
-				argumentTypeArray = new Type[] { typeof(Int64), null, typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Void, EraType.Integer, EraType.Integer };
+				if (allowsOmittedStart)
+					nullableArgumentArray = new bool[] { false, true, false, false };
 				minArg = 3;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1216,7 +1479,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_POWER_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
 				//minArg = 2;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1236,7 +1499,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_SWAPVAR_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(void), typeof(void) };
+				argumentTypeArray = new EraType[] { EraType.Void, EraType.Void };
 				//minArg = 2;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1250,7 +1513,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				VariableTerm y = getChangeableVariable(terms, 2, line);
 				if (y == null)
 					return null;
-				if (x.GetOperandType() != y.GetOperandType())
+				if (x.GetEraType() != y.GetEraType())
 				{
 					warn("引数の型が異なります", line, 2, false);
 					return null;
@@ -1263,7 +1526,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public VAR_INT_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				minArg = 0;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1284,7 +1547,7 @@ namespace MinorShift.Emuera.GameProc.Function
         {
             public VAR_STR_ArgumentBuilder()
             {
-                argumentTypeArray = new Type[] { typeof(string) };
+                argumentTypeArray = new EraType[] { EraType.String };
                 minArg = 0;
             }
             public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1309,7 +1572,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public BIT_ARG_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				minArg = 2;
                 argAny = true;
 			}
@@ -1346,12 +1609,15 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_VAR_SET_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(void), typeof(void), typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Void, EraType.Void, EraType.Integer, EraType.Integer };
 				minArg = 1;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
 			{
-				IOperandTerm[] terms = popTerms(line);
+				StringStream st = line.PopArgumentPrimitive();
+				WordCollection wc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
+				VariableToken nakedArrayTarget = tryGetNakedArray1DVarSetTarget(wc);
+				IOperandTerm[] terms = ExpressionParser.ReduceArguments(wc, ArgsEndWith.EoL, false);
 				if (!checkArgumentType(line, exm, terms))
 					return null;
 				VariableTerm varTerm = getChangeableVariable(terms, 1, line);
@@ -1388,12 +1654,47 @@ namespace MinorShift.Emuera.GameProc.Function
 					term4 = terms[3];
 				if (terms.Length >= 3 && !varTerm.Identifier.IsArray1D)
 					warn("第３引数以降は1次元配列以外では無視されます", line, 1, false);
-				if (term.GetOperandType() != varTerm.GetOperandType())
+				if (term.GetEraType() != varTerm.GetEraType())
 				{
 					warn("２つの引数の型が一致していません", line, 2, false);
 					return null;
 				}
+				if (nakedArrayTarget != null)
+					return new SpVarSetArgument(new FixedVariableTerm(nakedArrayTarget), term, term3, term4);
 				return new SpVarSetArgument(varTerm, term, term3, term4);
+			}
+
+			private static VariableToken tryGetNakedArray1DVarSetTarget(WordCollection wc)
+			{
+				// 仅 VARSET 第 1 参数需要兼容原 Emuera：裸 1D 数组名表示整数组写入目标，而不是第 0 项。
+				if (wc == null || wc.Collection.Count == 0 || !(wc.Collection[0] is IdentifierWord idWord))
+					return null;
+
+				int index = 1;
+				string subKey = null;
+				if (index < wc.Collection.Count && wc.Collection[index].Type == '@')
+				{
+					index++;
+					if (index >= wc.Collection.Count || !(wc.Collection[index] is IdentifierWord subIdWord))
+						return null;
+					subKey = subIdWord.Code;
+					index++;
+				}
+				if (index < wc.Collection.Count && wc.Collection[index].Type != ',')
+					return null;
+
+				VariableToken token;
+				try
+				{
+					token = GlobalStatic.IdentifierDictionary.GetVariableToken(idWord.Code, subKey, true);
+				}
+				catch
+				{
+					return null;
+				}
+				if (token == null || !token.IsArray1D || token.IsCharacterData)
+					return null;
+				return token;
 			}
 		}
 
@@ -1401,7 +1702,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_CVAR_SET_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(void), typeof(void), typeof(void), typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Void, EraType.Void, EraType.Void, EraType.Integer, EraType.Integer };
 				minArg = 1;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1436,14 +1737,14 @@ namespace MinorShift.Emuera.GameProc.Function
 					term4 = terms[3];
 				if (terms.Length > 4)
 					term5 = terms[4];
-				if (index is SingleTerm term1 && index.GetOperandType() == typeof(string) && varTerm.Identifier.IsArray1D)
+				if (index is SingleTerm term1 && index.GetEraType() == EraType.String && varTerm.Identifier.IsArray1D)
 				{
 					if (!GlobalStatic.ConstantData.isDefined(varTerm.Identifier.Code, term1.Str))
 					{ warn("文字列" + index.GetStrValue(null) + "は変数" + varTerm.Identifier.Name + "の要素ではありません", line, 2, false); return null; }
 				}
 				if (terms.Length > 3 && !varTerm.Identifier.IsArray1D)
 					warn("第４引数以降は1次元配列以外では無視されます", line, 1, false);
-				if (term.GetOperandType() != varTerm.GetOperandType())
+				if (term.GetEraType() != varTerm.GetEraType())
 				{
 					warn("２つの引数の型が一致していません", line, 2, false);
 					return null;
@@ -1456,7 +1757,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_BUTTON_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(string), typeof(void) };
+				argumentTypeArray = new EraType[] { EraType.String, EraType.Void };
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
 			{
@@ -1471,7 +1772,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_COLOR_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
 				minArg = 1;
 			}
 
@@ -1505,11 +1806,33 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private sealed class SP_COLOR_ALPHA_ArgumentBuilder : ArgumentBuilder
+		{
+			public SP_COLOR_ALPHA_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
+				minArg = 2;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				IOperandTerm[] terms = popTerms(line);
+				if (terms != null && terms.Length > 2)
+				{
+					warn("引数が多すぎます", line, 2, false);
+					return null;
+				}
+				if (!checkArgumentType(line, exm, terms))
+					return null;
+				return new SpColorAlphaArgument(terms[0], terms[1]);
+			}
+		}
+
 		private sealed class SP_SPLIT_ArgumentBuilder : ArgumentBuilder
 		{
 			public SP_SPLIT_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String, EraType.Integer };
 				minArg = 3;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1531,7 +1854,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_HTMLSPLIT_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.Integer };
 				minArg = 1;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1560,12 +1883,106 @@ namespace MinorShift.Emuera.GameProc.Function
 				return new SpHtmlSplitArgument(terms[0], destVar, term);
 			}
 		}
-		
+
+		private sealed class SP_SETBGIMAGE_ArgumentBuilder : ArgumentBuilder
+		{
+			public SP_SETBGIMAGE_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[] { EraType.String, EraType.Integer, EraType.Integer };
+				minArg = 1;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				StringStream st = line.PopArgumentPrimitive();
+				List<IOperandTerm> termList = new List<IOperandTerm>();
+				LexicalAnalyzer.SkipHalfSpace(st);
+				if (st.EOS)
+				{
+					warn("引数が設定されていません", line, 2, false);
+					return null;
+				}
+
+				// SETBGIMAGE 的第 1 参数是 v24 资源名语义，title 这类裸词
+				// 必须按图片名处理，不能进入普通表达式后被当成变量标识符。
+				StrFormWord nameWord = LexicalAnalyzer.AnalyseFormattedString(st, FormStrEndWith.Comma, false);
+				termList.Add(ExpressionParser.ToStrFormTerm(nameWord));
+				if (!st.EOS)
+				{
+					st.ShiftNext();
+					LexicalAnalyzer.SkipHalfSpace(st);
+					if (!st.EOS)
+					{
+						WordCollection wc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
+						termList.AddRange(ExpressionParser.ReduceArguments(wc, ArgsEndWith.EoL, false));
+					}
+				}
+
+				IOperandTerm[] terms = termList.ToArray();
+				if (!checkArgumentType(line, exm, terms))
+					return null;
+
+				return new SpSetBgImageArgument(
+					terms[0],
+					terms.Length > 1 ? terms[1] : null,
+					terms.Length > 2 ? terms[2] : null);
+			}
+		}
+
+		private sealed class SP_SETIMAGELAYERL_ArgumentBuilder : ArgumentBuilder
+		{
+			public SP_SETIMAGELAYERL_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[]
+				{
+					EraType.String, EraType.Integer, EraType.Integer, EraType.Integer,
+					EraType.Integer, EraType.Integer, EraType.Integer, EraType.Void
+				};
+				minArg = 2;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				IOperandTerm[] terms = popTerms(line);
+				if (terms == null)
+				{
+					warn("引数がありません", line, 2, false);
+					return null;
+				}
+				if (terms.Length < minArg)
+				{
+					warn("引数が足りません", line, 2, false);
+					return null;
+				}
+				if (terms[0] == null || terms[0].GetEraType() != EraType.String)
+				{
+					warn("第1引数の型が正しくありません", line, 2, false);
+					return null;
+				}
+				if (terms[1] == null || terms[1].GetEraType() != EraType.Integer)
+				{
+					warn("第2引数の型が正しくありません", line, 2, false);
+					return null;
+				}
+
+				return new SpSetImageLayerArgument(
+					terms[0],
+					terms[1],
+					terms.Length > 2 ? terms[2] : null,
+					terms.Length > 3 ? terms[3] : null,
+					terms.Length > 4 ? terms[4] : null,
+					terms.Length > 5 ? terms[5] : null,
+					terms.Length > 6 ? terms[6] : null,
+					terms.Length > 7 ? terms[7] : null,
+					null);
+			}
+		}
+
 		private sealed class SP_GETINT_ArgumentBuilder : ArgumentBuilder
 		{
 			public SP_GETINT_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				minArg = 0;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1589,7 +2006,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_CONTROL_ARRAY_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(void), typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Void, EraType.Integer, EraType.Integer };
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
 			{
@@ -1607,7 +2024,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_SHIFT_ARRAY_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(void), typeof(Int64), typeof(void), typeof(Int64), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.Void, EraType.Integer, EraType.Void, EraType.Integer, EraType.Integer };
 				minArg = 3;
 			}
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
@@ -1624,7 +2041,7 @@ namespace MinorShift.Emuera.GameProc.Function
 
 				if (line.FunctionCode == FunctionCode.ARRAYSHIFT)
 				{
-					if (terms[0].GetOperandType() != terms[2].GetOperandType())
+					if (terms[0].GetEraType() != terms[2].GetEraType())
 					{ warn("第１引数と第３引数の型が違います", line, 2, false); return null; }
 				}
 				IOperandTerm term4 = terms.Length >= 4 ? terms[3] : new SingleTerm(0);
@@ -1637,7 +2054,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_SAVEVAR_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(void)};
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.Void};
 				argAny = true;
 				minArg = 3;
 			}
@@ -1688,7 +2105,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_SAVECHARA_ArgumentBuilder()
 			{
-				argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(Int64) };
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.Integer };
 				minArg = 3;
 				argAny = true;
 			}
@@ -1730,7 +2147,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SP_REF_ArgumentBuilder(bool byname)
 			{
-				argumentTypeArray = new Type[] { typeof(void), typeof(void) };
+				argumentTypeArray = new EraType[] { EraType.Void, EraType.Void };
 				minArg = 2;
 				this.byname = byname;
 			}
@@ -1805,7 +2222,7 @@ namespace MinorShift.Emuera.GameProc.Function
         {
             public SP_INPUT_ArgumentBuilder()
             {
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
                 //if (nullable)妥協
                 minArg = 0;
             }
@@ -1855,7 +2272,7 @@ namespace MinorShift.Emuera.GameProc.Function
         {
             public SP_COPY_ARRAY_Arguments()
             {
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 minArg = 2;
             }
 
@@ -1928,7 +2345,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		/// </summary>
 		private sealed class Expressions_ArgumentBuilder : ArgumentBuilder
 		{
-			public Expressions_ArgumentBuilder(Type[] types, int minArgs = -1)
+			public Expressions_ArgumentBuilder(EraType[] types, int minArgs = -1)
 			{
 				argumentTypeArray = types;
 				this.minArg = minArgs;

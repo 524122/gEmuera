@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Globalization;
 using System.IO;
 //using System.Windows.Forms;
 using MinorShift.Emuera.Sub;
@@ -13,11 +14,14 @@ namespace MinorShift.Emuera.GameData.Variable
 	/// </summary>
 	internal sealed partial class VariableData : IDisposable
 	{
+		const string FloatSaveTextMarker = "__EMUERA_FLOAT_SAVEDATA__";
 
 		readonly Int64[] dataInteger;
 		readonly string[] dataString;
-		readonly Int64[][] dataIntegerArray;
-		readonly string[][] dataStringArray;
+		readonly double[] dataFloat;
+		readonly SparseArray<Int64>[] dataIntegerArray;
+		readonly SparseArray<string>[] dataStringArray;
+		readonly double[][] dataFloatArray;
 		readonly Int64[][,] dataIntegerArray2D;
 		readonly string[][,] dataStringArray2D;
 		readonly Int64[][, ,] dataIntegerArray3D;
@@ -29,8 +33,10 @@ namespace MinorShift.Emuera.GameData.Variable
 		readonly List<CharacterData> characterList;
 		public Int64[] DataInteger { get { return dataInteger; } }
 		public string[] DataString { get { return dataString; } }
-		public Int64[][] DataIntegerArray { get { return dataIntegerArray; } }
-		public string[][] DataStringArray { get { return dataStringArray; } }
+		public double[] DataFloat { get { return dataFloat; } }
+		public SparseArray<Int64>[] DataIntegerArray { get { return dataIntegerArray; } }
+		public SparseArray<string>[] DataStringArray { get { return dataStringArray; } }
+		public double[][] DataFloatArray { get { return dataFloatArray; } }
 		public Int64[][,] DataIntegerArray2D { get { return dataIntegerArray2D; } }
 		public string[][,] DataStringArray2D { get { return dataStringArray2D; } }
 		public Int64[][, ,] DataIntegerArray3D { get { return dataIntegerArray3D; } }
@@ -64,10 +70,12 @@ namespace MinorShift.Emuera.GameData.Variable
 		/// ユーザー広域変数のうちセーブされるもの。グローバル、キャラクタ変数は除く。
 		/// </summary>
 		List<UserDefinedVariableToken>[] userDefinedSaveVarList = new List<UserDefinedVariableToken>[6];
+		List<UserDefinedVariableToken>[] userDefinedFloatSaveVarList = new List<UserDefinedVariableToken>[3];
 		/// <summary>
 		/// ユーザー広域変数のうち、グローバルかつセーブされるもの。
 		/// </summary>
 		List<UserDefinedVariableToken>[] userDefinedGlobalSaveVarList = new List<UserDefinedVariableToken>[6];
+		List<UserDefinedVariableToken>[] userDefinedGlobalFloatSaveVarList = new List<UserDefinedVariableToken>[3];
 		/// <summary>
 		/// ユーザー広域変数のうち、キャラクタ変数であるもの。初期化やセーブされるかどうかはCharacterDataの方で判断。
 		/// </summary>
@@ -83,17 +91,18 @@ namespace MinorShift.Emuera.GameData.Variable
 			//argVars = new VariableLocal<Int64, Int64Calculator>(constant.VariableIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARG)]);
 			//argString = new VariableLocal<string, StringCalculator>(constant.VariableStrArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARGS)]);
 			dataInteger = new Int64[(int)VariableCode.__COUNT_INTEGER__];
+			dataFloat = new double[1];//RESULTF only
 
-			dataIntegerArray = new Int64[(int)VariableCode.__COUNT_INTEGER_ARRAY__][];
+			dataIntegerArray = new SparseArray<Int64>[(int)VariableCode.__COUNT_INTEGER_ARRAY__];
 			for (int i = 0; i < dataIntegerArray.Length; i++)
-				dataIntegerArray[i] = new Int64[constant.VariableIntArrayLength[i]];
+				dataIntegerArray[i] = new SparseArray<Int64>() { Length = constant.VariableIntArrayLength[i] };
 
 			dataString = new string[(int)VariableCode.__COUNT_STRING__];
 
-			dataStringArray = new string[(int)VariableCode.__COUNT_STRING_ARRAY__][];
+			dataStringArray = new SparseArray<string>[(int)VariableCode.__COUNT_STRING_ARRAY__];
 
 			for (int i = 0; i < dataStringArray.Length; i++)
-				dataStringArray[i] = new string[constant.VariableStrArrayLength[i]];
+				dataStringArray[i] = new SparseArray<string>() { Length = constant.VariableStrArrayLength[i] };
 
 
 			dataIntegerArray2D = new Int64[(int)VariableCode.__COUNT_INTEGER_ARRAY_2D__][,];
@@ -130,10 +139,16 @@ namespace MinorShift.Emuera.GameData.Variable
 				int length3 = (int)(length64 & 0xFFFFF);
 				dataStringArray3D[i] = new string[length, length2, length3];
 			}
+			dataFloatArray = new double[(int)VariableCode.__COUNT_FLOAT_ARRAY__][];
 			for (int i = 0; i < 6; i++)
 			{
 				userDefinedSaveVarList[i] = new List<UserDefinedVariableToken>();
 				userDefinedGlobalSaveVarList[i] = new List<UserDefinedVariableToken>();
+			}
+			for (int i = 0; i < 3; i++)
+			{
+				userDefinedFloatSaveVarList[i] = new List<UserDefinedVariableToken>();
+				userDefinedGlobalFloatSaveVarList[i] = new List<UserDefinedVariableToken>();
 			}
 
 
@@ -195,6 +210,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			varTokenDic.Add("GLOBAL", new Int1DVariableToken(VariableCode.GLOBAL, this));
 			varTokenDic.Add("RANDDATA", new Int1DVariableToken(VariableCode.RANDDATA, this));
+			varTokenDic.Add("RESULTF", new FloatVariableToken(VariableCode.RESULTF, this));
 
 			varTokenDic.Add("SAVESTR", new Str1DVariableToken(VariableCode.SAVESTR, this));
 			varTokenDic.Add("TSTR", new Str1DVariableToken(VariableCode.TSTR, this));
@@ -276,6 +292,9 @@ namespace MinorShift.Emuera.GameData.Variable
 			varTokenDic.Add("SAVESTRNAME", new Str1DConstantToken(VariableCode.SAVESTRNAME, this));
 			varTokenDic.Add("GLOBALNAME", new Str1DConstantToken(VariableCode.GLOBALNAME, this));
 			varTokenDic.Add("GLOBALSNAME", new Str1DConstantToken(VariableCode.GLOBALSNAME, this));
+			varTokenDic.Add("DAYNAME", new Str1DConstantToken(VariableCode.DAYNAME, this));
+			varTokenDic.Add("TIMENAME", new Str1DConstantToken(VariableCode.TIMENAME, this));
+			varTokenDic.Add("MONEYNAME", new Str1DConstantToken(VariableCode.MONEYNAME, this));
 
 			StrConstantToken token = new StrConstantToken(VariableCode.GAMEBASE_AUTHOR, this, gamebase.ScriptAutherName);
 			varTokenDic.Add("GAMEBASE_AUTHER", token);
@@ -283,6 +302,8 @@ namespace MinorShift.Emuera.GameData.Variable
 			varTokenDic.Add("GAMEBASE_INFO", new StrConstantToken(VariableCode.GAMEBASE_INFO, this, gamebase.ScriptDetail));
 			varTokenDic.Add("GAMEBASE_YEAR", new StrConstantToken(VariableCode.GAMEBASE_YEAR, this, gamebase.ScriptYear));
 			varTokenDic.Add("GAMEBASE_TITLE", new StrConstantToken(VariableCode.GAMEBASE_TITLE, this, gamebase.ScriptTitle));
+			varTokenDic.Add("GAMEBASE_URL", new StrConstantToken(VariableCode.GAMEBASE_URL, this, gamebase.UpdateCheckURL));
+			varTokenDic.Add("GAMEBASE_VERSIONNAME", new StrConstantToken(VariableCode.GAMEBASE_VERSIONNAME, this, gamebase.VersionName));
 
 
 			varTokenDic.Add("GAMEBASE_GAMECODE", new IntConstantToken(VariableCode.GAMEBASE_GAMECODE, this, gamebase.ScriptUniqueCode));
@@ -329,11 +350,10 @@ namespace MinorShift.Emuera.GameData.Variable
 			localvarTokenDic.Add("LOCAL", new VariableLocal(VariableCode.LOCAL, size, CreateLocalInt));
 			size = constant.VariableIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARG)];
 			localvarTokenDic.Add("ARG", new VariableLocal(VariableCode.ARG, size, CreateLocalInt));
-			if (Program.IsSnakeProfile)
-			{
-				size = constant.VariableIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARGF)];
-				localvarTokenDic.Add("ARGF", new VariableLocal(VariableCode.ARGF, size, CreateLocalInt));
-			}
+			size = constant.VariableFloatArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.LOCALF)];
+			localvarTokenDic.Add("LOCALF", new VariableLocal(VariableCode.LOCALF, size, CreateLocalFloat));
+			size = constant.VariableFloatArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARGF)];
+			localvarTokenDic.Add("ARGF", new VariableLocal(VariableCode.ARGF, size, CreateLocalFloat));
 			size = constant.VariableStrArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.LOCALS)];
 			localvarTokenDic.Add("LOCALS", new VariableLocal(VariableCode.LOCALS, size, CreateLocalStr));
 			size = constant.VariableStrArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ARGS)];
@@ -344,6 +364,10 @@ namespace MinorShift.Emuera.GameData.Variable
 		private LocalVariableToken CreateLocalInt(VariableCode varCode, string subKey, int size)
 		{
 			return new LocalInt1DVariableToken(varCode, this, subKey, size);
+		}
+		private LocalVariableToken CreateLocalFloat(VariableCode varCode, string subKey, int size)
+		{
+			return new LocalFloat1DVariableToken(varCode, this, subKey, size);
 		}
 		private LocalVariableToken CreateLocalStr(VariableCode varCode, string subKey, int size)
 		{
@@ -380,6 +404,13 @@ namespace MinorShift.Emuera.GameData.Variable
 						case 2: ret = new UserDefinedCharaStr2DVariableToken(data, this, index); break;
 						default: throw new ExeEE("異常な変数宣言");
 					}
+				else if (data.TypeIsFloat)
+					switch (data.Dimension)
+					{
+						case 1: ret = new UserDefinedCharaFloat1DVariableToken(data, this, index); break;
+						case 2: ret = new UserDefinedCharaFloat2DVariableToken(data, this, index); break;
+						default: throw new ExeEE("異常な変数宣言");
+					}
 				else
 					switch (data.Dimension)
 					{
@@ -394,12 +425,58 @@ namespace MinorShift.Emuera.GameData.Variable
 		public UserDefinedVariableToken CreateUserDefVariable(UserDefinedVariableData data)
 		{
 			UserDefinedVariableToken ret = null;
-			if (data.TypeIsStr)
+			if (data.Reference)
+			{
+				if (data.TypeIsStr)
+				{
+					switch (data.Dimension)
+					{
+						case 0: ret = new ReferenceStrScalarToken(data); break;
+						case 1: ret = new ReferenceStr1DToken(data); break;
+						case 2: ret = new ReferenceStr2DToken(data); break;
+						case 3: ret = new ReferenceStr3DToken(data); break;
+						default: throw new ExeEE("異常な変数宣言");
+					}
+				}
+				else if (data.TypeIsFloat)
+				{
+					switch (data.Dimension)
+					{
+						case 0: ret = new ReferenceFloatScalarToken(data); break;
+						case 1: ret = new ReferenceFloat1DToken(data); break;
+						case 2: ret = new ReferenceFloat2DToken(data); break;
+						case 3: ret = new ReferenceFloat3DToken(data); break;
+						default: throw new ExeEE("異常な変数宣言");
+					}
+				}
+				else
+				{
+					switch (data.Dimension)
+					{
+						case 0: ret = new ReferenceIntScalarToken(data); break;
+						case 1: ret = new ReferenceInt1DToken(data); break;
+						case 2: ret = new ReferenceInt2DToken(data); break;
+						case 3: ret = new ReferenceInt3DToken(data); break;
+						default: throw new ExeEE("異常な変数宣言");
+					}
+				}
+				if (data.Out)
+					ret.IsOut = true;
+			}
+			else if (data.TypeIsStr)
 				switch (data.Dimension)
 				{
 					case 1: ret = new StaticStr1DVariableToken(data); break;
 					case 2: ret = new StaticStr2DVariableToken(data); break;
 					case 3: ret = new StaticStr3DVariableToken(data); break;
+					default: throw new ExeEE("異常な変数宣言");
+				}
+			else if (data.TypeIsFloat)
+				switch (data.Dimension)
+				{
+					case 1: ret = new StaticFloat1DVariableToken(data); break;
+					case 2: ret = new StaticFloat2DVariableToken(data); break;
+					case 3: ret = new StaticFloat3DVariableToken(data); break;
 					default: throw new ExeEE("異常な変数宣言");
 				}
 			else
@@ -416,13 +493,24 @@ namespace MinorShift.Emuera.GameData.Variable
 				userDefinedStaticVarList.Add(ret);
 			if (ret.IsSavedata)
 			{
-				int type = ret.Dimension * 2 - 2;
-				if (!ret.IsString)
-					type++;
-				if (ret.IsGlobal)
-					userDefinedGlobalSaveVarList[type].Add(ret);
+				if (ret.IsFloat)
+				{
+					int type = ret.Dimension - 1;
+					if (ret.IsGlobal)
+						userDefinedGlobalFloatSaveVarList[type].Add(ret);
+					else
+						userDefinedFloatSaveVarList[type].Add(ret);
+				}
 				else
-					userDefinedSaveVarList[type].Add(ret);
+				{
+					int type = ret.Dimension * 2 - 2;
+					if (!ret.IsString)
+						type++;
+					if (ret.IsGlobal)
+						userDefinedGlobalSaveVarList[type].Add(ret);
+					else
+						userDefinedSaveVarList[type].Add(ret);
+				}
 			}
 			return ret;
 		}
@@ -436,9 +524,21 @@ namespace MinorShift.Emuera.GameData.Variable
 				{
 					switch (data.Dimension)
 					{
+						case 0: ret = new ReferenceStrScalarToken(data); break;
 						case 1: ret = new ReferenceStr1DToken(data); break;
 						case 2: ret = new ReferenceStr2DToken(data); break;
 						case 3: ret = new ReferenceStr3DToken(data); break;
+						default: throw new ExeEE("異常な変数宣言");
+					}
+				}
+				else if (data.TypeIsFloat)
+				{
+					switch (data.Dimension)
+					{
+						case 0: ret = new ReferenceFloatScalarToken(data); break;
+						case 1: ret = new ReferenceFloat1DToken(data); break;
+						case 2: ret = new ReferenceFloat2DToken(data); break;
+						case 3: ret = new ReferenceFloat3DToken(data); break;
 						default: throw new ExeEE("異常な変数宣言");
 					}
 				}
@@ -446,12 +546,15 @@ namespace MinorShift.Emuera.GameData.Variable
 				{
 					switch (data.Dimension)
 					{
+						case 0: ret = new ReferenceIntScalarToken(data); break;
 						case 1: ret = new ReferenceInt1DToken(data); break;
 						case 2: ret = new ReferenceInt2DToken(data); break;
 						case 3: ret = new ReferenceInt3DToken(data); break;
 						default: throw new ExeEE("異常な変数宣言");
 					}
 				}
+				if (data.Out)
+					ret.IsOut = true;
 			}
 			else if (data.Static)
 			{
@@ -462,6 +565,16 @@ namespace MinorShift.Emuera.GameData.Variable
 						case 1: ret = new StaticStr1DVariableToken(data); break;
 						case 2: ret = new StaticStr2DVariableToken(data); break;
 						case 3: ret = new StaticStr3DVariableToken(data); break;
+						default: throw new ExeEE("異常な変数宣言");
+					}
+				}
+				else if (data.TypeIsFloat)
+				{
+					switch (data.Dimension)
+					{
+						case 1: ret = new StaticFloat1DVariableToken(data); break;
+						case 2: ret = new StaticFloat2DVariableToken(data); break;
+						case 3: ret = new StaticFloat3DVariableToken(data); break;
 						default: throw new ExeEE("異常な変数宣言");
 					}
 				}
@@ -489,6 +602,16 @@ namespace MinorShift.Emuera.GameData.Variable
 						default: throw new ExeEE("異常な変数宣言");
 					}
 				}
+				else if (data.TypeIsFloat)
+				{
+					switch (data.Dimension)
+					{
+						case 1: ret = new PrivateFloat1DVariableToken(data); break;
+						case 2: ret = new PrivateFloat2DVariableToken(data); break;
+						case 3: ret = new PrivateFloat3DVariableToken(data); break;
+						default: throw new ExeEE("異常な変数宣言");
+					}
+				}
 				else
 				{
 					switch (data.Dimension)
@@ -506,12 +629,10 @@ namespace MinorShift.Emuera.GameData.Variable
 		public void SetDefaultGlobalValue()
 		{
 
-			Int64[] globalInt = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.GLOBAL];
-			string[] globalStr = dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.GLOBALS];
-			for (int i = 0; i < globalInt.Length; i++)
-				globalInt[i] = 0;
-			for (int i = 0; i < globalStr.Length; i++)
-				globalStr[i] = null;
+			SparseArray<Int64> globalInt = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.GLOBAL];
+			SparseArray<string> globalStr = dataStringArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.GLOBALS];
+			globalInt.Clear();
+			globalStr.Clear();
 			foreach (UserDefinedVariableToken var in userDefinedGlobalVarList)
 				var.SetDefault();
 		}
@@ -547,12 +668,10 @@ namespace MinorShift.Emuera.GameData.Variable
 					case (int)(VariableCode.__LOWERCASE__ & VariableCode.GLOBAL):
 						break;
 					case (int)(VariableCode.__LOWERCASE__ & VariableCode.ITEMPRICE):
-						//constant.ItemPrice.CopyTo(dataIntegerArray[i], 0);
-						Buffer.BlockCopy(constant.ItemPrice, 0, dataIntegerArray[i], 0, 8 * dataIntegerArray[i].Length);
+						dataIntegerArray[i].FromArray(constant.ItemPrice);
 						break;
 					default:
-						for (int j = 0; j < dataIntegerArray[i].Length; j++)
-							dataIntegerArray[i][j] = 0;
+						dataIntegerArray[i].Clear();
 						break;
 				}
 			}
@@ -569,12 +688,11 @@ namespace MinorShift.Emuera.GameData.Variable
 					case (int)(VariableCode.__LOWERCASE__ & VariableCode.STR):
 						{
 							string[] csvStrData = constant.GetCsvNameList(VariableCode.__DUMMY_STR__);
-							csvStrData.CopyTo(dataStringArray[i], 0);
+							dataStringArray[i].FromArray(csvStrData);
 							break;
 						}
 					default:
-						for (int j = 0; j < dataStringArray[i].Length; j++)
-							dataStringArray[i][j] = null;
+						dataStringArray[i].Clear();
 						break;
 				}
 			}
@@ -619,9 +737,10 @@ namespace MinorShift.Emuera.GameData.Variable
 							array3D[x, y, z] = null;
 			}
 
-			Int64[] palamlv = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.PALAMLV];
+			SparseArray<Int64> palamlv = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.PALAMLV];
 			List<Int64> defPalam = Config.PalamLvDef;
-			defPalam.CopyTo(0, palamlv, 0, Math.Min(palamlv.Length, defPalam.Count));
+			for (int i = 0; i < Math.Min(palamlv.Length, defPalam.Count); i++)
+				palamlv[i] = defPalam[i];
 			//palamlv[0] = 0;
 			//palamlv[1] = 100;
 			//palamlv[2] = 500;
@@ -633,9 +752,10 @@ namespace MinorShift.Emuera.GameData.Variable
 			//palamlv[8] = 150000;
 			//palamlv[9] = 250000;
 
-			Int64[] explv = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXPLV];
+			SparseArray<Int64> explv = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.EXPLV];
 			List<Int64> defExpLv = Config.ExpLvDef;
-			defExpLv.CopyTo(0, explv, 0, Math.Min(explv.Length, defExpLv.Count));
+			for (int i = 0; i < Math.Min(explv.Length, defExpLv.Count); i++)
+				explv[i] = defExpLv[i];
 			//explv[0] = 0;
 			//explv[1] = 1;
 			//explv[2] = 4;
@@ -645,7 +765,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 			//dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ASSIPLAY][0] = 0;
 			//dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.MASTER][0] = 0;
-			long[] array;
+			SparseArray<Int64> array;
 			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.ASSI];
 			if (array.Length > 0) array[0] = -1;
 			array = dataIntegerArray[(int)VariableCode.__LOWERCASE__ & (int)VariableCode.TARGET];
@@ -764,6 +884,303 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 		}
 
+		public void SaveFloatToStreamExtended(EraDataWriter writer)
+		{
+			writer.Write(FloatSaveTextMarker);
+			WriteFloatSaveBlock(writer, userDefinedFloatSaveVarList);
+		}
+
+		public bool TryLoadFloatFromStreamExtended(EraDataReader reader)
+		{
+			if (!reader.TryPeekString(out string marker) || marker != FloatSaveTextMarker)
+				return false;
+			reader.ReadString();
+			ReadFloatSaveBlock(reader, userDefinedFloatSaveVarList);
+			return true;
+		}
+
+		public void SaveGlobalFloatToStreamExtended(EraDataWriter writer)
+		{
+			writer.Write(FloatSaveTextMarker);
+			WriteFloatSaveBlock(writer, userDefinedGlobalFloatSaveVarList);
+		}
+
+		public bool TryLoadGlobalFloatFromStreamExtended(EraDataReader reader)
+		{
+			if (!reader.TryPeekString(out string marker) || marker != FloatSaveTextMarker)
+				return false;
+			reader.ReadString();
+			ReadFloatSaveBlock(reader, userDefinedGlobalFloatSaveVarList);
+			return true;
+		}
+
+		void WriteFloatSaveBlock(EraDataWriter writer, List<UserDefinedVariableToken>[] varLists)
+		{
+			foreach (UserDefinedVariableToken var in varLists[0])
+				WriteFloatExtended(writer, var.Name, (double[])var.GetArray());
+			writer.EmuSeparete();
+			foreach (UserDefinedVariableToken var in varLists[1])
+				WriteFloatExtended(writer, var.Name, (double[,])var.GetArray());
+			writer.EmuSeparete();
+			foreach (UserDefinedVariableToken var in varLists[2])
+				WriteFloatExtended(writer, var.Name, (double[, ,])var.GetArray());
+			writer.EmuSeparete();
+		}
+
+		void ReadFloatSaveBlock(EraDataReader reader, List<UserDefinedVariableToken>[] varLists)
+		{
+			Dictionary<string, List<double>> floatListDic = ReadFloatArrayExtended(reader);
+			Dictionary<string, List<double[]>> float2DListDic = ReadFloatArray2DExtended(reader);
+			Dictionary<string, List<List<double[]>>> float3DListDic = ReadFloatArray3DExtended(reader);
+
+			foreach (UserDefinedVariableToken var in varLists[0])
+				if (floatListDic.TryGetValue(var.Name, out var listfound))
+					copyListToArray(listfound, (double[])var.GetArray());
+			foreach (UserDefinedVariableToken var in varLists[1])
+				if (float2DListDic.TryGetValue(var.Name, out var listarrfound))
+					copyListToArray2D(listarrfound, (double[,])var.GetArray());
+			foreach (UserDefinedVariableToken var in varLists[2])
+				if (float3DListDic.TryGetValue(var.Name, out var listlistarrfound))
+					copyListToArray3D(listlistarrfound, (double[, ,])var.GetArray());
+		}
+
+		static void WriteFloatExtended(EraDataWriter writer, string key, double[] array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			int count = -1;
+			for (int i = 0; i < array.Length; i++)
+				if (array[i] != 0)
+					count = i;
+			count++;
+			if (count == 0)
+				return;
+			writer.Write(key);
+			for (int i = 0; i < count; i++)
+				writer.Write(FormatFloatSaveValue(array[i]));
+			writer.Write(EraDataWriter.FINISHER);
+		}
+
+		static void WriteFloatExtended(EraDataWriter writer, string key, double[,] array2D)
+		{
+			if (array2D == null)
+				throw new FileEE("無効な配列が渡されました");
+			int countX = 0;
+			int length0 = array2D.GetLength(0);
+			int length1 = array2D.GetLength(1);
+			int[] countY = new int[length0];
+			for (int x = 0; x < length0; x++)
+			{
+				for (int y = 0; y < length1; y++)
+				{
+					if (array2D[x, y] != 0)
+					{
+						countX = x + 1;
+						countY[x] = y + 1;
+					}
+				}
+			}
+			if (countX == 0)
+				return;
+			writer.Write(key);
+			for (int x = 0; x < countX; x++)
+			{
+				if (countY[x] == 0)
+				{
+					writer.Write("");
+					continue;
+				}
+				StringBuilder builder = new StringBuilder("");
+				for (int y = 0; y < countY[x]; y++)
+				{
+					builder.Append(FormatFloatSaveValue(array2D[x, y]));
+					if (y != countY[x] - 1)
+						builder.Append(",");
+				}
+				writer.Write(builder.ToString());
+			}
+			writer.Write(EraDataWriter.FINISHER);
+		}
+
+		static void WriteFloatExtended(EraDataWriter writer, string key, double[, ,] array3D)
+		{
+			if (array3D == null)
+				throw new FileEE("無効な配列が渡されました");
+			int countX = 0;
+			int length0 = array3D.GetLength(0);
+			int length1 = array3D.GetLength(1);
+			int length2 = array3D.GetLength(2);
+			int[] countY = new int[length0];
+			int[,] countZ = new int[length0, length1];
+			for (int x = 0; x < length0; x++)
+			{
+				for (int y = 0; y < length1; y++)
+				{
+					for (int z = 0; z < length2; z++)
+					{
+						if (array3D[x, y, z] != 0)
+						{
+							countX = x + 1;
+							countY[x] = y + 1;
+							countZ[x, y] = z + 1;
+						}
+					}
+				}
+			}
+			if (countX == 0)
+				return;
+			writer.Write(key);
+			for (int x = 0; x < countX; x++)
+			{
+				writer.Write(x.ToString() + "{");
+				if (countY[x] == 0)
+				{
+					writer.Write("}");
+					continue;
+				}
+				for (int y = 0; y < countY[x]; y++)
+				{
+					if (countZ[x, y] == 0)
+					{
+						writer.Write("");
+						continue;
+					}
+					StringBuilder builder = new StringBuilder("");
+					for (int z = 0; z < countZ[x, y]; z++)
+					{
+						builder.Append(FormatFloatSaveValue(array3D[x, y, z]));
+						if (z != countZ[x, y] - 1)
+							builder.Append(",");
+					}
+					writer.Write(builder.ToString());
+				}
+				writer.Write("}");
+			}
+			writer.Write(EraDataWriter.FINISHER);
+		}
+
+		static Dictionary<string, List<double>> ReadFloatArrayExtended(EraDataReader reader)
+		{
+			Dictionary<string, List<double>> ret = new Dictionary<string, List<double>>();
+			while (true)
+			{
+				string str = reader.ReadString();
+				if (str.Equals(EraDataReader.FINISHER, StringComparison.Ordinal))
+					throw new FileEE("セーブデータの形式が不正です");
+				if (str.Equals(EraDataReader.EMU_SEPARATOR, StringComparison.Ordinal))
+					break;
+				string key = str;
+				List<double> valueList = new List<double>();
+				while (true)
+				{
+					str = reader.ReadString();
+					if (str.Equals(EraDataReader.EMU_SEPARATOR, StringComparison.Ordinal))
+						throw new FileEE("セーブデータの形式が不正です");
+					if (str.Equals(EraDataReader.FINISHER, StringComparison.Ordinal))
+						break;
+					valueList.Add(ParseFloatSaveValue(str));
+				}
+				if (!ret.ContainsKey(key))
+					ret.Add(key, valueList);
+			}
+			return ret;
+		}
+
+		static Dictionary<string, List<double[]>> ReadFloatArray2DExtended(EraDataReader reader)
+		{
+			Dictionary<string, List<double[]>> ret = new Dictionary<string, List<double[]>>();
+			while (true)
+			{
+				string str = reader.ReadString();
+				if (str.Equals(EraDataReader.FINISHER, StringComparison.Ordinal))
+					throw new FileEE("セーブデータの形式が不正です");
+				if (str.Equals(EraDataReader.EMU_SEPARATOR, StringComparison.Ordinal))
+					break;
+				string key = str;
+				List<double[]> valueList = new List<double[]>();
+				while (true)
+				{
+					str = reader.ReadString();
+					if (str.Equals(EraDataReader.EMU_SEPARATOR, StringComparison.Ordinal))
+						throw new FileEE("セーブデータの形式が不正です");
+					if (str.Equals(EraDataReader.FINISHER, StringComparison.Ordinal))
+						break;
+					if (str.Length == 0)
+					{
+						valueList.Add(new double[0]);
+						continue;
+					}
+					string[] tokens = str.Split(',');
+					double[] floatTokens = new double[tokens.Length];
+					for (int x = 0; x < tokens.Length; x++)
+						floatTokens[x] = ParseFloatSaveValue(tokens[x]);
+					valueList.Add(floatTokens);
+				}
+				if (!ret.ContainsKey(key))
+					ret.Add(key, valueList);
+			}
+			return ret;
+		}
+
+		static Dictionary<string, List<List<double[]>>> ReadFloatArray3DExtended(EraDataReader reader)
+		{
+			Dictionary<string, List<List<double[]>>> ret = new Dictionary<string, List<List<double[]>>>();
+			while (true)
+			{
+				string str = reader.ReadString();
+				if (str.Equals(EraDataReader.FINISHER, StringComparison.Ordinal))
+					throw new FileEE("セーブデータの形式が不正です");
+				if (str.Equals(EraDataReader.EMU_SEPARATOR, StringComparison.Ordinal))
+					break;
+				string key = str;
+				List<List<double[]>> valueList = new List<List<double[]>>();
+				while (true)
+				{
+					str = reader.ReadString();
+					if (str.Equals(EraDataReader.EMU_SEPARATOR, StringComparison.Ordinal))
+						throw new FileEE("セーブデータの形式が不正です");
+					if (str.Equals(EraDataReader.FINISHER, StringComparison.Ordinal))
+						break;
+					if (str.Contains("{"))
+					{
+						List<double[]> tokenList = new List<double[]>();
+						while (true)
+						{
+							str = reader.ReadString();
+							if (str == "}")
+								break;
+							if (str.Length == 0)
+							{
+								tokenList.Add(new double[0]);
+								continue;
+							}
+							string[] tokens = str.Split(',');
+							double[] floatTokens = new double[tokens.Length];
+							for (int x = 0; x < tokens.Length; x++)
+								floatTokens[x] = ParseFloatSaveValue(tokens[x]);
+							tokenList.Add(floatTokens);
+						}
+						valueList.Add(tokenList);
+					}
+				}
+				if (!ret.ContainsKey(key))
+					ret.Add(key, valueList);
+			}
+			return ret;
+		}
+
+		static string FormatFloatSaveValue(double value)
+		{
+			return value.ToString("R", CultureInfo.InvariantCulture);
+		}
+
+		static double ParseFloatSaveValue(string value)
+		{
+			if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double result))
+				throw new FileEE(value + "は浮動小数点数として認識できません");
+			return result;
+		}
+
 
 		public void LoadFromStreamExtended(EraDataReader reader, int version)
 		{
@@ -870,6 +1287,14 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 		}
 
+		private void copyListToArray<T>(List<T> srcList, SparseArray<T> destArray)
+		{
+			destArray.Clear();
+			int count = Math.Min(srcList.Count, destArray.Length);
+			for (int i = 0; i < count; i++)
+				destArray[i] = srcList[i];
+		}
+
 		private void copyListToArray2D<T>(List<T[]> srcList, T[,] destArray)
 		{
 			int countX = Math.Min(srcList.Count, destArray.GetLength(0));
@@ -937,6 +1362,7 @@ namespace MinorShift.Emuera.GameData.Variable
 				}
 				writer.EmuSeparete();
 			}
+			SaveGlobalFloatToStreamExtended(writer);
 		}
 
 		public void LoadGlobalFromStream1808(EraDataReader reader)
@@ -980,6 +1406,7 @@ namespace MinorShift.Emuera.GameData.Variable
 			foreach (UserDefinedVariableToken var in varList)
 				if (int3DListDic.TryGetValue(var.Name, out var listlistlongarrfound))
 					copyListToArray3D(listlistlongarrfound, (Int64[, ,])var.GetArray());
+			TryLoadGlobalFloatFromStreamExtended(reader);
 		}
 
 		public void SaveGlobalToStreamBinary(EraBinaryDataWriter writer)
@@ -989,13 +1416,13 @@ namespace MinorShift.Emuera.GameData.Variable
 				VariableToken var = pair.Value;
 				if (var.IsSavedata && !var.IsCharacterData && var.IsGlobal)
 				{
-					writer.WriteWithKey(pair.Key, var.GetArray());
+					writer.WriteWithKey(pair.Key, var.GetSaveValue());
 				}
 			}
 			foreach (UserDefinedVariableToken var in userDefinedGlobalVarList)
 			{
 				if (var.IsSavedata)
-					writer.WriteWithKey(var.Name, var.GetArray());
+					writer.WriteWithKey(var.Name, var.GetSaveValue());
 			}
 		}
 
@@ -1006,13 +1433,13 @@ namespace MinorShift.Emuera.GameData.Variable
 				VariableToken var = pair.Value;
 				if (var.IsSavedata && !var.IsCharacterData && !var.IsGlobal)
 				{
-					writer.WriteWithKey(pair.Key, var.GetArray());
+					writer.WriteWithKey(pair.Key, var.GetSaveValue());
 				}
 			}
 			foreach (UserDefinedVariableToken var in userDefinedStaticVarList)
 			{
 				if (var.IsSavedata)
-					writer.WriteWithKey(var.Name, var.GetArray());
+					writer.WriteWithKey(var.Name, var.GetSaveValue());
 			}
 		}
 
@@ -1052,9 +1479,15 @@ namespace MinorShift.Emuera.GameData.Variable
 					break;
 				case EraSaveDataType.IntArray:
 					if (vToken == null || !vToken.IsInteger || vToken.Dimension != 1)
-						reader.ReadIntArray(null, true);
+						reader.ReadIntArray((long[])null, true);
 					else
-						reader.ReadIntArray((long[])vToken.GetArray(), true);
+					{
+						object arrObj = vToken.GetArray();
+						if (arrObj is SparseArray<Int64> sparseArray)
+							reader.ReadIntArray(sparseArray, true);
+						else
+							reader.ReadIntArray((long[])arrObj, true);
+					}
 					break;
 				case EraSaveDataType.IntArray2D:
 					if (vToken == null || !vToken.IsInteger || vToken.Dimension != 2)
@@ -1070,9 +1503,15 @@ namespace MinorShift.Emuera.GameData.Variable
 					break;
 				case EraSaveDataType.StrArray:
 					if (vToken == null || !vToken.IsString || vToken.Dimension != 1)
-						reader.ReadStrArray(null, true);
+						reader.ReadStrArray((string[])null, true);
 					else
-						reader.ReadStrArray((string[])vToken.GetArray(), true);
+					{
+						object arrObj = vToken.GetArray();
+						if (arrObj is SparseArray<string> sparseArray)
+							reader.ReadStrArray(sparseArray, true);
+						else
+							reader.ReadStrArray((string[])arrObj, true);
+					}
 					break;
 				case EraSaveDataType.StrArray2D:
 					if (vToken == null || !vToken.IsString || vToken.Dimension != 2)
@@ -1085,6 +1524,66 @@ namespace MinorShift.Emuera.GameData.Variable
 						reader.ReadStrArray3D(null, true);
 					else
 						reader.ReadStrArray3D((string[, ,])vToken.GetArray(), true);
+					break;
+				case EraSaveDataType.PcFloat:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 0)
+						reader.ReadFloat();
+					else
+						vToken.SetValue(reader.ReadFloat(), null);
+					break;
+				case EraSaveDataType.PcFloatArray:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 1)
+						reader.ReadPcFloatArray((double[])null, true);
+					else
+					{
+						object arrObj = vToken.GetArray();
+						if (arrObj is SparseArray<double> sparseArray)
+							reader.ReadPcFloatArray(sparseArray, true);
+						else
+							reader.ReadPcFloatArray((double[])arrObj, true);
+					}
+					break;
+				case EraSaveDataType.PcFloatArray2D:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 2)
+						reader.ReadPcFloatArray2D(null, true);
+					else
+						reader.ReadPcFloatArray2D((double[,])vToken.GetArray(), true);
+					break;
+				case EraSaveDataType.PcFloatArray3D:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 3)
+						reader.ReadPcFloatArray3D(null, true);
+					else
+						reader.ReadPcFloatArray3D((double[, ,])vToken.GetArray(), true);
+					break;
+				case EraSaveDataType.Float:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 0)
+						reader.ReadFloat();
+					else
+						vToken.SetValue(reader.ReadFloat(), null);
+					break;
+				case EraSaveDataType.FloatArray:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 1)
+						reader.ReadFloatArray((double[])null, true);
+					else
+					{
+						object arrObj = vToken.GetArray();
+						if (arrObj is SparseArray<double> sparseArray)
+							reader.ReadFloatArray(sparseArray, true);
+						else
+							reader.ReadFloatArray((double[])arrObj, true);
+					}
+					break;
+				case EraSaveDataType.FloatArray2D:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 2)
+						reader.ReadFloatArray2D(null, true);
+					else
+						reader.ReadFloatArray2D((double[,])vToken.GetArray(), true);
+					break;
+				case EraSaveDataType.FloatArray3D:
+					if (vToken == null || !vToken.IsFloat || vToken.Dimension != 3)
+						reader.ReadFloatArray3D(null, true);
+					else
+						reader.ReadFloatArray3D((double[, ,])vToken.GetArray(), true);
 					break;
 				default:
 					throw new FileEE("データ異常");

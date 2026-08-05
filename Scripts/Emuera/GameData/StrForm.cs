@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Runtime.CompilerServices;
 using System.Text;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.GameData.Variable;
@@ -136,12 +137,12 @@ namespace MinorShift.Emuera.GameData
                 }
 				if (SWT is CurlyBraceSubWord)
 				{
-					if (operand.GetOperandType() != typeof(Int64))
+					if (operand.GetEraType() != EraType.Integer)
 						throw new CodeEE("{}の中の式が数式ではありません");
 					termArray[i] = new FunctionMethodTerm(formatCurlyBrace, new IOperandTerm[] { operand, second, third });
 					continue;
 				}
-				if (operand.GetOperandType() != typeof(string))
+				if (operand.GetEraType() != EraType.String)
 					throw new CodeEE("%%の中の式が文字列式ではありません");
 				termArray[i] = new FunctionMethodTerm(formatPercent, new IOperandTerm[] { operand, second, third });
 			}
@@ -206,14 +207,16 @@ namespace MinorShift.Emuera.GameData
 		{
 			if (strs.Length == 1)
 				return strs[0];
-			StringBuilder builder = new StringBuilder(100);
+			// 对照 v24 参考实现改用 DefaultInterpolatedStringHandler，避免每次为短串
+			// 分配 StringBuilder(100) 的堆开销；输出字符串完全一致。
+			var handler = new DefaultInterpolatedStringHandler(strs.Length + terms.Length, 0);
 			for (int i = 0; i < strs.Length - 1; i++)
 			{
-				builder.Append(strs[i]);
-				builder.Append(terms[i].GetStrValue(exm));
+				handler.AppendLiteral(strs[i]);
+				handler.AppendLiteral(terms[i].GetStrValue(exm));
 			}
-			builder.Append(strs[strs.Length - 1]);
-			return builder.ToString();
+			handler.AppendLiteral(strs[strs.Length - 1]);
+			return handler.ToString();
 		}
 
 		#region FormattedStringMethod 書式付文字列の内部
@@ -222,7 +225,7 @@ namespace MinorShift.Emuera.GameData
 			public FormattedStringMethod()
 			{
 				CanRestructure = true;
-				ReturnType = typeof(string);
+				ReturnType = EraType.String;
 				argumentTypeArray = null;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments) { throw new ExeEE("型チェックは呼び出し元が行うこと"); }

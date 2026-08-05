@@ -25,6 +25,15 @@ namespace MinorShift.Emuera
 		GRAPHICS = 0,
 		TEXTRENDERER = 1,
 		WINAPI = 2,
+		SKIASHARP = 3,
+	}
+
+	[global::System.Reflection.Obfuscation(Exclude=true)]
+	internal enum RenderingBackend
+	{
+		Auto = 0,
+		OpenGL = 1,
+		CPU = 2,
 	}
 
     [global::System.Reflection.Obfuscation(Exclude = true)]
@@ -119,6 +128,7 @@ namespace MinorShift.Emuera
 		CompatiLinefeedAs1739,
         useLanguage,
 		SystemSaveInBinary,
+		ZipSaveData,
 		CompatiFuncArgAutoConvert,
 		CompatiFuncArgOptional,
 		AllowLongInputByMouse,
@@ -131,6 +141,14 @@ namespace MinorShift.Emuera
 		SystemNoTarget,
 		SystemIgnoreStringSet,
 		UseLazyLoading,
+		UseERD,
+		VarsizeDimConfig,
+		CheckDuplicateIdentifier,
+		ForbidUpdateCheck,
+		PluginAvailableWarn,
+		DisableBeforeErrorThrow,
+		UseScopedVariableInstruction,
+		LoadTextValidExtensions,
 
 		MoneyLabel = 100,
 		MoneyFirst = 101,

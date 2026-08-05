@@ -31,6 +31,7 @@ namespace MinorShift.Emuera.GameView
 				lineNo = 0;
 				lastDrawnLineNo = -1;
 			}
+			ConsumeDisplayRewriteRefresh();
 			verticalScrollBarUpdate();
 			window.Refresh();//OnPaint発行
 		}
@@ -106,10 +107,46 @@ namespace MinorShift.Emuera.GameView
 		int lineNo = 0;
 		Int64 logicalLineCount = 0;
 		public long LineCount { get { return logicalLineCount; } }
+		public int GetLineNo { get { return lineNo; } }
 		private void addRangeDisplayLine(ConsoleDisplayLine[] lineList)
 		{
 			for (int i = 0; i < lineList.Length; i++)
 				addDisplayLine(lineList[i], false);
+		}
+
+		private void applyCurrentLineMetadata(ConsoleDisplayLine[] lineList)
+		{
+			if (lineList == null)
+				return;
+			for (int i = 0; i < lineList.Length; i++)
+			{
+				if (lineList[i] == null)
+					continue;
+				ApplyCurrentLineMetadata(lineList[i]);
+			}
+		}
+
+		internal void ApplyCurrentLineMetadata(ConsoleDisplayLine line)
+		{
+			if (line == null)
+				return;
+			line.TextBackgroundColor = TextBackgroundColor;
+			if (line.Buttons == null)
+				return;
+			for (int i = 0; i < line.Buttons.Length; i++)
+			{
+				var parts = line.Buttons[i]?.StrArray;
+				if (parts == null)
+					continue;
+				for (int j = 0; j < parts.Length; j++)
+				{
+					if (parts[j] is ConsoleDivPart div && div.Children != null)
+					{
+						for (int k = 0; k < div.Children.Length; k++)
+							ApplyCurrentLineMetadata(div.Children[k]);
+					}
+				}
+			}
 		}
 
 		private void addDisplayLine(ConsoleDisplayLine line, bool force_LEFT)
@@ -150,9 +187,26 @@ namespace MinorShift.Emuera.GameView
 				else
 					line.SetAlignment(alignment);
 				line.LineNo = lineNo;
+				// PRINT/PRINTFORM 等不换行输出要和下一次 Flush 的内容保持同一逻辑行。
+				// LINECOUNT/CLEARLINE 依赖这个边界；Godot 侧还要沿用旧 LineNo，才能替换已渲染的未结束行。
+				if (displayLineList.Count != 0 && !displayLineList[displayLineList.Count - 1].IsLineEnd)
+				{
+					ConsoleDisplayLine lastLine = displayLineList[displayLineList.Count - 1];
+					int mergedLineNo = lastLine.LineNo;
+					ConsoleButtonString[] lastButtons = lastLine.Buttons ?? new ConsoleButtonString[0];
+					ConsoleButtonString[] currentButtons = line.Buttons ?? new ConsoleButtonString[0];
+					if (lastButtons.Length > 0 && currentButtons.Length > 0)
+					{
+						ConsoleButtonString lastButton = lastButtons[lastButtons.Length - 1];
+						line.ShiftPositionX(lastButton.PointX + lastButton.Width);
+					}
+					deleteLine(1);
+					line.LineNo = mergedLineNo;
+					line.ChangeStr(mergeDisplayLineButtons(lastButtons, currentButtons));
+				}
 				displayLineList.Add(line);
 				lineNo++;
-				if (line.IsLogicalLine)
+				if (line.IsLogicalLine && line.IsLineEnd)
 					logicalLineCount++;
 				if (lineNo == int.MaxValue)
 				{
@@ -168,12 +222,24 @@ namespace MinorShift.Emuera.GameView
 			}
 		}
 
+		private static ConsoleButtonString[] mergeDisplayLineButtons(ConsoleButtonString[] first, ConsoleButtonString[] second)
+		{
+			int firstLength = first == null ? 0 : first.Length;
+			int secondLength = second == null ? 0 : second.Length;
+			ConsoleButtonString[] merged = new ConsoleButtonString[firstLength + secondLength];
+			if (firstLength > 0)
+				Array.Copy(first, 0, merged, 0, firstLength);
+			if (secondLength > 0)
+				Array.Copy(second, 0, merged, firstLength, secondLength);
+			return merged;
+		}
+
 
 		public void deleteLine(int argNum)
 		{
+			int delNum = 0;
 			lock (displayLineLock)
 			{
-				int delNum = 0;
 				int num = argNum;
 				while (delNum < num)
 				{
@@ -185,13 +251,16 @@ namespace MinorShift.Emuera.GameView
 					if (line.IsLogicalLine)
 					{
 						delNum++;
-						logicalLineCount--;
+						if (line.IsLineEnd)
+							logicalLineCount--;
 					}
 				}
 				if (lineNo < 0)
 					lineNo += int.MaxValue;
 				lastDrawnLineNo = -1;
 			}
+			if (delNum > 0)
+				MarkDisplayRewriteInProgress();
 			//RefreshStrings(true);
 		}
 
@@ -361,16 +430,27 @@ namespace MinorShift.Emuera.GameView
 		}
 
 		
-		public void PrintImg(string str)
-		{
-			printBuffer.Append(new ConsoleImagePart(str, null, 0, 0, 0));
-		}
+			public void PrintImg(string str)
+			{
+				printBuffer.Append(new ConsoleImagePart(str, null, 0, 0, 0));
+			}
 
-		public void PrintShape(string type, int[] param)
-		{
-			ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
-			printBuffer.Append(part);
-		}
+			public void PrintImg(string name, string buttonName, string mappingName, MixedNum height, MixedNum width, MixedNum ypos)
+			{
+				printBuffer.Append(new ConsoleImagePart(name, buttonName, mappingName, height, width, ypos));
+			}
+
+			public void PrintShape(string type, int[] param)
+			{
+				ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
+				printBuffer.Append(part);
+			}
+
+			public void PrintShape(string type, MixedNum[] param)
+			{
+				ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
+				printBuffer.Append(part);
+			}
 
 		public void PrintHtml(string str)
 		{
@@ -395,7 +475,9 @@ namespace MinorShift.Emuera.GameView
 					ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
 					addRangeDisplayLine(dispList);
 				}
-				addRangeDisplayLine(HtmlManager.Html2DisplayLine(str, stringMeasure, this));
+				ConsoleDisplayLine[] htmlLines = HtmlManager.Html2DisplayLine(str, stringMeasure, this);
+				applyCurrentLineMetadata(htmlLines);
+				addRangeDisplayLine(htmlLines);
 			}
 			RefreshStrings(false);
 		}
@@ -417,17 +499,21 @@ namespace MinorShift.Emuera.GameView
 			int contentWidth = 0;
 			foreach (ConsoleButtonString button in buttons)
 			{
+				if (button == null)
+					continue;
 				button.CalcWidth(stringMeasure, 0);
 				contentWidth += Math.Max(0, button.Width);
 			}
 
-			int padPx = cellWidthPx - contentWidth;
-			if (padPx > 0 && alignmentRight)
-				appendHtmlCellSpace(padPx);
-			foreach (ConsoleButtonString button in buttons)
-				printBuffer.AppendButton(button);
-			if (padPx > 0 && !alignmentRight)
-				appendHtmlCellSpace(padPx);
+			appendPrintCCell(contentWidth, cellWidthPx, alignmentRight, () =>
+			{
+				foreach (ConsoleButtonString button in buttons)
+				{
+					if (button == null)
+						continue;
+					printBuffer.AppendButton(button);
+				}
+			});
 		}
 
 		private void appendHtmlCellSpace(int width)
@@ -441,14 +527,20 @@ namespace MinorShift.Emuera.GameView
 		}
 
 		private int printCWidth = -1;
-		private int printCWidthL = -1;
-		private int printCWidthL2 = -1;
+		// PRINTC/PRINTBUTTONC 在 Godot 侧按像素宽度分栏，避免全半角混排时列宽漂移。
+		// 这里单独跟踪缓冲中由 PRINTC 累积的宽度，因为 force_button 路径的按钮宽度要到 Flush 前才会补齐。
+		private int printCCurrentLinePx = 0;
 		public void PrintC(string str, bool alignmentRight)
 		{
 			if (string.IsNullOrEmpty(str))
 				return;
 
-			printBuffer.Append(CreateTypeCString(str, alignmentRight), Style, true);
+			if (printCWidth == -1)
+				calcPrintCWidth(stringMeasure);
+
+			Font font = Config.Font;
+			int contentWidth = stringMeasure.GetDisplayLength(str, font);
+			appendPrintCCell(contentWidth, printCWidth, alignmentRight, () => printBuffer.Append(str, Style, true));
 		}
 
 		private void calcPrintCWidth(StringMeasure stringMeasure)
@@ -456,59 +548,58 @@ namespace MinorShift.Emuera.GameView
 			string str = new string(' ', Config.PrintCLength);
 			Font font = Config.Font;
 			printCWidth = stringMeasure.GetDisplayLength(str, font);
-
-			str += " ";
-			printCWidthL = stringMeasure.GetDisplayLength(str, font);
-
-			str += " ";
-			printCWidthL2 = stringMeasure.GetDisplayLength(str, font);
 		}
 
-		private string CreateTypeCString(string str, bool alignmentRight)
+		private void appendPrintCCell(int contentWidth, int cellWidth, bool alignmentRight, Action appendContent)
 		{
-			if (printCWidth == -1)
-				calcPrintCWidth(stringMeasure);
-			int length = 0;
-			int width = 0;
-            if(str != null)
-                //length = Config.Encode.GetByteCount(str);
-                length = uEmuera.Utils.GetByteCount(str);
-            int printcLength = Config.PrintCLength;
-			Font font = null;
-			try
+			if (appendContent == null)
+				return;
+
+			int currentPx = getPrintCCurrentLinePx();
+			int maxLineWidth = Config.DrawableWidth;
+			bool fullColumnFits = currentPx + cellWidth <= maxLineWidth;
+			bool contentFits = currentPx + contentWidth <= maxLineWidth;
+
+			if (currentPx > 0 && !contentFits)
 			{
-				font = new Font(Style.Fontname, Config.Font.Size, Style.FontStyle, GraphicsUnit.Pixel);
-			}
-			catch
-			{
-				return str;
+				flushPrintBufferForPrintC();
+				currentPx = 0;
+				fullColumnFits = true;
 			}
 
-			if ((alignmentRight) && (length < printcLength))
+			int padPx = cellWidth - contentWidth;
+			if (alignmentRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			appendContent();
+
+			if (!alignmentRight && padPx > 0 && fullColumnFits)
+				appendHtmlCellSpace(padPx);
+
+			// HTML_PRINTC/PRINTC 可以混用。列累计以本 helper 为准，CurrentLineWidth
+			// 只作为外部按钮已经计算过宽度时的下限，避免结算表格后续列回到错误的起点。
+			printCCurrentLinePx = fullColumnFits ? currentPx + cellWidth : maxLineWidth;
+		}
+
+		private int getPrintCCurrentLinePx()
+		{
+			if (printBuffer.IsEmpty)
 			{
-				str = new string(' ', printcLength - length) + str;
-				width = stringMeasure.GetDisplayLength(str, font);
-				while (width > printCWidth)
-				{
-					if (str[0] != ' ')
-						break;
-					str = str.Remove(0, 1);
-					width = stringMeasure.GetDisplayLength(str, font);
-				}
+				printCCurrentLinePx = 0;
+				return 0;
 			}
-			else if ((!alignmentRight) && (length < printcLength + 1))
-			{
-				str += new string(' ', printcLength + 1 - length);
-				width = stringMeasure.GetDisplayLength(str, font);
-				while (width > printCWidthL)
-				{
-					if (str[str.Length - 1] != ' ')
-						break;
-					str = str.Remove(str.Length - 1, 1);
-					width = stringMeasure.GetDisplayLength(str, font);
-				}
-			}
-			return str;
+
+			int actualWidth = printBuffer.CurrentLineWidth;
+			if (actualWidth > printCCurrentLinePx)
+				printCCurrentLinePx = actualWidth;
+			return printCCurrentLinePx;
+		}
+
+		private void flushPrintBufferForPrintC()
+		{
+			ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
+			addRangeDisplayLine(dispList);
+			printCCurrentLinePx = 0;
 		}
 
 		internal void PrintButton(string str, string p)
@@ -527,13 +618,25 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (string.IsNullOrEmpty(str))
 				return;
-			printBuffer.AppendButton(CreateTypeCString(str, isRight), Style, p);
+
+			if (printCWidth == -1)
+				calcPrintCWidth(stringMeasure);
+
+			Font font = Config.Font;
+			int contentWidth = stringMeasure.GetDisplayLength(str, font);
+			appendPrintCCell(contentWidth, printCWidth, isRight, () => printBuffer.AppendButton(str, Style, p));
 		}
 		internal void PrintButtonC(string str, long p, bool isRight)
 		{
 			if (string.IsNullOrEmpty(str))
 				return;
-			printBuffer.AppendButton(CreateTypeCString(str, isRight), Style, p);
+
+			if (printCWidth == -1)
+				calcPrintCWidth(stringMeasure);
+
+			Font font = Config.Font;
+			int contentWidth = stringMeasure.GetDisplayLength(str, font);
+			appendPrintCCell(contentWidth, printCWidth, isRight, () => printBuffer.AppendButton(str, Style, p));
 		}
 
 		internal void PrintPlain(string str)
@@ -587,6 +690,7 @@ namespace MinorShift.Emuera.GameView
 			ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, force_temporary);
 			//ConsoleDisplayLine[] dispList = printBuffer.Flush(stringMeasure, temporary | force_temporary);
 			addRangeDisplayLine(dispList);
+			printCCurrentLinePx = 0;
 			//1819描画命令は分離
 			//RefreshStrings(false);
 		}
@@ -683,7 +787,7 @@ namespace MinorShift.Emuera.GameView
 					}
 					foreach (ConsoleDisplayLine line in lines)
 				{
-					writer.WriteLine(line.ToString());
+					writer.WriteLine(line.ToLogString());
 				}
 			}
 			catch (Exception)
@@ -711,13 +815,16 @@ namespace MinorShift.Emuera.GameView
 			if (!baseDir.EndsWith(Path.DirectorySeparatorChar.ToString()) && !baseDir.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
 				baseDir += Path.DirectorySeparatorChar;
 
-			if (string.IsNullOrEmpty(filename))
+			bool runnerDefaultLogRedirected = Program.TryResolveM0RunnerDefaultOutputLogPath(filename, out string runnerDefaultLogPath);
+			if (runnerDefaultLogRedirected)
+				filename = runnerDefaultLogPath;
+			else if (string.IsNullOrEmpty(filename))
 				filename = Path.Combine(baseDir, "emuera.log");
 			else if (!Path.IsPathRooted(filename))
 				filename = Path.Combine(baseDir, filename);
 			filename = Path.GetFullPath(filename);
 
-            if (!filename.StartsWith(baseDir, StringComparison.CurrentCultureIgnoreCase))
+			if (!runnerDefaultLogRedirected && !filename.StartsWith(baseDir, StringComparison.CurrentCultureIgnoreCase))
             {
                 MessageBox.Show("ログファイルは実行ファイル以下のディレクトリにのみ保存できます", "ログ出力失敗");
                 return false;
@@ -727,7 +834,10 @@ namespace MinorShift.Emuera.GameView
 			{
 				if (window.Created)
 				{
-					PrintSystemLine("※※※ログファイルを" + filename + "に出力しました※※※");
+					string displayFilename = runnerDefaultLogRedirected
+						? Path.Combine(baseDir, "emuera.log")
+						: filename;
+					PrintSystemLine("※※※ログファイルを" + displayFilename + "に出力しました※※※");
 					RefreshStrings(true);
 				}
 				return true;

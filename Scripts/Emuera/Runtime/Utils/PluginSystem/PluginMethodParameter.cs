@@ -16,6 +16,13 @@ namespace MinorShift.Emuera.Runtime.Utils.PluginSystem
 			intValue = initialValue;
 		}
 
+		public PluginMethodParameter(double initialValue)
+		{
+			isString = false;
+			isFloat = true;
+			floatValue = initialValue;
+		}
+
 		public bool isString;
 		public bool isFloat;
 		public string strValue;
@@ -29,6 +36,8 @@ namespace MinorShift.Emuera.Runtime.Utils.PluginSystem
 		{
 			if (term.IsString)
 				return new PluginMethodParameter(term.GetStrValue(exm));
+			if (term.IsFloat)
+				return new PluginMethodParameter(term.GetFloatValue(exm));
 			return new PluginMethodParameter(term.GetIntValue(exm));
 		}
 	}

@@ -12,6 +12,7 @@ namespace MinorShift.Emuera.GameData.Variable
         __CAN_FORBID__ = 0x00010000,
 		__INTEGER__ = 0x00020000,
 		__STRING__ = 0x00040000,
+		__FLOAT__ = 0x00200000,
 		__ARRAY_1D__ = 0x00080000,
 		__CHARACTER_DATA__ = 0x00100000,//第一引数を省略可能。TARGETで補う
 		__UNCHANGEABLE__ = 0x00400000,//変更不可属性
@@ -42,7 +43,7 @@ namespace MinorShift.Emuera.GameData.Variable
 		EJAC = 0x08 | __INTEGER__ | __ARRAY_1D__ | __CAN_FORBID__,//射精チェックのための一時変数。
 		DOWN = 0x09 | __INTEGER__ | __ARRAY_1D__ | __CAN_FORBID__,//調教中パラメータの減少値。indexはPALAM.CSVのもの
 		RESULT = 0x0A | __INTEGER__ | __ARRAY_1D__,//戻り値(数値)
-		COUNT = 0x0B | __INTEGER__ | __ARRAY_1D__,//繰り返しカウンター
+		COUNT = 0x0B | __INTEGER__ | __ARRAY_1D__ | __CAN_FORBID__,//繰り返しカウンター
 		TARGET = 0x0C | __INTEGER__ | __ARRAY_1D__,//調教中のキャラの"登録番号"
 		ASSI = 0x0D | __INTEGER__ | __ARRAY_1D__ | __CAN_FORBID__,//助手のキャラの"登録番号"
 		MASTER = 0x0E | __INTEGER__ | __ARRAY_1D__ | __CAN_FORBID__,//主人公のキャラの"登録番号"。通常0
@@ -98,8 +99,11 @@ namespace MinorShift.Emuera.GameData.Variable
 		ARG = 0x3E | __INTEGER__ | __ARRAY_1D__ | __LOCAL__ | __EXTENDED__ | __CAN_FORBID__,//関数の引数用
 		GLOBAL = 0x3F | __INTEGER__ | __ARRAY_1D__ | __GLOBAL__ | __EXTENDED__ | __CAN_FORBID__,//グローバル数値型変数
 		RANDDATA = 0x40 | __INTEGER__ | __ARRAY_1D__ | __SAVE_EXTENDED__ | __EXTENDED__,//グローバル数値型変数
-		ARGF = 0x41 | __INTEGER__ | __ARRAY_1D__ | __LOCAL__ | __EXTENDED__ | __CAN_FORBID__,//Snake互換: 浮動小数引数を整数互換で扱う
-		__COUNT_INTEGER_ARRAY__ = 0x42,
+		LOCALF = 0x00 | __FLOAT__ | __ARRAY_1D__ | __LOCAL__ | __EXTENDED__ | __CAN_FORBID__,
+		ARGF = 0x01 | __FLOAT__ | __ARRAY_1D__ | __LOCAL__ | __EXTENDED__ | __CAN_FORBID__,
+		RESULTF = 0x00 | __FLOAT__ | __EXTENDED__,
+		__COUNT_INTEGER_ARRAY__ = 0x41,
+		__COUNT_FLOAT_ARRAY__ = 0x02,
 
 
 		SAVESTR = 0x00 | __STRING__ | __ARRAY_1D__ | __CAN_FORBID__,//文字列データ。保存される
@@ -228,8 +232,11 @@ namespace MinorShift.Emuera.GameData.Variable
 		SAVESTRNAME = 0x17 | __STRING__ | __ARRAY_1D__ | __UNCHANGEABLE__ | __EXTENDED__ | __CONSTANT__ | __CAN_FORBID__,
 		GLOBALNAME = 0x18 | __STRING__ | __ARRAY_1D__ | __UNCHANGEABLE__ | __EXTENDED__ | __CONSTANT__ | __CAN_FORBID__,
 		GLOBALSNAME = 0x19 | __STRING__ | __ARRAY_1D__ | __UNCHANGEABLE__ | __EXTENDED__ | __CONSTANT__ | __CAN_FORBID__,
+		DAYNAME = 0x1A | __STRING__ | __ARRAY_1D__ | __UNCHANGEABLE__ | __EXTENDED__ | __CONSTANT__ | __CAN_FORBID__,
+		TIMENAME = 0x1B | __STRING__ | __ARRAY_1D__ | __UNCHANGEABLE__ | __EXTENDED__ | __CONSTANT__ | __CAN_FORBID__,
+		MONEYNAME = 0x1C | __STRING__ | __ARRAY_1D__ | __UNCHANGEABLE__ | __EXTENDED__ | __CONSTANT__ | __CAN_FORBID__,
 
-        __COUNT_CSV_STRING_ARRAY_1D__ = 0x1A,
+        __COUNT_CSV_STRING_ARRAY_1D__ = 0x1D,
 
 
 		GAMEBASE_AUTHER = 0x04 | __STRING__ | __CALC__ | __UNCHANGEABLE__ | __EXTENDED__,//文字列型。作者。綴りを間違えていたが互換性のため残す。
@@ -244,6 +251,8 @@ namespace MinorShift.Emuera.GameData.Variable
         MONEYLABEL = 0x08 | __STRING__ | __CALC__ | __UNCHANGEABLE__ | __EXTENDED__,//お金のラベル
         DRAWLINESTR = 0x09 | __STRING__ | __CALC__ | __UNCHANGEABLE__ | __EXTENDED__,//DRAWLINEの描画文字列
         EMUERA_VERSION = 0x0A | __STRING__ | __CALC__ | __UNCHANGEABLE__ | __EXTENDED__, //Emeuraのバージョン
+		GAMEBASE_URL = 0x0B | __STRING__ | __CALC__ | __UNCHANGEABLE__ | __EXTENDED__,
+		GAMEBASE_VERSIONNAME = 0x0C | __STRING__ | __CALC__ | __UNCHANGEABLE__ | __EXTENDED__,
 
 		LASTLOAD_TEXT = 0x05 | __STRING__ | __CALC__ | __UNCHANGEABLE__ | __EXTENDED__,//数値型。
 
@@ -270,10 +279,13 @@ namespace MinorShift.Emuera.GameData.Variable
 		//CVARS3D = 0xFC | __STRING__ | __ARRAY_3D__ | __EXTENDED__,//ユーザー定義変数
 		REF = 0xFD | __INTEGER__ | __ARRAY_1D__ | __EXTENDED__,//参照型
 		REFS = 0xFD | __STRING__ | __ARRAY_1D__ | __EXTENDED__,
+		REFF = 0xFD | __FLOAT__ | __ARRAY_1D__ | __EXTENDED__,
 		REF2D = 0xFD | __INTEGER__ | __ARRAY_2D__ | __EXTENDED__,
 		REFS2D = 0xFD | __STRING__ | __ARRAY_2D__ | __EXTENDED__,
+		REFF2D = 0xFD | __FLOAT__ | __ARRAY_2D__ | __EXTENDED__,
 		REF3D = 0xFD | __INTEGER__ | __ARRAY_3D__ | __EXTENDED__,
 		REFS3D = 0xFD | __STRING__ | __ARRAY_3D__ | __EXTENDED__,
+		REFF3D = 0xFD | __FLOAT__ | __ARRAY_3D__ | __EXTENDED__,
 		VAR = 0xFE | __INTEGER__ | __ARRAY_1D__ | __EXTENDED__,//ユーザー定義変数 1808 プライベート変数と広域変数を区別しない
 		VARS = 0xFE | __STRING__ | __ARRAY_1D__ | __EXTENDED__,//ユーザー定義変数
 		VAR2D = 0xFE | __INTEGER__ | __ARRAY_2D__ | __EXTENDED__,//ユーザー定義変数

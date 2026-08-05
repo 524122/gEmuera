@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.dialect-ownership-evidence",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-07",
+  "stableCurrentModuleCandidates": ["game.snake", "gemuera.v24"],
+  "upstream": {
+    "instructionSourceSuffix": "Emuera/Runtime/Script/Statements/FunctionIdentifier.cs",
+    "expressionSourceSuffix": "Emuera/Runtime/Script/Statements/Function/Creator.cs",
+    "instructionSourceSha256": "543e793a29a18b2c8fc69555b6f0fcde83e39663714211addb1317101ee68c71",
+    "expressionSourceSha256": "74fbf32cd641962f0fd38eb17fd56bae3c01dc13f3119e76ae3ecb04babd29f1",
+    "expectedInstructionCount": 303,
+    "expectedExpressionFunctionCount": 266
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.dialect-module-visibility",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-09",
+  "sourceRegistrySnapshotWorkPackage": "M0-DIA-02",
+  "sourceOwnershipEvidenceWorkPackage": "M0-DIA-07",
+  "sourceNameLookupContractWorkPackage": "M0-DIA-08",
+  "expected": {
+    "unresolvedOwnershipCount": 131,
+    "unresolvedInstructionCount": 14,
+    "unresolvedExpressionFunctionCount": 117,
+    "v24VisibleCandidateCount": 123,
+    "snakeOnlyCandidateCount": 8,
+    "missingSnakeProjectionCount": 0,
+    "v24VisibleInstructionCount": 8,
+    "snakeOnlyInstructionCount": 6,
+    "v24VisibleExpressionFunctionCount": 115,
+    "snakeOnlyExpressionFunctionCount": 2
+  }
+}

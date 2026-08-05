@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using MinorShift.Emuera.GameProc;
+using MinorShift.Emuera.GameData;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.Sub;
 
@@ -11,6 +12,10 @@ namespace MinorShift.Emuera.GameData.Function
 	{
 		protected SuperUserDefinedMethodTerm(Type returnType)
 			: base(returnType)
+		{
+		}
+		protected SuperUserDefinedMethodTerm(EraType returnType)
+			: base(EraTypeHelper.ToClrType(returnType))
 		{
 		}
 		public abstract UserDefinedFunctionArgument Argument { get;}
@@ -29,13 +34,22 @@ namespace MinorShift.Emuera.GameData.Function
 				return "";
 			return term.Str;
 		}
+		public override double GetFloatValue(ExpressionMediator exm)
+		{
+			SingleTerm term = exm.Process.GetValue(this);
+			if (term == null)
+				return 0.0;
+			return term.GetFloatValue(exm);
+		}
 		public override SingleTerm GetValue(ExpressionMediator exm)
 		{
 			SingleTerm term = exm.Process.GetValue(this);
 			if (term == null)
 			{
-				if (GetOperandType() == typeof(Int64))
+				if (GetEraType() == EraType.Integer)
 					return new SingleTerm(0);
+				else if (GetEraType() == EraType.Float)
+					return new SingleTerm(0.0);
 				else
 					return new SingleTerm("");
 			}
@@ -58,7 +72,7 @@ namespace MinorShift.Emuera.GameData.Function
 			return new UserDefinedMethodTerm(arg, call.TopLabel.MethodType, call);
 		}
 
-		private UserDefinedMethodTerm(UserDefinedFunctionArgument arg, Type returnType, CalledFunction call)
+		private UserDefinedMethodTerm(UserDefinedFunctionArgument arg, EraType returnType, CalledFunction call)
 			: base(returnType)
 		{
 			argment = arg;
@@ -117,7 +131,8 @@ namespace MinorShift.Emuera.GameData.Function
 			{
 				if (srcArgs[i] == null)
 					continue;
-				if ((reffunc.ArgTypeList[i] & UserDifinedFunctionDataArgType.__Ref) == UserDifinedFunctionDataArgType.__Ref)
+				UserDifinedFunctionDataArgType argType = reffunc.ArgTypeList[Math.Min(i, reffunc.ArgTypeList.Length - 1)];
+				if ((argType & UserDifinedFunctionDataArgType.__Ref) == UserDifinedFunctionDataArgType.__Ref)
 					srcArgs[i].Restructure(exm);
 				else
 					srcArgs[i] = srcArgs[i].Restructure(exm);

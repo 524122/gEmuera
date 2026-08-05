@@ -1,0 +1,141 @@
+{
+    "schemaVersion":  "1.0.0",
+    "workPackage":  "M0-DIA-16",
+    "generatedAtUtc":  "2026-07-15T13:58:37.3987712Z",
+    "executionStatus":  "InProgress",
+    "gateStatus":  "Blocked",
+    "blockerCode":  "EvidenceMissing",
+    "result":  "Partial",
+    "sourceCompatibilityPackHash":  "e9ffd09462b7bd4ecf2340d36850604533102b0e5c5bb659a29fe06f88438c46",
+    "sourcePolicySurfaceHash":  "2213bf38212c06c6d4d9ffd1cb12c095f62ceaa17b544d651cea915e27c9e012",
+    "catalogId":  "gemuera.m0.dialect-module-composition",
+    "catalogVersion":  "1.0.0",
+    "catalogHash":  "7421c53d7a3c89eff7a9cc880c85e3e0c4aefb4459d0ded2a3f1a6c4b7cce835",
+    "moduleCompositionSetHash":  "2b7361ad3954632a8235f981dde009f4caebed1b612588a2b629e6df432dea75",
+    "compositionCounts":  {
+                              "moduleDescriptorCount":  2,
+                              "dependencyEdgeCount":  1,
+                              "portDeclarationCount":  10,
+                              "profileClosureCount":  2
+                          },
+    "currentCompatibilityPackExposure":  {
+                                             "status":  "NoRuntimeCapabilitiesDeclared",
+                                             "allowedCapabilityIds":  [
+
+                                                                      ],
+                                             "reason":  "DIA-12 static CompatibilityPacks intentionally declare no runtime capability ids."
+                                         },
+    "modules":  [
+                    {
+                        "moduleId":  "gemuera.v24",
+                        "moduleVersion":  "1.0.0",
+                        "moduleApiVersion":  1,
+                        "dependencyModuleIds":  [
+
+                                                ],
+                        "declaredPortTypeIds":  [
+
+                                                ],
+                        "sourceBehaviorKeyIds":  [
+
+                                                 ],
+                        "descriptorStatus":  "StaticCandidate",
+                        "runtimeStatus":  "NotImplemented",
+                        "distributionEligibility":  "Blocked"
+                    },
+                    {
+                        "moduleId":  "game.snake",
+                        "moduleVersion":  "1.0.0",
+                        "moduleApiVersion":  1,
+                        "dependencyModuleIds":  [
+                                                    "gemuera.v24"
+                                                ],
+                        "declaredPortTypeIds":  [
+                                                    "IDisplayRefreshTimingPolicy",
+                                                    "IEffectiveDisplayConfigurationProjection",
+                                                    "IExpressionFunctionCatalog",
+                                                    "IExtraArgumentPolicy",
+                                                    "IInstructionCatalogBuilder",
+                                                    "IParserDiagnosticsSinkPolicy",
+                                                    "IPrivateArgumentShapePolicy",
+                                                    "IResourceLazyIndexPolicy",
+                                                    "IStartupFaultPolicy",
+                                                    "IUserVariableResolutionPolicy"
+                                                ],
+                        "sourceBehaviorKeyIds":  [
+                                                     "call.extra-arguments.v1",
+                                                     "call.private-argument-shape.v1",
+                                                     "display.history-capacity.v1",
+                                                     "display.refresh-timing.v1",
+                                                     "function.snake-fallen-state.v1",
+                                                     "instruction.scoped-variable-registration.v1",
+                                                     "parser.startup-fault.v1",
+                                                     "parser.user-variable-resolution.v1",
+                                                     "parser.warning-routing.v1",
+                                                     "resource.lazy-index.v1"
+                                                 ],
+                        "descriptorStatus":  "StaticCandidate",
+                        "runtimeStatus":  "NotImplemented",
+                        "distributionEligibility":  "Blocked"
+                    }
+                ],
+    "profileClosures":  [
+                            {
+                                "profileId":  "snake",
+                                "packId":  "gemuera.compat.snake.static",
+                                "legacyCoreProfileEnum":  "Snake",
+                                "selectedModuleIds":  [
+                                                          "game.snake",
+                                                          "gemuera.v24"
+                                                      ],
+                                "resolvedModuleIds":  [
+                                                          "gemuera.v24",
+                                                          "game.snake"
+                                                      ],
+                                "profileStatus":  "StaticCandidate",
+                                "runtimeStatus":  "NotImplemented"
+                            },
+                            {
+                                "profileId":  "v24pure",
+                                "packId":  "gemuera.compat.v24pure.static",
+                                "legacyCoreProfileEnum":  "V24Pure",
+                                "selectedModuleIds":  [
+                                                          "gemuera.v24"
+                                                      ],
+                                "resolvedModuleIds":  [
+                                                          "gemuera.v24"
+                                                      ],
+                                "profileStatus":  "StaticCandidate",
+                                "runtimeStatus":  "NotImplemented"
+                            }
+                        ],
+    "currentRuntimeIsolation":  {
+                                    "status":  "Failed",
+                                    "reason":  "DIA-16 only models static module composition; legacy profile and registries remain process-wide mutable state."
+                                },
+    "parserVmConsumption":  {
+                                "status":  "NotConsumed",
+                                "reason":  "DIA-16 is an offline module composition report and is not read by the legacy Parser or VM."
+                            },
+    "compatibilityPlanRuntime":  {
+                                     "status":  "NotImplemented",
+                                     "reason":  "DIA-16 does not create a runtime CompatibilityPlan, DialectPlan, LegacySessionFacade, feature flag or frozen registry."
+                                 },
+    "resolverRuntime":  {
+                            "status":  "NotImplemented",
+                            "reason":  "DIA-16 does not inspect game content, parse a manifest, pin a user choice or resolve a runtime candidate."
+                        },
+    "runtimeModuleCatalog":  {
+                                 "status":  "NotImplemented",
+                                 "reason":  "DIA-16 does not load an assembly, reflect a type, register a runtime module or bind a port implementation."
+                             },
+    "m1Eligibility":  {
+                          "status":  "Blocked",
+                          "reason":  "Static module descriptors do not establish session isolation, generation guards, candidate commit or runtime capability binding."
+                      },
+    "uncovered":  [
+                      "DIA-16 proves only a source-backed static descriptor graph. It does not prove module behavior, dependency version semantics, port implementation, conflict resolution, save compatibility or distribution safety.",
+                      "The profile closures are derived from DIA-12 static packs only; they do not inspect content, parse a game manifest, calculate a fingerprint, resolve a user pin or select a runtime profile.",
+                      "No C# module assembly, reflection scan, runtime catalog, resolver, CompatibilityPlan, LegacySessionFacade, D2 frozen registry, Parser/VM consumption, game run, APK or device evidence is introduced."
+                  ]
+}

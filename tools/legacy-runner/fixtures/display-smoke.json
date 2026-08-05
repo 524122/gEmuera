@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0.0",
+  "gameRoot": "",
+  "profile": "v24pure",
+  "outputDirectory": "",
+  "maxRuntimeMs": 60000,
+  "initialWaitTimeoutMs": 45000,
+  "settleFrames": 3,
+  "displaySettleFrames": 2,
+  "displayBackend": "canvas",
+  "captureScreenshot": true,
+  "viewportWidth": 1280,
+  "viewportHeight": 720,
+  "maxDisplayBytes": 16777216,
+  "traceEnabled": true,
+  "maxTraceEvents": 250000,
+  "inputs": []
+}

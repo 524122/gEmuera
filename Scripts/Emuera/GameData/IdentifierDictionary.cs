@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Text;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameData;
@@ -8,10 +9,10 @@ using MinorShift.Emuera.GameData.Function;
 using MinorShift.Emuera.GameProc;
 using MinorShift.Emuera.GameView;
 using System.IO;
-using System.Text.RegularExpressions;
 using MinorShift.Emuera.GameProc.Function;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift._Library;
+using GEmuera.Core.Compatibility;
 
 namespace MinorShift.Emuera
 {
@@ -40,9 +41,6 @@ namespace MinorShift.Emuera
 			'\\', '@', '$', '#', '?', ';', '\'',
 			//'_'はOK
 		};
-		readonly static Regex regexCom = new Regex("^COM[0-9]+$");
-		readonly static Regex regexComAble = new Regex("^COM_ABLE[0-9]+$");
-		readonly static Regex regexAblup = new Regex("^ABLUP[0-9]+$");
 		#region static
 		
 		public static bool IsEventLabelName(string labelName)
@@ -58,6 +56,8 @@ namespace MinorShift.Emuera
 				case "EVENTCOMEND":
 				case "EVENTEND":
 				case "EVENTLOAD":
+				case "BEFORE_THROW":
+				case "BEFORE_ERROR":
 					return true;
 			}
 			return false;
@@ -94,17 +94,26 @@ namespace MinorShift.Emuera
 					return true;
 			}
 
-			if (labelName.StartsWith("COM"))
-			{
-				if (regexCom.IsMatch(labelName))
-					return true;
-				if (regexComAble.IsMatch(labelName))
-					return true;
-			}
-			if (labelName.StartsWith("ABLUP"))
-				if (regexAblup.IsMatch(labelName))
-					return true;
+			if (IsPrefixedAsciiNumber(labelName, "COM"))
+				return true;
+			if (IsPrefixedAsciiNumber(labelName, "COM_ABLE"))
+				return true;
+			if (IsPrefixedAsciiNumber(labelName, "ABLUP"))
+				return true;
 			return false;
+		}
+
+		private static bool IsPrefixedAsciiNumber(string value, string prefix)
+		{
+			if (!value.StartsWith(prefix, StringComparison.Ordinal) || value.Length == prefix.Length)
+				return false;
+			for (int i = prefix.Length; i < value.Length; i++)
+			{
+				char c = value[i];
+				if (c < '0' || c > '9')
+					return false;
+			}
+			return true;
 		}
 		#endregion
 
@@ -118,8 +127,12 @@ namespace MinorShift.Emuera
 		VariableData varData;
 		Dictionary<string, VariableToken> varTokenDic;
 		Dictionary<string, VariableLocal> localvarTokenDic;
-		Dictionary<string, FunctionIdentifier> instructionDic;
-		Dictionary<string, FunctionMethod> methodDic;
+		IReadOnlyDictionary<string, FunctionIdentifier> instructionDic;
+		IReadOnlyDictionary<string, FunctionMethod> methodDic;
+		IReadOnlyDictionary<string, FunctionIdentifier> compatibilityInstructionDic;
+		IReadOnlyDictionary<string, FunctionMethod> compatibilityMethodDic;
+		IReadOnlyList<string> legacyInstructionNames;
+		IReadOnlyList<string> legacyFunctionNames;
 		Dictionary<string, UserDefinedRefMethod> refmethodDic;
 		public List<UserDefinedCharaVariableToken> CharaDimList = new List<UserDefinedCharaVariableToken>();
 		#region initialize
@@ -144,13 +157,17 @@ namespace MinorShift.Emuera
 			nameDic.Add("__DEBUG__", DefinedNameType.Reserved);
 			nameDic.Add("__SKIP__", DefinedNameType.Reserved);
 			nameDic.Add("_", DefinedNameType.Reserved);
-			if (Program.IsSnakeProfile)
-				nameDic.Add("VARIADIC", DefinedNameType.Reserved);
-			instructionDic = FunctionIdentifier.GetInstructionNameDic();
+			nameDic.Add("VARIADIC", DefinedNameType.Reserved);
+			var compatibility = Program.Compatibility;
+			instructionDic = FunctionIdentifier.GetInstructionNameDic(compatibility);
 
 			varTokenDic = varData.GetVarTokenDicClone();
 			localvarTokenDic = varData.GetLocalvarTokenDic();
-			methodDic = FunctionMethodCreator.GetMethodList();
+			methodDic = FunctionMethodCreator.GetMethodList(compatibility);
+			legacyInstructionNames = new ReadOnlyCollection<string>(
+				new List<string>(instructionDic.Keys));
+			legacyFunctionNames = new ReadOnlyCollection<string>(
+				new List<string>(methodDic.Keys));
 			refmethodDic = new Dictionary<string, UserDefinedRefMethod>();
 
 			foreach(KeyValuePair<string, FunctionMethod> pair in methodDic)
@@ -293,10 +310,21 @@ namespace MinorShift.Emuera
 						warnLevel = 2;
 						break;
 					case DefinedNameType.SystemInstrument:
+						if (IsCompatibilityMethodVisible(varName))
+						{
+							errMes = "変数名" + varName + "はEmueraの式中関数名として使われています";
+							warnLevel = 1;
+						}
+						else
+						{
+							//代入文が使えなくなるために命令名との衝突は致命的。
+							errMes = "変数名" + varName + "はEmueraの命令名として使われています";
+							warnLevel = 2;
+						}
+						break;
 					case DefinedNameType.SystemMethod:
-						//代入文が使えなくなるために命令名との衝突は致命的。
-						errMes = "変数名" + varName + "はEmueraの命令名として使われています";
-						warnLevel = 2;
+						errMes = "変数名" + varName + "はEmueraの式中関数名として使われています";
+						warnLevel = 1;
 						break;
 					case DefinedNameType.SystemVariable:
 						errMes = "変数名" + varName + "はEmueraの変数名として使われています";
@@ -393,11 +421,21 @@ namespace MinorShift.Emuera
 						warnLevel = 2;
 						return;
 					case DefinedNameType.SystemInstrument:
+						if (IsCompatibilityMethodVisible(varName))
+						{
+							break;
+						}
+						else
+						{
+							//代入文が使えなくなるために命令名との衝突は致命的。
+							// ただしプライベート変数の場合はスコープが限定的なので警告レベル1にして変数を作成する。
+							// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応。
+							errMes = "変数名" + varName + "はEmueraの命令名として使われています";
+							warnLevel = 1;
+							break;
+						}
 					case DefinedNameType.SystemMethod:
-						//代入文が使えなくなるために命令名との衝突は致命的。
-						errMes = "変数名" + varName + "はEmueraの命令名として使われています";
-						warnLevel = 2;
-						return;
+						break;
 					case DefinedNameType.SystemVariable:
 						//システム変数の上書きは不可
                         errMes = "変数名" + varName + "はEmueraの変数名として使われています";
@@ -470,6 +508,20 @@ namespace MinorShift.Emuera
 			get { return macroDic.Keys; }
 		}
 
+		public IEnumerable<string> VarKeys
+		{
+			get
+			{
+				List<string> list = new List<string>();
+				foreach (var pair in nameDic)
+				{
+					if (pair.Value == DefinedNameType.UserGlobalVariable)
+						list.Add(pair.Key);
+				}
+				return list;
+			}
+		}
+
 		public VariableToken GetVariableToken(string key, string subKey, bool allowPrivate)
 		{
 			VariableToken ret = null;
@@ -537,21 +589,56 @@ namespace MinorShift.Emuera
 
 		public FunctionIdentifier GetFunctionIdentifier(string str)
 		{
-			string key = str;
-            if (string.IsNullOrEmpty(key))
+            if (string.IsNullOrEmpty(str))
                 return null;
-            if (Config.ICFunction)
-				key = key.ToUpper();
-			if (instructionDic.TryGetValue(key, out FunctionIdentifier ret))
+			var lookup = compatibilityInstructionDic ?? instructionDic;
+			if (lookup.TryGetValue(str, out FunctionIdentifier ret))
 				return ret;
 			else
 				return null;
 		}
 
+		internal IEnumerable<string> GetLegacyInstructionNames()
+		{
+			return legacyInstructionNames;
+		}
+
+		internal IEnumerable<string> GetLegacyFunctionNames()
+		{
+			return legacyFunctionNames;
+		}
+
+		/// <summary>
+		/// Narrows legacy lookup to the immutable descriptor surface selected by
+		/// the startup plan. The legacy FunctionIdentifier/FunctionMethod objects
+		/// remain the behavior owners; this boundary only chooses which existing
+		/// handlers are reachable by the parser.
+		/// </summary>
+		internal void BindCompatibilityPlan(CompatibilityPlan plan)
+		{
+			if (plan == null)
+				throw new ArgumentNullException(nameof(plan));
+
+			if (plan.Dialect.Instructions.Count == 0 && plan.Dialect.Functions.Count == 0)
+			{
+				compatibilityInstructionDic = null;
+				compatibilityMethodDic = null;
+				return;
+			}
+
+			var route = CompatibilityDescriptorRoute<FunctionIdentifier, FunctionMethod>.Create(
+				plan,
+				instructionDic,
+				methodDic);
+			compatibilityInstructionDic = route.Instructions;
+			compatibilityMethodDic = route.Functions;
+		}
+
 		public List<string> GetOverloadedList(LabelDictionary labelDic)
 		{
 			List<string> list = new List<string>();
-			foreach (KeyValuePair<string, FunctionMethod> pair in methodDic)
+			var methods = compatibilityMethodDic ?? methodDic;
+			foreach (KeyValuePair<string, FunctionMethod> pair in methods)
 			{
 				FunctionLabelLine func = labelDic.GetNonEventLabel(pair.Key);
 				if (func == null)
@@ -590,6 +677,8 @@ namespace MinorShift.Emuera
                 if (refmethodDic.TryGetValue(codeStr, out ref_method))
 					return new UserDefinedRefMethodTerm(ref_method, arguments);
 				FunctionLabelLine func = labelDic.GetNonEventLabel(codeStr);
+				if (func == null && GlobalStatic.Process != null && GlobalStatic.Process.TryLazyLoadErb(codeStr))
+					func = labelDic.GetNonEventLabel(codeStr);
 				if (func != null)
 				{
 					if (userDefinedOnly && !func.IsMethod)
@@ -605,19 +694,26 @@ namespace MinorShift.Emuera
 						return ret;
 					}
 					//1.721 #FUNCTIONが定義されていない関数は組み込み関数を上書きしない方向に。 PANCTION.ERBのRANDとか。
-					if (!methodDic.ContainsKey(codeStr))
+					if (!IsCompatibilityMethodVisible(codeStr))
 						throw new CodeEE("#FUNCTIONが定義されていない関数(" + func.Position.Filename + ":" + func.Position.LineNo + "行目)を式中で呼び出そうとしました");
 				}
 			}
 			if (userDefinedOnly)
 				return null;
 			FunctionMethod method = null;
-			if (!methodDic.TryGetValue(codeStr, out method))
+			var methods = compatibilityMethodDic ?? methodDic;
+			if (!methods.TryGetValue(codeStr, out method))
 				return null;
 			string errmes = method.CheckArgumentType(codeStr, arguments);
 			if (errmes != null)
 				throw new CodeEE(errmes);
 			return new FunctionMethodTerm(method, arguments);
+		}
+
+		private bool IsCompatibilityMethodVisible(string name)
+		{
+			var methods = compatibilityMethodDic ?? methodDic;
+			return methods.ContainsKey(name);
 		}
 
 		//1756 作成中途

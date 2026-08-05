@@ -1,0 +1,100 @@
+{
+    "schemaVersion":  "1.0.0",
+    "workPackage":  "M0-DIA-12",
+    "generatedAtUtc":  "2026-07-15T13:55:24.1208975Z",
+    "executionStatus":  "InProgress",
+    "gateStatus":  "Blocked",
+    "blockerCode":  "EvidenceMissing",
+    "result":  "Partial",
+    "sourcePlanPreflightHash":  "d5cc089f073229aff0ea44436c7dfc2f559c83c0f785467921d035f0c815256b",
+    "sourceProfileSelectionHash":  "0960994b046e1160dc9bddef3bbf031a4cdaaa18f8a20674a20f5b7be3bbd71d",
+    "catalogId":  "gemuera.m0.dialect-compatibility-pack",
+    "catalogVersion":  "1.0.0",
+    "catalogHash":  "791ba06bb235fbc973680e6e185ad627ee1e39a6ca09543e5e797f0423d0e78e",
+    "compatibilityPackSetHash":  "e9ffd09462b7bd4ecf2340d36850604533102b0e5c5bb659a29fe06f88438c46",
+    "declarationPolicy":  {
+                              "compatibilityPackSchema":  "emuera.compatibility-pack/v1",
+                              "externalCodePolicy":  "BuiltInCompiledOnly",
+                              "allowedCapabilityIds":  [
+
+                                                       ],
+                              "contentBindingStatus":  "NotBound",
+                              "runtimeModuleLoading":  "NotImplemented",
+                              "runtimeResolverStatus":  "NotImplemented"
+                          },
+    "packs":  [
+                  {
+                      "packId":  "gemuera.compat.snake.static",
+                      "declarationVersion":  "1.0.0",
+                      "profileId":  "snake",
+                      "legacyCoreProfileEnum":  "Snake",
+                      "builtInModuleIds":  [
+                                               "game.snake",
+                                               "gemuera.v24"
+                                           ],
+                      "staticProjectionSupportModuleIds":  [
+                                                               "legacy.current.common",
+                                                               "legacy.current.expression"
+                                                           ],
+                      "requiredCapabilityIds":  [
+
+                                                ],
+                      "optionalCapabilityIds":  [
+
+                                                ],
+                      "contentBindingStatus":  "NotBound",
+                      "saveProfileEvidenceStatus":  "Uncovered",
+                      "fixtureEvidenceStatus":  "Uncovered",
+                      "distributionEligibility":  "Blocked"
+                  },
+                  {
+                      "packId":  "gemuera.compat.v24pure.static",
+                      "declarationVersion":  "1.0.0",
+                      "profileId":  "v24pure",
+                      "legacyCoreProfileEnum":  "V24Pure",
+                      "builtInModuleIds":  [
+                                               "gemuera.v24"
+                                           ],
+                      "staticProjectionSupportModuleIds":  [
+                                                               "legacy.current.common",
+                                                               "legacy.current.expression"
+                                                           ],
+                      "requiredCapabilityIds":  [
+
+                                                ],
+                      "optionalCapabilityIds":  [
+
+                                                ],
+                      "contentBindingStatus":  "NotBound",
+                      "saveProfileEvidenceStatus":  "Uncovered",
+                      "fixtureEvidenceStatus":  "Uncovered",
+                      "distributionEligibility":  "Blocked"
+                  }
+              ],
+    "currentRuntimeIsolation":  {
+                                    "status":  "Failed",
+                                    "reason":  "CoreProfile and legacy registries remain process-wide; DIA-12 only validates static CompatibilityPack declarations."
+                                },
+    "parserVmConsumption":  {
+                                "status":  "NotConsumed",
+                                "reason":  "DIA-12 is an offline catalog/report and is not read by the legacy Parser or VM."
+                            },
+    "compatibilityPlanRuntime":  {
+                                     "status":  "NotImplemented",
+                                     "reason":  "DIA-12 does not create a runtime CompatibilityPlan, LegacySessionFacade, feature flag or frozen registry."
+                                 },
+    "resolverRuntime":  {
+                            "status":  "NotImplemented",
+                            "reason":  "DIA-12 does not inspect game content, calculate fingerprints, read manifests from games or resolve a runtime candidate."
+                        },
+    "m1Eligibility":  {
+                          "status":  "Blocked",
+                          "reason":  "M0-DIA-10/11 remain static evidence; declaration validation does not isolate a session."
+                      },
+    "uncovered":  [
+                      "DIA-12 validates only an offline declaration catalog; no game directory, game manifest, package fingerprint or user pin is inspected.",
+                      "Only v24pure and snake consume evidence-backed static projections. SnakeModernMobile remains explicitly unsupported by this contract.",
+                      "Declared capability arrays are intentionally explicit and empty because M0 has not yet proven runtime capability bindings, save profiles or behavior fixtures.",
+                      "No runtime CompatibilityPlan, resolver, LegacySessionFacade, feature flag, Parser/VM consumption, D2 frozen registry, game run, APK or device evidence is introduced."
+                  ]
+}

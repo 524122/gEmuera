@@ -161,8 +161,7 @@ namespace MinorShift.Emuera.Sub
 		{
 			if (pointer + rother.Length > source.Length)
 				return false;
-			string sub = source.Substring(pointer, rother.Length);
-			return sub.Equals(rother, comp);
+			return string.Compare(source, pointer, rother, 0, rother.Length, comp) == 0;
 		}
 
 		public void Seek(int offset, SeekOrigin origin)

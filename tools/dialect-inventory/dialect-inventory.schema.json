@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-inventory-1.0.0.json",
+  "title": "gEmuera M0 dialect inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result",
+    "canonicalHash", "branchHitCount", "unmappedHitCount", "instructionRegistrationCount", "expressionRegistrationCount",
+    "crossRegistryCollisionCount", "unresolvedInstructionCount", "unresolvedExpressionCount", "uncovered", "sourceFiles",
+    "branchHits", "instructionRegistrations", "expressionRegistrations", "crossRegistryCollisions"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackage": { "const": "M0-DIA-01" },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "executionStatus": { "const": "InProgress" },
+    "gateStatus": { "const": "Blocked" },
+    "blockerCode": { "const": "EvidenceMissing" },
+    "result": { "const": "Partial" },
+    "canonicalHash": { "$ref": "#/$defs/sha256" },
+    "branchHitCount": { "type": "integer", "minimum": 1 },
+    "unmappedHitCount": { "const": 0 },
+    "instructionRegistrationCount": { "type": "integer", "minimum": 1 },
+    "expressionRegistrationCount": { "type": "integer", "minimum": 1 },
+    "crossRegistryCollisionCount": { "type": "integer", "minimum": 0 },
+    "unresolvedInstructionCount": { "type": "integer", "minimum": 0 },
+    "unresolvedExpressionCount": { "type": "integer", "minimum": 0 },
+    "uncovered": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "sourceFiles": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceFile" } },
+    "branchHits": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/branchHit" } },
+    "instructionRegistrations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/registration" } },
+    "expressionRegistrations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/registration" } },
+    "crossRegistryCollisions": { "type": "array", "items": { "$ref": "#/$defs/collision" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceFile", "sha256", "bytes"],
+      "properties": {
+        "sourceFile": { "type": "string", "pattern": "^Scripts/" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "branchHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["markerId", "sourceFile", "sourceLine", "sourceText", "classificationId", "category", "currentOwner", "intendedOwner", "targetModule", "behaviorKey", "capabilityId", "fixtureId", "notes"],
+      "properties": {
+        "markerId": { "type": "string", "minLength": 1 },
+        "sourceFile": { "type": "string", "pattern": "^Scripts/" },
+        "sourceLine": { "type": "integer", "minimum": 1 },
+        "sourceText": { "type": "string" },
+        "classificationId": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "currentOwner": { "type": "string", "minLength": 1 },
+        "intendedOwner": { "type": "string", "minLength": 1 },
+        "targetModule": { "type": "string", "minLength": 1 },
+        "behaviorKey": { "type": "string" },
+        "capabilityId": { "type": "string" },
+        "fixtureId": { "type": "string", "pattern": "^DIA-" },
+        "notes": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [
+        { "properties": { "behaviorKey": { "minLength": 1 } } },
+        { "properties": { "capabilityId": { "minLength": 1 } } }
+      ]
+    },
+    "registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publicKey", "registryKind", "sourceFile", "sourceLine", "currentContribution", "currentGuard", "handler", "targetModule", "provenanceWarning"],
+      "properties": {
+        "publicKey": { "type": "string", "minLength": 1 },
+        "registryKind": { "enum": ["instruction", "expression-function"] },
+        "sourceFile": { "type": "string", "pattern": "^Scripts/" },
+        "sourceLine": { "type": "integer", "minimum": 1 },
+        "currentContribution": { "type": "string", "minLength": 1 },
+        "currentGuard": { "type": "string", "minLength": 1 },
+        "handler": { "type": "string", "minLength": 1 },
+        "targetModule": { "type": "string", "minLength": 1 },
+        "provenanceWarning": { "type": "string" }
+      }
+    },
+    "collision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publicKey", "instructionHandler", "expressionHandler", "currentResolution"],
+      "properties": {
+        "publicKey": { "type": "string", "minLength": 1 },
+        "instructionHandler": { "type": "string", "minLength": 1 },
+        "expressionHandler": { "type": "string", "minLength": 1 },
+        "currentResolution": { "const": "instruction-precedence-via-ContainsKey" }
+      }
+    }
+  }
+}

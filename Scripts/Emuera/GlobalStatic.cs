@@ -43,10 +43,13 @@ namespace MinorShift.Emuera
 #if UEMUERA_DEBUG
 		public static List<FunctionLabelLine> StackList = new List<FunctionLabelLine>();
 #endif
+		public static CtrlZ ctrlZ = new CtrlZ();
+		public static bool ExistPlugin;
 		public static void Reset()
 		{
 			MinorShift.Emuera.GameData.Function.SnakeSqlManager.CloseAll();
 			MinorShift.Emuera.Modern.Script.Functions.ModernSqlManager.CloseAll();
+			MinorShift.Emuera.GameData.Function.RuntimeDataStore.Clear();
 			Process = null;
 			ConstantData = null;
 			GameBaseData = null;
@@ -57,7 +60,26 @@ namespace MinorShift.Emuera
 			MainWindow = null;
 			LabelDictionary = null;
 			IdentifierDictionary = null;
+			ExistPlugin = false;
 			tempDic.Clear();
+		}
+
+		internal static void ResetCanarySessionState()
+		{
+			ctrlZ.ResetSessionState();
+#if UEMUERA_DEBUG
+			StackList.Clear();
+#endif
+			// These compatibility roots are not part of the frozen process
+			// catalog.  They hold paths, parser substitutions, input pulses and
+			// diagnostics produced by the active legacy candidate.
+			MinorShift.Emuera.ParserMediator.ResetSessionState();
+			MinorShift.Emuera.GameProc.Process.ResetCanarySessionState();
+			MinorShift.Emuera.KeyMacro.ResetCanarySessionState();
+			MinorShift.Emuera.GameData.Function.FunctionMethodCreator.ResetCanarySessionState();
+			MinorShift.Emuera.Config.ResetCanarySessionState();
+			uEmuera.Utils.ResetCanarySessionState();
+			GenericUtils.ResetCanarySessionState();
 		}
 	}
 }

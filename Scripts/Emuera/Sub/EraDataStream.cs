@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
+using MinorShift.Emuera.GameData.Variable;
 
 namespace MinorShift.Emuera.Sub
 {
@@ -42,6 +43,7 @@ namespace MinorShift.Emuera.Sub
 		}
 		FileStream file;
 		StreamReader reader;
+		string peekedLine = null;
 		public const string FINISHER = "__FINISHED";
 		public const string EMU_1700_START = "__EMUERA_STRAT__";
 		public const string EMU_1708_START = "__EMUERA_1708_STRAT__";
@@ -54,17 +56,41 @@ namespace MinorShift.Emuera.Sub
 		{
 			if (reader == null)
 				throw new FileEE("無効なストリームです");
-			string str = reader.ReadLine();
+			string str = readLine();
 			if (str == null)
 				throw new FileEE("読み取るべき文字列がありません");
 			return str;
+		}
+
+		public bool TryPeekString(out string str)
+		{
+			str = null;
+			if (reader == null)
+				throw new FileEE("無効なストリームです");
+			if (peekedLine == null)
+				peekedLine = reader.ReadLine();
+			if (peekedLine == null)
+				return false;
+			str = peekedLine;
+			return true;
+		}
+
+		string readLine()
+		{
+			if (peekedLine != null)
+			{
+				string line = peekedLine;
+				peekedLine = null;
+				return line;
+			}
+			return reader.ReadLine();
 		}
 
 		public Int64 ReadInt64()
 		{
 			if (reader == null)
 				throw new FileEE("無効なストリームです");
-            string str = reader.ReadLine();
+            string str = readLine();
             if (str == null)
 				throw new FileEE("読み取るべき数値がありません");
 			if (!Int64.TryParse(str, out long ret))
@@ -99,6 +125,31 @@ namespace MinorShift.Emuera.Sub
 				array[i] = 0;
 		}
 
+		public void ReadInt64Array(SparseArray<Int64> array)
+		{
+			if (reader == null)
+				throw new FileEE("無効なストリームです");
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			array.Clear();
+			int i = -1;
+			string str;
+			while (true)
+			{
+				i++;
+				str = reader.ReadLine();
+				if (str == null)
+					throw new FileEE("予期しないセーブデータの終端です");
+				if (str.Equals(FINISHER, StringComparison.Ordinal))
+					break;
+				if (i >= array.Length)
+					continue;
+				if (!Int64.TryParse(str, out long integer))
+					throw new FileEE("数値として認識できません");
+				array[i] = integer;
+			}
+		}
+
 		public void ReadStringArray(string[] array)
 		{
 			if (reader == null)
@@ -121,6 +172,29 @@ namespace MinorShift.Emuera.Sub
 			}
 			for (; i < array.Length; i++)//保存されている値が無いなら""に初期化
 				array[i] = "";
+		}
+
+		public void ReadStringArray(SparseArray<string> array)
+		{
+			if (reader == null)
+				throw new FileEE("無効なストリームです");
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			array.Clear();
+			int i = -1;
+			string str;
+			while (true)
+			{
+				i++;
+				str = reader.ReadLine();
+				if (str == null)
+					throw new FileEE("予期しないセーブデータの終端です");
+				if (str.Equals(FINISHER, StringComparison.Ordinal))
+					break;
+				if (i >= array.Length)
+					continue;
+				array[i] = str;
+			}
 		}
 		#endregion
 		#region Emuera
@@ -470,16 +544,16 @@ namespace MinorShift.Emuera.Sub
 		//    writer = new StreamWriter(file, Config.SaveEncode);
 		//    //writer = new StreamWriter(filepath, false, Config.SaveEncode);
 		//}
-		public EraDataWriter(FileStream file)
+		public EraDataWriter(Stream file)
 		{
 			this.file = file;
 			writer = new StreamWriter(file, Config.SaveEncode);
 		}
-		
+
 		public const string FINISHER = EraDataReader.FINISHER;
 		public const string EMU_START = EraDataReader.EMU_1808_START;
 		public const string EMU_SEPARATOR = EraDataReader.EMU_SEPARATOR;
-		FileStream file;
+		Stream file;
 		StreamWriter writer;
 		#region eramaker
 		public void Write(Int64 integer)
@@ -515,6 +589,21 @@ namespace MinorShift.Emuera.Sub
 				writer.WriteLine(array[i].ToString());
 			writer.WriteLine(FINISHER);
 		}
+		public void Write(SparseArray<Int64> array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			// ToArray() の全量コピーを挟まず内部密集バッファを直接走査（出力は同一）
+			Int64[] data = array.RawData;
+			int count = -1;
+			for (int i = 0; i < data.Length; i++)
+				if (data[i] != 0)
+					count = i;
+			count++;
+			for (int i = 0; i < count; i++)
+				writer.WriteLine(data[i].ToString());
+			writer.WriteLine(FINISHER);
+		}
 		public void Write(string[] array)
 		{
 			if (writer == null)
@@ -532,6 +621,26 @@ namespace MinorShift.Emuera.Sub
 					writer.WriteLine("");
 				else
 					writer.WriteLine(array[i]);
+			}
+			writer.WriteLine(FINISHER);
+		}
+		public void Write(SparseArray<string> array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			// ToArray() の全量コピーを挟まず内部密集バッファを直接走査（出力は同一）
+			string[] data = array.RawData;
+			int count = -1;
+			for (int i = 0; i < data.Length; i++)
+				if (!string.IsNullOrEmpty(data[i]))
+					count = i;
+			count++;
+			for (int i = 0; i < count; i++)
+			{
+				if (data[i] == null)
+					writer.WriteLine("");
+				else
+					writer.WriteLine(data[i]);
 			}
 			writer.WriteLine(FINISHER);
 		}
@@ -588,6 +697,24 @@ namespace MinorShift.Emuera.Sub
 				writer.WriteLine(array[i].ToString());
 			writer.WriteLine(FINISHER);
 		}
+		public void WriteExtended(string key, SparseArray<Int64> array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			// ToArray() の全量コピーを挟まず内部密集バッファを直接走査（出力は同一）
+			Int64[] data = array.RawData;
+			int count = -1;
+			for (int i = 0; i < data.Length; i++)
+				if (data[i] != 0)
+					count = i;
+			count++;
+			if (count == 0)
+				return;
+			writer.WriteLine(key);
+			for (int i = 0; i < count; i++)
+				writer.WriteLine(data[i].ToString());
+			writer.WriteLine(FINISHER);
+		}
 		public void WriteExtended(string key, string[] array)
 		{
 			if (writer == null)
@@ -608,6 +735,29 @@ namespace MinorShift.Emuera.Sub
 					writer.WriteLine("");
 				else
 					writer.WriteLine(array[i]);
+			}
+			writer.WriteLine(FINISHER);
+		}
+		public void WriteExtended(string key, SparseArray<string> array)
+		{
+			if (array == null)
+				throw new FileEE("無効な配列が渡されました");
+			// ToArray() の全量コピーを挟まず内部密集バッファを直接走査（出力は同一）
+			string[] data = array.RawData;
+			int count = -1;
+			for (int i = 0; i < data.Length; i++)
+				if (!string.IsNullOrEmpty(data[i]))
+					count = i;
+			count++;
+			if (count == 0)
+				return;
+			writer.WriteLine(key);
+			for (int i = 0; i < count; i++)
+			{
+				if (data[i] == null)
+					writer.WriteLine("");
+				else
+					writer.WriteLine(data[i]);
 			}
 			writer.WriteLine(FINISHER);
 		}

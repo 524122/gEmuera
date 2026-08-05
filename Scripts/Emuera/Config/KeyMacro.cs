@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using MinorShift.Emuera.Sub;
 using System;
 //using System.Windows.Forms;
@@ -7,7 +7,6 @@ namespace MinorShift.Emuera
 {
 	internal static class KeyMacro
 	{
-		readonly static string macroPath = Program.ExeDir + "macro.txt";
 		public const string gID = "グループ";
 		public const int MaxGroup = 10;
 		public const int MaxFkey = 12;
@@ -23,6 +22,11 @@ namespace MinorShift.Emuera
 		static string[] groupName = new string[MaxGroup];
 		static bool isMacroChanged = false;
 		static KeyMacro()
+		{
+			InitializeDefaults();
+		}
+
+		static void InitializeDefaults()
 		{
 			for (int g = 0; g < MaxGroup; g++)
 			{
@@ -44,6 +48,7 @@ namespace MinorShift.Emuera
 		{
 			if (!isMacroChanged)
 				return true;
+			string macroPath = (Program.ExeDir ?? "") + "macro.txt";
 			StreamWriter writer = null;
 
 			try
@@ -105,6 +110,17 @@ namespace MinorShift.Emuera
 			}
 			catch { return; }
 			finally { eReader.Dispose(); }
+		}
+
+		/// <summary>
+		/// Macro definitions are loaded from the active game directory and must
+		/// not survive a canary switch. Reinitialization happens before the next
+		/// Process.Initialize call, which then loads the candidate's macro.txt.
+		/// </summary>
+		internal static void ResetCanarySessionState()
+		{
+			InitializeDefaults();
+			isMacroChanged = false;
 		}
 
 		public static void SetMacro(int FkeyNum, int groupNum, string macroStr)

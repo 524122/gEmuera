@@ -19,6 +19,7 @@ namespace MinorShift.Emuera.Sub
 		int nextNo = 0;
 		StreamReader reader;
 		Stream stream;
+		string[] cachedLines;
 
 		public bool Open(string path)
 		{
@@ -43,17 +44,45 @@ namespace MinorShift.Emuera.Sub
 			}
 			catch (Exception ex)
 			{
-				Godot.GD.PrintErr($"Failed to open text file: {filepath}, {ex.GetType().Name}: {ex.Message}");
+				global::GenericUtils.Error(global::EmueraLogCategory.FileSystem, () => $"[FS] Failed to open text file: {filepath}, {ex.GetType().Name}: {ex.Message}");
 				this.Dispose();
 				return false;
 			}
 			return true;
 		}
 
+		public bool OpenOnCache(string path)
+		{
+			return OpenOnCache(path, Path.GetFileName(path));
+		}
+
+		public bool OpenOnCache(string path, string name)
+		{
+			if (!Preload.TryGetFileLines(path, out cachedLines))
+				return Open(path, name);
+			filepath = path;
+			filename = name;
+			nextNo = 0;
+			curNo = 0;
+			return true;
+		}
+
 		public string ReadLine()
 		{
-			nextNo++;
+			string line = ReadRawLine();
 			curNo = nextNo;
+			return line;
+		}
+
+		string ReadRawLine()
+		{
+			if (cachedLines != null)
+			{
+				if (nextNo >= cachedLines.Length)
+					return null;
+				return cachedLines[nextNo++];
+			}
+			nextNo++;
 			return reader.ReadLine();
 		}
 
@@ -67,9 +96,8 @@ namespace MinorShift.Emuera.Sub
 			curNo = nextNo;
 			while (true)
 			{
-				line = reader.ReadLine();
+				line = ReadRawLine();
 				curNo++;
-				nextNo++;
 				if (line == null)
 					return null;
 				if (line.Length == 0)
@@ -91,7 +119,7 @@ namespace MinorShift.Emuera.Sub
 						throw new CodeEE("予期しない行連結終端記号'}'が見つかりました", new ScriptPosition(filename, curNo));
 					if (st.Current == '{')
 					{
-						if (line.Trim() != "{")
+						if (!IsOnlyTokenLine(line, '{'))
 							throw new CodeEE("行連結始端記号'{'の行に'{'以外の文字を含めることはできません", new ScriptPosition(filename, curNo));
 						break;
 					}
@@ -102,8 +130,7 @@ namespace MinorShift.Emuera.Sub
 			StringBuilder b = new StringBuilder();
 			while (true)
 			{
-				line = reader.ReadLine();
-				nextNo++;
+				line = ReadRawLine();
 				if (line == null)
 				{
 					throw new CodeEE("行連結始端記号'{'が使われましたが終端記号'}'が見つかりません", new ScriptPosition(filename, curNo));
@@ -114,12 +141,12 @@ namespace MinorShift.Emuera.Sub
 					foreach (KeyValuePair<string, string> pair in ParserMediator.RenameDic)
 						line = line.Replace(pair.Key, pair.Value);
 				}
-				string test = line.TrimStart();
-				if (test.Length > 0)
+				int testStart = FirstNonTrimWhitespaceIndex(line);
+				if (testStart < line.Length)
 				{
-					if (test[0] == '}')
+					if (line[testStart] == '}')
 					{
-						if (test.Trim() != "}")
+						if (!IsOnlyTokenLine(line, testStart, '}'))
 							throw new CodeEE("行連結終端記号'}'の行に'}'以外の文字を含めることはできません", new ScriptPosition(filename, nextNo));
 						break;
 					}
@@ -127,7 +154,7 @@ namespace MinorShift.Emuera.Sub
                     //{
                     //A}
                     //みたいなどうしようもないコードは知ったこっちゃない
-					if (test[0] == '{' && test.Length == 1)
+					if (line[testStart] == '{' && line.Length - testStart == 1)
 						throw new CodeEE("予期しない行連結始端記号'{'が見つかりました", new ScriptPosition(filename, nextNo));
 				}
 				b.Append(line);
@@ -136,6 +163,33 @@ namespace MinorShift.Emuera.Sub
 			st.Set(b.ToString());
 			LexicalAnalyzer.SkipWhiteSpace(st);
 			return st;
+		}
+
+		static int FirstNonTrimWhitespaceIndex(string line)
+		{
+			if (string.IsNullOrEmpty(line))
+				return 0;
+			int index = 0;
+			while (index < line.Length && char.IsWhiteSpace(line[index]))
+				index++;
+			return index;
+		}
+
+		static bool IsOnlyTokenLine(string line, char token)
+		{
+			return IsOnlyTokenLine(line, FirstNonTrimWhitespaceIndex(line), token);
+		}
+
+		static bool IsOnlyTokenLine(string line, int tokenIndex, char token)
+		{
+			if (string.IsNullOrEmpty(line) || tokenIndex >= line.Length || line[tokenIndex] != token)
+				return false;
+			for (int i = tokenIndex + 1; i < line.Length; i++)
+			{
+				if (!char.IsWhiteSpace(line[i]))
+					return false;
+			}
+			return true;
 		}
 
 		/// <summary>
@@ -174,6 +228,7 @@ namespace MinorShift.Emuera.Sub
 			filename = null;
 			reader = null;
 			stream = null;
+			cachedLines = null;
 			disposed = true;
 		}
 

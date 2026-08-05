@@ -154,40 +154,57 @@ namespace uEmuera.VisualBasic
                 {' ', '　'},
         };
 
+        private const char NoMap = char.MaxValue;
+        private static readonly char[] NarrowMap = BuildMap(ToNarrow);
+        private static readonly char[] WideMap = BuildMap(ToWide);
+
+        private static char[] BuildMap(Dictionary<char, char> dict)
+        {
+            var map = new char[65536];
+            for(int i = 0; i < map.Length; ++i)
+                map[i] = NoMap;
+            foreach(var pair in dict)
+                map[pair.Key] = pair.Value;
+            return map;
+        }
+
         public static string StrConv(string str, VbStrConv Conversion, int LocaleID = 0)
         {
             switch(Conversion)
             {
             case VbStrConv.Wide:
                 {
-                    var result = "";
+                    if(str.Length == 0)
+                        return str;
+                    var buf = new char[str.Length * 2];
+                    int n = 0;
                     for(int i = 0; i < str.Length; ++i)
                     {
                         char c = str[i];
-                        char found = '\x0';
-                        if(ToWide.TryGetValue(c, out found))
-                            result += found;
+                        char found = WideMap[c];
+                        if(found != NoMap)
+                            buf[n++] = found;
                         else
                         {
-                            result += ' ';
-                            result += c;
+                            buf[n++] = ' ';
+                            buf[n++] = c;
                         }
                     }
-                    return result;
+                    return new string(buf, 0, n);
                 }
             case VbStrConv.Narrow:
                 {
-                    var result = "";
+                    if(str.Length == 0)
+                        return str;
+                    var buf = new char[str.Length];
+                    int n = 0;
                     for(int i = 0; i < str.Length; ++i)
                     {
                         char c = str[i];
-                        char found = '\x0';
-                        if(ToNarrow.TryGetValue(c, out found))
-                            result += found;
-                        else
-                            result += c;
+                        char found = NarrowMap[c];
+                        buf[n++] = found != NoMap ? found : c;
                     }
-                    return result;
+                    return new string(buf, 0, n);
                 }
             }
             return str;

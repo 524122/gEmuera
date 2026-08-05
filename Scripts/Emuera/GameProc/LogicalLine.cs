@@ -125,6 +125,10 @@ namespace MinorShift.Emuera.GameProc
 			argprimitive = null;
 			return ret;
 		}
+		public string PeekArgumentPrimitive()
+		{
+			return argprimitive == null ? "" : argprimitive.Substring();
+		}
 		public WordCollection PopAssignmentDestStr()
 		{
 			WordCollection ret = assigndest;
@@ -165,6 +169,7 @@ namespace MinorShift.Emuera.GameProc
         private LogicalLine jumptoendcatch = null;
 		//IF文とSELECT文のみが使う。
 		public List<InstructionLine> IfCaseList = null;
+		public SelectCaseJumpTable SelectCaseJumpTable = null;
         //PRINTDATA文のみが使う。
         public List<List<InstructionLine>> dataList = null;
         //TRYCALLLIST系が使う
@@ -203,8 +208,10 @@ namespace MinorShift.Emuera.GameProc
 			Index = -1;
 			Depth = -1;
 			VariadicArgIndex = -1;
+			LocalFloatLength = 0;
+			ArgFloatLength = 0;
 			IsMethod = false;
-			MethodType = typeof(void);
+			MethodType = EraType.Void;
 		}
 		public override bool IsError
 		{
@@ -228,11 +235,13 @@ namespace MinorShift.Emuera.GameProc
 			Depth = -1;
 			LocalLength = 0;
 			LocalsLength = 0;
+			LocalFloatLength = 0;
 			ArgLength = 0;
 			ArgsLength = 0;
+			ArgFloatLength = 0;
 			VariadicArgIndex = -1;
 			IsMethod = false;
-			MethodType = typeof(void);
+			MethodType = EraType.Void;
 			this.wc = wc;
 
 			//ArgOptional = true;
@@ -256,15 +265,17 @@ namespace MinorShift.Emuera.GameProc
 		public bool hasPrivDynamicVar { get; set; }
 		public int LocalLength { get; set; }
 		public int LocalsLength { get; set; }
+		public int LocalFloatLength { get; set; }
 		public int ArgLength { get; set; }
 		public int ArgsLength { get; set; }
+		public int ArgFloatLength { get; set; }
 		public int VariadicArgIndex { get; set; }
 
 		//public bool ArgOptional { get; set; }
 		//public bool ArgAutoConvert { get; set; }
 
 		public bool IsMethod { get; set; }
-		public Type MethodType { get; set; }
+		public EraType MethodType { get; set; }
 		public VariableTerm[] Arg { get; set; }
 		public SingleTerm[] Def { get; set; }
         //public SingleTerm[] SubNames { get; set; }

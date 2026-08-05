@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using MinorShift.Emuera.GameData.Expression;
@@ -25,7 +26,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetcharaMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -40,10 +41,10 @@ namespace MinorShift.Emuera.GameData.Function
 
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                if (arguments[0].GetOperandType() != typeof(Int64))
+                if (arguments[0].GetEraType() != EraType.Integer)
                     return name + "関数の1番目の引数の型が正しくありません";
                 //2は省略可能
-                if ((arguments.Length == 2) && (arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length == 2) && (arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の引数の型が正しくありません";
                 return null;
             }
@@ -76,8 +77,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetspcharaMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 CanRestructure = false;
             }
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -94,14 +95,14 @@ namespace MinorShift.Emuera.GameData.Function
             readonly CharacterStrData charaStr;
             public CsvStrDataMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
 				argumentTypeArray = null;
                 charaStr = CharacterStrData.NAME;
                 CanRestructure = true;
             }
             public CsvStrDataMethod(CharacterStrData cStr)
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
 				argumentTypeArray = null;
 				charaStr = cStr;
 				CanRestructure = true;
@@ -118,7 +119,7 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の1番目の引数が数値ではありません";
                 if (arguments.Length == 1)
                     return null;
-                if ((arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の変数が数値ではありません";
                 return null;
             }
@@ -136,7 +137,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public CsvcstrMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = true;
             }
@@ -152,11 +153,11 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の1番目の引数が数値ではありません";
                 if (arguments[1] == null)
                     return name + "関数の2番目の引数は省略できません";
-                if (arguments[1].GetOperandType() != typeof(Int64))
+                if (arguments[1].GetEraType() != EraType.Integer)
                     return name + "関数の2番目の変数が数値ではありません";
                 if (arguments.Length == 2)
                     return null;
-                if ((arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の変数が数値ではありません";
                 return null;
             }
@@ -176,14 +177,14 @@ namespace MinorShift.Emuera.GameData.Function
             readonly CharacterIntData charaInt;
             public CsvDataMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 charaInt = CharacterIntData.BASE;
                 CanRestructure = true;
             }
             public CsvDataMethod(CharacterIntData cInt)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
 				charaInt = cInt;
 				CanRestructure = true;
@@ -200,11 +201,11 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の1番目の引数が数値ではありません";
                 if (arguments[1] == null)
                     return name + "関数の2番目の引数は省略できません";
-                if (arguments[1].GetOperandType() != typeof(Int64))
+                if (arguments[1].GetEraType() != EraType.Integer)
                     return name + "関数の2番目の変数が数値ではありません";
                 if (arguments.Length == 2)
                     return null;
-                if ((arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の変数が数値ではありません";
                 return null;
             }
@@ -223,7 +224,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public FindcharaMethod(bool last)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
                 isLast = last;
@@ -246,13 +247,13 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の1番目の引数の変数がキャラクタ変数ではありません";
                 if (arguments[1] == null)
                     return name + "関数の2番目の引数は省略できません";
-                if (arguments[1].GetOperandType() != arguments[0].GetOperandType())
+                if (arguments[1].GetEraType() != arguments[0].GetEraType())
                     return name + "関数の2番目の引数の型が正しくありません";
                 //3番目は省略可能
-                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の引数の型が正しくありません";
                 //4番目は省略可能
-                if ((arguments.Length >= 4) && (arguments[3] != null) && (arguments[3].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 4) && (arguments[3] != null) && (arguments[3].GetEraType() != EraType.Integer))
                     return name + "関数の4番目の引数の型が正しくありません";
                 return null;
             }
@@ -298,7 +299,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public ExistCsvMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = true;
             }
@@ -314,7 +315,7 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の1番目の引数が数値ではありません";
                 if (arguments.Length == 1)
                     return null;
-                if ((arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の変数が数値ではありません";
                 return null;
             }
@@ -335,7 +336,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public VarsizeMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = true;
 				//1808beta009 参照型変数の追加によりちょっと面倒になった
@@ -354,12 +355,12 @@ namespace MinorShift.Emuera.GameData.Function
                 if (arguments[0] is SingleTerm)
                 {
                     string varName = ((SingleTerm)arguments[0]).Str;
-                    if (GlobalStatic.IdentifierDictionary.GetVariableToken(varName, null, true) == null)
+                    if (ResolveVarsizeVariable(varName) == null)
                         return name + "関数の1番目の引数が変数名ではありません";
                 }
                 if (arguments.Length == 1)
                     return null;
-                if ((arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の変数が数値ではありません";
                 if (arguments.Length == 2)
                     return null;
@@ -367,12 +368,15 @@ namespace MinorShift.Emuera.GameData.Function
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
-                VariableToken var = GlobalStatic.IdentifierDictionary.GetVariableToken(arguments[0].GetStrValue(exm), null, true);
+                string varName = arguments[0].GetStrValue(exm);
+                VariableToken var = ResolveVarsizeVariable(varName);
                 if (var == null)
                     throw new CodeEE("VARSIZEの1番目の引数(\"" + arguments[0].GetStrValue(exm) + "\")が変数名ではありません");
                 int dim = 0;
                 if (arguments.Length == 2 && arguments[1] != null)
                     dim = (int)arguments[1].GetIntValue(exm);
+				if (Config.VarsizeDimConfig && dim > 0)
+					dim--;
                 return (var.GetLength(dim));
             }
 			public override bool UniqueRestructure(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -382,12 +386,30 @@ namespace MinorShift.Emuera.GameData.Function
 					arguments[1].Restructure(exm);
 				if (arguments[0] is SingleTerm && (arguments.Length == 1 || arguments[1] is SingleTerm))
 				{
-					VariableToken var = GlobalStatic.IdentifierDictionary.GetVariableToken(arguments[0].GetStrValue(exm), null, true);
+					VariableToken var = ResolveVarsizeVariable(arguments[0].GetStrValue(exm));
 					if (var == null || var.IsReference)//可変長の場合は定数化できない
 						return false;
 					return true;
 				}
 				return false;
+			}
+
+			static VariableToken ResolveVarsizeVariable(string varName)
+			{
+				VariableToken var = GlobalStatic.IdentifierDictionary.GetVariableToken(varName, null, true);
+				if (var != null || string.IsNullOrEmpty(varName))
+					return var;
+
+				// v24/snake 系では旧名 VARSIZE("FOO") が実体配列 FOO_ENG/FOO_JP を指すケースがある。
+				// 完全一致を優先し、代表的な表示名配列だけへ限定して回退する。
+				string[] suffixes = new string[] { "_ENG", "_JP" };
+				for (int i = 0; i < suffixes.Length; i++)
+				{
+					var = GlobalStatic.IdentifierDictionary.GetVariableToken(varName + suffixes[i], null, true);
+					if (var != null)
+						return var;
+				}
+				return null;
 			}
         }
 
@@ -395,8 +417,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
 			public CheckfontMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = true;//起動中に変わることもそうそうないはず……
 			}
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -423,8 +445,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
 			public CheckdataMethod(EraSaveFileType type)
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 CanRestructure = false;
 				this.type = type;
             }
@@ -450,8 +472,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public CheckdataStrMethod(EraSaveFileType type)
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 				this.type = type;
 			}
@@ -473,7 +495,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public FindFilesMethod(EraSaveFileType type)
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 				this.type = type;
@@ -498,11 +520,10 @@ namespace MinorShift.Emuera.GameData.Function
 				if (arguments.Length > 0 && arguments[0] != null)
 					pattern = arguments[0].GetStrValue(exm);
                 List<string> filepathes = exm.VEvaluator.GetDatFiles(type == EraSaveFileType.CharVar, pattern);
-                string[] results = exm.VEvaluator.VariableData.DataStringArray[(int)(VariableCode.RESULTS & VariableCode.__LOWERCASE__)];
-				if (filepathes.Count <= results.Length)
-					filepathes.CopyTo(results);
-				else
-					filepathes.CopyTo(0, results, 0, results.Length);
+                var results = exm.VEvaluator.VariableData.DataStringArray[(int)(VariableCode.RESULTS & VariableCode.__LOWERCASE__)];
+				int count = Math.Min(filepathes.Count, results.Length);
+				for (int i = 0; i < count; i++)
+					results[i] = filepathes[i];
 				return filepathes.Count;
 			}
 		}
@@ -512,8 +533,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public IsSkipMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -526,7 +547,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public MesSkipMethod(bool warn)
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 				this.warn = warn;
@@ -552,8 +573,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetColorMethod(bool isDef)
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = isDef;
                 defaultColor = isDef;
             }
@@ -570,8 +591,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetFocusColorMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -584,8 +605,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetBGColorMethod(bool isDef)
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = isDef;
                 defaultColor = isDef;
             }
@@ -602,8 +623,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetStyleMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
 
@@ -627,8 +648,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetFontMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -641,8 +662,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public BarStringMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(long), typeof(long), typeof(long) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
                 CanRestructure = true;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -658,8 +679,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public CurrentAlignMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -677,8 +698,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public CurrentRedrawMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override long GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -691,8 +712,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public ColorFromNameMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = true;
 			}
 			public override long GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -717,8 +738,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public ColorFromRGBMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(long), typeof(long), typeof(long) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = true;
 			}
 			public override long GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -742,7 +763,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GetRefMethod()
 			{
-				ReturnType = typeof(string);
+				ReturnType = EraType.String;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
@@ -770,7 +791,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public MoneyStrMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = true;
             }
@@ -783,9 +804,9 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の引数が多すぎます";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                if (arguments[0].GetOperandType() != typeof(Int64))
+                if (arguments[0].GetEraType() != EraType.Integer)
                     return name + "関数の1番目の引数の型が正しくありません";
-                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetOperandType() != typeof(string)))
+                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetEraType() != EraType.String))
                     return name + "関数の2番目の引数の型が正しくありません";
                 return null;
             }
@@ -812,8 +833,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetPrintCPerLineMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -826,8 +847,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public PrintCLengthMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = true;
             }
             public override long GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -840,8 +861,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetSaveNosMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -854,8 +875,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GettimeMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -875,8 +896,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GettimesMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -889,8 +910,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetmsMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -905,8 +926,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetSecondMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -923,7 +944,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public RandMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -939,14 +960,14 @@ namespace MinorShift.Emuera.GameData.Function
                 {
                     if (arguments[0] == null)
                         return name + "関数には少なくとも1つの引数が必要です";
-                    if ((arguments[0].GetOperandType() != typeof(Int64)))
+                    if ((arguments[0].GetEraType() != EraType.Integer))
                         return name + "関数の1番目の引数の型が正しくありません";
                     return null;
                 }
                 //1番目は省略可能
-                if ((arguments[0] != null) && (arguments[0].GetOperandType() != typeof(Int64)))
+                if ((arguments[0] != null) && (arguments[0].GetEraType() != EraType.Integer))
                     return name + "関数の1番目の引数の型が正しくありません";
-                if ((arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の引数の型が正しくありません";
                 return null;
             }
@@ -978,14 +999,14 @@ namespace MinorShift.Emuera.GameData.Function
             readonly bool isMax;
             public MaxMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isMax = true;
                 CanRestructure = true;
             }
             public MaxMethod(bool max)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isMax = max;
                 CanRestructure = true;
@@ -998,7 +1019,7 @@ namespace MinorShift.Emuera.GameData.Function
                 {
                     if (arguments[i] == null)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数は省略できません";
-                    if (arguments[i].GetOperandType() != typeof(Int64))
+                    if (arguments[i].GetEraType() != EraType.Integer && arguments[i].GetEraType() != EraType.Float)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
                 }
                 return null;
@@ -1023,14 +1044,40 @@ namespace MinorShift.Emuera.GameData.Function
                 }
                 return (ret);
             }
+            public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                double ret = ToDouble(arguments[0], exm);
+
+                for (int i = 1; i < arguments.Length; i++)
+                {
+                    double newRet = ToDouble(arguments[i], exm);
+                    if (isMax)
+                    {
+                        if (ret < newRet)
+                            ret = newRet;
+                    }
+                    else
+                    {
+                        if (ret > newRet)
+                            ret = newRet;
+                    }
+                }
+                return ret;
+            }
+            public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                if (HasFloatArg(arguments))
+                    return new SingleTerm(GetFloatValue(exm, arguments));
+                return new SingleTerm(GetIntValue(exm, arguments));
+            }
         }
 
         private sealed class AbsMethod : FunctionMethod
         {
             public AbsMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1044,8 +1091,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public PowerMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1067,9 +1114,19 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public SqrtMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = null;
                 CanRestructure = true;
+            }
+            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+            {
+                if (arguments.Length != 1)
+                    return name + "関数の引数の数が正しくありません";
+                if (arguments[0] == null)
+                    return name + "関数の1番目の引数は省略できません";
+                if (arguments[0].GetEraType() != EraType.Integer && arguments[0].GetEraType() != EraType.Float)
+                    return name + "関数の1番目の引数の型が正しくありません";
+                return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -1078,14 +1135,27 @@ namespace MinorShift.Emuera.GameData.Function
                     throw new CodeEE("SQRT関数の引数に負の値が指定されました");
                 return ((Int64)Math.Sqrt(ret));
             }
+            public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                double ret = ToDouble(arguments[0], exm);
+                if (ret < 0)
+                    throw new CodeEE("SQRT関数の引数に負の値が指定されました");
+                return Math.Sqrt(ret);
+            }
+            public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                if (HasFloatArg(arguments))
+                    return new SingleTerm(GetFloatValue(exm, arguments));
+                return new SingleTerm(GetIntValue(exm, arguments));
+            }
         }
 
         private sealed class CbrtMethod : FunctionMethod
         {
             public CbrtMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1102,15 +1172,15 @@ namespace MinorShift.Emuera.GameData.Function
             readonly double Base;
             public LogMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 Base = Math.E;
                 CanRestructure = true;
             }
             public LogMethod(double b)
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 Base = b;
                 CanRestructure = true;
             }
@@ -1140,8 +1210,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public ExpMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1164,8 +1234,8 @@ namespace MinorShift.Emuera.GameData.Function
 
             public SignMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1179,9 +1249,22 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetLimitMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = null;
                 CanRestructure = true;
+            }
+            public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+            {
+                if (arguments.Length != 3)
+                    return name + "関数の引数の数が正しくありません";
+                for (int i = 0; i < arguments.Length; i++)
+                {
+                    if (arguments[i] == null)
+                        return name + "関数の" + (i + 1).ToString() + "番目の引数は省略できません";
+                    if (arguments[i].GetEraType() != EraType.Integer && arguments[i].GetEraType() != EraType.Float)
+                        return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
+                }
+                return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
@@ -1197,6 +1280,35 @@ namespace MinorShift.Emuera.GameData.Function
                     ret = value;
                 return (ret);
             }
+            public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                double value = ToDouble(arguments[0], exm);
+                double min = ToDouble(arguments[1], exm);
+                double max = ToDouble(arguments[2], exm);
+                if (value < min)
+                    return min;
+                if (value > max)
+                    return max;
+                return value;
+            }
+            public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                if (HasFloatArg(arguments))
+                    return new SingleTerm(GetFloatValue(exm, arguments));
+                return new SingleTerm(GetIntValue(exm, arguments));
+            }
+        }
+        private static double ToDouble(IOperandTerm term, ExpressionMediator exm)
+        {
+            return term.GetEraType() == EraType.Integer ? term.GetIntValue(exm) : term.GetFloatValue(exm);
+        }
+
+        private static bool HasFloatArg(IOperandTerm[] arguments)
+        {
+            for (int i = 0; i < arguments.Length; i++)
+                if (arguments[i] != null && arguments[i].GetEraType() == EraType.Float)
+                    return true;
+            return false;
         }
         #endregion
 
@@ -1206,14 +1318,14 @@ namespace MinorShift.Emuera.GameData.Function
             readonly bool isCharaRange;
             public SumArrayMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isCharaRange = false;
                 CanRestructure = false;
             }
             public SumArrayMethod(bool isChara)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isCharaRange = isChara;
                 CanRestructure = false;
@@ -1237,11 +1349,11 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の1番目の引数が配列変数ではありません";
                 if (arguments.Length == 1)
                     return null;
-                if ((arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の変数が数値ではありません";
                 if (arguments.Length == 2)
                     return null;
-                if ((arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の変数が数値ではありません";
                 return null;
             }
@@ -1265,6 +1377,33 @@ namespace MinorShift.Emuera.GameData.Function
                     return (exm.VEvaluator.GetArraySumChara(p, index1, index2));
                 }
             }
+            public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                VariableTerm varTerm = (VariableTerm)arguments[0];
+                Int64 index1 = (arguments.Length >= 2 && arguments[1] != null) ? arguments[1].GetIntValue(exm) : 0;
+                Int64 index2 = (arguments.Length == 3 && arguments[2] != null) ? arguments[2].GetIntValue(exm) : (isCharaRange ? exm.VEvaluator.CHARANUM : varTerm.GetLastLength());
+
+                FixedVariableTerm p = varTerm.GetFixedVariableTerm(exm);
+                if (!isCharaRange)
+                {
+                    p.IsArrayRangeValid(index1, index2, "SUMARRAY", 2L, 3L);
+                    return exm.VEvaluator.GetArraySumDouble(p, index1, index2);
+                }
+                else
+                {
+                    Int64 charaNum = exm.VEvaluator.CHARANUM;
+                    if (index1 >= charaNum || index1 < 0 || index2 > charaNum || index2 < 0)
+                        throw new CodeEE("SUMCARRAY関数の範囲指定がキャラクタ配列の範囲を超えています(" + index1.ToString() + "～" + index2.ToString() + ")");
+                    return exm.VEvaluator.GetArraySumCharaDouble(p, index1, index2);
+                }
+            }
+            public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                VariableTerm varTerm = (VariableTerm)arguments[0];
+                if (varTerm.Identifier.GetEraType() == EraType.Float)
+                    return new SingleTerm(GetFloatValue(exm, arguments));
+                return new SingleTerm(GetIntValue(exm, arguments));
+            }
         }
 
         private sealed class MatchMethod : FunctionMethod
@@ -1272,7 +1411,7 @@ namespace MinorShift.Emuera.GameData.Function
             readonly bool isCharaRange;
             public MatchMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isCharaRange = false;
                 CanRestructure = false;
@@ -1280,7 +1419,7 @@ namespace MinorShift.Emuera.GameData.Function
             }
             public MatchMethod(bool isChara)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isCharaRange = isChara;
                 CanRestructure = false;
@@ -1305,11 +1444,11 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の1番目の引数が配列変数ではありません";
                 if (arguments[1] == null)
                     return name + "関数の2番目の引数は省略できません";
-                if (arguments[1].GetOperandType() != arguments[0].GetOperandType())
+                if (arguments[1].GetEraType() != arguments[0].GetEraType())
                     return name + "関数の1番目の引数と2番目の引数の型が異なります";
-                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の引数の型が正しくありません";
-                if ((arguments.Length >= 4) && (arguments[3] != null) && (arguments[3].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 4) && (arguments[3] != null) && (arguments[3].GetEraType() != EraType.Integer))
                     return name + "関数の4番目の引数の型が正しくありません";
                 return null;
             }
@@ -1324,10 +1463,15 @@ namespace MinorShift.Emuera.GameData.Function
                 if (!isCharaRange)
                 {
                     p.IsArrayRangeValid(start, end, "MATCH", 3L, 4L);
-                    if (arguments[0].GetOperandType() == typeof(Int64))
+                    if (arguments[0].GetEraType() == EraType.Integer)
                     {
                         Int64 targetValue = arguments[1].GetIntValue(exm);
                         return (exm.VEvaluator.GetMatch(p, targetValue, start, end));
+                    }
+                    else if (arguments[0].GetEraType() == EraType.Float)
+                    {
+                        double targetValue = arguments[1].GetFloatValue(exm);
+                        return exm.VEvaluator.GetMatch(p, targetValue, start, end);
                     }
                     else
                     {
@@ -1340,10 +1484,15 @@ namespace MinorShift.Emuera.GameData.Function
                     Int64 charaNum = exm.VEvaluator.CHARANUM;
                     if (start >= charaNum || start < 0 || end > charaNum || end < 0)
                         throw new CodeEE("CMATCH関数の範囲指定がキャラクタ配列の範囲を超えています(" + start.ToString() + "～" + end.ToString() + ")");
-                    if (arguments[0].GetOperandType() == typeof(Int64))
+                    if (arguments[0].GetEraType() == EraType.Integer)
                     {
                         Int64 targetValue = arguments[1].GetIntValue(exm);
                         return (exm.VEvaluator.GetMatchChara(p, targetValue, start, end));
+                    }
+                    else if (arguments[0].GetEraType() == EraType.Float)
+                    {
+                        double targetValue = arguments[1].GetFloatValue(exm);
+                        return exm.VEvaluator.GetMatchChara(p, targetValue, start, end);
                     }
                     else
                     {
@@ -1370,7 +1519,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GroupMatchMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -1380,12 +1529,12 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数には少なくとも2つの引数が必要です";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                Type baseType = arguments[0].GetOperandType();
+                EraType baseType = arguments[0].GetEraType();
                 for (int i = 1; i < arguments.Length; i++)
                 {
                     if (arguments[i] == null)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数は省略できません";
-                    if (arguments[i].GetOperandType() != baseType)
+                    if (arguments[i].GetEraType() != baseType)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
                 }
                 return null;
@@ -1393,12 +1542,21 @@ namespace MinorShift.Emuera.GameData.Function
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
                 Int64 ret = 0;
-                if (arguments[0].GetOperandType() == typeof(Int64))
+                if (arguments[0].GetEraType() == EraType.Integer)
                 {
                     Int64 baseValue = arguments[0].GetIntValue(exm);
                     for (int i = 1; i < arguments.Length; i++)
                     {
                         if (baseValue == arguments[i].GetIntValue(exm))
+                            ret += 1;
+                    }
+                }
+                else if (arguments[0].GetEraType() == EraType.Float)
+                {
+                    double baseValue = arguments[0].GetFloatValue(exm);
+                    for (int i = 1; i < arguments.Length; i++)
+                    {
+                        if (baseValue == arguments[i].GetFloatValue(exm))
                             ret += 1;
                     }
                 }
@@ -1419,7 +1577,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public NosamesMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -1429,35 +1587,50 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数には少なくとも2つの引数が必要です";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                Type baseType = arguments[0].GetOperandType();
+                EraType baseType = arguments[0].GetEraType();
                 for (int i = 1; i < arguments.Length; i++)
                 {
                     if (arguments[i] == null)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数は省略できません";
-                    if (arguments[i].GetOperandType() != baseType)
+                    if (arguments[i].GetEraType() != baseType)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
                 }
                 return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
-                if (arguments[0].GetOperandType() == typeof(Int64))
+                if (arguments[0].GetEraType() == EraType.Integer)
                 {
-                    Int64 baseValue = arguments[0].GetIntValue(exm);
-                    for (int i = 1; i < arguments.Length; i++)
+                    Int64[] valueArray = new Int64[arguments.Length];
+                    for (int i = 0; i < arguments.Length; i++)
                     {
-                        if (baseValue == arguments[i].GetIntValue(exm))
-                            return 0L;
+                        valueArray[i] = arguments[i].GetIntValue(exm);
                     }
+                    var resultArray = valueArray.Distinct();
+                    if (resultArray.Count() != arguments.Length)
+                        return 0L;
+                }
+                else if (arguments[0].GetEraType() == EraType.Float)
+                {
+                    double[] valueArray = new double[arguments.Length];
+                    for (int i = 0; i < arguments.Length; i++)
+                    {
+                        valueArray[i] = arguments[i].GetFloatValue(exm);
+                    }
+                    var resultArray = valueArray.Distinct();
+                    if (resultArray.Count() != arguments.Length)
+                        return 0L;
                 }
                 else
                 {
-                    string baseValue = arguments[0].GetStrValue(exm);
-                    for (int i = 1; i < arguments.Length; i++)
+                    string[] stringArray = new string[arguments.Length];
+                    for (int i = 0; i < arguments.Length; i++)
                     {
-                        if (baseValue == arguments[i].GetStrValue(exm))
-                            return 0L;
+                        stringArray[i] = arguments[i].GetStrValue(exm);
                     }
+                    var resultArray = stringArray.Distinct();
+                    if (resultArray.Count() != arguments.Length)
+                        return 0L;
                 }
                 return 1L;
             }
@@ -1467,7 +1640,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public AllsamesMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
@@ -1477,24 +1650,33 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数には少なくとも2つの引数が必要です";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                Type baseType = arguments[0].GetOperandType();
+                EraType baseType = arguments[0].GetEraType();
                 for (int i = 1; i < arguments.Length; i++)
                 {
                     if (arguments[i] == null)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数は省略できません";
-                    if (arguments[i].GetOperandType() != baseType)
+                    if (arguments[i].GetEraType() != baseType)
                         return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
                 }
                 return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
-                if (arguments[0].GetOperandType() == typeof(Int64))
+                if (arguments[0].GetEraType() == EraType.Integer)
                 {
                     Int64 baseValue = arguments[0].GetIntValue(exm);
                     for (int i = 1; i < arguments.Length; i++)
                     {
                         if (baseValue != arguments[i].GetIntValue(exm))
+                            return 0L;
+                    }
+                }
+                else if (arguments[0].GetEraType() == EraType.Float)
+                {
+                    double baseValue = arguments[0].GetFloatValue(exm);
+                    for (int i = 1; i < arguments.Length; i++)
+                    {
+                        if (baseValue != arguments[i].GetFloatValue(exm))
                             return 0L;
                     }
                 }
@@ -1518,7 +1700,7 @@ namespace MinorShift.Emuera.GameData.Function
             readonly string funcName;
             public MaxArrayMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isCharaRange = false;
                 isMax = true;
@@ -1527,7 +1709,7 @@ namespace MinorShift.Emuera.GameData.Function
             }
             public MaxArrayMethod(bool isChara)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isCharaRange = isChara;
                 isMax = true;
@@ -1539,7 +1721,7 @@ namespace MinorShift.Emuera.GameData.Function
             }
             public MaxArrayMethod(bool isChara, bool isMaxFunc)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isCharaRange = isChara;
                 isMax = isMaxFunc;
@@ -1559,15 +1741,15 @@ namespace MinorShift.Emuera.GameData.Function
                 VariableTerm varToken = (VariableTerm)arguments[0];
                 if (isCharaRange && !varToken.Identifier.IsCharacterData)
                     return name + "関数の1番目の引数がキャラクタ変数ではありません";
-                if (!varToken.IsInteger)
+                if (!varToken.IsInteger && !varToken.IsFloat)
                     return name + "関数の1番目の引数が数値変数ではありません";
                 if (!isCharaRange && (varToken.Identifier.IsArray2D || varToken.Identifier.IsArray3D))
                     return name + "関数は二重配列・三重配列には対応していません";
                 if (!varToken.Identifier.IsArray1D)
                     return name + "関数の1番目の引数が配列変数ではありません";
-                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の引数の型が正しくありません";
-                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の引数の型が正しくありません";
                 return null;
             }
@@ -1580,6 +1762,8 @@ namespace MinorShift.Emuera.GameData.Function
                 if (!isCharaRange)
                 {
                     p.IsArrayRangeValid(start, end, funcName, 2L, 3L);
+                    if (vTerm.Identifier.GetEraType() == EraType.Float)
+                        return (Int64)exm.VEvaluator.GetMaxArrayDouble(p, start, end, isMax);
                     return (exm.VEvaluator.GetMaxArray(p, start, end, isMax));
                 }
                 else
@@ -1587,6 +1771,8 @@ namespace MinorShift.Emuera.GameData.Function
                     Int64 charaNum = exm.VEvaluator.CHARANUM;
                     if (start >= charaNum || start < 0 || end > charaNum || end < 0)
                         throw new CodeEE(funcName + "関数の範囲指定がキャラクタ配列の範囲を超えています(" + start.ToString() + "～" + end.ToString() + ")");
+                    if (vTerm.Identifier.GetEraType() == EraType.Float)
+                        return (Int64)exm.VEvaluator.GetMaxArrayCharaDouble(p, start, end, isMax);
                     return (exm.VEvaluator.GetMaxArrayChara(p, start, end, isMax));
                 }
             }
@@ -1596,8 +1782,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetbitMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
                 CanRestructure = true;
             }
             public override string CheckArgumentType(string name, IOperandTerm[] arguments)
@@ -1628,31 +1814,36 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetnumMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = true;
                 HasUniqueRestructure = true;
             }
             public override string CheckArgumentType(string name, IOperandTerm[] arguments)
             {
-                if (arguments.Length != 2)
-                    return name + "関数には2つの引数が必要です";
+                if (arguments.Length < 2 || arguments.Length > 3)
+                    return name + "関数には2つまたは3つの引数が必要です";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
                 if (!(arguments[0] is VariableTerm))
                     return name + "関数の1番目の引数の型が正しくありません";
                 if (arguments[1] == null)
                     return name + "関数の2番目の引数は省略できません";
-                if (arguments[1].GetOperandType() != typeof(string))
+                if (arguments[1].GetEraType() != EraType.String)
                     return name + "関数の2番目の引数の型が正しくありません";
+				if (arguments.Length == 3 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+					return name + "関数の3番目の引数の型が正しくありません";
                 return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
                 VariableTerm vToken = (VariableTerm)arguments[0];
                 VariableCode varCode = vToken.Identifier.Code;
+				string varname = arguments.Length > 2 && arguments[2] != null
+					? vToken.Identifier.Name + "@" + arguments[2].GetIntValue(exm)
+					: vToken.Identifier.Name;
                 string key = arguments[1].GetStrValue(exm);
-                if (exm.VEvaluator.Constant.TryKeywordToInteger(out int ret, varCode, key, -1, vToken.Identifier.Name))
+                if (exm.VEvaluator.Constant.TryKeywordToInteger(out int ret, varCode, key, -1, varname))
                     return ret;
                 else
                     return -1;
@@ -1668,23 +1859,20 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GetnumBMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.String };
 				CanRestructure = true;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				string errStr = base.CheckArgumentType(name, arguments);
-				if (errStr != null)
-					return errStr;
+				if (arguments.Length != 2)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
 				if (arguments[0] == null)
 					return name + "関数の1番目の引数は省略できません";
-				if (arguments[0] is SingleTerm)
-				{
-					string varName = ((SingleTerm)arguments[0]).Str;
-					if (GlobalStatic.IdentifierDictionary.GetVariableToken(varName, null, true) == null)
-						return name + "関数の1番目の引数が変数名ではありません";
-				}
+				if (arguments[1] == null)
+					return name + "関数の2番目の引数は省略できません";
+				if (arguments[1].GetEraType() != EraType.String)
+					return name + "関数の2番目の引数の型が正しくありません";
 				return null;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1704,8 +1892,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetPalamLVMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
                 CanRestructure = false;
             }
             public override string CheckArgumentType(string name, IOperandTerm[] arguments)
@@ -1730,8 +1918,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetExpLVMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
                 CanRestructure = false;
             }
             public override string CheckArgumentType(string name, IOperandTerm[] arguments)
@@ -1756,7 +1944,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public FindElementMethod(bool last)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = true; //すべて定数項ならできるはず
                 HasUniqueRestructure = true;
@@ -1780,16 +1968,16 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数は二重配列・三重配列には対応していません";
                 if (!varToken.Identifier.IsArray1D)
                     return name + "関数の1番目の引数が配列変数ではありません";
-                Type baseType = arguments[0].GetOperandType();
+                EraType baseType = arguments[0].GetEraType();
                 if (arguments[1] == null)
                     return name + "関数の2番目の引数は省略できません";
-                if (arguments[1].GetOperandType() != baseType)
+                if (arguments[1].GetEraType() != baseType)
                     return name + "関数の2番目の引数の型が正しくありません";
-                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の引数の型が正しくありません";
-                if ((arguments.Length >= 4) && (arguments[3] != null) && (arguments[3].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 4) && (arguments[3] != null) && (arguments[3].GetEraType() != EraType.Integer))
                     return name + "関数の4番目の引数の型が正しくありません";
-                if ((arguments.Length >= 5) && (arguments[4] != null) && (arguments[4].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 5) && (arguments[4] != null) && (arguments[4].GetEraType() != EraType.Integer))
                     return name + "関数の5番目の引数の型が正しくありません";
                 return null;
             }
@@ -1807,7 +1995,7 @@ namespace MinorShift.Emuera.GameData.Function
                 FixedVariableTerm p = varTerm.GetFixedVariableTerm(exm);
                 p.IsArrayRangeValid(start, end, funcName, 3L, 4L);
 
-                if (arguments[0].GetOperandType() == typeof(Int64))
+                if (arguments[0].GetEraType() == EraType.Integer)
                 {
                     Int64 targetValue = arguments[1].GetIntValue(exm);
                     return exm.VEvaluator.FindElement(p, targetValue, start, end, isExact, isLast);
@@ -1849,8 +2037,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public InRangeMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -1866,13 +2054,13 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public InRangeArrayMethod()
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = false;
             }
             public InRangeArrayMethod(bool isChara)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 isCharaRange = isChara;
                 CanRestructure = false;
@@ -1880,9 +2068,9 @@ namespace MinorShift.Emuera.GameData.Function
             private readonly bool isCharaRange = false;
             public override string CheckArgumentType(string name, IOperandTerm[] arguments)
             {
-                if (arguments.Length < 2)
-                    return name + "関数には少なくとも2つの引数が必要です";
-                if (arguments.Length > 6)
+                if (arguments.Length < 3)
+                    return name + "関数には少なくとも3つの引数が必要です";
+                if (arguments.Length > 5)
                     return name + "関数の引数が多すぎます";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
@@ -1895,44 +2083,75 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数は二重配列・三重配列には対応していません";
                 if (!isCharaRange && !varToken.Identifier.IsArray1D)
                     return name + "関数の1番目の引数が配列変数ではありません";
-                if (!varToken.IsInteger)
+                EraType arrayType = varToken.Identifier.GetEraType();
+                if (arrayType != EraType.Integer && arrayType != EraType.Float)
                     return name + "関数の1番目の引数が数値型変数ではありません";
                 if (arguments[1] == null)
                     return name + "関数の2番目の引数は省略できません";
-                if (arguments[1].GetOperandType() != typeof(Int64))
+                if (arrayType == EraType.Float)
+                {
+                    if (arguments[1].GetEraType() != EraType.Integer && arguments[1].GetEraType() != EraType.Float)
+                        return name + "関数の2番目の引数が数値型ではありません";
+                }
+                else if (arguments[1].GetEraType() != EraType.Integer)
                     return name + "関数の2番目の引数が数値型ではありません";
                 if (arguments[2] == null)
                     return name + "関数の3番目の引数は省略できません";
-                if (arguments[2].GetOperandType() != typeof(Int64))
+                if (arrayType == EraType.Float)
+                {
+                    if (arguments[2].GetEraType() != EraType.Integer && arguments[2].GetEraType() != EraType.Float)
+                        return name + "関数の3番目の引数が数値型ではありません";
+                }
+                else if (arguments[2].GetEraType() != EraType.Integer)
                     return name + "関数の3番目の引数が数値型ではありません";
-                if ((arguments.Length >= 4) && (arguments[3] != null) && (arguments[3].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 4) && (arguments[3] != null) && (arguments[3].GetEraType() != EraType.Integer))
                     return name + "関数の4番目の引数の型が正しくありません";
-                if ((arguments.Length >= 5) && (arguments[4] != null) && (arguments[4].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 5) && (arguments[4] != null) && (arguments[4].GetEraType() != EraType.Integer))
                     return name + "関数の5番目の引数の型が正しくありません";
                 return null;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
             {
-                Int64 min = arguments[1].GetIntValue(exm);
-                Int64 max = arguments[2].GetIntValue(exm);
-
                 VariableTerm varTerm = arguments[0] as VariableTerm;
                 Int64 start = (arguments.Length > 3 && arguments[3] != null) ? arguments[3].GetIntValue(exm) : 0;
                 Int64 end = (arguments.Length > 4 && arguments[4] != null) ? arguments[4].GetIntValue(exm) : (isCharaRange ? exm.VEvaluator.CHARANUM : varTerm.GetLength());
 
                 FixedVariableTerm p = varTerm.GetFixedVariableTerm(exm);
+                bool isFloatArray = varTerm.Identifier.GetEraType() == EraType.Float;
 
                 if (!isCharaRange)
                 {
                     p.IsArrayRangeValid(start, end, "INRANGEARRAY", 4L, 5L);
-                    return (exm.VEvaluator.GetInRangeArray(p, min, max, start, end));
+                    if (isFloatArray)
+                    {
+                        double min = ToDouble(arguments[1], exm);
+                        double max = ToDouble(arguments[2], exm);
+                        return exm.VEvaluator.GetInRangeArrayDouble(p, min, max, start, end);
+                    }
+                    else
+                    {
+                        Int64 min = arguments[1].GetIntValue(exm);
+                        Int64 max = arguments[2].GetIntValue(exm);
+                        return exm.VEvaluator.GetInRangeArray(p, min, max, start, end);
+                    }
                 }
                 else
                 {
                     Int64 charaNum = exm.VEvaluator.CHARANUM;
                     if (start >= charaNum || start < 0 || end > charaNum || end < 0)
                         throw new CodeEE("INRANGECARRAY関数の範囲指定がキャラクタ配列の範囲を超えています(" + start.ToString() + "～" + end.ToString() + ")");
-                    return (exm.VEvaluator.GetInRangeArrayChara(p, min, max, start, end));
+                    if (isFloatArray)
+                    {
+                        double min = ToDouble(arguments[1], exm);
+                        double max = ToDouble(arguments[2], exm);
+                        return exm.VEvaluator.GetInRangeArrayCharaDouble(p, min, max, start, end);
+                    }
+                    else
+                    {
+                        Int64 min = arguments[1].GetIntValue(exm);
+                        Int64 max = arguments[2].GetIntValue(exm);
+                        return exm.VEvaluator.GetInRangeArrayChara(p, min, max, start, end);
+                    }
                 }
             }
         }
@@ -1941,7 +2160,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public ArrayMultiSortMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 				HasUniqueRestructure = true;
@@ -1956,124 +2175,27 @@ namespace MinorShift.Emuera.GameData.Function
 						return string.Format("{0}関数:{1}番目の引数は省略できません", name, i + 1);
                     if (!(arguments[i] is VariableTerm varTerm) || varTerm.Identifier.IsCalc || varTerm.Identifier.IsConst)
                         return string.Format("{0}関数:{1}番目の引数が変数ではありません", name, i + 1);
-                    if (varTerm.Identifier.IsCharacterData)
+					if (varTerm.Identifier.IsCharacterData)
 						return string.Format("{0}関数:{1}番目の引数がキャラクタ変数です", name, i + 1);
 					if (i == 0 && !varTerm.Identifier.IsArray1D)
 						return string.Format("{0}関数:{1}番目の引数が一次元配列ではありません", name, i + 1);
-					if (!varTerm.Identifier.IsArray1D && !varTerm.Identifier.IsArray2D && !varTerm.Identifier.IsArray2D)
+					if (!varTerm.Identifier.IsArray1D && !varTerm.Identifier.IsArray2D && !varTerm.Identifier.IsArray3D)
 						return string.Format("{0}関数:{1}番目の引数が配列変数ではありません", name, i + 1);
+					if (!varTerm.Identifier.IsInteger && !varTerm.Identifier.IsString && !varTerm.Identifier.IsFloat)
+						return string.Format("{0}関数:{1}番目の引数の型が正しくありません", name, i + 1);
 				}
 				return null;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
 				VariableTerm varTerm = arguments[0] as VariableTerm;
-				int[] sortedArray;
-				if (varTerm.Identifier.IsInteger)
-				{
-					List<KeyValuePair<Int64, int>> sortList = new List<KeyValuePair<long, int>>();
-					Int64[] array = (Int64[])varTerm.Identifier.GetArray();
-					for (int i = 0; i < array.Length; i++)
-					{
-						if (array[i] == 0)
-							break;
-						if (array[i] < Int64.MinValue || array[i] > Int64.MaxValue)
-							return 0;
-						sortList.Add(new KeyValuePair<long, int>(array[i], i));
-					}
-                    //素ではintの範囲しか扱えないので一工夫
-                    sortList.Sort((a, b) => { return Math.Sign(a.Key - b.Key); });
-					sortedArray = new int[sortList.Count];
-					for (int i = 0; i < sortedArray.Length; i++)
-						sortedArray[i] = sortList[i].Value;
-				}
-				else
-				{
-					List<KeyValuePair<string, int>> sortList = new List<KeyValuePair<string, int>>();
-					string[] array = (string[])varTerm.Identifier.GetArray();
-					for (int i = 0; i < array.Length; i++)
-					{
-						if (string.IsNullOrEmpty(array[i]))
-							return 0;
-						sortList.Add(new KeyValuePair<string, int>(array[i], i));
-					}
-					sortList.Sort((a, b) => { return a.Key.CompareTo(b.Key); });
-					sortedArray = new int[sortList.Count];
-					for (int i = 0; i < sortedArray.Length; i++)
-						sortedArray[i] = sortList[i].Value;
-				}
+				int[] sortedArray = BuildSortedIndices(varTerm, true, -1, false);
+				if (sortedArray == null)
+					return 0;
 				foreach (VariableTerm term in arguments)//もう少し賢い方法はないものだろうか
 				{
-					if (term.Identifier.IsArray1D)
-					{
-						if (term.IsInteger)
-						{
-							var array = (Int64[])term.Identifier.GetArray();
-							var clone = (Int64[])array.Clone();
-							if (array.Length < sortedArray.Length)
-								return 0;
-							for (int i = 0; i < sortedArray.Length; i++)
-								array[i] = clone[sortedArray[i]];
-						}
-						else
-						{
-							var array = (string[])term.Identifier.GetArray();
-							var clone = (string[])array.Clone();
-							if (array.Length < sortedArray.Length)
-								return 0;
-							for (int i = 0; i < sortedArray.Length; i++)
-								array[i] = clone[sortedArray[i]];
-						}
-					}
-					else if (term.Identifier.IsArray2D)
-					{
-						if (term.IsInteger)
-						{
-							var array = (Int64[,])term.Identifier.GetArray();
-							var clone = (Int64[,])array.Clone();
-							if (array.GetLength(0) < sortedArray.Length)
-								return 0;
-							for (int i = 0; i < sortedArray.Length; i++)
-								for (int x = 0; x < array.GetLength(1); x++)
-									array[i, x] = clone[sortedArray[i], x];
-						}
-						else
-						{
-							var array = (string[,])term.Identifier.GetArray();
-							var clone = (string[,])array.Clone();
-							if (array.GetLength(0) < sortedArray.Length)
-								return 0;
-							for (int i = 0; i < sortedArray.Length; i++)
-								for (int x = 0; x < array.GetLength(1); x++)
-									array[i, x] = clone[sortedArray[i], x];
-						}
-					}
-					else if (term.Identifier.IsArray3D)
-					{
-						if (term.IsInteger)
-						{
-							var array = (Int64[, ,])term.Identifier.GetArray();
-							var clone = (Int64[, ,])array.Clone();
-							if (array.GetLength(0) < sortedArray.Length)
-								return 0;
-							for (int i = 0; i < sortedArray.Length; i++)
-								for (int x = 0; x < array.GetLength(1); x++)
-									for (int y = 0; y < array.GetLength(2); y++)
-										array[i, x, y] = clone[sortedArray[i], x, y];
-						}
-						else
-						{
-							var array = (string[, ,])term.Identifier.GetArray();
-							var clone = (string[, ,])array.Clone();
-							if (array.GetLength(0) < sortedArray.Length)
-								return 0;
-							for (int i = 0; i < sortedArray.Length; i++)
-								for (int x = 0; x < array.GetLength(1); x++)
-									for (int y = 0; y < array.GetLength(2); y++)
-										array[i, x, y] = clone[sortedArray[i], x, y];
-						}
-					}
-					else { throw new ExeEE("異常な配列"); }
+					if (!ApplySortedIndices(term, sortedArray))
+						return 0;
 				}
 				return 1;
 			}
@@ -2084,6 +2206,266 @@ namespace MinorShift.Emuera.GameData.Function
 				return false;
 			}
 		}
+
+		private sealed class ArrayMultiSortExMethod : FunctionMethod
+		{
+			public ArrayMultiSortExMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+				HasUniqueRestructure = true;
+			}
+
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 2)
+					return string.Format("{0}関数:少なくとも{1}の引数が必要です", name, 2);
+				if (arguments.Length > 4)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null)
+					return name + "関数の1番目の引数は省略できません";
+				if (!(arguments[0] is VariableTerm) && arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数は配列変数または変数名文字列でなければなりません";
+				if (!(arguments[1] is VariableTerm namesTerm) || !namesTerm.Identifier.IsString || !namesTerm.Identifier.IsArray1D)
+					return name + "関数の2番目の引数は文字列型1次元配列変数でなければなりません";
+				if (namesTerm.Identifier.IsCalc || namesTerm.Identifier.IsConst || namesTerm.Identifier.IsCharacterData)
+					return name + "関数の2番目の引数は通常の文字列型1次元配列変数でなければなりません";
+				if (arguments.Length >= 3 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+					return name + "関数の3番目の引数の型が正しくありません";
+				if (arguments.Length >= 4 && arguments[3] != null && arguments[3].GetEraType() != EraType.Integer)
+					return name + "関数の4番目の引数の型が正しくありません";
+				return null;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableTerm baseTerm = GetSortableArrayTerm(arguments[0], exm, "ARRAYMSORTEX");
+				bool ascending = arguments.Length < 3 || arguments[2] == null || arguments[2].GetIntValue(exm) != 0;
+				long fixedLengthInput = arguments.Length < 4 || arguments[3] == null ? -1 : arguments[3].GetIntValue(exm);
+				if (fixedLengthInput == 0)
+					return 0;
+				if (fixedLengthInput < -1 || fixedLengthInput > int.MaxValue)
+					throw new CodeEE("ARRAYMSORTEX関数の4番目の引数が範囲外です");
+
+				int[] sortedIndices = BuildSortedIndices(baseTerm, ascending, (int)fixedLengthInput, true);
+				if (sortedIndices == null)
+					return 0;
+
+				foreach (string variableName in EnumerateArrayMultiSortTargetNames((VariableTerm)arguments[1]))
+				{
+					if (!TryParseSnakeVariable(variableName, out VariableTerm targetTerm))
+						throw new CodeEE("ARRAYMSORTEX関数:変数\"" + variableName + "\"を解釈できません");
+					targetTerm = GetSortableTargetTerm(targetTerm, "ARRAYMSORTEX", variableName);
+					if (!ApplySortedIndices(targetTerm, sortedIndices))
+						return 0;
+				}
+				return 1;
+			}
+
+			public override bool UniqueRestructure(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				for (int i = 0; i < arguments.Length; i++)
+				{
+					if (arguments[i] != null)
+						arguments[i] = arguments[i].Restructure(exm);
+				}
+				return false;
+			}
+		}
+
+		private static VariableTerm GetSortableArrayTerm(IOperandTerm argument, ExpressionMediator exm, string functionName)
+		{
+			VariableTerm term = argument as VariableTerm;
+			if (term == null)
+			{
+				if (argument == null || argument.GetEraType() != EraType.String || !TryParseSnakeVariable(argument.GetStrValue(exm), out term))
+					throw new CodeEE(functionName + "関数の引数が配列変数ではありません");
+			}
+			if (term.Identifier.IsCalc || term.Identifier.IsConst || term.Identifier.IsCharacterData)
+				throw new CodeEE(functionName + "関数の引数が通常の配列変数ではありません");
+			if (!term.Identifier.IsArray1D)
+				throw new CodeEE(functionName + "関数は一次元配列だけに対応しています");
+			if (!term.Identifier.IsInteger && !term.Identifier.IsString && !term.Identifier.IsFloat)
+				throw new CodeEE(functionName + "関数の引数の型が正しくありません");
+			return term;
+		}
+
+		private static VariableTerm GetSortableTargetTerm(VariableTerm term, string functionName, string variableName)
+		{
+			if (term.Identifier.IsCalc || term.Identifier.IsConst || term.Identifier.IsCharacterData)
+				throw new CodeEE(functionName + "関数:変数\"" + variableName + "\"は通常の配列変数ではありません");
+			if (!term.Identifier.IsArray1D && !term.Identifier.IsArray2D && !term.Identifier.IsArray3D)
+				throw new CodeEE(functionName + "関数:変数\"" + variableName + "\"は配列変数ではありません");
+			if (!term.Identifier.IsInteger && !term.Identifier.IsString && !term.Identifier.IsFloat)
+				throw new CodeEE(functionName + "関数:変数\"" + variableName + "\"の型が正しくありません");
+			return term;
+		}
+
+		private static IEnumerable<string> EnumerateArrayMultiSortTargetNames(VariableTerm namesTerm)
+		{
+			object arrayObject = namesTerm.Identifier.GetArray();
+			if (arrayObject is SparseArray<string> sparseArray)
+			{
+				for (int i = 0; i < sparseArray.Length; i++)
+				{
+					string variableName = sparseArray[i];
+					if (string.IsNullOrWhiteSpace(variableName))
+						yield break;
+					yield return variableName;
+				}
+				yield break;
+			}
+
+			string[] array = (string[])arrayObject;
+			for (int i = 0; i < array.Length; i++)
+			{
+				string variableName = array[i];
+				if (string.IsNullOrWhiteSpace(variableName))
+					yield break;
+				yield return variableName;
+			}
+		}
+
+		private static int[] BuildSortedIndices(VariableTerm term, bool ascending, int fixedLength, bool useOrdinalStringComparison)
+		{
+			object arrayObject = term.Identifier.GetArray();
+			if (term.Identifier.IsInteger)
+			{
+				int length = GetSortLength(GetFirstDimensionLength(arrayObject), fixedLength, i => GetIntArrayValue(arrayObject, i) == 0);
+				if (length < 0)
+					return null;
+				var sortList = new List<KeyValuePair<Int64, int>>(length);
+				for (int i = 0; i < length; i++)
+					sortList.Add(new KeyValuePair<Int64, int>(GetIntArrayValue(arrayObject, i), i));
+				sortList.Sort((a, b) => ascending ? a.Key.CompareTo(b.Key) : b.Key.CompareTo(a.Key));
+				return sortList.Select(pair => pair.Value).ToArray();
+			}
+			if (term.Identifier.IsFloat)
+			{
+				int length = GetSortLength(GetFirstDimensionLength(arrayObject), fixedLength, i => GetFloatArrayValue(arrayObject, i) == 0.0d);
+				if (length < 0)
+					return null;
+				var sortList = new List<KeyValuePair<double, int>>(length);
+				for (int i = 0; i < length; i++)
+					sortList.Add(new KeyValuePair<double, int>(GetFloatArrayValue(arrayObject, i), i));
+				sortList.Sort((a, b) => ascending ? a.Key.CompareTo(b.Key) : b.Key.CompareTo(a.Key));
+				return sortList.Select(pair => pair.Value).ToArray();
+			}
+			else
+			{
+				int length = GetSortLength(GetFirstDimensionLength(arrayObject), fixedLength, i => string.IsNullOrEmpty(GetStringArrayValue(arrayObject, i)));
+				if (length < 0)
+					return null;
+				var sortList = new List<KeyValuePair<string, int>>(length);
+				for (int i = 0; i < length; i++)
+					sortList.Add(new KeyValuePair<string, int>(GetStringArrayValue(arrayObject, i), i));
+				sortList.Sort((a, b) =>
+				{
+					int comparison = useOrdinalStringComparison ? string.CompareOrdinal(a.Key, b.Key) : a.Key.CompareTo(b.Key);
+					return ascending ? comparison : -comparison;
+				});
+				return sortList.Select(pair => pair.Value).ToArray();
+			}
+		}
+
+		private static int GetSortLength(int arrayLength, int fixedLength, Func<int, bool> isDefault)
+		{
+			if (fixedLength >= 0)
+				return Math.Min(fixedLength, arrayLength);
+			int length = 0;
+			while (length < arrayLength && !isDefault(length))
+				length++;
+			return length;
+		}
+
+		private static bool ApplySortedIndices(VariableTerm term, int[] sortedIndices)
+		{
+			object arrayObject = term.Identifier.GetArray();
+			if (arrayObject is Array array)
+				return ApplySortedIndicesToDenseArray(array, sortedIndices);
+			if (arrayObject is SparseArray<Int64> intSparseArray)
+				return ApplySortedIndicesToSparseArray(intSparseArray, sortedIndices);
+			if (arrayObject is SparseArray<double> floatSparseArray)
+				return ApplySortedIndicesToSparseArray(floatSparseArray, sortedIndices);
+			if (arrayObject is SparseArray<string> stringSparseArray)
+				return ApplySortedIndicesToSparseArray(stringSparseArray, sortedIndices);
+			throw new ExeEE("異常な配列");
+		}
+
+		private static bool ApplySortedIndicesToDenseArray(Array array, int[] sortedIndices)
+		{
+			int rank = array.Rank;
+			if (rank < 1 || rank > 3)
+				throw new ExeEE("異常な配列");
+			if (array.GetLength(0) < sortedIndices.Length)
+				return false;
+
+			Array clone = (Array)array.Clone();
+			for (int i = 0; i < sortedIndices.Length; i++)
+			{
+				int sourceIndex = sortedIndices[i];
+				if (rank == 1)
+					array.SetValue(clone.GetValue(sourceIndex), i);
+				else if (rank == 2)
+				{
+					for (int x = 0; x < array.GetLength(1); x++)
+						array.SetValue(clone.GetValue(sourceIndex, x), i, x);
+				}
+				else
+				{
+					for (int x = 0; x < array.GetLength(1); x++)
+						for (int y = 0; y < array.GetLength(2); y++)
+							array.SetValue(clone.GetValue(sourceIndex, x, y), i, x, y);
+				}
+			}
+			return true;
+		}
+
+		private static bool ApplySortedIndicesToSparseArray<T>(SparseArray<T> array, int[] sortedIndices)
+		{
+			if (array.Length < sortedIndices.Length)
+				return false;
+			// 稀疏数组的逻辑长度可能很大，只克隆参与排序的前段，避免在 Android 上把未使用区间全部物化。
+			T[] clone = new T[sortedIndices.Length];
+			for (int i = 0; i < sortedIndices.Length; i++)
+				clone[i] = array[i];
+			for (int i = 0; i < sortedIndices.Length; i++)
+				array[i] = clone[sortedIndices[i]];
+			return true;
+		}
+
+		private static int GetFirstDimensionLength(object arrayObject)
+		{
+			if (arrayObject is SparseArray<Int64> intSparseArray)
+				return intSparseArray.Length;
+			if (arrayObject is SparseArray<double> floatSparseArray)
+				return floatSparseArray.Length;
+			if (arrayObject is SparseArray<string> stringSparseArray)
+				return stringSparseArray.Length;
+			return ((Array)arrayObject).GetLength(0);
+		}
+
+		private static Int64 GetIntArrayValue(object arrayObject, int index)
+		{
+			if (arrayObject is SparseArray<Int64> sparseArray)
+				return sparseArray[index];
+			return ((Int64[])arrayObject)[index];
+		}
+
+		private static double GetFloatArrayValue(object arrayObject, int index)
+		{
+			if (arrayObject is SparseArray<double> sparseArray)
+				return sparseArray[index];
+			return ((double[])arrayObject)[index];
+		}
+
+		private static string GetStringArrayValue(object arrayObject, int index)
+		{
+			if (arrayObject is SparseArray<string> sparseArray)
+				return sparseArray[index];
+			return ((string[])arrayObject)[index];
+		}
         #endregion
 
         #region 文字列操作系
@@ -2091,8 +2473,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public StrlenMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2106,8 +2488,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public StrlenuMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2121,7 +2503,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public SubstringMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = true;
             }
@@ -2136,12 +2518,12 @@ namespace MinorShift.Emuera.GameData.Function
 
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                if (arguments[0].GetOperandType() != typeof(string))
+                if (arguments[0].GetEraType() != EraType.String)
                     return name + "関数の1番目の引数の型が正しくありません";
                 //2、３は省略可能
-                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の引数の型が正しくありません";
-                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の引数の型が正しくありません";
                 return null;
             }
@@ -2163,7 +2545,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public SubstringuMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = true;
             }
@@ -2178,12 +2560,12 @@ namespace MinorShift.Emuera.GameData.Function
 
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                if (arguments[0].GetOperandType() != typeof(string))
+                if (arguments[0].GetEraType() != EraType.String)
                     return name + "関数の1番目の引数の型が正しくありません";
                 //2、３は省略可能
-                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の引数の型が正しくありません";
-                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の引数の型が正しくありません";
                 return null;
             }
@@ -2218,7 +2600,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public StrfindMethod(bool unicode)
             {
-                ReturnType = typeof(Int64);
+                ReturnType = EraType.Integer;
                 argumentTypeArray = null;
                 CanRestructure = true;
 				this.unicode = unicode;
@@ -2234,14 +2616,14 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の引数が多すぎます";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                if (arguments[0].GetOperandType() != typeof(string))
+                if (arguments[0].GetEraType() != EraType.String)
                     return name + "関数の1番目の引数の型が正しくありません";
                 if (arguments[1] == null)
                     return name + "関数の2番目の引数は省略できません";
-                if (arguments[1].GetOperandType() != typeof(string))
+                if (arguments[1].GetEraType() != EraType.String)
                     return name + "関数の2番目の引数の型が正しくありません";
                 //3つ目は省略可能
-                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 3) && (arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の引数の型が正しくありません";
                 return null;
             }
@@ -2278,8 +2660,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public StrCountMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2301,7 +2683,7 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public ToStrMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 CanRestructure = true;
             }
@@ -2315,9 +2697,9 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の引数が多すぎます";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                if (arguments[0].GetOperandType() != typeof(Int64))
+                if (arguments[0].GetEraType() != EraType.Integer)
                     return name + "関数の1番目の引数の型が正しくありません";
-                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetOperandType() != typeof(string)))
+                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetEraType() != EraType.String))
                     return name + "関数の2番目の引数の型が正しくありません";
                 return null;
             }
@@ -2344,8 +2726,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public ToIntMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = true;
             }
 
@@ -2382,6 +2764,28 @@ namespace MinorShift.Emuera.GameData.Function
             }
         }
 
+        private sealed class ToFloatMethod : FunctionMethod
+        {
+            public ToFloatMethod()
+            {
+                ReturnType = EraType.Float;
+                argumentTypeArray = new EraType[] { EraType.String };
+                CanRestructure = true;
+            }
+
+            public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                string str = arguments[0].GetStrValue(exm);
+                if (string.IsNullOrEmpty(str))
+                    return new SingleTerm(0.0);
+                if (str.Length < LangManager.GetStrlenLang(str))
+                    return new SingleTerm(0.0);
+                if (double.TryParse(str, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double result))
+                    return new SingleTerm(result);
+                return new SingleTerm(0.0);
+            }
+        }
+
         //難読化用属性。enum.ToString()やenum.Parse()を行うなら(Exclude=true)にすること。
         [global::System.Reflection.Obfuscation(Exclude = false)]
         //TOUPPER等の処理を汎用化するためのenum
@@ -2398,15 +2802,15 @@ namespace MinorShift.Emuera.GameData.Function
             readonly StrFormType strType;
             public StrChangeStyleMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String };
                 strType = StrFormType.Upper;
                 CanRestructure = true;
             }
             public StrChangeStyleMethod(StrFormType type)
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String };
                 strType = type;
                 CanRestructure = true;
             }
@@ -2434,8 +2838,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public LineIsEmptyMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { };
                 CanRestructure = false;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2448,8 +2852,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public ReplaceMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string), typeof(string), typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.String, EraType.String };
                 CanRestructure = true;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2472,8 +2876,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public UnicodeMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(Int64) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.Integer };
                 CanRestructure = true;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2503,8 +2907,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public UnicodeByteMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = true;
             }
             public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2523,8 +2927,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public ConvertIntMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
                 CanRestructure = true;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2540,8 +2944,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public IsNumericMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = true;
             }
             public override long GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2580,8 +2984,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public EscapeMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = true;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2594,8 +2998,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public EncodeToUniMethod()
             {
-                ReturnType = typeof(Int64);
-                argumentTypeArray = new Type[] { null };
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.Void };
                 CanRestructure = true;
             }
             public override string CheckArgumentType(string name, IOperandTerm[] arguments)
@@ -2607,9 +3011,9 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の引数が多すぎます";
                 if (arguments[0] == null)
                     return name + "関数の1番目の引数は省略できません";
-                if (arguments[0].GetOperandType() != typeof(string))
+                if (arguments[0].GetEraType() != EraType.String)
                     return name + "関数の1番目の引数の型が正しくありません";
-                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetOperandType() != typeof(Int64)))
+                if ((arguments.Length >= 2) && (arguments[1] != null) && (arguments[1].GetEraType() != EraType.Integer))
                     return name + "関数の2番目の引数の型が正しくありません";
                 return null;
             }
@@ -2631,8 +3035,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public CharAtMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string), typeof(Int64) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String, EraType.Integer };
                 CanRestructure = true;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2649,8 +3053,8 @@ namespace MinorShift.Emuera.GameData.Function
         {
             public GetLineStrMethod()
             {
-                ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string) };
+                ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String };
                 CanRestructure = true;
             }
             public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2666,8 +3070,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public StrFormMethod()
 			{
-				ReturnType = typeof(string);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { EraType.String };
                 HasUniqueRestructure = true;
 				CanRestructure = true;
 			}
@@ -2716,12 +3120,37 @@ namespace MinorShift.Emuera.GameData.Function
                 return true;
             }
         }
+        public sealed class StrFormCheckMethod : FunctionMethod
+        {
+            public StrFormCheckMethod()
+            {
+                ReturnType = EraType.Integer;
+                argumentTypeArray = new EraType[] { EraType.String };
+                CanRestructure = false;
+            }
+
+            public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+            {
+                string str = arguments[0].GetStrValue(exm);
+                try
+                {
+                    StrFormWord wt = LexicalAnalyzer.AnalyseFormattedString(new StringStream(str), FormStrEndWith.EoL, false);
+                    StrForm strForm = StrForm.FromWordToken(wt);
+                    strForm.GetString(exm);
+                    return 1;
+                }
+                catch
+                {
+                    return 0;
+                }
+            }
+        }
 
         public sealed class JoinMethod : FunctionMethod
         {
             public JoinMethod()
             {
-                ReturnType = typeof(string);
+                ReturnType = EraType.String;
                 argumentTypeArray = null;
                 HasUniqueRestructure = true;
                 CanRestructure = true;
@@ -2741,15 +3170,15 @@ namespace MinorShift.Emuera.GameData.Function
                     return name + "関数の1番目の引数が配列変数ではありません";
                 if (arguments.Length == 1)
                     return null;
-                if ((arguments[1] != null) && (arguments[1].GetOperandType() != typeof(string)))
+                if ((arguments[1] != null) && (arguments[1].GetEraType() != EraType.String))
                     return name + "関数の2番目の変数が文字列ではありません";
                 if (arguments.Length == 2)
                     return null;
-                if ((arguments[2] != null) && (arguments[2].GetOperandType() != typeof(Int64)))
+                if ((arguments[2] != null) && (arguments[2].GetEraType() != EraType.Integer))
                     return name + "関数の3番目の変数が数値ではありません";
                 if (arguments.Length == 3)
                     return null;
-                if ((arguments[3] != null) && (arguments[3].GetOperandType() != typeof(Int64)))
+                if ((arguments[3] != null) && (arguments[3].GetEraType() != EraType.Integer))
                     return name + "関数の4番目の変数が数値ではありません";
                 return null;
             }
@@ -2791,14 +3220,14 @@ namespace MinorShift.Emuera.GameData.Function
 				if(typeisInt)
 				{
 					funcname = "GETCONFIG";
-					ReturnType = typeof(Int64);
+					ReturnType = EraType.Integer;
 				}
 				else
 				{
 					funcname = "GETCONFIGS";
-					ReturnType = typeof(string);
+					ReturnType = EraType.String;
 				}
-				argumentTypeArray = new Type[] { typeof(string) };
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = true;
 			}
 			private readonly string funcname;
@@ -2815,19 +3244,19 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				if(ReturnType != typeof(Int64))
+				if(ReturnType != EraType.Integer)
 					throw new ExeEE(funcname + "関数:不正な呼び出し");
 				SingleTerm term = GetSingleTerm(exm, arguments);
-				if(term.GetOperandType() != typeof(Int64))
+				if(term.GetEraType() != EraType.Integer)
 					throw new CodeEE(funcname + "関数:型が違います（GETCONFIGS関数を使用してください）");
 				return term.Int;
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				if(ReturnType != typeof(string))
+				if(ReturnType != EraType.String)
 					throw new ExeEE(funcname + "関数:不正な呼び出し");
 				SingleTerm term = GetSingleTerm(exm, arguments);
-				if (term.GetOperandType() != typeof(string))
+				if (term.GetEraType() != EraType.String)
 					throw new CodeEE(funcname + "関数:型が違います（GETCONFIG関数を使用してください）");
 				return term.Str;
 			}
@@ -2840,7 +3269,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public HtmlGetPrintedStrMethod()
 			{
-				ReturnType = typeof(string);
+				ReturnType = EraType.String;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
@@ -2852,7 +3281,7 @@ namespace MinorShift.Emuera.GameData.Function
 					return name + "関数の引数が多すぎます";
 				if (arguments.Length == 0|| arguments[0] == null)
 					return null;
-				if (arguments[0].GetOperandType() != typeof(Int64))
+				if (arguments[0].GetEraType() != EraType.Integer)
 					return name + "関数の1番目の引数の型が正しくありません";
 				return null;
 			}
@@ -2874,8 +3303,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public HtmlPopPrintingStrMethod()
 			{
-				ReturnType = typeof(string);
-				argumentTypeArray = new Type[] { };
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { };
 				CanRestructure = false;
 			}
 
@@ -2892,8 +3321,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public HtmlToPlainTextMethod()
 			{
-				ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2905,8 +3334,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public HtmlEscapeMethod()
 			{
-				ReturnType = typeof(string);
-                argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.String;
+                argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -2919,7 +3348,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public HtmlStringLenMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
@@ -2927,9 +3356,9 @@ namespace MinorShift.Emuera.GameData.Function
 			{
 				if (arguments.Length < 1 || arguments.Length > 2)
 					return name + "関数の引数の数が間違っています";
-				if (arguments[0] == null || arguments[0].GetOperandType() != typeof(string))
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
 					return name + "関数の1番目の引数の型が正しくありません";
-				if (arguments.Length == 2 && arguments[1] != null && arguments[1].GetOperandType() != typeof(Int64))
+				if (arguments.Length == 2 && arguments[1] != null && arguments[1].GetEraType() != EraType.Integer)
 					return name + "関数の2番目の引数の型が正しくありません";
 				return null;
 			}
@@ -2950,34 +3379,18 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public HtmlSubstringMethod()
 			{
-				ReturnType = typeof(string);
-				argumentTypeArray = null;
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.Integer };
 				CanRestructure = false;
-			}
-			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
-			{
-				if (arguments.Length < 2 || arguments.Length > 3)
-					return name + "関数の引数の数が正しくありません";
-				if (arguments[0] == null || arguments[0].GetOperandType() != typeof(string))
-					return name + "関数の1番目の引数の型が正しくありません";
-				if (arguments[1] == null || arguments[1].GetOperandType() != typeof(Int64))
-					return name + "関数の2番目の引数の型が正しくありません";
-				if (arguments.Length == 3 && arguments[2] != null && arguments[2].GetOperandType() != typeof(Int64))
-					return name + "関数の3番目の引数の型が正しくありません";
-				return null;
 			}
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				string plain = HtmlManager.Html2PlainText(arguments[0].GetStrValue(exm)) ?? "";
-				int start = (int)Math.Max(0, arguments[1].GetIntValue(exm));
-				if (start >= plain.Length)
-					return "";
-				int length = arguments.Length >= 3 && arguments[2] != null ? (int)arguments[2].GetIntValue(exm) : plain.Length - start;
-				if (length <= 0)
-					return "";
-				if (start + length > plain.Length)
-					length = plain.Length - start;
-				return plain.Substring(start, length);
+				string[] values = HtmlManager.HtmlSubString(arguments[0].GetStrValue(exm), (int)arguments[1].GetIntValue(exm));
+				var results = exm.VEvaluator.RESULTS_ARRAY;
+				int count = Math.Min(values.Length, results.Length);
+				for (int i = 0; i < count; i++)
+					results[i] = values[i];
+				return values[0];
 			}
 		}
 
@@ -2985,20 +3398,24 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public HtmlStringLinesMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				string plain = HtmlManager.Html2PlainText(arguments[0].GetStrValue(exm)) ?? "";
-				if (plain.Length == 0)
+				string str = arguments[0].GetStrValue(exm);
+				int lineLength = (int)arguments[1].GetIntValue(exm);
+				if (string.IsNullOrEmpty(str) || lineLength <= 0)
 					return 0;
 				int lines = 1;
-				for (int i = 0; i < plain.Length; i++)
+				while (true)
 				{
-					if (plain[i] == '\n')
-						lines++;
+					string[] values = HtmlManager.HtmlSubString(str, lineLength);
+					str = values[1];
+					if (string.IsNullOrEmpty(str))
+						break;
+					lines++;
 				}
 				return lines;
 			}
@@ -3130,12 +3547,90 @@ namespace MinorShift.Emuera.GameData.Function
 			return cm;
 		}
 
+		/// <summary>
+		/// snake 兼容：CBGSETSPRITE/CBGSETCIMG 的 ColorMatrix 支持整数/小数 2D/3D 数组，
+		/// 并且参数本身允许省略，因此需要单独做空值和类型检查。
+		/// </summary>
+		private static float[][] ReadOptionalColorMatrixForCbg(string Name, ExpressionMediator exm, IOperandTerm[] arguments, int argNo)
+		{
+			if (arguments.Length <= argNo || arguments[argNo] == null)
+				return null;
+			if (!(arguments[argNo] is VariableTerm term))
+				throw new CodeEE(string.Format(Properties.Resources.SyntaxErrMesMethodGraphicsColorMatrix0, Name));
+			FixedVariableTerm fixedTerm = term.GetFixedVariableTerm(exm);
+			if (!fixedTerm.Identifier.IsInteger && !fixedTerm.Identifier.IsFloat)
+				throw new CodeEE(string.Format(Properties.Resources.SyntaxErrMesMethodGraphicsColorMatrix0, Name));
+			if (!fixedTerm.Identifier.IsArray2D && !fixedTerm.Identifier.IsArray3D)
+				throw new CodeEE(string.Format(Properties.Resources.SyntaxErrMesMethodGraphicsColorMatrix0, Name));
+
+			float[][] matrix = new float[5][];
+			for (int i = 0; i < matrix.Length; i++)
+				matrix[i] = new float[5];
+
+			if (fixedTerm.Identifier.IsArray2D)
+			{
+				Int64 row = fixedTerm.Identifier.IsCharacterData ? fixedTerm.Index2 : fixedTerm.Index1;
+				Int64 col = fixedTerm.Identifier.IsCharacterData ? fixedTerm.Index3 : fixedTerm.Index2;
+				if (row < 0 || col < 0)
+					throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGColorMatrix0, Name, row, col));
+				if (fixedTerm.Identifier.IsFloat)
+				{
+					double[,] array = fixedTerm.Identifier.IsCharacterData
+						? fixedTerm.Identifier.GetArrayChara((int)fixedTerm.Index1) as double[,]
+						: fixedTerm.Identifier.GetArray() as double[,];
+					if (array == null || row + 5 > array.GetLength(0) || col + 5 > array.GetLength(1))
+						throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGColorMatrix0, Name, row, col));
+					for (int x = 0; x < 5; x++)
+						for (int y = 0; y < 5; y++)
+							matrix[x][y] = (float)array[row + x, col + y];
+					return matrix;
+				}
+
+				Int64[,] intArray = fixedTerm.Identifier.IsCharacterData
+					? fixedTerm.Identifier.GetArrayChara((int)fixedTerm.Index1) as Int64[,]
+					: fixedTerm.Identifier.GetArray() as Int64[,];
+				if (intArray == null || row + 5 > intArray.GetLength(0) || col + 5 > intArray.GetLength(1))
+					throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGColorMatrix0, Name, row, col));
+				for (int x = 0; x < 5; x++)
+					for (int y = 0; y < 5; y++)
+						matrix[x][y] = ((float)intArray[row + x, col + y]) / 256f;
+				return matrix;
+			}
+
+			if (fixedTerm.Identifier.IsCharacterData)
+				throw new NotImplCodeEE();
+
+			Int64 layer = fixedTerm.Index1;
+			Int64 row3 = fixedTerm.Index2;
+			Int64 col3 = fixedTerm.Index3;
+			if (layer < 0 || row3 < 0 || col3 < 0)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGColorMatrix0, Name, row3, col3));
+			if (fixedTerm.Identifier.IsFloat)
+			{
+				double[,,] array = fixedTerm.Identifier.GetArray() as double[,,];
+				if (array == null || layer >= array.GetLength(0) || row3 + 5 > array.GetLength(1) || col3 + 5 > array.GetLength(2))
+					throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGColorMatrix0, Name, row3, col3));
+				for (int x = 0; x < 5; x++)
+					for (int y = 0; y < 5; y++)
+						matrix[x][y] = (float)array[layer, row3 + x, col3 + y];
+				return matrix;
+			}
+
+			Int64[,,] intArray3 = fixedTerm.Identifier.GetArray() as Int64[,,];
+			if (intArray3 == null || layer >= intArray3.GetLength(0) || row3 + 5 > intArray3.GetLength(1) || col3 + 5 > intArray3.GetLength(2))
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGColorMatrix0, Name, row3, col3));
+			for (int x = 0; x < 5; x++)
+				for (int y = 0; y < 5; y++)
+					matrix[x][y] = ((float)intArray3[layer, row3 + x, col3 + y]) / 256f;
+			return matrix;
+		}
+
 		public sealed class GraphicsStateMethod : FunctionMethod
 		{
 			public GraphicsStateMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3153,6 +3648,16 @@ namespace MinorShift.Emuera.GameData.Function
 						return g.Width;
 					case "GHEIGHT":
 						return g.Height;
+					case "GGETFONTSIZE":
+						return g.Fontsize;
+					case "GGETFONTSTYLE":
+						return g.Fontstyle;
+					case "GGETPEN":
+						return ((Int64)g.PenColor.ToArgb()) & 0xFFFFFFFFL;
+					case "GGETPENWIDTH":
+						return g.PenWidth;
+					case "GGETBRUSH":
+						return ((Int64)g.BrushColor.ToArgb()) & 0xFFFFFFFFL;
 				}
 				throw new ExeEE("GraphicsState:" + Name + ":異常な分岐");
 			}
@@ -3162,8 +3667,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsGetColorMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3187,8 +3692,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsSetColorMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3206,13 +3711,42 @@ namespace MinorShift.Emuera.GameData.Function
 				return 1;
 			}
 		}
-		
+
+		/// <summary>
+		/// GCLEARLOWALPHA(int ID, int alphaThreshold)
+		/// アルファ値がalphaThreshold以下の画素を一括で透明黒(0x0)にする。
+		/// ERBの画像_僅少アルファ除去が行っていたFOR二重ループ+GGETCOLOR/GSETCOLOR
+		/// 逐画素呼び出しを、GraphicsImage.ClearLowAlphaのバイト配列一括処理に置き換えるための原語。
+		/// </summary>
+		public sealed class GraphicsClearLowAlphaMethod : FunctionMethod
+		{
+			public GraphicsClearLowAlphaMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
+				CanRestructure = false;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+					throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+				GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+				if (!g.IsCreated)
+					return 0;
+				Int64 threshold64 = arguments[1].GetIntValue(exm);
+				if (threshold64 < 0 || threshold64 > 255)
+					throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodDefaultArgumentOutOfRange0, Name, threshold64, 2));
+				g.ClearLowAlpha((int)threshold64);
+				return 1;
+			}
+		}
+
 		public sealed class GraphicsSetBrushMethod : FunctionMethod
 		{
 			public GraphicsSetBrushMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3231,9 +3765,25 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsSetFontMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(string), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
 				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 3)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum1, name, 3);
+				if (arguments.Length > 4)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum2, name);
+				if (arguments[0] == null || !arguments[0].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
+				if (arguments[1] == null || !arguments[1].IsString)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 2);
+				if (arguments[2] == null || !arguments[2].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 3);
+				if (arguments.Length == 4 && (arguments[3] == null || !arguments[3].IsInteger))
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 4);
+				return null;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -3244,11 +3794,12 @@ namespace MinorShift.Emuera.GameData.Function
 					return 0;
 				string fontname = arguments[1].GetStrValue(exm);
 				Int64 fontsize = arguments[2].GetIntValue(exm);
+				FontStyle fontStyle = arguments.Length >= 4 ? GraphicsFontStyleFromInt(arguments[3].GetIntValue(exm)) : FontStyle.Regular;
 
                 Font styledFont;
                 try
 				{
-					styledFont = new Font(fontname, fontsize, FontStyle.Regular, GraphicsUnit.Pixel);
+					styledFont = new Font(fontname, fontsize, fontStyle, GraphicsUnit.Pixel);
 				}
 				catch
 				{
@@ -3258,13 +3809,27 @@ namespace MinorShift.Emuera.GameData.Function
 				return 1;
 			}
 		}
+
+		static FontStyle GraphicsFontStyleFromInt(long style)
+		{
+			FontStyle fontStyle = FontStyle.Regular;
+			if ((style & 1) != 0)
+				fontStyle |= FontStyle.Bold;
+			if ((style & 2) != 0)
+				fontStyle |= FontStyle.Italic;
+			if ((style & 4) != 0)
+				fontStyle |= FontStyle.Strikeout;
+			if ((style & 8) != 0)
+				fontStyle |= FontStyle.Underline;
+			return fontStyle;
+		}
 		
 		public sealed class GraphicsSetPenMethod : FunctionMethod
 		{
 			public GraphicsSetPenMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3285,22 +3850,39 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SpriteStateMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
 				string imgname = arguments[0].GetStrValue(exm);
+				if (Name == "SPRITECREATED")
+					return AppContents.SpriteExists(imgname) ? 1 : 0;
+
 				ASprite img = AppContents.GetSprite(imgname);
 				if (img == null || !img.IsCreated)
 					return 0;
 				if (img.DestBaseSize.Width <= 0 || img.DestBaseSize.Height <= 0)
+				{
+					// 防御性：某些动态创建路径（如 SPRITECREATE 后 GraphicsImage 被异常释放，
+					// 或 CSV 索引与文件系统状态不一致）可能导致 DestBaseSize 为0，但底层 Bitmap 仍有有效尺寸。
+					// 此时回退到 Bitmap 尺寸，避免 SPRITEWIDTH 返回0 引发后续脚本 GCREATE 报错。
+					var bmp = img.Bitmap;
+					if (bmp != null && bmp.Width > 0 && bmp.Height > 0)
+					{
+						switch (Name)
+						{
+							case "SPRITEWIDTH":
+								return bmp.Width;
+							case "SPRITEHEIGHT":
+								return bmp.Height;
+						}
+					}
 					return 0;
+				}
 				switch (Name)
 				{
-					case "SPRITECREATED":
-						return 1;
 					case "SPRITEWIDTH":
 						return img.DestBaseSize.Width;
 					case "SPRITEHEIGHT":
@@ -3318,8 +3900,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SpriteSetPosMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) , typeof(Int64),typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String , EraType.Integer,EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3333,9 +3915,11 @@ namespace MinorShift.Emuera.GameData.Function
 				{
 					case "SPRITEMOVE":
 						img.DestBasePosition.Offset(p);
+						AppContents.SetSpriteBasePosition(imgname, img.DestBasePosition);
 						return 1;
 					case "SPRITESETPOS":
 						img.DestBasePosition = p;
+						AppContents.SetSpriteBasePosition(imgname, img.DestBasePosition);
 						return 1;
 				}
 				throw new ExeEE("SpriteStateMethod:" + Name + ":異常な分岐");
@@ -3346,8 +3930,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SpriteGetColorMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3372,8 +3956,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public ClientSizeMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] {};
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] {};
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3393,8 +3977,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsCreateMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3428,8 +4012,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsCreateFromFileMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3444,12 +4028,7 @@ namespace MinorShift.Emuera.GameData.Function
                 BitmapTexture bmp = null;
 				try
 				{
-					string filepath = filename;
-					if(!System.IO.Path.IsPathRooted(filepath))
-						filepath = System.IO.Path.Combine(Program.ContentDir ?? "", filename);
-					string resolved = uEmuera.Utils.ResolveExistingFilePath(filepath);
-					if (!string.IsNullOrEmpty(resolved))
-						filepath = resolved;
+					string filepath = ResolveGraphicsResourceFilePath(filename);
 					if (!uEmuera.Utils.FileExists(filepath))
 						return 0;
 					bmp = new BitmapTexture(filepath);
@@ -3457,7 +4036,8 @@ namespace MinorShift.Emuera.GameData.Function
 						return 0;
 					if (bmp.Width == 0 || bmp.Height == 0)
 						return 0;
-					g.GCreateFromF(bmp, (Config.TextDrawingMode == TextDrawingMode.WINAPI));
+					if (!g.GCreateFromF(bmp, (Config.TextDrawingMode == TextDrawingMode.WINAPI)))
+						return 0;
 				}
 				catch (Exception e)
 				{
@@ -3476,12 +4056,44 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 		}
 
+		static string ResolveGraphicsResourceFilePath(string filename)
+		{
+			if (string.IsNullOrWhiteSpace(filename))
+				return filename;
+			string normalized = uEmuera.Utils.NormalizePath(filename.Trim());
+			if (System.IO.Path.IsPathRooted(normalized) || normalized.Contains("://"))
+				return uEmuera.Utils.ResolveExistingFilePath(normalized);
+
+			foreach (string candidate in BuildGraphicsResourcePathCandidates(normalized))
+			{
+				if (string.IsNullOrEmpty(candidate))
+					continue;
+				string resolved = uEmuera.Utils.ResolveExistingFilePath(candidate);
+				if (uEmuera.Utils.FileExists(resolved))
+					return resolved;
+			}
+			return uEmuera.Utils.ResolveExistingFilePath(System.IO.Path.Combine(Program.ExeDir ?? "", normalized));
+		}
+
+		static IEnumerable<string> BuildGraphicsResourcePathCandidates(string normalized)
+		{
+			string gameDir = Program.ExeDir ?? "";
+			string contentDir = Program.ContentDir ?? "";
+			yield return System.IO.Path.Combine(gameDir, normalized);
+
+			const string resourcesPrefix = "resources/";
+			if (normalized.StartsWith(resourcesPrefix, StringComparison.OrdinalIgnoreCase))
+				yield return System.IO.Path.Combine(contentDir, normalized.Substring(resourcesPrefix.Length));
+			else
+				yield return System.IO.Path.Combine(contentDir, normalized);
+		}
+
 		public sealed class GraphicsDisposeMethod : FunctionMethod
 		{
 			public GraphicsDisposeMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3503,8 +4115,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SpriteCreateMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
@@ -3518,9 +4130,9 @@ namespace MinorShift.Emuera.GameData.Function
 					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, 0 + 1);
 				if (arguments[1] == null)
 					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, 1 + 1);
-				if (arguments[0].GetOperandType() != typeof(string))
+				if (arguments[0].GetEraType() != EraType.String)
 					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 0 + 1);
-				if (arguments[1].GetOperandType() != typeof(Int64))
+				if (arguments[1].GetEraType() != EraType.Integer)
 					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1 + 1);
 				if (arguments.Length == 2)
 					return null;
@@ -3530,7 +4142,7 @@ namespace MinorShift.Emuera.GameData.Function
 				{
 					if (arguments[i] == null)
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, i + 1);
-					if (arguments[i].GetOperandType() != typeof(Int64))
+					if (arguments[i].GetEraType() != EraType.Integer)
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
 				}
 				return null;
@@ -3592,8 +4204,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SpriteDisposeMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3615,8 +4227,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsClearMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3639,8 +4251,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsFillRectangleMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3664,7 +4276,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsDrawGMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 				HasUniqueRestructure = true;
@@ -3680,7 +4292,7 @@ namespace MinorShift.Emuera.GameData.Function
 				{
 					if (arguments[i] == null)
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, i + 1);
-					if (typeof(Int64) != arguments[i].GetOperandType())
+					if (EraType.Integer != arguments[i].GetEraType())
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
 				}
 				if (arguments.Length == 10)
@@ -3734,8 +4346,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsDrawGWithMaskMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			
@@ -3775,8 +4387,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsDrawSpriteMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(string), typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.String, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 				HasUniqueRestructure = true;
 			}
@@ -3795,7 +4407,7 @@ namespace MinorShift.Emuera.GameData.Function
 					if (arguments[i] == null)
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, i + 1);
 					
-					if (i < argumentTypeArray.Length && argumentTypeArray[i] != arguments[i].GetOperandType())
+					if (i < argumentTypeArray.Length && argumentTypeArray[i] != arguments[i].GetEraType())
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
 				}
 				if (arguments.Length <= 6)
@@ -3816,35 +4428,31 @@ namespace MinorShift.Emuera.GameData.Function
 				ASprite img = AppContents.GetSprite(imgname);
 				if (img == null || !img.IsCreated)
 				{
-					Godot.GD.PushWarning($"[GDRAWSPRITE] Sprite not found or not created: '{imgname}'");
+					global::GenericUtils.Warn(global::EmueraLogCategory.Sprite, () => $"[GDRAWSPRITE] Sprite not found or not created: '{imgname}'");
 					return 0;
 				}
 
 				Rectangle destRect = new Rectangle(0, 0, img.DestBaseSize.Width, img.DestBaseSize.Height);
 				if (arguments.Length == 2)
 				{
-					dest.GDrawCImg(img, destRect);
-					return 1;
+					return dest.GDrawCImg(img, destRect) ? 1 : 0;
 				}
 				if (arguments.Length == 4)
 				{
 					Point p = ReadPoint(Name, exm, arguments, 2);
 					destRect.X = p.X;
 					destRect.Y = p.Y;
-					dest.GDrawCImg(img, destRect);
-					return 1;
+					return dest.GDrawCImg(img, destRect) ? 1 : 0;
 				}
 				if (arguments.Length == 6)
 				{
 					destRect = ReadRectangle(Name, exm, arguments, 2);
-					dest.GDrawCImg(img, destRect);
-					return 1;
+					return dest.GDrawCImg(img, destRect) ? 1 : 0;
 				}
 				//if (arguments.Length == 7)
 				destRect = ReadRectangle(Name, exm, arguments, 2);
 				float[][] cm = ReadColormatrix(Name, exm, arguments, 6);
-				dest.GDrawCImg(img, destRect, cm);
-				return 1;
+				return dest.GDrawCImg(img, destRect, cm) ? 1 : 0;
 			}
 
 			public override bool UniqueRestructure(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3870,8 +4478,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SpriteAnimeCreateMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3907,8 +4515,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SpriteAnimeAddFrameMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 
@@ -3948,8 +4556,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public CBGClearMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] {};
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] {};
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3968,8 +4576,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public CBGRemoveRangeMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -3991,8 +4599,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public CBGClearButtonMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4010,8 +4618,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public CBGRemoveBMapMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4029,8 +4637,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public CBGSetGraphicsMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4058,8 +4666,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public CBGSetBMapGMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64)};
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer};
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4077,15 +4685,36 @@ namespace MinorShift.Emuera.GameData.Function
 		}
 
 		/// <summary>
-		/// CBGSETCIMG(str imgName, int x, int y, int zdepth)
+		/// CBGSETCIMG / CBGSETSPRITE
+		/// snake 兼容：从第 2 个参数开始都可以省略，并支持 width/height/opacity/ColorMatrix。
 		/// </summary>
 		public sealed class CBGSetCIMGMethod : FunctionMethod
 		{
 			public CBGSetCIMGMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string), typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
 				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 1)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum1, name, 1);
+				if (arguments.Length > 8)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum2, name);
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
+				for (int i = 1; i <= 6 && i < arguments.Length; i++)
+				{
+					if (arguments[i] != null && arguments[i].GetEraType() != EraType.Integer)
+						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
+				}
+				if (arguments.Length > 7 && arguments[7] != null)
+				{
+					if (!(arguments[7] is VariableTerm varToken) || (!varToken.Identifier.IsArray2D && !varToken.Identifier.IsArray3D) || (!varToken.IsInteger && !varToken.IsFloat))
+						return string.Format(Properties.Resources.SyntaxErrMesMethodGraphicsColorMatrix0, name);
+				}
+				return null;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
@@ -4096,11 +4725,16 @@ namespace MinorShift.Emuera.GameData.Function
 				ASprite img = AppContents.GetSprite(imgname);
 				if (img == null || !img.IsCreated)
 					return 0;
-				Point p = ReadPoint(Name, exm, arguments, 1);
-				Int64 z64 = arguments[3].GetIntValue(exm);
+				int x = arguments.Length > 1 && arguments[1] != null ? (int)arguments[1].GetIntValue(exm) : 0;
+				int y = arguments.Length > 2 && arguments[2] != null ? (int)arguments[2].GetIntValue(exm) : 0;
+				Int64 z64 = arguments.Length > 3 && arguments[3] != null ? arguments[3].GetIntValue(exm) : 1;
+				int width = arguments.Length > 4 && arguments[4] != null ? (int)arguments[4].GetIntValue(exm) : 0;
+				int height = arguments.Length > 5 && arguments[5] != null ? (int)arguments[5].GetIntValue(exm) : 0;
+				float opacity = arguments.Length > 6 && arguments[6] != null ? arguments[6].GetIntValue(exm) / 255.0f : 1.0f;
+				float[][] colorMatrix = ReadOptionalColorMatrixForCbg(Name, exm, arguments, 7);
 				if (z64 < int.MinValue || z64 > int.MaxValue || z64 == 0)
 					throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodDefaultArgumentOutOfRange0, Name, z64, 3 + 1));
-				if (!exm.Console.CBG_SetImage(img, p.X,p.Y, (int)z64))
+				if (!exm.Console.CBG_SetImage(img, x, y, (int)z64, width, height, opacity, colorMatrix))
 					return 0;
 				return 1;
 
@@ -4114,8 +4748,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public CBGSETButtonSpriteMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(string), typeof(string), typeof(Int64), typeof(Int64), typeof(Int64), typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.String, EraType.String, EraType.Integer, EraType.Integer, EraType.Integer, EraType.String };
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
@@ -4133,7 +4767,7 @@ namespace MinorShift.Emuera.GameData.Function
 					if (arguments[i] == null)
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, i + 1);
 
-					if (i < argumentTypeArray.Length && argumentTypeArray[i] != arguments[i].GetOperandType())
+					if (i < argumentTypeArray.Length && argumentTypeArray[i] != arguments[i].GetEraType())
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
 				}
 				return null;
@@ -4166,12 +4800,18 @@ namespace MinorShift.Emuera.GameData.Function
 		}
 
 		static readonly short[] keytoggle = new short[256];
+
+		internal static void ResetCanarySessionState()
+		{
+			Array.Clear(keytoggle, 0, keytoggle.Length);
+		}
+
 		private sealed class GetKeyStateMethod : FunctionMethod
 		{
 			public GetKeyStateMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4187,7 +4827,10 @@ namespace MinorShift.Emuera.GameData.Function
 				switch(Name)
 				{
 					case "GETKEY": return (s < 0) ? 1 : 0;
-					case "GETKEYTRIGGERED": return (s < 0) && (toggle != keytoggle[keycode]) ? 1 : 0;//初回はtrue、2回目以降はトグル状態が前回と違う場合のみ1
+					case "GETKEYTRIGGERED":
+						if (WinInput.ConsumeKeyLatch((int)keycode) != 0)
+							return 1;
+						return (s < 0) && (toggle != keytoggle[keycode]) ? 1 : 0;//初回はtrue、2回目以降はトグル状態が前回と違う場合のみ1
 				}
 				throw new ExeEE("異常な分岐");
 			}
@@ -4197,8 +4840,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public MousePosMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4217,8 +4860,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public IsActiveMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4231,8 +4874,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SetAnimeTimerMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] {typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] {EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4249,8 +4892,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GetAnimeTimerMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4263,8 +4906,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public ExistSoundMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4277,8 +4920,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public ExistsImageLayerMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4286,12 +4929,101 @@ namespace MinorShift.Emuera.GameData.Function
 				return exm.Console.ExistsImageLayer(arguments[0].GetIntValue(exm)) ? 1 : 0;
 			}
 		}
+		private sealed class GetLineYMethod : FunctionMethod
+		{
+			public GetLineYMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
+				CanRestructure = false;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				long lineNo = arguments[0].GetIntValue(exm);
+				if (lineNo < 0)
+					throw new CodeEE("GETLINEY関数の1番目の引数に0未満の値が指定されました: " + lineNo);
+				int pointY = exm.Console.GetLinePointY((int)lineNo);
+				return pointY + Config.LineHeight - exm.Console.ClientHeight;
+			}
+		}
+
+		private sealed class ExistFunctionMethod : FunctionMethod
+		{
+			public ExistFunctionMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
+				CanRestructure = false;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string name = arguments[0].GetStrValue(exm);
+				if (Config.ICFunction)
+					name = name.ToUpper();
+
+				if (FunctionMethodCreator.GetMethodList(Program.Compatibility).TryGetValue(name, out var method))
+				{
+					if (method.ReturnType == EraType.Integer)
+						return 2;
+					if (method.ReturnType == EraType.String)
+						return 3;
+					if (method.ReturnType == EraType.Float || method.ReturnType == EraType.Float)
+						return 4;
+					return 1;
+				}
+
+				var labelDic = exm.Process.LabelDictionary;
+				if (labelDic.GetNonEventLabel(name) != null)
+					return 1;
+				if (labelDic.GetEventLabels(name) != null)
+					return 1;
+
+				if (exm.Process.IsFunctionInLazyLoadingTable(name))
+					return 1;
+
+				return 0;
+			}
+		}
+
+		private sealed class ExistFileMethod : FunctionMethod
+		{
+			public ExistFileMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
+				CanRestructure = false;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string path = arguments[0].GetStrValue(exm);
+				string resolved = uEmuera.Utils.ResolveScriptFilePath(path);
+				return !string.IsNullOrWhiteSpace(resolved) && uEmuera.Utils.FileExists(resolved) ? 1 : 0;
+			}
+		}
+
+		private sealed class GetCsvNoByNameMethod : FunctionMethod
+		{
+			readonly CharacterStrData searchType;
+			public GetCsvNoByNameMethod(CharacterStrData type)
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
+				CanRestructure = true;
+				searchType = type;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string name = arguments[0].GetStrValue(exm);
+				return exm.VEvaluator.Constant.GetCsvNoByCharacterStr(searchType, name);
+			}
+		}
 
 		private sealed class GetSoundOrBgmInfoMethod : FunctionMethod
 		{
 			public GetSoundOrBgmInfoMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
@@ -4299,9 +5031,9 @@ namespace MinorShift.Emuera.GameData.Function
 			{
 				if (arguments.Length < 1 || arguments.Length > 2)
 					return name + "関数の引数の数が正しくありません";
-				if (arguments[0] == null || arguments[0].GetOperandType() != typeof(Int64))
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.Integer)
 					return name + "関数の1番目の引数の型が正しくありません";
-				if (arguments.Length == 2 && arguments[1] != null && arguments[1].GetOperandType() != typeof(Int64))
+				if (arguments.Length == 2 && arguments[1] != null && arguments[1].GetEraType() != EraType.Integer)
 					return name + "関数の2番目の引数の型が正しくありません";
 				return null;
 			}
@@ -4339,21 +5071,21 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public IsPlayingSoundMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				if (arguments.Length > 1)
-					return name + "関数の引数が多すぎます";
-				if (arguments.Length == 1 && arguments[0] != null && arguments[0].GetOperandType() != typeof(Int64))
+				if (arguments.Length != 1)
+					return name + "関数の引数の数が正しくありません";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.Integer)
 					return name + "関数の1番目の引数の型が正しくありません";
 				return null;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				int channel = arguments.Length == 0 || arguments[0] == null ? -1 : (int)arguments[0].GetIntValue(exm);
+				int channel = (int)arguments[0].GetIntValue(exm);
 				return global::GenericUtils.FindPlayingSound(channel);
 			}
 		}
@@ -4362,7 +5094,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SoundControlMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
@@ -4372,7 +5104,7 @@ namespace MinorShift.Emuera.GameData.Function
 					return name + "関数の引数の数が正しくありません";
 				for (int i = 0; i < arguments.Length; i++)
 				{
-					if (arguments[i] == null || arguments[i].GetOperandType() != typeof(Int64))
+					if (arguments[i] == null || arguments[i].GetEraType() != EraType.Integer)
 						return name + "関数の引数の型が正しくありません";
 				}
 				return null;
@@ -4381,8 +5113,17 @@ namespace MinorShift.Emuera.GameData.Function
 			{
 				int channel = (int)arguments[0].GetIntValue(exm);
 				int action = (int)arguments[1].GetIntValue(exm);
-				int speed = arguments.Length >= 3 ? (int)arguments[2].GetIntValue(exm) : 100;
-				return global::GenericUtils.ControlSound(channel, action, speed);
+				if (action == 3)
+				{
+					if (arguments.Length < 3)
+						return -2;
+					int speed = (int)arguments[2].GetIntValue(exm);
+					bool preservePitch = arguments.Length < 4 || arguments[3].GetIntValue(exm) == 0;
+					return global::GenericUtils.ControlSound(channel, action, speed, preservePitch);
+				}
+				if (arguments.Length != 2)
+					return -2;
+				return global::GenericUtils.ControlSound(channel, action);
 			}
 		}
 
@@ -4390,8 +5131,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public IsPlayingBgmMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4404,7 +5145,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public BgmControlMethod()
 			{
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
@@ -4414,7 +5155,7 @@ namespace MinorShift.Emuera.GameData.Function
 					return name + "関数の引数の数が正しくありません";
 				for (int i = 0; i < arguments.Length; i++)
 				{
-					if (arguments[i] == null || arguments[i].GetOperandType() != typeof(Int64))
+					if (arguments[i] == null || arguments[i].GetEraType() != EraType.Integer)
 						return name + "関数の引数の型が正しくありません";
 				}
 				return null;
@@ -4422,8 +5163,17 @@ namespace MinorShift.Emuera.GameData.Function
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
 				int action = (int)arguments[0].GetIntValue(exm);
-				int speed = arguments.Length >= 2 ? (int)arguments[1].GetIntValue(exm) : 100;
-				return global::GenericUtils.ControlBgm(action, speed);
+				if (action == 3)
+				{
+					if (arguments.Length < 2)
+						return -2;
+					int speed = (int)arguments[1].GetIntValue(exm);
+					bool preservePitch = arguments.Length < 3 || arguments[2].GetIntValue(exm) == 0;
+					return global::GenericUtils.ControlBgm(action, speed, preservePitch);
+				}
+				if (arguments.Length != 1)
+					return -2;
+				return global::GenericUtils.ControlBgm(action);
 			}
 		}
 
@@ -4431,8 +5181,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GetTextDrawingModeMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4445,8 +5195,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GetSkiaQualityMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4465,196 +5215,188 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 		}
 
-		private sealed class SnakeSqlIntMethod : FunctionMethod
+		private sealed class SnakeFallenStateMethod : FunctionMethod
 		{
-			public SnakeSqlIntMethod(string operation)
+			static readonly string[] LoverTalents = { "恋人", "戀人" };
+			static readonly string[] AffectionTalents = { "恋慕", "戀慕", "愛欲", "炮友", "砲友" };
+			static readonly string[] FondnessTalents = { "思慕" };
+			static readonly string[] EstablishedFactFlags = { "既成事実", "既成事实", "既成事實" };
+
+			public SnakeFallenStateMethod()
 			{
-				this.operation = operation;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 
-			readonly string operation;
-
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				switch (operation)
-				{
-					case "CONNECTION_OPEN":
-						return CheckSqlArgs(name, arguments, 1, 1, typeof(string), typeof(string));
-					case "CONNECT":
-						return CheckSqlArgs(name, arguments, 1, 2, typeof(string), typeof(string));
-					case "DISCONNECT":
-						return CheckSqlArgs(name, arguments, 1, 1, typeof(string), typeof(string));
-					case "EXECUTE_NONQUERY":
-					case "EXECUTE_READER":
-					case "EXECUTE_SCALAR_LONG":
-					case "EXECUTE_SCALAR_FLOAT":
-						return CheckSqlArgs(name, arguments, 2, 2, typeof(string), typeof(string));
-					case "P_EXECUTE_NONQUERY":
-					case "P_EXECUTE_READER":
-					case "P_EXECUTE_SCALAR_LONG":
-					case "P_EXECUTE_SCALAR_FLOAT":
-						return CheckSqlArgs(name, arguments, 2, int.MaxValue, typeof(string), typeof(string));
-					case "IMPORT_MAP_XML":
-					case "EXPORT_MAP_XML":
-						return CheckSqlArgs(name, arguments, 3, 3, typeof(string), typeof(string));
-					case "IMPORT_DT_XML":
-					case "EXPORT_DT_XML":
-						return CheckSqlArgs(name, arguments, 4, 4, typeof(string), typeof(string));
-					case "IMPORT_XML_CUSTOM":
-						return CheckSqlArgs(name, arguments, 5, 5, typeof(string), typeof(string));
-					case "READER_READ":
-					case "READER_CLOSE":
-						return CheckSqlArgs(name, arguments, 1, 1, typeof(Int64), typeof(Int64));
-					case "READER_GET_LONG":
-					case "READER_GET_FLOAT":
-					case "READER_ISNULL":
-						return CheckSqlArgs(name, arguments, 2, 2, typeof(Int64), typeof(Int64));
-					default:
-						return null;
-				}
+				if (!Program.Compatibility.Snake.IsEnabled)
+					return name + "関数はSnake互換モード専用です";
+				if (arguments.Length > 1)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+				if (arguments.Length == 1 && (arguments[0] == null || arguments[0].GetEraType() != EraType.Integer))
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
+				return null;
 			}
 
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				try
+				long target = (arguments.Length == 1 && arguments[0] != null) ? arguments[0].GetIntValue(exm) : exm.VEvaluator.TARGET;
+				if (target < 0 || target >= exm.VEvaluator.CHARANUM)
+					return 0;
+
+				CharacterData chara = exm.VEvaluator.VariableData.CharacterList[(int)target];
+				SparseArray<Int64> talent = chara.DataIntegerArray[(int)(VariableCode.TALENT & VariableCode.__LOWERCASE__)];
+				SparseArray<Int64> cflag = chara.DataIntegerArray[(int)(VariableCode.CFLAG & VariableCode.__LOWERCASE__)];
+				ConstantData constant = exm.VEvaluator.Constant;
+
+				// Snake/eraTW 未修正数据里，部分口上会直接调用禁用块中的私有函数名。
+				// 已由 ERB 定义的同名 #FUNCTION 会优先执行，这里只补共通 TALENT/CFLAG 能推导出的兜底等级。
+				if (HasAnyKeywordValue(constant, talent, VariableCode.TALENT, LoverTalents))
+					return 4;
+				if (HasAnyKeywordValue(constant, talent, VariableCode.TALENT, AffectionTalents))
+					return 3;
+				if (HasEstablishedFact(constant, cflag) || HasAnyKeywordValue(constant, talent, VariableCode.TALENT, FondnessTalents))
+					return 1;
+				return 0;
+			}
+
+			static bool HasAnyKeywordValue(ConstantData constant, SparseArray<Int64> values, VariableCode code, string[] keywords)
+			{
+				for (int i = 0; i < keywords.Length; i++)
 				{
-					switch (operation)
-					{
-						case "CONNECTION_OPEN":
-							return SnakeSqlManager.ConnectionOpen(arguments[0].GetStrValue(exm));
-						case "CONNECT":
-							return SnakeSqlManager.Connect(
-								arguments[0].GetStrValue(exm),
-								arguments.Length > 1 && arguments[1] != null ? arguments[1].GetStrValue(exm) : "Data Source=:memory:",
-								false);
-						case "DISCONNECT":
-							return SnakeSqlManager.Disconnect(arguments[0].GetStrValue(exm));
-						case "EXECUTE_NONQUERY":
-							return SnakeSqlManager.ExecuteNonQuery(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm));
-						case "EXECUTE_READER":
-							return SnakeSqlManager.ExecuteReader(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm));
-						case "READER_READ":
-							return SnakeSqlManager.ReaderRead(arguments[0].GetIntValue(exm));
-						case "READER_GET_LONG":
-							return SnakeSqlManager.ReaderGetLong(arguments[0].GetIntValue(exm), (int)arguments[1].GetIntValue(exm));
-						case "READER_GET_FLOAT":
-							return SnakeSqlManager.ReaderGetFloatAsLong(arguments[0].GetIntValue(exm), (int)arguments[1].GetIntValue(exm));
-						case "READER_ISNULL":
-							return SnakeSqlManager.ReaderIsNull(arguments[0].GetIntValue(exm), (int)arguments[1].GetIntValue(exm));
-						case "READER_CLOSE":
-							return SnakeSqlManager.ReaderClose(arguments[0].GetIntValue(exm));
-						case "EXECUTE_SCALAR_LONG":
-							return SnakeSqlManager.ExecuteScalarLong(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm));
-						case "EXECUTE_SCALAR_FLOAT":
-							return SnakeSqlManager.ExecuteScalarFloatAsLong(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm));
-						case "P_EXECUTE_NONQUERY":
-							return SnakeSqlManager.ExecuteNonQuery(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), ReadSqlParameters(exm, arguments, 2));
-						case "P_EXECUTE_READER":
-							return SnakeSqlManager.ExecuteReader(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), ReadSqlParameters(exm, arguments, 2));
-						case "P_EXECUTE_SCALAR_LONG":
-							return SnakeSqlManager.ExecuteScalarLong(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), ReadSqlParameters(exm, arguments, 2));
-						case "P_EXECUTE_SCALAR_FLOAT":
-							return SnakeSqlManager.ExecuteScalarFloatAsLong(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), ReadSqlParameters(exm, arguments, 2));
-						case "IMPORT_MAP_XML":
-							return SnakeSqlManager.ImportMapXml(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), arguments[2].GetStrValue(exm));
-						case "IMPORT_DT_XML":
-							return SnakeSqlManager.ImportDtXml(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), arguments[2].GetStrValue(exm), arguments[3].GetStrValue(exm));
-						case "IMPORT_XML_CUSTOM":
-							return SnakeSqlManager.ImportXmlCustom(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), arguments[2].GetStrValue(exm), arguments[3].GetStrValue(exm), arguments[4].GetStrValue(exm));
-						case "EXPORT_MAP_XML":
-							return SnakeSqlManager.ExportMapXml(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), arguments[2].GetStrValue(exm));
-						case "EXPORT_DT_XML":
-							return SnakeSqlManager.ExportDtXml(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), arguments[2].GetStrValue(exm), arguments[3].GetStrValue(exm));
-					}
+					if (constant.TryKeywordToInteger(out int index, code, keywords[i], 1) && GetArrayValue(values, index) != 0)
+						return true;
 				}
-				catch (CodeEE)
+				return false;
+			}
+
+			static bool HasEstablishedFact(ConstantData constant, SparseArray<Int64> cflag)
+			{
+				for (int i = 0; i < EstablishedFactFlags.Length; i++)
 				{
-					throw;
+					if (!constant.TryKeywordToInteger(out int index, VariableCode.CFLAG, EstablishedFactFlags[i], 1))
+						continue;
+					long value = GetArrayValue(cflag, index);
+					if (GetBit(value, 0) || GetBit(value, 1))
+						return true;
 				}
-				catch (Exception ex)
-				{
-					throw new CodeEE(Name + ": " + ex.Message);
-				}
+				return false;
+			}
+
+			static long GetArrayValue(SparseArray<Int64> values, int index)
+			{
+				if (values == null || index < 0 || index >= values.Length)
+					return 0;
+				return values[index];
+			}
+
+			static bool GetBit(long value, int bit)
+			{
+				return ((value >> bit) & 1L) != 0;
+			}
+		}
+		private sealed class SequenceInputMethod : FunctionMethod
+		{
+			public SequenceInputMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
+				CanRestructure = false;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				exm.Process.SequenceInputValue = arguments[0].GetStrValue(exm);
+				exm.Process.HasSequenceInput = true;
 				return 0;
 			}
 		}
 
-		private sealed class SnakeSqlStringMethod : FunctionMethod
+		private sealed class DisableInputMacroMethod : FunctionMethod
 		{
-			public SnakeSqlStringMethod(string operation)
+			public DisableInputMacroMethod()
 			{
-				this.operation = operation;
-				ReturnType = typeof(string);
-				argumentTypeArray = null;
-				CanRestructure = operation == "ESCAPE";
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
+				CanRestructure = false;
 			}
 
-			readonly string operation;
-
-			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				switch (operation)
-				{
-					case "ESCAPE":
-						return CheckSqlArgs(name, arguments, 1, 1, typeof(string), typeof(string));
-					case "EXECUTE_SCALAR_STRING":
-						return CheckSqlArgs(name, arguments, 2, 2, typeof(string), typeof(string));
-					case "P_EXECUTE_SCALAR_STRING":
-						return CheckSqlArgs(name, arguments, 2, int.MaxValue, typeof(string), typeof(string));
-					case "READER_GET_STRING":
-						return CheckSqlArgs(name, arguments, 2, 2, typeof(Int64), typeof(Int64));
-					default:
-						return null;
-				}
-			}
-
-			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
-			{
-				try
-				{
-					switch (operation)
-					{
-						case "ESCAPE":
-							return SnakeSqlManager.Escape(arguments[0].GetStrValue(exm));
-						case "EXECUTE_SCALAR_STRING":
-							return SnakeSqlManager.ExecuteScalarString(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm));
-						case "P_EXECUTE_SCALAR_STRING":
-							return SnakeSqlManager.ExecuteScalarString(arguments[0].GetStrValue(exm), arguments[1].GetStrValue(exm), ReadSqlParameters(exm, arguments, 2));
-						case "READER_GET_STRING":
-							return SnakeSqlManager.ReaderGetString(arguments[0].GetIntValue(exm), (int)arguments[1].GetIntValue(exm));
-					}
-				}
-				catch (CodeEE)
-				{
-					throw;
-				}
-				catch (Exception ex)
-				{
-					throw new CodeEE(Name + ": " + ex.Message);
-				}
-				return "";
+				exm.Process.InputMacroEnabled = false;
+				return 0;
 			}
 		}
 
-		private static string CheckSqlArgs(string name, IOperandTerm[] arguments, int min, int max, Type firstType, Type secondType)
+		private sealed class EnableInputMacroMethod : FunctionMethod
+		{
+			public EnableInputMacroMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
+				CanRestructure = false;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				exm.Process.InputMacroEnabled = true;
+				return 0;
+			}
+		}
+
+		private sealed class GetPlatformMethod : FunctionMethod
+		{
+			public GetPlatformMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { };
+				CanRestructure = true;
+			}
+
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string platform = global::Godot.OS.GetName();
+				switch (platform)
+				{
+					case "Windows":
+						return 0;
+					case "Android":
+						return 1;
+					case "iOS":
+						return 2;
+					case "macOS":
+					case "OSX":
+						return 3;
+					case "Linux":
+					case "FreeBSD":
+					case "NetBSD":
+					case "OpenBSD":
+					case "BSD":
+						return 4;
+					default:
+						return 5;
+				}
+			}
+		}
+
+		private static string CheckSqlArgs(string name, IOperandTerm[] arguments, int min, int max, EraType firstType, EraType secondType)
 		{
 			if (arguments.Length < min)
 				return name + "関数には少なくとも" + min.ToString() + "個の引数が必要です";
 			if (arguments.Length > max)
 				return name + "関数の引数が多すぎます";
-			if (arguments.Length >= 1 && (arguments[0] == null || arguments[0].GetOperandType() != firstType))
+			if (arguments.Length >= 1 && (arguments[0] == null || arguments[0].GetEraType() != firstType))
 				return name + "関数の1番目の引数の型が正しくありません";
-			if (arguments.Length >= 2 && (arguments[1] == null || arguments[1].GetOperandType() != secondType))
+			if (arguments.Length >= 2 && (arguments[1] == null || arguments[1].GetEraType() != secondType))
 				return name + "関数の2番目の引数の型が正しくありません";
 			for (int i = 2; i < arguments.Length; i++)
 			{
 				if (arguments[i] == null)
 					continue;
-				Type type = arguments[i].GetOperandType();
-				if (type != typeof(Int64) && type != typeof(string))
+				EraType type = arguments[i].GetEraType();
+				if (type != EraType.Integer && type != EraType.String)
 					return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
 			}
 			return null;
@@ -4672,85 +5414,12 @@ namespace MinorShift.Emuera.GameData.Function
 					parameters[i - start] = null;
 					continue;
 				}
-				if (arguments[i].GetOperandType() == typeof(string))
+				if (arguments[i].GetEraType() == EraType.String)
 					parameters[i - start] = arguments[i].GetStrValue(exm);
 				else
 					parameters[i - start] = arguments[i].GetIntValue(exm);
 			}
 			return parameters;
-		}
-
-		private sealed class SnakeGetVarIntMethod : FunctionMethod
-		{
-			public SnakeGetVarIntMethod(string operation)
-			{
-				this.operation = operation;
-				ReturnType = typeof(Int64);
-				argumentTypeArray = null;
-				CanRestructure = false;
-			}
-
-			readonly string operation;
-
-			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
-			{
-				if (arguments.Length < 1 || arguments.Length > 2)
-					return name + "関数の引数の数が正しくありません";
-				if (arguments[0] == null || arguments[0].GetOperandType() != typeof(string))
-					return name + "関数の1番目の引数の型が正しくありません";
-				if (arguments.Length == 2 && arguments[1] != null && arguments[1].GetOperandType() != typeof(Int64))
-					return name + "関数の2番目の引数の型が正しくありません";
-				return null;
-			}
-
-			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
-			{
-				long defaultValue = arguments.Length > 1 && arguments[1] != null ? arguments[1].GetIntValue(exm) : 0;
-				if (!TryParseSnakeVariable(arguments[0].GetStrValue(exm), out VariableTerm term))
-					return defaultValue;
-				if (term.GetOperandType() != typeof(Int64))
-				{
-					if (arguments.Length > 1)
-						return defaultValue;
-					throw new CodeEE(operation + " target " + term.Identifier.Name + " is not integer.");
-				}
-				return term.GetIntValue(exm);
-			}
-		}
-
-		private sealed class SnakeGetVarStringMethod : FunctionMethod
-		{
-			public SnakeGetVarStringMethod()
-			{
-				ReturnType = typeof(string);
-				argumentTypeArray = null;
-				CanRestructure = false;
-			}
-
-			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
-			{
-				if (arguments.Length < 1 || arguments.Length > 2)
-					return name + "関数の引数の数が正しくありません";
-				if (arguments[0] == null || arguments[0].GetOperandType() != typeof(string))
-					return name + "関数の1番目の引数の型が正しくありません";
-				if (arguments.Length == 2 && arguments[1] != null && arguments[1].GetOperandType() != typeof(string))
-					return name + "関数の2番目の引数の型が正しくありません";
-				return null;
-			}
-
-			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
-			{
-				string defaultValue = arguments.Length > 1 && arguments[1] != null ? arguments[1].GetStrValue(exm) : "";
-				if (!TryParseSnakeVariable(arguments[0].GetStrValue(exm), out VariableTerm term))
-					return defaultValue;
-				if (term.GetOperandType() != typeof(string))
-				{
-					if (arguments.Length > 1)
-						return defaultValue;
-					throw new CodeEE("GETVARS target " + term.Identifier.Name + " is not string.");
-				}
-				return term.GetStrValue(exm);
-			}
 		}
 
 		private static bool TryParseSnakeVariable(string source, out VariableTerm term)
@@ -4777,106 +5446,100 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 		}
 
-		private sealed class SnakeIntFallbackMethod : FunctionMethod
+		private sealed class V24TrigMethod : FunctionMethod
 		{
-			public SnakeIntFallbackMethod()
+			public V24TrigMethod(string kind, Func<double, double> func, bool checkUnitRange = false)
 			{
-				ReturnType = typeof(Int64);
+				this.kind = kind;
+				this.func = func;
+				this.checkUnitRange = checkUnitRange;
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
-				CanRestructure = false;
+				CanRestructure = true;
 			}
+			readonly string kind;
+			readonly Func<double, double> func;
+			readonly bool checkUnitRange;
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
+				if (arguments.Length != 1)
+					return name + "関数の引数の数が正しくありません";
+				if (arguments[0] == null || (arguments[0].GetEraType() != EraType.Integer && arguments[0].GetEraType() != EraType.Float))
+					return name + "関数の引数の型が正しくありません";
 				return null;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				return 0;
+				return CheckedDoubleToLong(kind, Calculate(arguments[0].GetIntValue(exm)));
+			}
+			public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetEraType() == EraType.Float)
+					return new SingleTerm(Calculate(arguments[0].GetFloatValue(exm)));
+				return new SingleTerm(GetIntValue(exm, arguments));
+			}
+			double Calculate(double value)
+			{
+				if (checkUnitRange && (value < -1.0d || value > 1.0d))
+					throw new CodeEE(kind + "関数の引数が範囲外です");
+				double result = func(value);
+				if (double.IsNaN(result))
+					throw new CodeEE(kind + "関数の結果が非数値です");
+				if (double.IsInfinity(result))
+					throw new CodeEE(kind + "関数の結果が無限大です");
+				return result;
 			}
 		}
 
-		private sealed class SnakeStringFallbackMethod : FunctionMethod
+		private sealed class V24RoundMathMethod : FunctionMethod
 		{
-			public SnakeStringFallbackMethod()
+			public V24RoundMathMethod(string kind, Func<double, double> func)
 			{
-				ReturnType = typeof(string);
+				this.kind = kind;
+				this.func = func;
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
-				CanRestructure = false;
+				CanRestructure = true;
 			}
+			readonly string kind;
+			readonly Func<double, double> func;
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
+				if (arguments.Length != 1)
+					return name + "関数の引数の数が正しくありません";
+				if (arguments[0] == null || (arguments[0].GetEraType() != EraType.Integer && arguments[0].GetEraType() != EraType.Float))
+					return name + "関数の引数の型が正しくありません";
 				return null;
 			}
-			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
-			{
-				return "";
-			}
-		}
-
-		private sealed class SnakeTrigMethod : FunctionMethod
-		{
-			public SnakeTrigMethod(string kind)
-			{
-				this.kind = kind;
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
-				CanRestructure = true;
-			}
-			readonly string kind;
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				double value = arguments[0].GetIntValue(exm) * Math.PI / 180.0d;
-				switch (kind)
-				{
-					case "SIN":
-						return (long)Math.Round(Math.Sin(value) * 1000.0d);
-					case "COS":
-						return (long)Math.Round(Math.Cos(value) * 1000.0d);
-					case "TAN":
-						return (long)Math.Round(Math.Tan(value) * 1000.0d);
-					case "ASIN":
-						return (long)Math.Round(Math.Asin(arguments[0].GetIntValue(exm) / 1000.0d) * 180.0d / Math.PI);
-					case "ACOS":
-						return (long)Math.Round(Math.Acos(arguments[0].GetIntValue(exm) / 1000.0d) * 180.0d / Math.PI);
-					case "ATAN":
-						return (long)Math.Round(Math.Atan(arguments[0].GetIntValue(exm) / 1000.0d) * 180.0d / Math.PI);
-					default:
-						return 0;
-				}
+				return CheckedDoubleToLong(kind, func(arguments[0].GetIntValue(exm)));
+			}
+			public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				if (arguments[0].GetEraType() == EraType.Float)
+					return new SingleTerm(func(arguments[0].GetFloatValue(exm)));
+				return new SingleTerm(GetIntValue(exm, arguments));
 			}
 		}
 
-		private sealed class SnakeUnaryMathMethod : FunctionMethod
+		static long CheckedDoubleToLong(string name, double value)
 		{
-			public SnakeUnaryMathMethod(string kind)
-			{
-				this.kind = kind;
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64) };
-				CanRestructure = true;
-			}
-			readonly string kind;
-			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
-			{
-				long value = arguments[0].GetIntValue(exm);
-				switch (kind)
-				{
-					case "FLOOR":
-					case "CEIL":
-					case "ROUND":
-						return value;
-					default:
-						return 0;
-				}
-			}
+			if (double.IsNaN(value))
+				throw new CodeEE(name + "関数の結果が非数値です");
+			if (double.IsInfinity(value))
+				throw new CodeEE(name + "関数の結果が無限大です");
+			if (value >= long.MaxValue || value <= long.MinValue)
+				throw new CodeEE(name + "関数の結果が64ビット符号付き整数の範囲外です");
+			return (long)value;
 		}
 
-		private sealed class SnakeArgLenMethod : FunctionMethod
+		private sealed class ArgLengthMethod : FunctionMethod
 		{
-			public SnakeArgLenMethod()
+			public ArgLengthMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[0];
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[0];
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4885,12 +5548,12 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 		}
 
-		private sealed class SnakeUncheckedMathMethod : FunctionMethod
+		private sealed class UncheckedMathMethod : FunctionMethod
 		{
-			public SnakeUncheckedMathMethod(string kind)
+			public UncheckedMathMethod(string kind)
 			{
 				this.kind = kind;
-				ReturnType = typeof(Int64);
+				ReturnType = EraType.Integer;
 				argumentTypeArray = null;
 				CanRestructure = true;
 			}
@@ -4901,7 +5564,7 @@ namespace MinorShift.Emuera.GameData.Function
 					return name + "関数の引数の数が正しくありません";
 				for (int i = 0; i < arguments.Length; i++)
 				{
-					if (arguments[i] == null || arguments[i].GetOperandType() != typeof(Int64))
+					if (arguments[i] == null || arguments[i].GetEraType() != EraType.Integer)
 						return name + "関数の引数の型が正しくありません";
 				}
 				return null;
@@ -4929,52 +5592,213 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 		}
 
-		private sealed class SnakeBitMethod : FunctionMethod
+		private static readonly long[] bitArrayMasks = CreateBitArrayMasks();
+
+		private static long[] CreateBitArrayMasks()
 		{
-			public SnakeBitMethod(string kind)
+			long[] masks = new long[65];
+			for (int i = 1; i <= 64; i++)
+				masks[i] = 1L << (i - 1);
+			return masks;
+		}
+
+		private static bool IsInt1DVariableTerm(IOperandTerm term)
+		{
+			if (!(term is VariableTerm varTerm))
+				return false;
+			VariableToken token = varTerm.Identifier;
+			return token != null && token.GetEraType() == EraType.Integer && token.IsArray1D;
+		}
+
+		private static long BitArrayGetValue(object array, long index)
+		{
+			if (array is SparseArray<Int64> sparseArray)
+				return sparseArray[index];
+			return ((Int64[])array)[index];
+		}
+
+		private static void BitArraySetValue(object array, long index, long value)
+		{
+			if (array is SparseArray<Int64> sparseArray)
+				sparseArray[index] = value;
+			else
+				((Int64[])array)[index] = value;
+		}
+
+		private static void BitArraySet(object array, long arrayLength, long idx, long val, long length)
+		{
+			if (array == null)
+				return;
+			long size = arrayLength * 64L;
+			for (long i = 0; i < length; i++)
 			{
-				this.kind = kind;
-				ReturnType = typeof(Int64);
-				argumentTypeArray = null;
-				CanRestructure = true;
+				long bitIndex = idx + i;
+				if (bitIndex >= size)
+					break;
+				if (bitIndex < 0)
+					continue;
+				long elementIndex = bitIndex / 64L;
+				long maskIndex = bitIndex % 64L + 1L;
+				long current = BitArrayGetValue(array, elementIndex);
+				if (val != 0)
+					current |= bitArrayMasks[maskIndex];
+				else
+					current &= ~bitArrayMasks[maskIndex];
+				BitArraySetValue(array, elementIndex, current);
 			}
-			readonly string kind;
+		}
+
+		private static long BitArrayGet(object array, long arrayLength, long idx)
+		{
+			if (array == null)
+				return -1;
+			long size = arrayLength * 64L;
+			if (idx >= size || idx < 0)
+				return -1;
+			long elementIndex = idx / 64L;
+			long maskIndex = idx % 64L + 1L;
+			return (BitArrayGetValue(array, elementIndex) & bitArrayMasks[maskIndex]) != 0 ? 1 : 0;
+		}
+
+		private static long BitArrayToggle(object array, long arrayLength, long idx)
+		{
+			if (array == null)
+				return 0;
+			long size = arrayLength * 64L;
+			if (idx >= size || idx < 0)
+				return 0;
+			long elementIndex = idx / 64L;
+			long maskIndex = idx % 64L + 1L;
+			long current = BitArrayGetValue(array, elementIndex) ^ bitArrayMasks[maskIndex];
+			BitArraySetValue(array, elementIndex, current);
+			return 1;
+		}
+
+		private static long BitArrayIndexOfFirst(object array, long arrayLength, long val)
+		{
+			if (array == null)
+				return -1;
+			bool searchForSet = val != 0;
+			long elementIndex = 0;
+			while (elementIndex < arrayLength && BitArrayGetValue(array, elementIndex) == (searchForSet ? 0L : -1L))
+				elementIndex++;
+			for (long i = 0; i < 64; i++)
+			{
+				long bitVal = BitArrayGet(array, arrayLength, elementIndex * 64L + i);
+				if (bitVal == -1)
+					return -1;
+				if ((bitVal == 1) == searchForSet)
+					return elementIndex * 64L + i;
+			}
+			return -1;
+		}
+
+		private sealed class BitSetMethod : FunctionMethod
+		{
+			public BitSetMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
 			{
-				if (arguments.Length < 1 || arguments.Length > 2)
+				if (arguments.Length < 2 || arguments.Length > 4)
 					return name + "関数の引数の数が正しくありません";
-				for (int i = 0; i < arguments.Length; i++)
+				if (arguments[0] == null || !IsInt1DVariableTerm(arguments[0]))
+					return name + "関数の1番目の引数は整数1次元配列変数である必要があります";
+				for (int i = 1; i < arguments.Length; i++)
 				{
-					if (arguments[i] == null || arguments[i].GetOperandType() != typeof(Int64))
-						return name + "関数の引数の型が正しくありません";
+					if (arguments[i] != null && arguments[i].GetEraType() != EraType.Integer)
+						return name + "関数の" + (i + 1).ToString() + "番目の引数の型が正しくありません";
 				}
 				return null;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				long value = arguments[0].GetIntValue(exm);
-				int bit = arguments.Length >= 2 ? (int)arguments[1].GetIntValue(exm) : 0;
-				if (bit < 0 || bit >= 63)
-					return kind == "INDEX" ? -1 : value;
-				long mask = 1L << bit;
-				switch (kind)
-				{
-					case "SET":
-						return value | mask;
-					case "GET":
-						return (value & mask) != 0 ? 1 : 0;
-					case "TOGGLE":
-						return value ^ mask;
-					case "INDEX":
-						for (int i = 0; i < 63; i++)
-						{
-							if ((value & (1L << i)) != 0)
-								return i;
-						}
-						return -1;
-					default:
-						return 0;
-				}
+				VariableToken token = ((VariableTerm)arguments[0]).Identifier;
+				object array = token.GetArray();
+				long idx = arguments[1].GetIntValue(exm);
+				long val = arguments.Length > 2 && arguments[2] != null ? arguments[2].GetIntValue(exm) : 1;
+				long length = arguments.Length > 3 && arguments[3] != null ? arguments[3].GetIntValue(exm) : 1;
+				BitArraySet(array, token.GetLength(), idx, val, length);
+				return 1;
+			}
+		}
+
+		private sealed class BitGetMethod : FunctionMethod
+		{
+			public BitGetMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length != 2)
+					return name + "関数の引数の数が正しくありません";
+				if (arguments[0] == null || !IsInt1DVariableTerm(arguments[0]))
+					return name + "関数の1番目の引数は整数1次元配列変数である必要があります";
+				if (arguments[1] == null || arguments[1].GetEraType() != EraType.Integer)
+					return name + "関数の2番目の引数の型が正しくありません";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableToken token = ((VariableTerm)arguments[0]).Identifier;
+				return BitArrayGet(token.GetArray(), token.GetLength(), arguments[1].GetIntValue(exm));
+			}
+		}
+
+		private sealed class BitToggleMethod : FunctionMethod
+		{
+			public BitToggleMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length != 2)
+					return name + "関数の引数の数が正しくありません";
+				if (arguments[0] == null || !IsInt1DVariableTerm(arguments[0]))
+					return name + "関数の1番目の引数は整数1次元配列変数である必要があります";
+				if (arguments[1] == null || arguments[1].GetEraType() != EraType.Integer)
+					return name + "関数の2番目の引数の型が正しくありません";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableToken token = ((VariableTerm)arguments[0]).Identifier;
+				return BitArrayToggle(token.GetArray(), token.GetLength(), arguments[1].GetIntValue(exm));
+			}
+		}
+
+		private sealed class BitIndexOfFirstMethod : FunctionMethod
+		{
+			public BitIndexOfFirstMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 1 || arguments.Length > 2)
+					return name + "関数の引数の数が正しくありません";
+				if (arguments[0] == null || !IsInt1DVariableTerm(arguments[0]))
+					return name + "関数の1番目の引数は整数1次元配列変数である必要があります";
+				if (arguments.Length > 1 && arguments[1] != null && arguments[1].GetEraType() != EraType.Integer)
+					return name + "関数の2番目の引数の型が正しくありません";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableToken token = ((VariableTerm)arguments[0]).Identifier;
+				long val = arguments.Length > 1 && arguments[1] != null ? arguments[1].GetIntValue(exm) : 0;
+				return BitArrayIndexOfFirst(token.GetArray(), token.GetLength(), val);
 			}
 		}
 
@@ -4985,8 +5809,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public SaveTextMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(string) ,typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String ,EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
@@ -5001,9 +5825,9 @@ namespace MinorShift.Emuera.GameData.Function
 					if (arguments[i] == null)
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, i + 1);
 
-					if (i == 1 && arguments[i].GetOperandType() == typeof(string))
+					if (i == 1 && arguments[i].GetEraType() == EraType.String)
 						continue;
-					if (i < argumentTypeArray.Length && argumentTypeArray[i] != arguments[i].GetOperandType())
+					if (i < argumentTypeArray.Length && argumentTypeArray[i] != arguments[i].GetEraType())
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
 				}
 				return null;
@@ -5046,8 +5870,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public LoadTextMethod()
 			{
-				ReturnType = typeof(string);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.String;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
@@ -5061,9 +5885,9 @@ namespace MinorShift.Emuera.GameData.Function
 				{
 					if (arguments[i] == null)
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNotNullable0, name, i + 1);
-					if (i == 0 && arguments[i].GetOperandType() == typeof(string))
+					if (i == 0 && arguments[i].GetEraType() == EraType.String)
 						continue;
-					if (i < argumentTypeArray.Length && argumentTypeArray[i] != arguments[i].GetOperandType())
+					if (i < argumentTypeArray.Length && argumentTypeArray[i] != arguments[i].GetEraType())
 						return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
 				}
 				return null;
@@ -5094,7 +5918,7 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			filepath = null;
 			indexedPath = false;
-			if (pathTerm.GetOperandType() == typeof(Int64))
+			if (pathTerm.GetEraType() == EraType.Integer)
 			{
 				Int64 i64 = pathTerm.GetIntValue(exm);
 				if (i64 < 0 || i64 > int.MaxValue)
@@ -5106,12 +5930,12 @@ namespace MinorShift.Emuera.GameData.Function
 				indexedPath = true;
 				return true;
 			}
-			if (pathTerm.GetOperandType() != typeof(string))
+			if (pathTerm.GetEraType() != EraType.String)
 				return false;
 			if (!TryGetSafeRelativeTextPath(pathTerm.GetStrValue(exm), out filepath))
 				return false;
 			string extension = System.IO.Path.HasExtension(filepath) ? System.IO.Path.GetExtension(filepath).TrimStart('.').ToLowerInvariant() : "";
-			if (!string.Equals(extension, "txt", StringComparison.OrdinalIgnoreCase))
+			if (!Config.IsLoadTextExtensionAllowed(extension))
 			{
 				if (!forSave)
 					return false;
@@ -5150,6 +5974,16 @@ namespace MinorShift.Emuera.GameData.Function
 			try
 			{
 				byte[] bytes = System.IO.File.ReadAllBytes(filepath);
+				// eraFL 的部分 xml 实际保存为 UTF-16/UTF-32，但声明仍写 utf-8。
+				// 这里先按 BOM 识别真实编码，避免 LOADTEXT 把内容读成带 NUL 的乱码。
+				if (bytes.Length >= 4 && bytes[0] == 0xFF && bytes[1] == 0xFE && bytes[2] == 0x00 && bytes[3] == 0x00)
+					return Encoding.UTF32.GetString(bytes);
+				if (bytes.Length >= 4 && bytes[0] == 0x00 && bytes[1] == 0x00 && bytes[2] == 0xFE && bytes[3] == 0xFF)
+					return new UTF32Encoding(true, true).GetString(bytes);
+				if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+					return Encoding.Unicode.GetString(bytes);
+				if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+					return Encoding.BigEndianUnicode.GetString(bytes);
 				if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
 					return new UTF8Encoding(true, true).GetString(bytes);
 				try
@@ -5177,8 +6011,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsSaveMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -5213,8 +6047,8 @@ namespace MinorShift.Emuera.GameData.Function
 		{
 			public GraphicsLoadMethod()
 			{
-				ReturnType = typeof(Int64);
-				argumentTypeArray = new Type[] { typeof(Int64), typeof(Int64) };
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -5240,7 +6074,8 @@ namespace MinorShift.Emuera.GameData.Function
 						return 0;
 					if (bmp.Width == 0 || bmp.Height == 0)
 						return 0;
-					g.GCreateFromF(bmp, (Config.TextDrawingMode == TextDrawingMode.WINAPI));
+					if (!g.GCreateFromF(bmp, (Config.TextDrawingMode == TextDrawingMode.WINAPI)))
+						return 0;
 				}
 				catch (Exception e)
 				{
@@ -5258,6 +6093,1970 @@ namespace MinorShift.Emuera.GameData.Function
 			}
 		}
 
-		#endregion
+
+	public sealed class GraphicsGetFontMethod : FunctionMethod
+	{
+		public GraphicsGetFontMethod()
+		{
+			ReturnType = EraType.String;
+			argumentTypeArray = new EraType[] { EraType.Integer };
+			CanRestructure = false;
+		}
+		public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return "";
+			return g.Fontname ?? "";
+		}
 	}
+
+	public sealed class GraphicsGetTextSizeMethod : FunctionMethod
+	{
+		public GraphicsGetTextSizeMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = null;
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			// v24/Snake measure an explicit font rather than a GraphicsImage handle.
+			// Keep this worker-thread safe and allocation-free: Godot font resources are
+			// main-thread owned, while the compatibility API only needs pixel dimensions.
+			string text = arguments[0].GetStrValue(exm) ?? "";
+			int fontSize = Math.Max(1, (int)arguments[2].GetIntValue(exm));
+			int width = uEmuera.Utils.GetDisplayLength(text, fontSize);
+			int height = Math.Max(1, fontSize + 6);
+			exm.VEvaluator.RESULT_ARRAY[1] = height;
+			return width;
+		}
+	}
+
+	public sealed class GraphicsDrawLineMethod : FunctionMethod
+	{
+		public GraphicsDrawLineMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return 0;
+			int x1 = (int)arguments[1].GetIntValue(exm);
+			int y1 = (int)arguments[2].GetIntValue(exm);
+			int x2 = (int)arguments[3].GetIntValue(exm);
+			int y2 = (int)arguments[4].GetIntValue(exm);
+			g.GDrawLine(x1, y1, x2, y2);
+			return 1;
+		}
+	}
+
+	public sealed class GraphicsDrawStringMethod : FunctionMethod
+	{
+		public GraphicsDrawStringMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = null;
+			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length != 2 && arguments.Length != 4)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+			if (arguments[0] == null || !arguments[0].IsInteger)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
+			if (arguments[1] == null || !arguments[1].IsString)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 2);
+			if (arguments.Length == 4)
+			{
+				if (arguments[2] == null || !arguments[2].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 3);
+				if (arguments[3] == null || !arguments[3].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 4);
+			}
+			return null;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return 0;
+			string text = arguments[1].GetStrValue(exm) ?? "";
+			int x = arguments.Length >= 4 ? (int)arguments[2].GetIntValue(exm) : 0;
+			int y = arguments.Length >= 4 ? (int)arguments[3].GetIntValue(exm) : 0;
+			return g.GDrawString(text, x, y) ? 1 : 0;
+		}
+	}
+
+	public sealed class GraphicsDashStyleMethod : FunctionMethod
+	{
+		public GraphicsDashStyleMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return 0;
+			int style = (int)arguments[1].GetIntValue(exm);
+			int cap = (int)arguments[2].GetIntValue(exm);
+			g.GDashStyle(style, cap);
+			return 1;
+		}
+	}
+
+	public sealed class GraphicsRotateMethod : FunctionMethod
+	{
+		public GraphicsRotateMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer, EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return 0;
+			long angle = arguments[1].GetIntValue(exm);
+			int pivotX = (int)arguments[2].GetIntValue(exm);
+			int pivotY = (int)arguments[3].GetIntValue(exm);
+			g.GRotate(angle, pivotX, pivotY);
+			return 1;
+		}
+	}
+
+	public sealed class PolygonPointAddMethod : FunctionMethod
+	{
+		public PolygonPointAddMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return 0;
+			int x = (int)arguments[1].GetIntValue(exm);
+			int y = (int)arguments[2].GetIntValue(exm);
+			g.GDrawPolygonAddPoint(new Point(x, y));
+			return 1;
+		}
+	}
+
+	public sealed class PolygonPointClearMethod : FunctionMethod
+	{
+		public PolygonPointClearMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return 0;
+			g.GDrawPolygonClearPoint();
+			return 1;
+		}
+	}
+
+	public sealed class PolygonDrawMethod : FunctionMethod
+	{
+		public PolygonDrawMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return 0;
+			g.GDrawPolygon();
+			return 1;
+		}
+	}
+
+	public sealed class PolygonFillMethod : FunctionMethod
+	{
+		public PolygonFillMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage g = ReadGraphics(Name, exm, arguments, 0);
+			if (!g.IsCreated)
+				return 0;
+			g.GFillPolygon();
+			return 1;
+		}
+	}
+
+	public sealed class SpriteCreateFromFileMethod : FunctionMethod
+	{
+		public SpriteCreateFromFileMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.String, EraType.String };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string imgName = arguments[0].GetStrValue(exm) ?? "";
+			string filepath = arguments[1].GetStrValue(exm) ?? "";
+			return AppContents.CreateSpriteFromFileDynamic(imgName, filepath) ? 1 : 0;
+		}
+	}
+
+	public sealed class SpriteDisposeAllMethod : FunctionMethod
+	{
+		public SpriteDisposeAllMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			bool delCsv = arguments[0].GetIntValue(exm) != 0;
+			return AppContents.SpriteDisposeAll(delCsv);
+		}
+	}
+
+	public sealed class SetTextBoxMethod : FunctionMethod
+	{
+		public SetTextBoxMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.String };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string text = arguments[0].GetStrValue(exm) ?? "";
+			exm.Console.SetTextBoxText(text);
+			return 1;
+		}
+	}
+
+	public sealed class GetTextBoxMethod : FunctionMethod
+	{
+		public GetTextBoxMethod()
+		{
+			ReturnType = EraType.String;
+			argumentTypeArray = new EraType[] { };
+			CanRestructure = false;
+		}
+		public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			return exm.Console.GetTextBoxText() ?? "";
+		}
+	}
+
+	public sealed class MoveTextBoxMethod : FunctionMethod
+	{
+		public MoveTextBoxMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer, EraType.Integer };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			var window = GlobalStatic.MainWindow;
+			if (window == null)
+				return 0;
+			int x = (int)arguments[0].GetIntValue(exm);
+			int y = (int)arguments[1].GetIntValue(exm);
+			int width = (int)arguments[2].GetIntValue(exm);
+			window.SetTextBoxPos(x, y, width);
+			return 1;
+		}
+	}
+
+	public sealed class ResumeTextBoxMethod : FunctionMethod
+	{
+		public ResumeTextBoxMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			var window = GlobalStatic.MainWindow;
+			if (window == null)
+				return 0;
+			window.ResetTextBoxPos();
+			return 1;
+		}
+	}
+
+	public sealed class MouseButtonMethod : FunctionMethod
+	{
+		public MouseButtonMethod()
+		{
+			ReturnType = EraType.String;
+			argumentTypeArray = new EraType[] { };
+			CanRestructure = false;
+		}
+		public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			return GenericUtils.GetPointingButtonInput() ?? "";
+		}
+	}
+
+	public sealed class VarSetExMethod : FunctionMethod
+	{
+		public VarSetExMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = null;
+			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length < 2)
+				return name + "関数には少なくとも2つの引数が必要です";
+			if (arguments.Length > 5)
+				return name + "関数の引数が多すぎます";
+			if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+				return name + "関数の1番目の引数の型が正しくありません";
+			if (arguments[1] == null)
+				return name + "関数の2番目の引数が必要です";
+			if (arguments.Length >= 3 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+				return name + "関数の3番目の引数の型が正しくありません";
+			if (arguments.Length >= 4 && arguments[3] != null && arguments[3].GetEraType() != EraType.Integer)
+				return name + "関数の4番目の引数の型が正しくありません";
+			if (arguments.Length >= 5 && arguments[4] != null && arguments[4].GetEraType() != EraType.Integer)
+				return name + "関数の5番目の引数の型が正しくありません";
+			return null;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string varName = arguments[0].GetStrValue(exm) ?? "";
+			VariableTerm varTerm = ParseVarSetExTerm(varName);
+			if (varTerm == null || varTerm.Identifier == null)
+				throw new CodeEE(varName + "は未定義の変数です");
+			VariableToken token = varTerm.Identifier;
+			if (token.IsConst)
+				throw new CodeEE(varName + "は変更できません");
+
+			bool setAllDims = arguments.Length < 3 || arguments[2] == null || arguments[2].GetIntValue(exm) != 0;
+			int start = arguments.Length >= 4 && arguments[3] != null ? (int)arguments[3].GetIntValue(exm) : 0;
+			int end = arguments.Length >= 5 && arguments[4] != null ? (int)arguments[4].GetIntValue(exm) : GetVarSetExDefaultEnd(token);
+
+			if (token.IsArray1D)
+			{
+				ClampVarSetExRange(token.GetLength(), ref start, ref end);
+				for (int i = start; i < end; i++)
+					SetVarSetExValue(token, arguments[1], exm, new long[] { i });
+			}
+			else if (token.IsArray2D)
+			{
+				int len1 = token.GetLength(0);
+				int len2 = token.GetLength(1);
+				int selected1 = (int)GetVarSetExIndex(varTerm, 0, exm);
+				int selected2 = (int)GetVarSetExIndex(varTerm, 1, exm);
+				start = Math.Max(start, selected2);
+				ClampVarSetExRange(len2, ref start, ref end);
+				int firstBegin = setAllDims ? 0 : selected1;
+				int firstEnd = setAllDims ? len1 : selected1 + 1;
+				for (int i = firstBegin; i < firstEnd; i++)
+					for (int j = start; j < end; j++)
+						SetVarSetExValue(token, arguments[1], exm, new long[] { i, j });
+			}
+			else if (token.IsArray3D)
+			{
+				int len1 = token.GetLength(0);
+				int len2 = token.GetLength(1);
+				int len3 = token.GetLength(2);
+				int selected1 = (int)GetVarSetExIndex(varTerm, 0, exm);
+				int selected2 = (int)GetVarSetExIndex(varTerm, 1, exm);
+				int selected3 = (int)GetVarSetExIndex(varTerm, 2, exm);
+				start = Math.Max(start, selected3);
+				ClampVarSetExRange(len3, ref start, ref end);
+				int firstBegin = setAllDims ? 0 : selected1;
+				int firstEnd = setAllDims ? len1 : selected1 + 1;
+				int secondBegin = setAllDims ? 0 : selected2;
+				int secondEnd = setAllDims ? len2 : selected2 + 1;
+				for (int i = firstBegin; i < firstEnd; i++)
+					for (int j = secondBegin; j < secondEnd; j++)
+						for (int k = start; k < end; k++)
+							SetVarSetExValue(token, arguments[1], exm, new long[] { i, j, k });
+			}
+			else
+			{
+				SetVarSetExValue(token, arguments[1], exm, new long[0]);
+			}
+			return 1;
+		}
+
+		private static VariableTerm ParseVarSetExTerm(string name)
+		{
+			WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(name), LexEndWith.EoL, LexAnalyzeFlag.None);
+			return ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL) as VariableTerm;
+		}
+
+		private static int GetVarSetExDefaultEnd(VariableToken token)
+		{
+			if (token.IsArray1D)
+				return token.GetLength();
+			if (token.IsArray2D)
+				return token.GetLength(1);
+			if (token.IsArray3D)
+				return token.GetLength(2);
+			return 0;
+		}
+
+		private static long GetVarSetExIndex(VariableTerm term, int dimension, ExpressionMediator exm)
+		{
+			try
+			{
+				return term.GetElementInt(dimension, exm);
+			}
+			catch
+			{
+				return 0;
+			}
+		}
+
+		private static void ClampVarSetExRange(int length, ref int start, ref int end)
+		{
+			if (start < 0)
+				start = 0;
+			if (end < start)
+				end = start;
+			if (end > length)
+				end = length;
+		}
+
+		private static void SetVarSetExValue(VariableToken token, IOperandTerm value, ExpressionMediator exm, long[] indexes)
+		{
+			if (token.GetEraType() == EraType.String)
+				token.SetValue(value.GetStrValue(exm) ?? "", indexes);
+			else if (token.GetEraType() == EraType.Float)
+				token.SetValue(ToDouble(value, exm), indexes);
+			else
+				token.SetValue(value.GetIntValue(exm), indexes);
+		}
+	}
+
+	public sealed class RegexpMatchMethod : FunctionMethod
+	{
+		public RegexpMatchMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = null;
+			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length < 2)
+				return name + "関数には少なくとも2つの引数が必要です";
+			if (arguments.Length > 4)
+				return name + "関数の引数が多すぎます";
+			if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+				return name + "関数の1番目の引数の型が正しくありません";
+			if (arguments[1] == null || arguments[1].GetEraType() != EraType.String)
+				return name + "関数の2番目の引数の型が正しくありません";
+			if (arguments.Length == 3 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+				return name + "関数の3番目の引数の型が正しくありません";
+			if (arguments.Length == 4)
+			{
+				if (!(arguments[2] is VariableTerm) || arguments[2].GetEraType() != EraType.Integer)
+					return name + "関数の3番目の引数は整数変数である必要があります";
+				if (!(arguments[3] is VariableTerm) || arguments[3].GetEraType() != EraType.String)
+					return name + "関数の4番目の引数は文字列配列変数である必要があります";
+				VariableTerm matchArray = (VariableTerm)arguments[3];
+				if (!matchArray.Identifier.IsArray1D)
+					return name + "関数の4番目の引数は文字列配列変数である必要があります";
+			}
+			return null;
+		}
+		static void OutputMatches(MatchCollection matches, Regex reg, SparseArray<string> results)
+		{
+			int index = 0;
+			foreach (Match match in matches)
+			{
+				foreach (string name in reg.GetGroupNames())
+				{
+					if (index >= results.Length)
+						return;
+					results[index++] = match.Groups[name].Value;
+				}
+			}
+		}
+		static void OutputMatches(MatchCollection matches, Regex reg, VariableTerm resultArray, ExpressionMediator exm)
+		{
+			long length = resultArray.Identifier.GetLength();
+			long index = 0;
+			foreach (Match match in matches)
+			{
+				foreach (string name in reg.GetGroupNames())
+				{
+					if (index >= length)
+						return;
+					resultArray.Identifier.SetValue(match.Groups[name].Value, new long[] { index++ });
+				}
+			}
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string baseString = arguments[0].GetStrValue(exm) ?? "";
+			string pattern = arguments[1].GetStrValue(exm) ?? "";
+			System.Text.RegularExpressions.Regex reg;
+			try
+			{
+				reg = new System.Text.RegularExpressions.Regex(pattern);
+			}
+			catch (ArgumentException e)
+			{
+				throw new CodeEE("無効な正規表現パターン: " + e.Message);
+			}
+			var matches = reg.Matches(baseString);
+			int ret = matches.Count;
+			if (arguments.Length == 3 && arguments[2].GetIntValue(exm) != 0)
+			{
+				exm.VEvaluator.RESULT_ARRAY[1] = reg.GetGroupNumbers().Length;
+				if (ret > 0 && matches[0].Groups.Count > 0)
+					OutputMatches(matches, reg, exm.VEvaluator.RESULTS_ARRAY);
+			}
+			if (arguments.Length == 4)
+			{
+				((VariableTerm)arguments[2]).SetValue(reg.GetGroupNumbers().Length, exm);
+				if (ret > 0)
+					OutputMatches(matches, reg, (VariableTerm)arguments[3], exm);
+			}
+			return ret;
+		}
+	}
+
+	public sealed class ExistMethMethod : FunctionMethod
+	{
+		public ExistMethMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.String };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string name = arguments[0].GetStrValue(exm) ?? "";
+			try
+			{
+				var term = GlobalStatic.IdentifierDictionary.GetFunctionMethod(GlobalStatic.LabelDictionary, name, new IOperandTerm[0], true);
+				if (term == null)
+					return 0;
+				// Check return type
+				// gEmuera's GetFunctionMethod returns IOperandTerm which doesn't have GetEraType
+				// We approximate by checking if it's a UserDefinedRefMethodTerm or UserDefinedRefMethodNoArgTerm
+				if (term is UserDefinedRefMethodTerm || term is UserDefinedRefMethodNoArgTerm)
+					return 1; // User ref methods are typically int
+				return 1;
+			}
+			catch (CodeEE)
+			{
+				return 0;
+			}
+		}
+	}
+
+	public sealed class EnumNameMethod : FunctionMethod
+	{
+		readonly EType type;
+		readonly EAction action;
+		public EnumNameMethod(string typeStr, string actionStr)
+		{
+			this.type = (EType)System.Enum.Parse(typeof(EType), typeStr);
+			this.action = (EAction)System.Enum.Parse(typeof(EAction), actionStr);
+			ReturnType = EraType.Integer;
+			argumentTypeArray = new EraType[] { EraType.String };
+			CanRestructure = false;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string arg = arguments[0].GetStrValue(exm)?.ToUpperInvariant() ?? "";
+			List<string> source = new List<string>();
+			switch (type)
+			{
+				case EType.Function:
+					source.AddRange(GlobalStatic.LabelDictionary.NoneventKeys);
+					break;
+				case EType.Variable:
+					source.AddRange(GlobalStatic.IdentifierDictionary.VarKeys);
+					break;
+				case EType.Macro:
+					source.AddRange(GlobalStatic.IdentifierDictionary.MacroNames);
+					break;
+			}
+			List<string> strs = new List<string>();
+			if (arg.Length > 0)
+			{
+				foreach (string item in source)
+				{
+					string upper = item.ToUpperInvariant();
+					if (upper.Length < arg.Length)
+						continue;
+					switch (action)
+					{
+						case EAction.BeginsWith:
+							if (upper.StartsWith(arg, StringComparison.Ordinal))
+								strs.Add(item);
+							break;
+						case EAction.EndsWith:
+							if (upper.EndsWith(arg, StringComparison.Ordinal))
+								strs.Add(item);
+							break;
+						case EAction.With:
+							if (upper.Contains(arg))
+								strs.Add(item);
+							break;
+					}
+				}
+			}
+			var results = exm.VEvaluator.RESULTS_ARRAY;
+			int count = Math.Min(strs.Count, results.Length);
+			for (int i = 0; i < count; i++)
+				results[i] = strs[i];
+			return strs.Count;
+		}
+		enum EType { Function, Variable, Macro }
+		enum EAction { BeginsWith, EndsWith, With }
+	}
+
+	public sealed class GraphicsDrawGWithRotateMethod : FunctionMethod
+	{
+		public GraphicsDrawGWithRotateMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = null;
+			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length != 3 && arguments.Length != 5)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+			for (int i = 0; i < arguments.Length; i++)
+			{
+				if (arguments[i] == null || !arguments[i].IsInteger)
+					return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, i + 1);
+			}
+			return null;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			if (Config.TextDrawingMode == TextDrawingMode.WINAPI)
+				throw new CodeEE(string.Format(Properties.Resources.RuntimeErrMesMethodGDIPLUSOnly, Name));
+			GraphicsImage dest = ReadGraphics(Name, exm, arguments, 0);
+			if (!dest.IsCreated)
+				return 0;
+			GraphicsImage src = ReadGraphics(Name, exm, arguments, 1);
+			if (!src.IsCreated)
+				return 0;
+			long angle = arguments[2].GetIntValue(exm);
+			// eraFL 省略 pivot 时默认围绕源图中心旋转，避免只给角度时图像被转出画布。
+			int pivotX = arguments.Length >= 5 ? (int)arguments[3].GetIntValue(exm) : src.Width / 2;
+			int pivotY = arguments.Length >= 5 ? (int)arguments[4].GetIntValue(exm) : src.Height / 2;
+			dest.GDrawGWithRotate(src, angle, pivotX, pivotY);
+			return 1;
+		}
+	}
+
+	public sealed class GetDisplayLineMethod : FunctionMethod
+	{
+		public GetDisplayLineMethod()
+		{
+			ReturnType = EraType.String;
+			argumentTypeArray = new EraType[] { EraType.Integer };
+			CanRestructure = false;
+		}
+		public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			int index = (int)arguments[0].GetIntValue(exm);
+			return exm.Console.GetDisplayLine(index);
+		}
+	}
+
+	public sealed class GetDoingFunctionMethod : FunctionMethod
+	{
+		public GetDoingFunctionMethod()
+		{
+			ReturnType = EraType.String;
+			argumentTypeArray = new EraType[] { };
+			CanRestructure = false;
+		}
+		public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			LogicalLine line = exm.Process.GetScaningLine();
+			if (line == null || line.ParentLabelLine == null)
+				return "";
+			return line.ParentLabelLine.LabelName ?? "";
+		}
+	}
+
+	public sealed class GetMethMethod : FunctionMethod
+	{
+		public GetMethMethod()
+		{
+			ReturnType = EraType.Integer;
+			argumentTypeArray = null;
+			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length < 1)
+				return name + "関数には少なくとも1つの引数が必要です";
+			if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+				return name + "関数の1番目の引数の型が正しくありません";
+			if (arguments.Length >= 2 && arguments[1] == null)
+				return name + "関数の2番目の引数が必要です";
+			return null;
+		}
+		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string name = arguments[0].GetStrValue(exm) ?? "";
+			bool hasDefault = arguments.Length >= 2 && arguments[1] != null;
+			long defaultValue = hasDefault ? arguments[1].GetIntValue(exm) : 0L;
+			int argStart = hasDefault ? 2 : 1;
+			IOperandTerm[] methArgs = new IOperandTerm[arguments.Length - argStart];
+			for (int i = argStart; i < arguments.Length; i++)
+			{
+				if (arguments[i] == null)
+					methArgs[i - argStart] = new SingleTerm(0L);
+				else if (arguments[i].GetEraType() == EraType.String)
+					methArgs[i - argStart] = new SingleTerm(arguments[i].GetStrValue(exm) ?? "");
+				else
+					methArgs[i - argStart] = new SingleTerm(arguments[i].GetIntValue(exm));
+			}
+			try
+			{
+				var term = GlobalStatic.IdentifierDictionary.GetFunctionMethod(GlobalStatic.LabelDictionary, name, methArgs, true);
+				if (term == null)
+				{
+					if (hasDefault)
+						return defaultValue;
+					throw new CodeEE("指定された関数名\"@" + name + "\"は存在しません");
+				}
+				return term.GetIntValue(exm);
+			}
+			catch (CodeEE)
+			{
+				if (!hasDefault)
+					throw;
+				return defaultValue;
+			}
+		}
+	}
+
+	public sealed class GetMethFMethod : FunctionMethod
+	{
+		public GetMethFMethod()
+		{
+			ReturnType = EraType.Float;
+			argumentTypeArray = null;
+			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length < 1)
+				return name + "関数には少なくとも1つの引数が必要です";
+			if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+				return name + "関数の1番目の引数の型が正しくありません";
+			if (arguments.Length >= 2 && arguments[1] == null)
+				return name + "関数の2番目の引数が必要です";
+			return null;
+		}
+		public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string name = arguments[0].GetStrValue(exm) ?? "";
+			bool hasDefault = arguments.Length >= 2 && arguments[1] != null;
+			double defaultValue = hasDefault ? ToDouble(arguments[1], exm) : 0.0d;
+			int argStart = hasDefault ? 2 : 1;
+			IOperandTerm[] methArgs = new IOperandTerm[arguments.Length - argStart];
+			for (int i = argStart; i < arguments.Length; i++)
+			{
+				if (arguments[i] == null)
+					methArgs[i - argStart] = new SingleTerm(0L);
+				else if (arguments[i].GetEraType() == EraType.String)
+					methArgs[i - argStart] = new SingleTerm(arguments[i].GetStrValue(exm) ?? "");
+				else if (arguments[i].GetEraType() == EraType.Float)
+					methArgs[i - argStart] = new SingleTerm(arguments[i].GetFloatValue(exm));
+				else
+					methArgs[i - argStart] = new SingleTerm(arguments[i].GetIntValue(exm));
+			}
+			try
+			{
+				var term = GlobalStatic.IdentifierDictionary.GetFunctionMethod(GlobalStatic.LabelDictionary, name, methArgs, true);
+				if (term == null)
+				{
+					if (hasDefault)
+						return new SingleTerm(defaultValue);
+					throw new CodeEE("指定された関数名\"@" + name + "\"は存在しません");
+				}
+				return new SingleTerm(term.GetFloatValue(exm));
+			}
+			catch (CodeEE)
+			{
+				if (!hasDefault)
+					throw;
+				return new SingleTerm(defaultValue);
+			}
+		}
+	}
+
+	public sealed class GetMethSMethod : FunctionMethod
+	{
+		public GetMethSMethod()
+		{
+			ReturnType = EraType.String;
+			argumentTypeArray = null;
+			CanRestructure = false;
+		}
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments.Length < 1)
+				return name + "関数には少なくとも1つの引数が必要です";
+			if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+				return name + "関数の1番目の引数の型が正しくありません";
+			if (arguments.Length >= 2 && arguments[1] == null)
+				return name + "関数の2番目の引数が必要です";
+			return null;
+		}
+		public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+		{
+			string name = arguments[0].GetStrValue(exm) ?? "";
+			bool hasDefault = arguments.Length >= 2 && arguments[1] != null;
+			string defaultValue = hasDefault ? arguments[1].GetStrValue(exm) ?? "" : "";
+			int argStart = hasDefault ? 2 : 1;
+			IOperandTerm[] methArgs = new IOperandTerm[arguments.Length - argStart];
+			for (int i = argStart; i < arguments.Length; i++)
+			{
+				if (arguments[i] == null)
+					methArgs[i - argStart] = new SingleTerm(0L);
+				else if (arguments[i].GetEraType() == EraType.String)
+					methArgs[i - argStart] = new SingleTerm(arguments[i].GetStrValue(exm) ?? "");
+				else
+					methArgs[i - argStart] = new SingleTerm(arguments[i].GetIntValue(exm));
+			}
+			try
+			{
+				var term = GlobalStatic.IdentifierDictionary.GetFunctionMethod(GlobalStatic.LabelDictionary, name, methArgs, true);
+				if (term == null)
+				{
+					if (hasDefault)
+						return defaultValue;
+					throw new CodeEE("指定された関数名\"@" + name + "\"は存在しません");
+				}
+				return term.GetStrValue(exm) ?? defaultValue;
+			}
+			catch (CodeEE)
+			{
+				if (!hasDefault)
+					throw;
+				return defaultValue;
+			}
+		}
+	}
+		private sealed class EvalMethod : FunctionMethod
+		{
+			public EvalMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 1)
+					return name + "関数には少なくとも1つの引数が必要です";
+				if (arguments.Length > 2)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				if (arguments.Length >= 2 && arguments[1] != null && arguments[1].GetEraType() != EraType.Integer)
+					return name + "関数の2番目の引数の型が正しくありません";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string expressionStr = arguments[0].GetStrValue(exm);
+				long defaultValue = arguments.Length > 1 && arguments[1] != null ? arguments[1].GetIntValue(exm) : 0;
+				if (string.IsNullOrWhiteSpace(expressionStr))
+					return defaultValue;
+				try
+				{
+					WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(expressionStr), LexEndWith.EoL, LexAnalyzeFlag.None);
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+					if (term == null)
+						return defaultValue;
+					term = term.Restructure(exm);
+					if (term.GetEraType() == EraType.Integer)
+						return term.GetIntValue(exm);
+					else if (term.GetEraType() == EraType.Float)
+						return (long)term.GetFloatValue(exm);
+					else
+						return defaultValue;
+				}
+				catch
+				{
+					return defaultValue;
+				}
+			}
+		}
+
+		private sealed class EvalFMethod : FunctionMethod
+		{
+			public EvalFMethod()
+			{
+				ReturnType = EraType.Float;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 1)
+					return name + "関数には少なくとも1つの引数が必要です";
+				if (arguments.Length > 2)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				if (arguments.Length >= 2 && arguments[1] != null
+					&& arguments[1].GetEraType() != EraType.Integer
+					&& arguments[1].GetEraType() != EraType.Float)
+					return name + "関数の2番目の引数の型が正しくありません";
+				return null;
+			}
+			public override double GetFloatValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string expressionStr = arguments[0].GetStrValue(exm);
+				double defaultValue = 0.0d;
+				if (arguments.Length > 1 && arguments[1] != null)
+					defaultValue = arguments[1].GetEraType() == EraType.Integer ? arguments[1].GetIntValue(exm) : arguments[1].GetFloatValue(exm);
+				if (string.IsNullOrWhiteSpace(expressionStr))
+					return defaultValue;
+				try
+				{
+					WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(expressionStr), LexEndWith.EoL, LexAnalyzeFlag.None);
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+					if (term == null)
+						return defaultValue;
+					term = term.Restructure(exm);
+					if (term.GetEraType() == EraType.Float)
+						return term.GetFloatValue(exm);
+					if (term.GetEraType() == EraType.Integer)
+						return term.GetIntValue(exm);
+					return defaultValue;
+				}
+				catch
+				{
+					return defaultValue;
+				}
+			}
+		}
+
+		private sealed class EvalSMethod : FunctionMethod
+		{
+			public EvalSMethod()
+			{
+				ReturnType = EraType.String;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 1)
+					return name + "関数には少なくとも1つの引数が必要です";
+				if (arguments.Length > 2)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				if (arguments.Length >= 2 && arguments[1] != null && arguments[1].GetEraType() != EraType.String)
+					return name + "関数の2番目の引数の型が正しくありません";
+				return null;
+			}
+			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string expressionStr = arguments[0].GetStrValue(exm);
+				string defaultValue = arguments.Length > 1 && arguments[1] != null ? arguments[1].GetStrValue(exm) : "";
+				if (string.IsNullOrWhiteSpace(expressionStr))
+					return defaultValue;
+				try
+				{
+					WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(expressionStr), LexEndWith.EoL, LexAnalyzeFlag.None);
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+					if (term == null)
+						return defaultValue;
+					term = term.Restructure(exm);
+					if (term.GetEraType() == EraType.String)
+						return term.GetStrValue(exm);
+					else if (term.GetEraType() == EraType.Float)
+						return term.GetFloatValue(exm).ToString();
+					else
+						return defaultValue;
+				}
+				catch
+				{
+					return defaultValue;
+				}
+			}
+		}
+
+		private sealed class MatchAllMethod : FunctionMethod
+		{
+			public MatchAllMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 2)
+					return name + "関数には少なくとも2つの引数が必要です";
+				if (arguments.Length > 5)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null)
+					return name + "関数の1番目の引数は省略できません";
+				if (!(arguments[0] is VariableTerm))
+					return name + "関数の1番目の引数が変数ではありません";
+				if (arguments[1] == null)
+					return name + "関数の2番目の引数は省略できません";
+				if (arguments.Length >= 3 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+					return name + "関数の3番目の引数の型が正しくありません";
+				if (arguments.Length >= 4 && arguments[3] != null && arguments[3].GetEraType() != EraType.Integer)
+					return name + "関数の4番目の引数の型が正しくありません";
+				if (arguments.Length >= 5 && arguments[4] != null && !(arguments[4] is VariableTerm))
+					return name + "関数の5番目の引数は変数である必要があります";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableTerm varTerm = (VariableTerm)arguments[0];
+				VariableToken token = varTerm.Identifier;
+				EraType targetType = arguments[1].GetEraType();
+				long beg = (arguments.Length > 2 && arguments[2] != null) ? arguments[2].GetIntValue(exm) : 0;
+				long end;
+				if (token.IsCharacterData)
+					end = exm.VEvaluator.CHARANUM;
+				else if (token.IsArray1D)
+					end = token.GetLength();
+				else
+					end = 1;
+				if (arguments.Length > 3 && arguments[3] != null)
+					end = arguments[3].GetIntValue(exm);
+				if (beg < 0 || end < 0)
+					throw new CodeEE("検索範囲に負の値が渡されました");
+				if (beg > end)
+					throw new CodeEE("検索範囲の指定が不正です");
+				long maxLen = token.IsCharacterData ? exm.VEvaluator.CHARANUM : token.IsArray1D ? token.GetLength() : 1;
+				if (end > maxLen)
+					end = maxLen;
+				VariableTerm outArr = null;
+				if (arguments.Length > 4 && arguments[4] != null)
+					outArr = (VariableTerm)arguments[4];
+				long count = 0;
+				long[] idxs = new long[2];
+				if (targetType == EraType.Integer)
+				{
+					long targetValue = arguments[1].GetIntValue(exm);
+					for (long i = beg; i < end; i++)
+					{
+						idxs[0] = i;
+						if (token.GetIntValue(exm, idxs) == targetValue)
+						{
+							if (outArr != null)
+							{
+								try
+								{
+									long outLen = outArr.Identifier.GetLength();
+									if (count < outLen)
+										outArr.Identifier.SetValue(i, new long[] { count });
+								}
+								catch { }
+							}
+							count++;
+						}
+					}
+				}
+				else if (targetType == EraType.String)
+				{
+					string targetStr = arguments[1].GetStrValue(exm);
+					for (long i = beg; i < end; i++)
+					{
+						idxs[0] = i;
+						if (token.GetStrValue(exm, idxs) == targetStr)
+						{
+							if (outArr != null)
+							{
+								try
+								{
+									long outLen = outArr.Identifier.GetLength();
+									if (count < outLen)
+										outArr.Identifier.SetValue(i, new long[] { count });
+								}
+								catch { }
+							}
+							count++;
+						}
+					}
+				}
+				else
+				{
+					throw new CodeEE("MATCHALL: サポートされていない型です");
+				}
+				return count;
+			}
+		}
+
+		private sealed class MatchAllExMethod : FunctionMethod
+		{
+			public MatchAllExMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 2)
+					return name + "関数には少なくとも2つの引数が必要です";
+				if (arguments.Length > 5)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null)
+					return name + "関数の1番目の引数は省略できません";
+				if (arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数が文字列ではありません";
+				if (arguments[1] == null)
+					return name + "関数の2番目の引数は省略できません";
+				if (arguments.Length >= 3 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+					return name + "関数の3番目の引数の型が正しくありません";
+				if (arguments.Length >= 4 && arguments[3] != null && arguments[3].GetEraType() != EraType.Integer)
+					return name + "関数の4番目の引数の型が正しくありません";
+				if (arguments.Length >= 5 && arguments[4] != null && !(arguments[4] is VariableTerm))
+					return name + "関数の5番目の引数は変数である必要があります";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string varName = arguments[0].GetStrValue(exm);
+				VariableToken token = null;
+				try
+				{
+					WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(varName), LexEndWith.EoL, LexAnalyzeFlag.None);
+					IdentifierWord id = wc.Current as IdentifierWord;
+					if (id != null)
+					{
+						wc.ShiftNext();
+						token = ExpressionParser.ReduceVariableIdentifier(wc, id.Code);
+					}
+				}
+				catch { }
+				if (token == null)
+					throw new CodeEE("変数 " + varName + " が見つかりません");
+				EraType targetType = arguments[1].GetEraType();
+				long beg = (arguments.Length > 2 && arguments[2] != null) ? arguments[2].GetIntValue(exm) : 0;
+				long end;
+				if (token.IsCharacterData)
+					end = exm.VEvaluator.CHARANUM;
+				else if (token.IsArray1D)
+					end = token.GetLength();
+				else
+					end = 1;
+				if (arguments.Length > 3 && arguments[3] != null)
+					end = arguments[3].GetIntValue(exm);
+				if (beg < 0 || end < 0)
+					throw new CodeEE("検索範囲に負の値が渡されました");
+				if (beg > end)
+					throw new CodeEE("検索範囲の指定が不正です");
+				long maxLen = token.IsCharacterData ? exm.VEvaluator.CHARANUM : token.IsArray1D ? token.GetLength() : 1;
+				if (end > maxLen)
+					end = maxLen;
+				VariableTerm outArr = null;
+				if (arguments.Length > 4 && arguments[4] != null)
+					outArr = (VariableTerm)arguments[4];
+				long count = 0;
+				long[] idxs = new long[2];
+				if (targetType == EraType.Integer)
+				{
+					long targetValue = arguments[1].GetIntValue(exm);
+					for (long i = beg; i < end; i++)
+					{
+						idxs[0] = i;
+						if (token.GetIntValue(exm, idxs) == targetValue)
+						{
+							if (outArr != null)
+							{
+								try
+								{
+									long outLen = outArr.Identifier.GetLength();
+									if (count < outLen)
+										outArr.Identifier.SetValue(i, new long[] { count });
+								}
+								catch { }
+							}
+							count++;
+						}
+					}
+				}
+				else if (targetType == EraType.String)
+				{
+					string targetStr = arguments[1].GetStrValue(exm);
+					for (long i = beg; i < end; i++)
+					{
+						idxs[0] = i;
+						if (token.GetStrValue(exm, idxs) == targetStr)
+						{
+							if (outArr != null)
+							{
+								try
+								{
+									long outLen = outArr.Identifier.GetLength();
+									if (count < outLen)
+										outArr.Identifier.SetValue(i, new long[] { count });
+								}
+								catch { }
+							}
+							count++;
+						}
+					}
+				}
+				else
+				{
+					throw new CodeEE("MATCHALLEX: サポートされていない型です");
+				}
+				return count;
+			}
+		}
+
+		private sealed class ExistVarMethod : FunctionMethod
+		{
+			public ExistVarMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = true;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 1)
+					return name + "関数には少なくとも1つの引数が必要です";
+				if (arguments.Length > 2)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				if (arguments.Length >= 2 && arguments[1] != null && arguments[1].GetEraType() != EraType.Integer)
+					return name + "関数の2番目の引数の型が正しくありません";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string name = arguments[0].GetStrValue(exm);
+				long mode = (arguments.Length > 1 && arguments[1] != null) ? arguments[1].GetIntValue(exm) : 0;
+				if (mode == 0)
+				{
+					try
+					{
+						VariableToken token = GlobalStatic.IdentifierDictionary.GetVariableToken(name, null, true);
+						if (token != null)
+						{
+							long res = 0;
+							if (token.IsInteger)
+								res |= 1;
+							else if (token.IsString)
+								res |= 2;
+							else if (token.IsFloat)
+								res |= 32;
+							if (token.IsConst)
+								res |= 4;
+							if (token.IsArray2D)
+								res |= 8;
+							if (token.IsArray3D)
+								res |= 16;
+							return res;
+						}
+					}
+					catch
+					{
+						return 0;
+					}
+				}
+				else
+				{
+					try
+					{
+						WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(name), LexEndWith.EoL, LexAnalyzeFlag.None);
+						IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+						return term != null ? 1 : 0;
+					}
+					catch
+					{
+						return 0;
+					}
+				}
+				return 0;
+			}
+		}
+
+		private sealed class SetVarMethod : FunctionMethod
+		{
+			public SetVarMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 2)
+					return name + "関数には少なくとも2つの引数が必要です";
+				if (arguments.Length > 3)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				if (arguments[1] == null)
+					return name + "関数の2番目の引数は省略できません";
+				if (arguments.Length >= 3 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+					return name + "関数の3番目の引数の型が正しくありません";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				long defaultValue = arguments.Length > 2 && arguments[2] != null ? arguments[2].GetIntValue(exm) : 0;
+				bool hasDefault = arguments.Length > 2 && arguments[2] != null;
+				string name = arguments[0].GetStrValue(exm);
+				VariableTerm varTerm = null;
+				try
+				{
+					WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(name), LexEndWith.EoL, LexAnalyzeFlag.None);
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+					varTerm = term as VariableTerm;
+				}
+				catch { }
+				if (varTerm == null || varTerm.Identifier == null || varTerm.Identifier.IsConst)
+					return hasDefault ? defaultValue : throw new CodeEE(name + "は変数ではありません");
+				EraType varType = varTerm.Identifier.GetEraType();
+				EraType valType = arguments[1].GetEraType();
+				if (varType == EraType.String)
+				{
+					if (valType != EraType.String)
+						return hasDefault ? defaultValue : throw new CodeEE(name + "は文字列型ではありません");
+					varTerm.SetValue(arguments[1].GetStrValue(exm), exm);
+				}
+				else if (varType == EraType.Float)
+				{
+					if (valType != EraType.Float && valType != EraType.Integer)
+						return hasDefault ? defaultValue : throw new CodeEE(name + "は小数型ではありません");
+					varTerm.SetValue(ToDouble(arguments[1], exm), exm);
+				}
+				else
+				{
+					if (valType != EraType.Integer)
+						return hasDefault ? defaultValue : throw new CodeEE(name + "は整数型ではありません");
+					varTerm.SetValue(arguments[1].GetIntValue(exm), exm);
+				}
+				return 1;
+			}
+		}
+
+		private sealed class IsDefinedMethod : FunctionMethod
+		{
+			public IsDefinedMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[] { EraType.String };
+				CanRestructure = true;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string name = arguments[0].GetStrValue(exm);
+				if (string.IsNullOrWhiteSpace(name))
+					return 0;
+				var macro = GlobalStatic.IdentifierDictionary.GetMacro(name);
+				return macro != null ? 1 : 0;
+			}
+		}
+
+		private sealed class ClearMemoryMethod : FunctionMethod
+		{
+			public ClearMemoryMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[0];
+				CanRestructure = false;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				long before = GC.GetTotalMemory(false);
+				GC.Collect();
+				long after = GC.GetTotalMemory(false);
+				return before - after;
+			}
+		}
+
+		private sealed class GetMemoryUsageMethod : FunctionMethod
+		{
+			public GetMemoryUsageMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = new EraType[0];
+				CanRestructure = false;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				using (System.Diagnostics.Process proc = System.Diagnostics.Process.GetCurrentProcess())
+				{
+					return proc.WorkingSet64;
+				}
+			}
+		}
+
+		private sealed class OutputLogMethod : FunctionMethod
+		{
+			public OutputLogMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length > 2)
+					return name + "関数の引数が多すぎます";
+				if (arguments.Length >= 1 && arguments[0] != null && arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				if (arguments.Length >= 2 && arguments[1] != null && arguments[1].GetEraType() != EraType.Integer)
+					return name + "関数の2番目の引数の型が正しくありません";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string filename = arguments.Length > 0 && arguments[0] != null ? arguments[0].GetStrValue(exm) : null;
+				bool hideInfo = arguments.Length > 1 && arguments[1] != null && arguments[1].GetIntValue(exm) != 0;
+				return exm.Console.OutputLog(filename, hideInfo) ? 1 : 0;
+			}
+		}
+		public sealed class ErdNameMethod : FunctionMethod
+		{
+			public ErdNameMethod()
+			{
+				ReturnType = EraType.String;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 2)
+						return name + "関数には少なくとも2つの引数が必要です";
+					if (arguments.Length > 3)
+						return name + "関数の引数が多すぎます";
+					if (arguments[0] == null || !(arguments[0] is VariableTerm))
+						return name + "関数の1番目の引数の型が正しくありません";
+					if (arguments[1] == null || arguments[1].GetEraType() != EraType.Integer)
+						return name + "関数の2番目の引数の型が正しくありません";
+					if (arguments.Length == 3 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+						return name + "関数の3番目の引数の型が正しくありません";
+					return null;
+			}
+			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				VariableTerm varTerm = (VariableTerm)arguments[0];
+				string varName = varTerm.Identifier.Name;
+				long value = arguments[1].GetIntValue(exm);
+				int index = arguments.Length > 2 && arguments[2] != null ? (int)arguments[2].GetIntValue(exm) : -1;
+				if (index >= 0)
+					varName = varName + "@" + index;
+				return TryIntegerToKeyword(varName, value, index);
+			}
+			static string TryIntegerToKeyword(string variableName, long value, int index)
+			{
+				if (string.IsNullOrWhiteSpace(variableName))
+						return "";
+				var constantData = MinorShift.Emuera.GlobalStatic.ConstantData;
+				if (constantData != null && constantData.TryIntegerToKeyword(out string erdValue, value, variableName))
+					return erdValue;
+				string name = variableName.Trim();
+				int atIndex = name.IndexOf('@');
+				if (atIndex >= 0)
+						name = name.Substring(0, atIndex);
+				int colonIndex = name.IndexOf(':');
+				if (colonIndex >= 0)
+						name = name.Substring(0, colonIndex);
+				if (!System.Enum.TryParse<MinorShift.Emuera.GameData.Variable.VariableCode>(name, true, out var legacyCode))
+						return "";
+				if (constantData == null)
+						return "";
+				Dictionary<string, int> dictionary;
+				try
+				{
+					dictionary = constantData.GetKeywordDictionary(out _, legacyCode, index);
+				}
+				catch
+				{
+					return "";
+				}
+				if (dictionary == null)
+						return "";
+				foreach (var pair in dictionary)
+				{
+					if (pair.Value == value)
+							return pair.Key;
+				}
+				return "";
+			}
+		}
+
+		public sealed class ToStrfMethod : FunctionMethod
+		{
+			public ToStrfMethod()
+			{
+				ReturnType = EraType.String;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 1)
+						return name + "関数には少なくとも1つの引数が必要です";
+					if (arguments.Length > 2)
+						return name + "関数の引数が多すぎます";
+					return null;
+			}
+			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				double value = ToDouble(arguments[0], exm);
+				if (arguments.Length < 2)
+						return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+				string format = arguments[1].GetStrValue(exm) ?? "";
+				try
+				{
+					return value.ToString(format, System.Globalization.CultureInfo.InvariantCulture);
+				}
+				catch (System.FormatException)
+				{
+					throw new CodeEE("TOSTRF: 無効な書式指定文字列です");
+				}
+			}
+		}
+
+
+
+		public sealed class EnumFilesMethod : FunctionMethod
+		{
+			public EnumFilesMethod()
+			{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+			}
+			public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+			{
+				if (arguments.Length < 1)
+					return name + "関数には少なくとも1つの引数が必要です";
+				if (arguments.Length > 4)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				if (arguments.Length > 1 && arguments[1] != null && arguments[1].GetEraType() != EraType.String)
+					return name + "関数の2番目の引数の型が正しくありません";
+				if (arguments.Length > 2 && arguments[2] != null && arguments[2].GetEraType() != EraType.Integer)
+					return name + "関数の3番目の引数の型が正しくありません";
+				if (arguments.Length > 3 && arguments[3] != null &&
+					arguments[3].GetEraType() != EraType.Integer && !CanWriteStringArray(arguments[3]))
+					return name + "関数の4番目の引数の型が正しくありません";
+				return null;
+			}
+			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+			{
+				string dir = uEmuera.Utils.ResolveScriptDirectoryPath(arguments[0].GetStrValue(exm));
+				if (string.IsNullOrWhiteSpace(dir) || !uEmuera.Utils.DirectoryExists(dir))
+					return -1;
+				string pattern = arguments.Length > 1 && arguments[1] != null ? arguments[1].GetStrValue(exm) : "*";
+				if (string.IsNullOrEmpty(pattern))
+					pattern = "*";
+				bool recursive = arguments.Length > 2 && arguments[2] != null && arguments[2].GetIntValue(exm) != 0;
+				System.IO.SearchOption option = recursive ? System.IO.SearchOption.AllDirectories : System.IO.SearchOption.TopDirectoryOnly;
+				List<string> files;
+				try
+				{
+					// ENUMFILES 是运行时动态枚举：会话中途新增/删除的文件必须可见，
+					// 先失效目录快照缓存再枚举（与 baseline 每次即时枚举语义一致）。
+					uEmuera.Utils.InvalidateRecursiveDirListing(dir);
+					files = uEmuera.Utils.GetFilePaths(dir, pattern, option);
+					for (int i = 0; i < files.Count; i++)
+						files[i] = uEmuera.Utils.GetRelativePathFromGameDir(files[i]);
+				}
+				catch
+				{
+					return -1;
+				}
+				return CopyEnumFilesResult(exm, arguments, files);
+			}
+
+			static bool CanWriteStringArray(IOperandTerm argument)
+			{
+				if (argument is not VariableTerm variableTerm)
+					return false;
+				try
+				{
+					object output = variableTerm.Identifier.GetArray();
+					return output is string[] || output is SparseArray<string>;
+				}
+				catch
+				{
+					return false;
+				}
+			}
+
+			static Int64 CopyEnumFilesResult(ExpressionMediator exm, IOperandTerm[] arguments, List<string> files)
+			{
+				if (arguments.Length > 3 && arguments[3] != null && CanWriteStringArray(arguments[3]))
+				{
+					object output = ((VariableTerm)arguments[3]).Identifier.GetArray();
+					if (output is string[] array)
+					{
+						int arrayCount = Math.Min(files.Count, array.Length);
+						for (int i = 0; i < arrayCount; i++)
+							array[i] = files[i];
+						return arrayCount;
+					}
+
+					var sparseArray = (SparseArray<string>)output;
+					int sparseCount = Math.Min(files.Count, sparseArray.Length);
+					for (int i = 0; i < sparseCount; i++)
+						sparseArray[i] = files[i];
+					return sparseCount;
+				}
+
+				var results = exm.VEvaluator.RESULTS_ARRAY;
+				int resultsIndex = arguments.Length > 3 && arguments[3] != null ? (int)arguments[3].GetIntValue(exm) : 0;
+				if (resultsIndex < 0)
+					resultsIndex = 0;
+				int offset = Math.Min(resultsIndex, results.Length);
+				int resultCount = Math.Min(files.Count, results.Length - offset);
+				for (int i = 0; i < resultCount; i++)
+					results[offset + i] = files[i];
+				return arguments.Length > 3 ? files.Count : resultCount;
+			}
+		}
+
+		public sealed class GetVarMethod : FunctionMethod
+			{
+			public GetVarMethod()
+				{
+				ReturnType = EraType.Integer;
+				argumentTypeArray = null;
+				CanRestructure = false;
+				}
+				public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+				{
+				if (arguments.Length < 1)
+					return name + "関数には少なくとも1つの引数が必要です";
+				if (arguments.Length > 2)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				return null;
+				}
+				public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+				{
+				bool hasDefault = arguments.Length > 1 && arguments[1] != null;
+				long defaultValue = hasDefault ? arguments[1].GetIntValue(exm) : 0;
+				string name = arguments[0].GetStrValue(exm) ?? "";
+				VariableTerm varTerm = null;
+				try
+				{
+					WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(name), LexEndWith.EoL, LexAnalyzeFlag.None);
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+					varTerm = term as VariableTerm;
+				}
+				catch
+				{
+					if (hasDefault)
+						return defaultValue;
+					throw new CodeEE(name + "は変数ではありません");
+				}
+				if (varTerm == null || varTerm.Identifier == null)
+					return hasDefault ? defaultValue : throw new CodeEE(name + "は変数ではありません");
+				try
+				{
+					if (varTerm.Identifier.GetEraType() == EraType.Integer)
+						return varTerm.GetIntValue(exm);
+				}
+				catch
+				{
+					if (hasDefault)
+						return defaultValue;
+					throw;
+				}
+				return hasDefault ? defaultValue : throw new CodeEE(name + "は整数型ではありません");
+				}
+			}
+
+		public sealed class GetVarSMethod : FunctionMethod
+			{
+			public GetVarSMethod()
+				{
+				ReturnType = EraType.String;
+				argumentTypeArray = null;
+				CanRestructure = false;
+				}
+				public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+				{
+				if (arguments.Length < 1)
+					return name + "関数には少なくとも1つの引数が必要です";
+				if (arguments.Length > 2)
+					return name + "関数の引数が多すぎます";
+				if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+					return name + "関数の1番目の引数の型が正しくありません";
+				return null;
+				}
+				public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
+				{
+				bool hasDefault = arguments.Length > 1 && arguments[1] != null;
+				string defaultValue = hasDefault ? arguments[1].GetStrValue(exm) ?? "" : "";
+				string name = arguments[0].GetStrValue(exm) ?? "";
+				VariableTerm varTerm = null;
+				try
+				{
+					WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(name), LexEndWith.EoL, LexAnalyzeFlag.None);
+					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+					varTerm = term as VariableTerm;
+				}
+				catch
+				{
+					if (hasDefault)
+						return defaultValue;
+					throw new CodeEE(name + "は変数ではありません");
+				}
+				if (varTerm == null || varTerm.Identifier == null)
+					return hasDefault ? defaultValue : throw new CodeEE(name + "は変数ではありません");
+				try
+				{
+					if (varTerm.Identifier.GetEraType() == EraType.String)
+						return varTerm.GetStrValue(exm) ?? defaultValue;
+				}
+				catch
+				{
+					if (hasDefault)
+						return defaultValue;
+					throw;
+				}
+				return hasDefault ? defaultValue : throw new CodeEE(name + "は文字列型ではありません");
+				}
+			}
+
+			public sealed class GetVarFMethod : FunctionMethod
+				{
+				public GetVarFMethod()
+					{
+					ReturnType = EraType.Float;
+					argumentTypeArray = null;
+					CanRestructure = false;
+					}
+					public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+					{
+					if (arguments.Length < 1)
+						return name + "関数には少なくとも1つの引数が必要です";
+					if (arguments.Length > 2)
+						return name + "関数の引数が多すぎます";
+					if (arguments[0] == null || arguments[0].GetEraType() != EraType.String)
+						return name + "関数の1番目の引数の型が正しくありません";
+					return null;
+					}
+					public override SingleTerm GetReturnValue(ExpressionMediator exm, IOperandTerm[] arguments)
+					{
+					bool hasDefault = arguments.Length > 1 && arguments[1] != null;
+					double defaultValue = hasDefault ? ToDouble(arguments[1], exm) : 0.0;
+					string name = arguments[0].GetStrValue(exm) ?? "";
+					VariableTerm varTerm = null;
+					try
+					{
+						WordCollection wc = LexicalAnalyzer.Analyse(new StringStream(name), LexEndWith.EoL, LexAnalyzeFlag.None);
+						IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+						varTerm = term as VariableTerm;
+					}
+					catch
+					{
+						if (hasDefault)
+							return new SingleTerm(defaultValue);
+						throw new CodeEE(name + "は変数ではありません");
+					}
+					if (varTerm == null || varTerm.Identifier == null)
+						return hasDefault ? new SingleTerm(defaultValue) : throw new CodeEE(name + "は変数ではありません");
+					try
+					{
+						if (varTerm.Identifier.IsFloat)
+							return new SingleTerm(varTerm.GetFloatValue(exm));
+					}
+					catch
+					{
+						if (hasDefault)
+							return new SingleTerm(defaultValue);
+						throw;
+					}
+					return hasDefault ? new SingleTerm(defaultValue) : throw new CodeEE(name + "は小数型ではありません");
+					}
+				}
+
+			private sealed class BitmapCacheEnableMethod : FunctionMethod
+			{
+				public BitmapCacheEnableMethod()
+				{
+					ReturnType = EraType.Integer;
+					argumentTypeArray = null;
+					CanRestructure = false;
+				}
+				public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+				{
+					if (arguments.Length < 1)
+						return name + "関数には少なくとも1つの引数が必要です";
+					if (arguments.Length > 1)
+						return name + "関数の引数が多すぎます";
+					if (arguments[0] == null || arguments[0].GetEraType() != EraType.Integer)
+						return name + "関数の1番目の引数の型が正しくありません";
+					return null;
+				}
+				public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+				{
+					exm.Console.BitmapCacheEnabledForNextLine = arguments[0].GetIntValue(exm) != 0;
+					return 0;
+				}
+			}
+
+			#region FlowInput / HotkeyState
+
+			public sealed class FlowInputMethod : FunctionMethod
+			{
+				public FlowInputMethod()
+				{
+					ReturnType = EraType.Integer;
+					argumentTypeArray = null;
+					CanRestructure = false;
+				}
+				public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+				{
+					if (arguments.Length < 1)
+						return name + "関数には少なくとも1つの引数が必要です";
+					if (arguments.Length > 4)
+						return name + "関数の引数が多すぎます";
+					for (int i = 0; i < arguments.Length; i++)
+					{
+						if (arguments[i] == null || arguments[i].GetEraType() != EraType.Integer)
+							return name + "関数の引数の型が正しくありません";
+					}
+					return null;
+				}
+				public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+				{
+					exm.Process.flowinputDef = arguments[0].GetIntValue(exm);
+					if (arguments.Length > 1)
+						exm.Process.flowinput = arguments[1].GetIntValue(exm) != 0;
+					if (arguments.Length > 2)
+						exm.Process.flowinputCanSkip = arguments[2].GetIntValue(exm) != 0;
+					if (arguments.Length > 3)
+						exm.Process.flowinputForceSkip = arguments[3].GetIntValue(exm) != 0;
+					return 0;
+				}
+			}
+
+			public sealed class FlowInputsMethod : FunctionMethod
+			{
+				public FlowInputsMethod()
+				{
+					ReturnType = EraType.Integer;
+					argumentTypeArray = null;
+					CanRestructure = false;
+				}
+				public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+				{
+					if (arguments.Length < 1)
+						return name + "関数には少なくとも1つの引数が必要です";
+					if (arguments.Length > 2)
+						return name + "関数の引数が多すぎます";
+					if (arguments[0] == null || arguments[0].GetEraType() != EraType.Integer)
+						return name + "関数の1番目の引数の型が正しくありません";
+					if (arguments.Length > 1 && (arguments[1] == null || arguments[1].GetEraType() != EraType.String))
+						return name + "関数の2番目の引数の型が正しくありません";
+					return null;
+				}
+				public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+				{
+					exm.Process.flowinputString = arguments[0].GetIntValue(exm) != 0;
+					if (arguments.Length > 1)
+						exm.Process.flowinputDefString = arguments[1].GetStrValue(exm) ?? "";
+					return 0;
+				}
+			}
+
+			public sealed class HotkeyStateInitMethod : FunctionMethod
+			{
+				public HotkeyStateInitMethod()
+				{
+					ReturnType = EraType.Integer;
+					argumentTypeArray = new EraType[] { EraType.Integer };
+					CanRestructure = false;
+				}
+				public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+				{
+					long size = arguments[0].GetIntValue(exm);
+					exm.Console.HotkeyStateInitialize(size);
+					return 0;
+				}
+			}
+
+			public sealed class HotkeyStateMethod : FunctionMethod
+			{
+				public HotkeyStateMethod()
+				{
+					ReturnType = EraType.Integer;
+					argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
+					CanRestructure = false;
+				}
+				public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
+				{
+					long index = arguments[0].GetIntValue(exm);
+					long value = arguments[1].GetIntValue(exm);
+					exm.Console.HotkeyStateSet(index, value);
+					return 0;
+				}
+			}
+
+			#endregion
+
+			#endregion
+		}
 }

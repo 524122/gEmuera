@@ -1,0 +1,181 @@
+{
+  "schemaVersion": "1.0.0",
+  "gameRoot": "",
+  "profile": "v24pure",
+  "outputDirectory": "",
+  "maxRuntimeMs": 600000,
+  "initialWaitTimeoutMs": 240000,
+  "settleFrames": 3,
+  "displaySettleFrames": 5,
+  "displayBackend": "canvas",
+  "captureScreenshot": true,
+  "viewportWidth": 1280,
+  "viewportHeight": 720,
+  "maxDisplayBytes": 16777216,
+  "traceEnabled": true,
+  "maxTraceEvents": 1000000,
+  "inputs": [
+    {
+      "value": "0",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 240000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 1
+    },
+    {
+      "value": "0",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 2
+    },
+    {
+      "value": "[SELECT_CHARA:3]",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "StrValue",
+      "expectedButtonGeneration": 3
+    },
+    {
+      "value": "2",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 4
+    },
+    {
+      "value": "10",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "StrValue",
+      "expectedButtonGeneration": 5
+    },
+    {
+      "value": "4",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 6
+    },
+    {
+      "value": "",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "EnterKey",
+      "expectedButtonGeneration": 6
+    },
+    {
+      "value": "",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "EnterKey",
+      "expectedButtonGeneration": 6
+    },
+    {
+      "value": "",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "EnterKey",
+      "expectedButtonGeneration": 6
+    },
+    {
+      "value": "",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "EnterKey",
+      "expectedButtonGeneration": 6
+    },
+    {
+      "value": "",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "EnterKey",
+      "expectedButtonGeneration": 6
+    },
+    {
+      "value": "",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "EnterKey",
+      "expectedButtonGeneration": 6
+    },
+    {
+      "value": "1",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 7
+    },
+    {
+      "value": "160010",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 1,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "StrValue",
+      "expectedButtonGeneration": 8
+    },
+    {
+      "value": "0",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 0,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 9
+    },
+    {
+      "value": "14",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 1,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 10
+    },
+    {
+      "value": "0",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 1,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 11
+    },
+    {
+      "value": "1",
+      "fromButton": true,
+      "skip": false,
+      "mouseButton": 1,
+      "waitTimeoutMs": 120000,
+      "expectedInputType": "IntValue",
+      "expectedButtonGeneration": 12
+    }
+  ]
+}

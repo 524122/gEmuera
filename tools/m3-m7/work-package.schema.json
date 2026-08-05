@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schemas/m3-m7-work-package-1.0.0.json",
+  "title": "gEmuera M3-M7 work package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workPackageId", "phase", "executionStatus", "gateStatus",
+    "blockerCode", "predecessors", "identity", "allowedPaths", "forbiddenPaths",
+    "owner", "commands", "fixtures", "comparators", "reports", "uncovered",
+    "rollback", "decision"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "workPackageId": { "type": "string", "pattern": "^M[3-7]-[A-Z0-9-]+$" },
+    "phase": { "type": "string", "enum": ["M3", "M4", "M5", "M6", "M7"] },
+    "executionStatus": { "type": "string", "enum": ["NotStarted", "InProgress", "Passed"] },
+    "gateStatus": { "type": "string", "enum": ["Blocked", "ReadyForReview", "Passed"] },
+    "blockerCode": { "type": "string", "minLength": 1 },
+    "predecessors": { "type": "array", "items": { "type": "string" } },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "toolchain", "runtime", "fixture", "profile", "flags"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "toolchain": { "type": "string", "minLength": 1 },
+        "runtime": { "type": "string", "minLength": 1 },
+        "fixture": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 },
+        "flags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "allowedPaths": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "forbiddenPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core", "bridge", "app", "tests"],
+      "properties": {
+        "core": { "type": "string", "minLength": 1 },
+        "bridge": { "type": "string", "minLength": 1 },
+        "app": { "type": "string", "minLength": 1 },
+        "tests": { "type": "string", "minLength": 1 }
+      }
+    },
+    "commands": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "fixtures": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "comparators": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reports": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "uncovered": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flag", "artifact", "restoreCommand", "verified"],
+      "properties": {
+        "flag": { "type": "string", "minLength": 1 },
+        "artifact": { "type": "string", "minLength": 1 },
+        "restoreCommand": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preparedBy", "reviewedBy", "approvedBy", "conclusion", "reportHashes"],
+      "properties": {
+        "preparedBy": { "type": "string", "minLength": 1 },
+        "reviewedBy": { "type": "string", "minLength": 1 },
+        "approvedBy": { "type": "string", "minLength": 1 },
+        "conclusion": { "type": "string", "enum": ["Approved", "Rejected", "NeedsEvidence"] },
+        "reportHashes": { "type": "array", "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+      }
+    }
+  }
+}

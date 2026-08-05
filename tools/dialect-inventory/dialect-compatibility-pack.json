@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.dialect-compatibility-pack",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-12",
+  "sourcePlanPreflightWorkPackage": "M0-DIA-10",
+  "sourceProfileSelectionWorkPackage": "M0-DIA-11",
+  "sourcePlanPreflightHash": "d5cc089f073229aff0ea44436c7dfc2f559c83c0f785467921d035f0c815256b",
+  "sourceProfileSelectionHash": "0960994b046e1160dc9bddef3bbf031a4cdaaa18f8a20674a20f5b7be3bbd71d",
+  "compatibilityPackSchema": "emuera.compatibility-pack/v1",
+  "externalCodePolicy": "BuiltInCompiledOnly",
+  "allowedCapabilityIds": [],
+  "builtInModules": [
+    {
+      "id": "gemuera.v24",
+      "declarationVersion": "1.0.0",
+      "profileIds": ["v24pure", "snake"],
+      "payloadKind": "BuiltInCompiledOnly",
+      "distributionStatus": "StaticEvidenceOnly"
+    },
+    {
+      "id": "game.snake",
+      "declarationVersion": "1.0.0",
+      "profileIds": ["snake"],
+      "payloadKind": "BuiltInCompiledOnly",
+      "distributionStatus": "StaticEvidenceOnly"
+    }
+  ],
+  "profileContracts": [
+    {
+      "profileId": "v24pure",
+      "packId": "gemuera.compat.v24pure.static",
+      "legacyCoreProfileEnum": "V24Pure",
+      "builtInModuleIds": ["gemuera.v24"],
+      "projectionEvidenceModuleIds": ["gemuera.v24", "legacy.current.common", "legacy.current.expression"]
+    },
+    {
+      "profileId": "snake",
+      "packId": "gemuera.compat.snake.static",
+      "legacyCoreProfileEnum": "Snake",
+      "builtInModuleIds": ["gemuera.v24", "game.snake"],
+      "projectionEvidenceModuleIds": ["gemuera.v24", "game.snake", "legacy.current.common", "legacy.current.expression"]
+    }
+  ],
+  "packs": [
+    {
+      "packId": "gemuera.compat.v24pure.static",
+      "declarationVersion": "1.0.0",
+      "profileId": "v24pure",
+      "builtInModuleIds": ["gemuera.v24"],
+      "projectionEvidenceModuleIds": ["gemuera.v24", "legacy.current.common", "legacy.current.expression"],
+      "requiredCapabilities": [],
+      "optionalCapabilities": [],
+      "saveProfileEvidenceStatus": "Uncovered",
+      "fixtureEvidenceStatus": "Uncovered",
+      "contentBindingStatus": "NotBound",
+      "distributionEligibility": "Blocked"
+    },
+    {
+      "packId": "gemuera.compat.snake.static",
+      "declarationVersion": "1.0.0",
+      "profileId": "snake",
+      "builtInModuleIds": ["gemuera.v24", "game.snake"],
+      "projectionEvidenceModuleIds": ["gemuera.v24", "game.snake", "legacy.current.common", "legacy.current.expression"],
+      "requiredCapabilities": [],
+      "optionalCapabilities": [],
+      "saveProfileEvidenceStatus": "Uncovered",
+      "fixtureEvidenceStatus": "Uncovered",
+      "contentBindingStatus": "NotBound",
+      "distributionEligibility": "Blocked"
+    }
+  ]
+}

@@ -12,16 +12,32 @@ config_version=5
 
 config/name="gemuera-c#"
 run/main_scene="res://first_window.tscn"
-config/features=PackedStringArray("4.6", "C#", "Mobile")
-config/icon="res://icon.svg"
+config/features=PackedStringArray("4.7", "C#", "Mobile")
+prototype_runtime=true
+typed_ports=true
+pixel_store=true
+
+[autoload]
+
+AppBootstrap="*res://Scripts/GodotHost/AppBootstrap.cs"
+PlatformGateway="*res://Scripts/GodotHost/PlatformGateway.cs"
 
 [display]
 
 window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
 
 [dotnet]
 
 project/assembly_name="gemuera-c#"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")
+
+[launcher]
+
+default_game_library="E:/MyCode/Era"
 
 [physics]
 
@@ -30,5 +46,6 @@ project/assembly_name="gemuera-c#"
 [rendering]
 
 rendering_device/driver.windows="d3d12"
-renderer/rendering_method="mobile"
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true

@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using MinorShift.Emuera.GameData.Function;
+using MinorShift.Emuera.Compatibility;
 
 namespace MinorShift.Emuera.GameProc.Function
 {
@@ -35,11 +37,15 @@ namespace MinorShift.Emuera.GameProc.Function
 
 		#region static
 		//元BuiltInFunctionManager部分
-		readonly static Dictionary<string, FunctionIdentifier> funcDic = new Dictionary<string, FunctionIdentifier>();
+		readonly static Dictionary<string, FunctionIdentifier> funcDic =
+			new Dictionary<string, FunctionIdentifier>(Config.ICVariable ? System.StringComparer.OrdinalIgnoreCase : System.StringComparer.Ordinal);
 		readonly static Dictionary<FunctionCode, string> funcMatch = new Dictionary<FunctionCode, string>();
 		readonly static Dictionary<FunctionCode, FunctionCode> funcParent = new Dictionary<FunctionCode, FunctionCode>();
 		readonly static ArgumentBuilder methodArgumentBuilder = null;
 		readonly static AbstractInstruction methodInstruction = null;
+		static readonly object registrySurfaceGate = new object();
+		static readonly Dictionary<string, IReadOnlyDictionary<string, FunctionIdentifier>> registrySurfaces =
+			new Dictionary<string, IReadOnlyDictionary<string, FunctionIdentifier>>(System.StringComparer.Ordinal);
 
 		private static void addFunction(FunctionCode code, AbstractInstruction inst)
 		{ addFunction(code, inst, 0); }
@@ -47,8 +53,6 @@ namespace MinorShift.Emuera.GameProc.Function
 		private static void addFunction(FunctionCode code, AbstractInstruction inst, int additionalFlag)
 		{
 			string key = code.ToString();
-			if (Config.ICFunction)
-				key = key.ToUpper();
 			funcDic.Add(key, new FunctionIdentifier(key, code, inst, additionalFlag));
 		}
 
@@ -58,14 +62,87 @@ namespace MinorShift.Emuera.GameProc.Function
 		private static void addFunction(FunctionCode code, ArgumentBuilder arg, int flag)
 		{
 			string key = code.ToString();
-			if (Config.ICFunction)
-				key = key.ToUpper();
 			funcDic.Add(key, new FunctionIdentifier(key, code, arg, flag));
 		}
 
-		public static Dictionary<string, FunctionIdentifier> GetInstructionNameDic()
+		/// <summary>
+		/// Returns the immutable instruction surface selected for one legacy
+		/// session. The global table below remains only the legacy handler store;
+		/// it is never exposed as the parser's profile-specific registry.
+		/// </summary>
+		public static IReadOnlyDictionary<string, FunctionIdentifier> GetInstructionNameDic(
+			LegacyCompatibilityProfile compatibility)
 		{
-			return funcDic;
+			if (compatibility == null)
+				throw new System.ArgumentNullException(nameof(compatibility));
+
+			string cacheKey = compatibility.RegistrySurfaceHash;
+			lock (registrySurfaceGate)
+			{
+				if (registrySurfaces.TryGetValue(cacheKey, out var existing))
+					return existing;
+
+				// Preserve the legacy handler store's comparer (Config.ICVariable chooses
+				// OrdinalIgnoreCase vs Ordinal) so mixed-case instruction spellings such as
+				// PRINTFORMw, CASe, TryCall and call keep resolving like the upstream engine.
+				var selected = new Dictionary<string, FunctionIdentifier>(funcDic.Comparer);
+				foreach (KeyValuePair<string, FunctionIdentifier> pair in funcDic)
+				{
+					// Expression functions are projected as METHOD instructions for legacy
+					// statement syntax. Their availability follows the function surface, not
+					// the independent instruction surface.
+					bool isVisible = pair.Value.Method == null
+						? compatibility.IsInstructionVisible(pair.Key)
+						: compatibility.IsFunctionVisible(pair.Key);
+					if (isVisible)
+						selected.Add(pair.Key, CreateProfileInstruction(pair.Value, compatibility));
+				}
+
+				// The shared handler store keeps an instruction when an instruction and
+				// an expression function have the same public name. Reintroduce only
+				// profile-declared METHOD projections; the rest retain their upstream
+				// statement visibility.
+				foreach (KeyValuePair<string, FunctionMethod> pair in FunctionMethodCreator.GetMethodList(compatibility))
+				{
+					if (selected.ContainsKey(pair.Key)
+						|| !funcDic.TryGetValue(pair.Key, out FunctionIdentifier sameNameHandler)
+						|| sameNameHandler.Method != null
+						|| !compatibility.ShouldProjectExpressionFunctionAsInstruction(pair.Key))
+						continue;
+
+					selected.Add(pair.Key, new FunctionIdentifier(pair.Key, pair.Value, methodInstruction));
+				}
+
+				var frozen = new ReadOnlyDictionary<string, FunctionIdentifier>(selected);
+				registrySurfaces.Add(cacheKey, frozen);
+				return frozen;
+			}
+		}
+
+		/// <summary>
+		/// Some upstream dialects retain the same public instruction name while
+		/// changing its grammar. Select that immutable handler while the session
+		/// registry is projected so parsing and execution do not need profile
+		/// branches on their hot paths.
+		/// </summary>
+		private static FunctionIdentifier CreateProfileInstruction(
+			FunctionIdentifier source,
+			LegacyCompatibilityProfile compatibility)
+		{
+			if (source.Method != null)
+				return source;
+			if (source.Code == FunctionCode.FOR && !compatibility.Snake.IsEnabled)
+				return new FunctionIdentifier(
+					source.Name,
+					source.Code,
+					new REPEAT_Instruction(true, ArgumentParser.CreateForNextArgumentBuilder(true)));
+			if (source.Code != FunctionCode.SETBGIMAGE)
+				return source;
+
+			AbstractInstruction instruction = compatibility.Snake.IsEnabled
+				? new SNAKE_SETBGIMAGE_Instruction()
+				: new V24_SETBGIMAGE_Instruction();
+			return new FunctionIdentifier(source.Name, source.Code, instruction);
 		}
 		private static void addPrintFunction(FunctionCode code)
 		{
@@ -84,61 +161,52 @@ namespace MinorShift.Emuera.GameProc.Function
 			addPrintFunction(FunctionCode.PRINTFORMN);
 			addPrintFunction(FunctionCode.PRINTFORMSN);
 
-			addFunction(FunctionCode.INPUTANY, new WAITANYKEY_Instruction());
-			addFunction(FunctionCode.BINPUT, new INPUT_Instruction());
-			addFunction(FunctionCode.BINPUTS, new INPUTS_Instruction());
-			addFunction(FunctionCode.ONEBINPUT, new ONEINPUT_Instruction());
-			addFunction(FunctionCode.ONEBINPUTS, new ONEINPUTS_Instruction());
-
-			addFunction(FunctionCode.JUMPSTR, new CALL_Instruction(false, true, false, false));
-			addFunction(FunctionCode.CALLSTR, new CALL_Instruction(false, false, false, false));
-			addFunction(FunctionCode.TRYJUMPSTR, new CALL_Instruction(false, true, true, false), EXTENDED);
-			addFunction(FunctionCode.TRYCALLSTR, new CALL_Instruction(false, false, true, false), EXTENDED);
-			addFunction(FunctionCode.TRYCJUMPSTR, new CALL_Instruction(false, true, true, true), EXTENDED);
-			addFunction(FunctionCode.TRYCCALLSTR, new CALL_Instruction(false, false, true, true), EXTENDED);
-
 			addFunction(FunctionCode.SKIPLOG, new SNAKE_SKIPLOG_Instruction());
-			addFunction(FunctionCode.UPDATECHECK, new SNAKE_UPDATECHECK_Instruction());
-			addFunction(FunctionCode.CALLSHARP, new SNAKE_CALLSHARP_Instruction());
-			addFunction(FunctionCode.TRYCALLF, new CALLF_Instruction(false, true));
-			addFunction(FunctionCode.TRYCALLFORMF, new CALLF_Instruction(true, true));
-			addFunction(FunctionCode.FORCE_BEGIN, new FORCE_BEGIN_Instruction());
-
 			addFunction(FunctionCode.SETBGIMAGE, new SNAKE_SETBGIMAGE_Instruction());
 			addFunction(FunctionCode.CLEARBGIMAGE, new SNAKE_CLEARBGIMAGE_Instruction());
 			addFunction(FunctionCode.REMOVEBGIMAGE, new SNAKE_REMOVEBGIMAGE_Instruction());
-			addFunction(FunctionCode.SETIMAGELAYER, new SNAKE_SETIMAGELAYER_Instruction());
-			addFunction(FunctionCode.CLEARIMAGELAYER, new SNAKE_CLEARIMAGELAYER_Instruction());
-			addFunction(FunctionCode.CLEARIMAGELAYER_ALL, new SNAKE_CLEARIMAGELAYER_ALL_Instruction());
 			addFunction(FunctionCode.TEXT_BGC_OFF, new SNAKE_TEXT_BGC_OFF_Instruction());
 			addFunction(FunctionCode.TEXT_BGC_ON, new SNAKE_TEXT_BGC_ON_Instruction());
-			addFunction(FunctionCode.PLAYSOUND, new SNAKE_PLAYSOUND_Instruction());
-			addFunction(FunctionCode.STOPSOUND, new SNAKE_STOPSOUND_Instruction());
-			addFunction(FunctionCode.PLAYBGM, new SNAKE_PLAYBGM_Instruction());
-			addFunction(FunctionCode.STOPBGM, new SNAKE_STOPBGM_Instruction());
-			addFunction(FunctionCode.SETSOUNDVOLUME, new SNAKE_SETVOLUME_Instruction(false));
-			addFunction(FunctionCode.SETBGMVOLUME, new SNAKE_SETVOLUME_Instruction(true));
-			addFunction(FunctionCode.QUIT_AND_RESTART, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
-			addFunction(FunctionCode.FORCE_QUIT, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
-			addFunction(FunctionCode.FORCE_QUIT_AND_RESTART, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
-			addFunction(FunctionCode.TOOLTIP_SETFONT, new SNAKE_TOOLTIP_SETFONT_Instruction());
-			addFunction(FunctionCode.TOOLTIP_SETFONTSIZE, new SNAKE_TOOLTIP_INT_Instruction(FunctionCode.TOOLTIP_SETFONTSIZE));
-			addFunction(FunctionCode.TOOLTIP_CUSTOM, new SNAKE_TOOLTIP_INT_Instruction(FunctionCode.TOOLTIP_CUSTOM));
-			addFunction(FunctionCode.TOOLTIP_FORMAT, new SNAKE_TOOLTIP_INT_Instruction(FunctionCode.TOOLTIP_FORMAT));
-			addFunction(FunctionCode.TOOLTIP_IMG, new SNAKE_TOOLTIP_INT_Instruction(FunctionCode.TOOLTIP_IMG));
 			addFunction(FunctionCode.DT_COLUMN_OPTIONS, new SNAKE_DT_COLUMN_OPTIONS_Instruction());
+			// The complete handler store is static, while visibility is selected by
+			// LegacyCompatibilityProfile's immutable scoped-variable snapshot.
 			addFunction(FunctionCode.VARI, new SNAKE_VARI_Instruction(false));
 			addFunction(FunctionCode.VARS, new SNAKE_VARI_Instruction(true));
 			addFunction(FunctionCode.HTML_PRINT_ISLAND, new SNAKE_HTML_PRINT_ISLAND_Instruction());
 			addFunction(FunctionCode.HTML_PRINT_ISLAND_CLEAR, new SNAKE_HTML_PRINT_ISLAND_CLEAR_Instruction());
 			addFunction(FunctionCode.HTML_PRINTC, new SNAKE_HTML_PRINTC_Instruction(true));
 			addFunction(FunctionCode.HTML_PRINTLC, new SNAKE_HTML_PRINTC_Instruction(false));
-			addFunction(FunctionCode.SETANIMETIMER, new SNAKE_SETANIMETIMER_Instruction());
 			addFunction(FunctionCode.STRICT_FONT_FALLBACK, new SNAKE_UI_SETTING_Instruction(FunctionCode.STRICT_FONT_FALLBACK));
 			addFunction(FunctionCode.SET_SKIA_QUALITY, new SNAKE_UI_SETTING_Instruction(FunctionCode.SET_SKIA_QUALITY));
 			addFunction(FunctionCode.SET_TEXT_DRAWING_MODE, new SNAKE_UI_SETTING_Instruction(FunctionCode.SET_TEXT_DRAWING_MODE));
-			addFunction(FunctionCode.BITMAP_CACHE_ENABLE, new SNAKE_UI_SETTING_Instruction(FunctionCode.BITMAP_CACHE_ENABLE));
+				addFunction(FunctionCode.BREAKBUTTON, new BREAKBUTTON_Instruction());
 		}
+
+		private static void addV24CompatibilityFunctions()
+		{
+			addFunction(FunctionCode.INPUTANY, new INPUTANY_Instruction());
+			addFunction(FunctionCode.JUMPSTR, new CALLS_Instruction(true, false, false));
+			addFunction(FunctionCode.CALLSTR, new CALLS_Instruction(false, false, false));
+			addFunction(FunctionCode.TRYJUMPSTR, new CALLS_Instruction(true, true, false), EXTENDED);
+			addFunction(FunctionCode.TRYCALLSTR, new CALLS_Instruction(false, true, false), EXTENDED);
+			addFunction(FunctionCode.TRYCJUMPSTR, new CALLS_Instruction(true, true, true), EXTENDED);
+			addFunction(FunctionCode.TRYCCALLSTR, new CALLS_Instruction(false, true, true), EXTENDED);
+			addFunction(FunctionCode.TRYCALLF, new CALLF_Instruction(false, true));
+			addFunction(FunctionCode.TRYCALLFORMF, new CALLF_Instruction(true, true));
+			addFunction(FunctionCode.CALLSHARP, new SNAKE_CALLSHARP_Instruction());
+			addFunction(FunctionCode.PLAYSOUND, new SNAKE_PLAYSOUND_Instruction());
+			addFunction(FunctionCode.STOPSOUND, new SNAKE_STOPSOUND_Instruction());
+			addFunction(FunctionCode.PLAYBGM, new SNAKE_PLAYBGM_Instruction());
+			addFunction(FunctionCode.STOPBGM, new SNAKE_STOPBGM_Instruction());
+			addFunction(FunctionCode.SETSOUNDVOLUME, new SNAKE_SETVOLUME_Instruction(false));
+			addFunction(FunctionCode.SETBGMVOLUME, new SNAKE_SETVOLUME_Instruction(true));
+			addFunction(FunctionCode.UPDATECHECK, new SNAKE_UPDATECHECK_Instruction());
+			addFunction(FunctionCode.QUIT_AND_RESTART, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
+			addFunction(FunctionCode.FORCE_QUIT, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
+			addFunction(FunctionCode.FORCE_QUIT_AND_RESTART, ArgumentParser.GetArgumentBuilder(FunctionArgType.VOID));
+				addFunction(FunctionCode.FORCE_BEGIN, new FORCE_BEGIN_Instruction());
+				addFunction(FunctionCode.BITMAP_CACHE_ENABLE, new SNAKE_UI_SETTING_Instruction(FunctionCode.BITMAP_CACHE_ENABLE));
+			}
 
 		static FunctionIdentifier()
 		{
@@ -258,6 +326,10 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.TINPUTS, new TINPUTS_Instruction(false));
 			addFunction(FunctionCode.TONEINPUT, new TINPUT_Instruction(true));
 			addFunction(FunctionCode.TONEINPUTS, new TINPUTS_Instruction(true));
+			addFunction(FunctionCode.TINPUTNF, new TINPUT_Instruction(false, true));
+			addFunction(FunctionCode.TINPUTSNF, new TINPUTS_Instruction(false, true));
+			addFunction(FunctionCode.TONEINPUTNF, new TINPUT_Instruction(true, true));
+			addFunction(FunctionCode.TONEINPUTSNF, new TINPUTS_Instruction(true, true));
 			addFunction(FunctionCode.TWAIT, new TWAIT_Instruction());
 			addFunction(FunctionCode.WAITANYKEY, new WAITANYKEY_Instruction());
 			addFunction(FunctionCode.FORCEWAIT, new WAIT_Instruction(true));
@@ -338,7 +410,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.SORTCHARA, new SORTCHARA_Instruction());
 			addFunction(FunctionCode.FONTSTYLE, argb[FunctionArgType.INT_EXPRESSION_NULLABLE], METHOD_SAFE | EXTENDED);
 			addFunction(FunctionCode.ALIGNMENT, argb[FunctionArgType.STR], METHOD_SAFE | EXTENDED);
-			addFunction(FunctionCode.CUSTOMDRAWLINE, argb[FunctionArgType.STR], METHOD_SAFE | EXTENDED);
+			addFunction(FunctionCode.CUSTOMDRAWLINE, new CUSTOMDRAWLINE_Instruction());
 			addFunction(FunctionCode.DRAWLINEFORM, argb[FunctionArgType.FORM_STR], METHOD_SAFE | EXTENDED);
 			addFunction(FunctionCode.CLEARTEXTBOX, argb[FunctionArgType.VOID], METHOD_SAFE | EXTENDED);
 
@@ -401,6 +473,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.CALLEVENT, new CALLEVENT_Instruction());
 			addFunction(FunctionCode.CALLF, new CALLF_Instruction(false));
 			addFunction(FunctionCode.CALLFORMF, new CALLF_Instruction(true));
+			addV24CompatibilityFunctions();
 			addFunction(FunctionCode.RESTART, new RESTART_Instruction());//関数の再開。関数の最初に戻る。
 			addFunction(FunctionCode.GOTO, new GOTO_Instruction(false, false, false));//$ラベルへジャンプ
 			addFunction(FunctionCode.TRYGOTO, new GOTO_Instruction(false, true, false), EXTENDED);
@@ -441,11 +514,27 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.TOOLTIP_SETCOLOR, new TOOLTIP_SETCOLOR_Instruction());
 			addFunction(FunctionCode.TOOLTIP_SETDELAY, new TOOLTIP_SETDELAY_Instruction());
             addFunction(FunctionCode.TOOLTIP_SETDURATION, new TOOLTIP_SETDURATION_Instruction());
+			addFunction(FunctionCode.TOOLTIP_SETFONT, new SNAKE_TOOLTIP_SETFONT_Instruction());
+			addFunction(FunctionCode.TOOLTIP_SETFONTSIZE, new SNAKE_TOOLTIP_INT_Instruction(FunctionCode.TOOLTIP_SETFONTSIZE));
+			addFunction(FunctionCode.TOOLTIP_CUSTOM, new SNAKE_TOOLTIP_INT_Instruction(FunctionCode.TOOLTIP_CUSTOM));
+			addFunction(FunctionCode.TOOLTIP_FORMAT, new SNAKE_TOOLTIP_INT_Instruction(FunctionCode.TOOLTIP_FORMAT));
+			addFunction(FunctionCode.TOOLTIP_IMG, new SNAKE_TOOLTIP_INT_Instruction(FunctionCode.TOOLTIP_IMG));
+
+			addFunction(FunctionCode.BINPUT, new BINPUT_Instruction());
+			addFunction(FunctionCode.BINPUTS, new BINPUTS_Instruction());
+			addFunction(FunctionCode.ONEBINPUT, new ONEBINPUT_Instruction());
+			addFunction(FunctionCode.ONEBINPUTS, new ONEBINPUTS_Instruction());
 
 			addFunction(FunctionCode.INPUTMOUSEKEY, new INPUTMOUSEKEY_Instruction());
 			addFunction(FunctionCode.AWAIT, new AWAIT_Instruction());
-			if (Program.IsSnakeProfile)
-				addSnakeCompatibilityFunctions();
+
+			addFunction(FunctionCode.SETIMAGELAYER, new SETIMAGELAYER_Instruction());
+			addFunction(FunctionCode.SETIMAGELAYERL, new SETIMAGELAYERL_Instruction());
+			addFunction(FunctionCode.CLEARIMAGELAYER, new CLEARIMAGELAYER_Instruction());
+			addFunction(FunctionCode.CLEARIMAGELAYER_ALL, new CLEARIMAGELAYER_ALL_Instruction());
+			addFunction(FunctionCode.SETANIMETIMER, new SETANIMETIMER_Instruction());
+
+			addSnakeCompatibilityFunctions();
 			#region 式中関数の引数違い
 			addFunction(FunctionCode.VARSIZE, argb[FunctionArgType.SP_VAR], METHOD_SAFE | EXTENDED);//動作が違うのでMETHOD化できない
 			addFunction(FunctionCode.GETTIME, argb[FunctionArgType.VOID], METHOD_SAFE | EXTENDED);//2つに代入する必要があるのでMETHOD化できない
@@ -455,7 +544,8 @@ namespace MinorShift.Emuera.GameProc.Function
 			addFunction(FunctionCode.ENCODETOUNI, argb[FunctionArgType.FORM_STR_NULLABLE], METHOD_SAFE | EXTENDED);//式中関数版を追加。処理が全然違う
 			#endregion
 
-			Dictionary<string, FunctionMethod> methodList = FunctionMethodCreator.GetMethodList();
+			IReadOnlyDictionary<string, FunctionMethod> methodList =
+				FunctionMethodCreator.GetLegacyHandlerMethodList();
 			foreach (KeyValuePair<string, FunctionMethod> pair in methodList)
 			{
 				string key = pair.Key;
@@ -475,11 +565,8 @@ namespace MinorShift.Emuera.GameProc.Function
 			funcMatch[FunctionCode.TRYCGOTOFORM] = "CATCH";
 			funcMatch[FunctionCode.TRYCJUMPFORM] = "CATCH";
 			funcMatch[FunctionCode.TRYCCALLFORM] = "CATCH";
-			if (Program.IsSnakeProfile)
-			{
-				funcMatch[FunctionCode.TRYCJUMPSTR] = "CATCH";
-				funcMatch[FunctionCode.TRYCCALLSTR] = "CATCH";
-			}
+			funcMatch[FunctionCode.TRYCJUMPSTR] = "CATCH";
+			funcMatch[FunctionCode.TRYCCALLSTR] = "CATCH";
 			funcMatch[FunctionCode.CATCH] = "ENDCATCH";
 			funcMatch[FunctionCode.DO] = "LOOP";
 			funcMatch[FunctionCode.PRINTDATA] = "ENDDATA";

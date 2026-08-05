@@ -43,6 +43,7 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		public bool isAllConst { get { return allArgIsConst; } }
 		public int getEl1forArg { get { return (int)transporter[0]; } }
+		public int ArgumentCount { get { return arguments == null ? 0 : arguments.Length; } }
 
 		public override Int64 GetIntValue(ExpressionMediator exm)
 		{
@@ -71,6 +72,22 @@ namespace MinorShift.Emuera.GameData.Variable
 				if (ret == null)
 					return "";
 				return ret;
+			}
+			catch (Exception e)
+			{
+				if ((e is IndexOutOfRangeException) || (e is ArgumentOutOfRangeException) || (e is OverflowException))
+					Identifier.CheckElement(transporter);
+				throw;
+			}
+		}
+		public override double GetFloatValue(ExpressionMediator exm)
+		{
+			try
+			{
+				if (!allArgIsConst)
+					for (int i = 0; i < arguments.Length; i++)
+						transporter[i] = arguments[i].GetIntValue(exm);
+				return Identifier.GetFloatValue(exm, transporter);
 			}
 			catch (Exception e)
 			{
@@ -108,7 +125,23 @@ namespace MinorShift.Emuera.GameData.Variable
 			{
 				if ((e is IndexOutOfRangeException) || (e is ArgumentOutOfRangeException) || (e is OverflowException))
 					Identifier.CheckElement(transporter);
-				throw e;
+				throw;
+			}
+		}
+		public virtual void SetValue(double value, ExpressionMediator exm)
+		{
+			try
+			{
+				if (!allArgIsConst)
+					for (int i = 0; i < arguments.Length; i++)
+						transporter[i] = arguments[i].GetIntValue(exm);
+				Identifier.SetValue(value, transporter);
+			}
+			catch (Exception e)
+			{
+				if ((e is IndexOutOfRangeException) || (e is ArgumentOutOfRangeException) || (e is OverflowException))
+					Identifier.CheckElement(transporter);
+				throw;
 			}
 		}
 
@@ -150,6 +183,25 @@ namespace MinorShift.Emuera.GameData.Variable
 				throw;
 			}
 		}
+		public virtual void SetValue(double[] array, ExpressionMediator exm)
+		{
+			try
+			{
+				if (!allArgIsConst)
+					for (int i = 0; i < arguments.Length; i++)
+						transporter[i] = arguments[i].GetIntValue(exm);
+				Identifier.SetValue(array, transporter);
+			}
+			catch (Exception e)
+			{
+				if ((e is IndexOutOfRangeException) || (e is ArgumentOutOfRangeException) || (e is OverflowException))
+				{
+					Identifier.CheckElement(transporter);
+					throw new CodeEE("配列変数" + Identifier.Name + "の要素数を超えて代入しようとしました");
+				}
+				throw;
+			}
+		}
 
 		public virtual Int64 PlusValue(Int64 value, ExpressionMediator exm)
 		{
@@ -171,6 +223,8 @@ namespace MinorShift.Emuera.GameData.Variable
 		{
 			if (Identifier.VariableType == typeof(Int64))
 				return new SingleTerm(GetIntValue(exm));
+			else if (Identifier.VariableType == typeof(double))
+				return new SingleTerm(GetFloatValue(exm));
 			else
 				return new SingleTerm(GetStrValue(exm));
 		}
@@ -178,6 +232,8 @@ namespace MinorShift.Emuera.GameData.Variable
 		{
 			if (Identifier.VariableType == typeof(Int64))
 				SetValue(value.Int, exm);
+			else if (Identifier.VariableType == typeof(double))
+				SetValue(value.Float, exm);
 			else
 				SetValue(value.Str, exm);
 		}
@@ -185,8 +241,14 @@ namespace MinorShift.Emuera.GameData.Variable
 		{
 			if (Identifier.VariableType == typeof(Int64))
 				SetValue(value.GetIntValue(exm), exm);
+			else if (Identifier.VariableType == typeof(double))
+				SetValue(value.GetFloatValue(exm), exm);
 			else
 				SetValue(value.GetStrValue(exm), exm);
+		}
+		public override EraType GetEraType()
+		{
+			return Identifier.GetEraType();
 		}
 		public Int32 GetLength()
 		{
@@ -344,6 +406,19 @@ namespace MinorShift.Emuera.GameData.Variable
 				throw;
 			}
         }
+        public override double GetFloatValue(ExpressionMediator exm)
+        {
+			try
+			{
+				return Identifier.GetFloatValue(exm, transporter);
+			}
+			catch(Exception e)
+			{
+				if ((e is IndexOutOfRangeException) || (e is ArgumentOutOfRangeException) || (e is OverflowException))
+					Identifier.CheckElement(transporter);
+				throw;
+			}
+        }
 
 		public override void SetValue(Int64 value, ExpressionMediator exm)
         {
@@ -359,6 +434,19 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
         }
 		public override void SetValue(string value, ExpressionMediator exm)
+        {
+			try
+			{
+				Identifier.SetValue(value, transporter);
+			}
+			catch(Exception e)
+			{
+				if ((e is IndexOutOfRangeException) || (e is ArgumentOutOfRangeException) || (e is OverflowException))
+					Identifier.CheckElement(transporter);
+				throw;
+			}
+        }
+		public override void SetValue(double value, ExpressionMediator exm)
         {
 			try
 			{
@@ -413,13 +501,19 @@ namespace MinorShift.Emuera.GameData.Variable
 		}
 		public override Int64 GetIntValue(ExpressionMediator exm)
 		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }
+		public override double GetFloatValue(ExpressionMediator exm)
+		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }
 		public override string GetStrValue(ExpressionMediator exm)
 		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }
 		public override void SetValue(Int64 value, ExpressionMediator exm)
 		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }
+		public override void SetValue(double value, ExpressionMediator exm)
+		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }
 		public override void SetValue(string value, ExpressionMediator exm)
 		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }
 		public override void SetValue(Int64[] array, ExpressionMediator exm)
+		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }
+		public override void SetValue(double[] array, ExpressionMediator exm)
 		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }
 		public override void SetValue(string[] array, ExpressionMediator exm)
 		{ throw new CodeEE("変数" + Identifier.Name + "に必要な引数が不足しています"); }

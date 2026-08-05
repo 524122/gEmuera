@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 //using System.Drawing;
@@ -30,35 +30,38 @@ namespace MinorShift.Emuera.GameView
 		StringStyle lastStringStyle = new StringStyle();
 		List<ConsoleButtonString> m_buttonList = new List<ConsoleButtonString>();
 		bool isLastLineEnd = true;
+		// BufferStrLength 的增量缓存：PRINT 热路径每追加一次就全量遍历 m_stringList
+		// 是 O(n²)。改为在每次列表变更时维护累计长度，读取 O(1)，行结构完全不变。
+		int cachedBufferStrLength = 0;
 
 		public int BufferStrLength
 		{
-			get
-			{
-				int length = 0;
+			get { return cachedBufferStrLength; }
+		}
 
-                var count = m_stringList.Count;
-                AConsoleDisplayPart css = null;
-                for(var i=0; i<count; ++i)
-				{
-                    css = m_stringList[i];
-					if (css is ConsoleStyledString)
-						length += css.Str.Length;
-					else
-						length += 1;
-				}
-				return length;
-			}
+		void AddDisplayPart(AConsoleDisplayPart part)
+		{
+			m_stringList.Add(part);
+			if (part is ConsoleStyledString css)
+				cachedBufferStrLength += css.Str.Length;
+			else
+				cachedBufferStrLength += 1;
+		}
+
+		void ClearDisplayParts()
+		{
+			m_stringList.Clear();
+			cachedBufferStrLength = 0;
 		}
 
 		public void Append(AConsoleDisplayPart part)
 		{
 			if (builder.Length != 0)
 			{
-				m_stringList.Add(new ConsoleStyledString(builder.ToString(), lastStringStyle));
+				AddDisplayPart(new ConsoleStyledString(builder.ToString(), lastStringStyle));
 				builder.Remove(0, builder.Length);
 			}
-			m_stringList.Add(part);
+			AddDisplayPart(part);
 		}
 
 		public void Append(string str, StringStyle style)
@@ -89,7 +92,7 @@ namespace MinorShift.Emuera.GameView
 			}
 			else
 			{
-				m_stringList.Add(new ConsoleStyledString(builder.ToString(), lastStringStyle));
+				AddDisplayPart(new ConsoleStyledString(builder.ToString(), lastStringStyle));
 				builder.Remove(0, builder.Length);
 				builder.Append(str);
 				lastStringStyle = style;
@@ -101,11 +104,11 @@ namespace MinorShift.Emuera.GameView
 		public void AppendButton(string str, StringStyle style, string input)
 		{
 			fromCssToButton();
-			m_stringList.Add(new ConsoleStyledString(str, style));
+			AddDisplayPart(new ConsoleStyledString(str, style));
 			if (m_stringList.Count == 0)
 				return;
 			m_buttonList.Add(createButton(m_stringList, input));
-			m_stringList.Clear();
+			ClearDisplayParts();
 		}
 
 
@@ -113,11 +116,11 @@ namespace MinorShift.Emuera.GameView
 		public void AppendButton(string str, StringStyle style, long input)
 		{
 			fromCssToButton();
-			m_stringList.Add(new ConsoleStyledString(str, style));
+			AddDisplayPart(new ConsoleStyledString(str, style));
 			if (m_stringList.Count == 0)
 				return;
 			m_buttonList.Add(createButton(m_stringList, input));
-			m_stringList.Clear();
+			ClearDisplayParts();
 		}
 
 		public void AppendButton(ConsoleButtonString button)
@@ -129,11 +132,11 @@ namespace MinorShift.Emuera.GameView
 		public void AppendPlainText(string str, StringStyle style)
 		{
 			fromCssToButton();
-			m_stringList.Add(new ConsoleStyledString(str, style));
+			AddDisplayPart(new ConsoleStyledString(str, style));
 			if (m_stringList.Count == 0)
 				return;
 			m_buttonList.Add(createPlainButton(m_stringList));
-			m_stringList.Clear();
+			ClearDisplayParts();
 		}
 
 		public bool IsEmpty
@@ -141,6 +144,20 @@ namespace MinorShift.Emuera.GameView
 			get
 			{
 				return ((m_buttonList.Count == 0) && (builder.Length == 0) && (m_stringList.Count == 0));
+			}
+		}
+
+		public int CurrentLineWidth
+		{
+			get
+			{
+				int width = 0;
+				foreach (ConsoleButtonString button in m_buttonList)
+				{
+					if (button != null && button.Width > 0)
+						width += button.Width;
+				}
+				return width;
 			}
 		}
 
@@ -158,11 +175,11 @@ namespace MinorShift.Emuera.GameView
 		public ConsoleDisplayLine AppendAndFlushErrButton(string str, StringStyle style, string input, ScriptPosition pos, StringMeasure sm)
 		{
 			fromCssToButton();
-			m_stringList.Add(new ConsoleStyledString(str, style));
+			AddDisplayPart(new ConsoleStyledString(str, style));
 			if (m_stringList.Count == 0)
 				return null;
 			m_buttonList.Add(createButton(m_stringList, input, pos));
-			m_stringList.Clear();
+			ClearDisplayParts();
 			return FlushSingleLine(sm, false);
 		}
 
@@ -173,9 +190,7 @@ namespace MinorShift.Emuera.GameView
 			ConsoleButtonString[] dispLineButtonArray = new ConsoleButtonString[m_buttonList.Count];
 			m_buttonList.CopyTo(dispLineButtonArray);
 			ConsoleDisplayLine line = new ConsoleDisplayLine(dispLineButtonArray, true, temporary);
-			line.TextBackgroundColor = parent.TextBackgroundColor;
-			line.BitmapCacheEnabled = parent.BitmapCacheEnabledForNextLine;
-			parent.BitmapCacheEnabledForNextLine = false;
+			parent.ApplyCurrentLineMetadata(line);
 			this.clearBuffer();
 			return line;
 		}
@@ -189,10 +204,8 @@ namespace MinorShift.Emuera.GameView
 				ret[ret.Length - 1].IsLineEnd = isLastLineEnd;
 				foreach (ConsoleDisplayLine line in ret)
 				{
-					line.TextBackgroundColor = parent.TextBackgroundColor;
-					line.BitmapCacheEnabled = parent.BitmapCacheEnabledForNextLine;
+					parent.ApplyCurrentLineMetadata(line);
 				}
-				parent.BitmapCacheEnabledForNextLine = false;
 			}
 			this.clearBuffer();
 			return ret;
@@ -206,14 +219,15 @@ namespace MinorShift.Emuera.GameView
 			return new ConsoleDisplayLine(dispLineButtonArray, firstLine, temporary);
 		}
 
-		public static ConsoleDisplayLine[] ButtonsToDisplayLines(List<ConsoleButtonString> buttonList, StringMeasure stringMeasure, bool nobr, bool temporary)
+		public static ConsoleDisplayLine[] ButtonsToDisplayLines(List<ConsoleButtonString> buttonList, StringMeasure stringMeasure, bool nobr, bool temporary, int customWidth = -1)
 		{
 			if (buttonList.Count == 0)
 				return new ConsoleDisplayLine[0];
 			setWidthToButtonList(buttonList, stringMeasure, nobr);
 			List<ConsoleDisplayLine> lineList = new List<ConsoleDisplayLine>();
 			List<ConsoleButtonString> lineButtonList = new List<ConsoleButtonString>();
-			int windowWidth = Config.DrawableWidth;
+			// div 内部需要按内容框宽度换行；继续使用整窗宽度会让子节点被父 div 裁剪。
+			int windowWidth = customWidth > 0 ? customWidth : Config.DrawableWidth;
 			bool firstLine = true;
 			for (int i = 0; i < buttonList.Count; i++)
 			{
@@ -238,7 +252,7 @@ namespace MinorShift.Emuera.GameView
 				//クリック可能なボタンでないなら分割する。ただし「ver1739以前の非ボタン折り返しを再現する」ならクリックの可否を区別しない
 				if ((!Config.ButtonWrap) || (lineButtonList.Count == 0) || (!buttonList[i].IsButton && !Config.CompatiLinefeedAs1739))
 				{//ボタン分割する
-					int divIndex = getDivideIndex(buttonList[i], stringMeasure);
+					int divIndex = getDivideIndex(buttonList[i], stringMeasure, windowWidth);
 					if (divIndex > 0)
 					{
 						ConsoleButtonString newButton = buttonList[i].DivideAt(divIndex, stringMeasure);
@@ -297,7 +311,7 @@ namespace MinorShift.Emuera.GameView
 		private void clearBuffer()
 		{
 			builder.Remove(0, builder.Length);
-			m_stringList.Clear();
+			ClearDisplayParts();
 			m_buttonList.Clear();
 		}
 
@@ -309,13 +323,13 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (builder.Length != 0)
 			{
-				m_stringList.Add(new ConsoleStyledString(builder.ToString(), lastStringStyle));
+				AddDisplayPart(new ConsoleStyledString(builder.ToString(), lastStringStyle));
 				builder.Remove(0, builder.Length);
 			}
 			if (m_stringList.Count == 0)
 				return;
 			m_buttonList.AddRange(createButtons(m_stringList));
-			m_stringList.Clear();
+			ClearDisplayParts();
 		}
 
 		/// <summary>
@@ -429,8 +443,9 @@ namespace MinorShift.Emuera.GameView
 		{
 			int pointX = 0;
 			//int count = buttonList.Count;
-			//1.824 修正。サブピクセルの初期値を0から0.5fにすることで端数処理吸収
-			float subPixel = 0.5f;
+			// v24/snake は 0 から subPixel を累计する。0.5f 起点会让 space/shape 补白
+			// 在横向按钮之间多吃 1px，导致视觉间隔和核心布局数据不一致。
+			float subPixel = 0.0f;
 			for (int i = 0; i < buttonList.Count; i++)
 			{
 				ConsoleButtonString button = buttonList[i];
@@ -508,17 +523,22 @@ namespace MinorShift.Emuera.GameView
 
 		private static int getDivideIndex(ConsoleButtonString button, StringMeasure sm)
 		{
+			return getDivideIndex(button, sm, Config.DrawableWidth);
+		}
+
+		private static int getDivideIndex(ConsoleButtonString button, StringMeasure sm, int windowWidth)
+		{
 			AConsoleDisplayPart divCss = null;
 			int pointX = button.PointX;
 			int strLength = 0;
 			int index = 0;
 
-            int count = button.StrArray.Length;
-            AConsoleDisplayPart css = null;
-            for(var i=0; i<count; ++i)
+			int count = button.StrArray.Length;
+			AConsoleDisplayPart css = null;
+			for(var i=0; i<count; ++i)
 			{
-                css = button.StrArray[i];
-				if (pointX + css.Width > Config.DrawableWidth)
+				css = button.StrArray[i];
+				if (pointX + css.Width > windowWidth)
 				{
 					if (index == 0 && !css.CanDivide)
 						continue;
@@ -531,7 +551,7 @@ namespace MinorShift.Emuera.GameView
 			}
 			if (divCss != null)
 			{
-				int cssDivIndex = getDivideIndex(divCss, sm);
+				int cssDivIndex = getDivideIndex(divCss, sm, windowWidth);
 				if (cssDivIndex > 0)
 					strLength += cssDivIndex;
 			}
@@ -540,36 +560,40 @@ namespace MinorShift.Emuera.GameView
 
 		private static int getDivideIndex(AConsoleDisplayPart part, StringMeasure sm)
 		{
+			return getDivideIndex(part, sm, Config.DrawableWidth);
+		}
+
+		private static int getDivideIndex(AConsoleDisplayPart part, StringMeasure sm, int windowWidth)
+		{
 			if (!part.CanDivide)
 				return -1;
 			ConsoleStyledString css = part as ConsoleStyledString;
-			if (part == null)
+			if (css == null)
 				return -1;
-			int widthLimit = Config.DrawableWidth - css.PointX;
+			int widthLimit = windowWidth - css.PointX;
 			string str = css.Str;
 			Font font = css.Font;
-            int highLength = str.Length;//widthLimitを超える最低の文字index(文字数-1)。
+			if (widthLimit <= 0)
+				return 0;
+			int highLength = str.Length;//widthLimitを超える最低の文字index(文字数-1)。
 			int lowLength = 0;//超えない最大の文字index。
-			//int i = (int)(widthLimit / fontDisplaySize);//およその文字数を推定
-			//if (i > str.Length - 1)//配列の外を参照しないように。
-			//	i = str.Length - 1;
-			int i = lowLength;//およその文字数を推定←やめた
 
 			int point;
 			string test = null;
+			// 折り返し位置探索は PRINT のホットパス。線形に Substring/Measure を
+			// 繰り返すと長文行で GC と CPU が跳ねるため、単調な幅を二分探索する。
 			while ((highLength - lowLength) > 1)//差が一文字以下になるまで繰り返す。
 			{
+				int i = lowLength + ((highLength - lowLength) / 2);
 				test = str.Substring(0, i);
 				point = sm.GetDisplayLength(test, font);
 				if (point <= widthLimit)//サイズ内ならlowLengthを更新。文字数を増やす。
 				{
 					lowLength = i;
-					i++;
 				}
 				else//サイズ外ならhighLengthを更新。文字数を減らす。
 				{
 					highLength = i;
-					i--;
 				}
 			}
 			return lowLength;

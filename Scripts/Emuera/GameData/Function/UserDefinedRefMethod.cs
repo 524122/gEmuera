@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using MinorShift.Emuera.GameProc;
+using MinorShift.Emuera.GameData;
 using MinorShift.Emuera.GameData.Variable;
 
 namespace MinorShift.Emuera.GameData.Function
@@ -10,17 +11,19 @@ namespace MinorShift.Emuera.GameData.Function
 	{
 		public CalledFunction CalledFunction { get; private set; }
 		public string Name { get; private set; }
-		public Type RetType { get; private set; }
+		public EraType RetType { get; private set; }
 		public UserDifinedFunctionDataArgType[] ArgTypeList { get; private set; }
 
 		internal static UserDefinedRefMethod Create(UserDefinedFunctionData funcData)
 		{
 			UserDefinedRefMethod ret = new UserDefinedRefMethod();
 			ret.Name = funcData.Name;
-			if (funcData.TypeIsStr)
-				ret.RetType = typeof(string);
+			if (funcData.TypeIsFloat)
+				ret.RetType = EraType.Float;
+			else if (funcData.TypeIsStr)
+				ret.RetType = EraType.String;
 			else
-				ret.RetType = typeof(Int64);
+				ret.RetType = EraType.Integer;
 			ret.ArgTypeList = funcData.ArgList;
 			return ret;
 		}
@@ -46,18 +49,29 @@ namespace MinorShift.Emuera.GameData.Function
 				{
 					UserDifinedFunctionDataArgType type = UserDifinedFunctionDataArgType.__Ref;
 					type += vToken.Dimension;
-					if (vToken.IsInteger)
+					if (vToken.IsFloat)
+						type |= UserDifinedFunctionDataArgType.Float;
+					else if (vToken.IsInteger)
 						type |= UserDifinedFunctionDataArgType.Int;
 					else
 						type |= UserDifinedFunctionDataArgType.Str;
+					if (vToken.IsOut)
+						type |= UserDifinedFunctionDataArgType.__Out;
+					if (i == label.VariadicArgIndex)
+						type |= UserDifinedFunctionDataArgType.__Variadic;
 					if (ArgTypeList[i] != type)
 						return false;
 				}
 				else
 				{
-					if (vToken.IsInteger && ArgTypeList[i] !=  UserDifinedFunctionDataArgType.Int)
-						return false;
-					if (vToken.IsString && ArgTypeList[i] != UserDifinedFunctionDataArgType.Str)
+					UserDifinedFunctionDataArgType type = UserDifinedFunctionDataArgType.Int;
+					if (vToken.IsFloat)
+						type = UserDifinedFunctionDataArgType.Float;
+					else if (vToken.IsString)
+						type = UserDifinedFunctionDataArgType.Str;
+					if (i == label.VariadicArgIndex)
+						type |= UserDifinedFunctionDataArgType.__Variadic;
+					if (ArgTypeList[i] != type)
 						return false;
 				}
 			}

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 //using Microsoft.VisualBasic;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameView;
@@ -37,6 +38,11 @@ namespace MinorShift.Emuera.GameProc
 		/// <param name="filepath"></param>
 		public bool LoadErbFiles(string erbDir, bool displayReport, LabelDictionary labelDictionary, bool useLazyLoading = false)
 		{
+			return LoadErbFilesAsync(erbDir, displayReport, labelDictionary, useLazyLoading).GetAwaiter().GetResult();
+		}
+
+		public async Task<bool> LoadErbFilesAsync(string erbDir, bool displayReport, LabelDictionary labelDictionary, bool useLazyLoading = false)
+		{
 			//1.713 labelDicをnewする位置を変更。
 			//checkScript();の時点でExpressionPerserがProcess.instance.LabelDicを必要とするから。
 			labelDic = labelDictionary;
@@ -53,6 +59,7 @@ namespace MinorShift.Emuera.GameProc
 			try
 			{
 				labelDic.RemoveAll();
+				labelDic.EnsureCapacity(EstimateLabelCapacity(erbFiles.Count, useLazyLoading), erbFiles.Count);
 				if (useLazyLoading)
 				{
 					parentProcess.LoadLazyLoadingTable(erbFiles);
@@ -66,37 +73,52 @@ namespace MinorShift.Emuera.GameProc
 						output.PrintSystemLine("LazyLoading: index not found; building a new table");
 					}
 				}
-				for (int i = 0; i < erbFiles.Count; i++)
+				else
 				{
-					string filename = erbFiles[i].Key;
-					string file = erbFiles[i].Value;
-					if (useLazyLoading && parentProcess.IsLazyLoadingFile(file))
-						continue;
-#if UEMUERA_DEBUG
-					if (displayReport)
-						output.PrintSystemLine("経過時間:" + (WinmmTimer.TickCount - starttime).ToString("D4") + "ms:" + filename + "読み込み中・・・");
-#else
-					if (displayReport)
-						output.PrintSystemLine(filename + "読み込み中・・・");
-#endif
-					//System.Windows.Forms.//Application.DoEvents();
-					loadErb(file, filename, isOnlyEvent);
+					parentProcess.ResetLazyLoadingState();
 				}
+				//N5: 全量加载改为单个 Task.Run 内的 foreach，消除逐文件 await 的线程跳跃。
+				//文件内顺序、警告顺序、首个异常传播行为与原逐文件 await 完全一致
+				//（loadErb 本身及其内部 output.PrintXxx 原本就已在 Task.Run 线程池线程上执行）。
+				await Task.Run(() =>
+				{
+					for (int i = 0; i < erbFiles.Count; i++)
+					{
+						string filename = erbFiles[i].Key;
+						string file = erbFiles[i].Value;
+						if (useLazyLoading && parentProcess.IsLazyLoadingFile(file))
+							continue;
+#if UEMUERA_DEBUG
+						if (displayReport)
+							output.PrintSystemLine("経過時間:" + (WinmmTimer.TickCount - starttime).ToString("D4") + "ms:" + filename + "読み込み中・・・");
+#else
+						if (displayReport)
+							output.PrintSystemLine(filename + "読み込み中・・・");
+#endif
+						//System.Windows.Forms.//Application.DoEvents();
+						loadErb(file, filename, isOnlyEvent);
+					}
+				});
 				ParserMediator.FlushWarningList();
 #if UEMUERA_DEBUG
 				output.PrintSystemLine("経過時間:" + (WinmmTimer.TickCount - starttime).ToString("D4") + "ms:");
 #endif
 				if (displayReport)
 					output.PrintSystemLine("ユーザー定義関数のリストを構築中・・・");
-				setLabelsArg();
+				await Task.Run(() => setLabelsArg());
 				ParserMediator.FlushWarningList();
 				labelDic.Initialized = true;
+				//M8: 全量加载完成。LazyLoading 关闭时 ERB 解码文本不再被任何路径重读，
+				//释放 Preload 中整会话驻留的 ERB 条目（开启时保留，供懒加载命中后重读）。
+				//后续任何再读（ReloadErb 等）都会回退到直接磁盘读取，语义不变。
+				if (!useLazyLoading)
+					Preload.RemoveByExtension(".erb");
 #if UEMUERA_DEBUG
 				output.PrintSystemLine("経過時間:" + (WinmmTimer.TickCount - starttime).ToString("D4") + "ms:");
 #endif
 				if (displayReport)
 					output.PrintSystemLine("スクリプトの構文チェック中・・・");
-				checkScript();
+				await Task.Run(() => checkScript());
 				ParserMediator.FlushWarningList();
 				if (parentProcess.LazyCurrentLazyStatus == Process.LazyStatus.BuildTable)
 				{
@@ -140,35 +162,87 @@ namespace MinorShift.Emuera.GameProc
 		/// 指定されたファイルを読み込む
 		/// </summary>
 		/// <param name="filename"></param>
-		public bool loadErbs(List<string> path, LabelDictionary labelDictionary)
+		public bool loadErbs(List<string> path, LabelDictionary labelDictionary, bool isLazyLoading = false)
 		{
-			string fname;
-            List<string> isOnlyEvent = new List<string>();
-            noError = true;
+			return LoadErbsAsync(path, labelDictionary, isLazyLoading).GetAwaiter().GetResult();
+		}
+
+		public async Task<bool> LoadErbsAsync(List<string> path, LabelDictionary labelDictionary, bool isLazyLoading = false)
+		{
+			List<string> isOnlyEvent = new List<string>();
+			noError = true;
 			labelDic = labelDictionary;
-			labelDic.Initialized = false;
-			foreach (string fpath in path)
+			labelDic.EnsureCapacity(EstimateLabelCapacity(path?.Count ?? 0, isLazyLoading), path?.Count ?? 0);
+			if (!isLazyLoading)
+				labelDic.Initialized = false;
+			await Task.Run(() =>
 			{
-				if (fpath.StartsWith(Program.ErbDir, Config.SCIgnoreCase) && !Program.AnalysisMode)
-					fname = fpath.Substring(Program.ErbDir.Length);
-				else
-					fname = fpath;
-				if (Program.AnalysisMode)
-					output.PrintSystemLine(fname + "読み込み中・・・");
-				//System.Windows.Forms.//Application.DoEvents();
-                loadErb(fpath, fname, isOnlyEvent);
+				foreach (string fpath in path)
+				{
+					string fname;
+					if (fpath.StartsWith(Program.ErbDir, Config.SCIgnoreCase) && !Program.AnalysisMode)
+						fname = fpath.Substring(Program.ErbDir.Length);
+					else
+						fname = fpath;
+					if (Program.AnalysisMode)
+						output.PrintSystemLine(fname + "読み込み中・・・");
+					//System.Windows.Forms.//Application.DoEvents();
+					loadErb(fpath, fname, isOnlyEvent, isLazyLoading);
+				}
+			});
+			if (Program.AnalysisMode)
+				output.NewLine();
+			ParserMediator.FlushWarningList();
+			if (!isLazyLoading)
+			{
+				await Task.Run(() => setLabelsArg());
+				ParserMediator.FlushWarningList();
+				labelDic.Initialized = true;
+				await Task.Run(() => checkScript());
+				ParserMediator.FlushWarningList();
 			}
-            if (Program.AnalysisMode)
-                output.NewLine();
-            ParserMediator.FlushWarningList();
-			setLabelsArg();
-			ParserMediator.FlushWarningList();
-			labelDic.Initialized = true;
-            checkScript();
-			ParserMediator.FlushWarningList();
 			parentProcess.scaningLine = null;
-            isOnlyEvent.Clear();
-            return noError;
+			isOnlyEvent.Clear();
+			return noError;
+		}
+
+		static int EstimateLabelCapacity(int fileCount, bool useLazyLoading)
+		{
+			if (fileCount <= 0)
+				return 0;
+			int labelsPerFile = useLazyLoading ? 4 : 8;
+			long estimate = (long)fileCount * labelsPerFile;
+			if (estimate < 32)
+				estimate = 32;
+			if (estimate > 1_000_000)
+				estimate = 1_000_000;
+			return (int)estimate;
+		}
+
+		private void TryPreRegisterSnakeDynamicVariable(LogicalLine line)
+		{
+			if (!Program.Compatibility.Snake.AllowsScopedVariablePreRegistration
+				|| !Program.Compatibility.ScopedVariableInstructionsEnabled)
+			{
+				return;
+			}
+
+			InstructionLine instruction = line as InstructionLine;
+			if (instruction == null || instruction.ParentLabelLine == null)
+				return;
+
+			bool isString;
+			if (instruction.FunctionCode == FunctionCode.VARS)
+				isString = true;
+			else if (instruction.FunctionCode == FunctionCode.VARI)
+				isString = false;
+			else
+				return;
+
+			// v24/snake 系スクリプトでは VARI/VARS 宣言が使用箇所より後に置かれることがある。
+			// 構文チェック前に同じ関数のプライベート変数として登録し、実際の初期化は従来通り命令実行時に行う。
+			if (UserDefinedVariableData.TryCreateSnakeDynamic(instruction.PeekArgumentPrimitive(), isString, out UserDefinedVariableData data, out _, out _))
+				instruction.ParentLabelLine.AddPrivateVariable(data);
 		}
 
 		private sealed class PPState
@@ -329,23 +403,30 @@ namespace MinorShift.Emuera.GameProc
 		/// ファイル一つを読む
 		/// </summary>
 		/// <param name="filepath"></param>
-		private void loadErb(string filepath, string filename, List<string> isOnlyEvent)
+		private void loadErb(string filepath, string filename, List<string> isOnlyEvent, bool isLazyLoading = false)
 		{
 			//読み込んだファイルのパスを記録
 			//一部ファイルの再読み込み時の処理用
 			labelDic.AddFilename(filename);
 			EraStreamReader eReader = new EraStreamReader(Config.UseRenameFile && ParserMediator.RenameDic != null);
-			if (!eReader.Open(filepath, filename))
+			if (!eReader.OpenOnCache(filepath, filename))
 			{
 				output.PrintError(eReader.Filename + "のオープンに失敗しました");
 				return;
 			}
+			uint traceStartTick = WinmmTimer.TickCount;
+			int traceStartEnabledLineCount = enabledLineCount;
+			int traceInstructionCount = 0;
+			int traceLabelCount = 0;
+			if (GenericUtils.IsScrollTraceActive)
+				GenericUtils.ScrollTrace("core", $"erb_load_start file={GenericUtils.ClipTrace(filename, 120)} lazy={isLazyLoading}");
 			try
 			{
 				PPState ppstate = new PPState();
 				LogicalLine nextLine = new NullLine();
 				LogicalLine lastLine = new NullLine();
 				FunctionLabelLine lastLabelLine = null;
+				List<FunctionLabelLine> tempFunctionLabels = new List<FunctionLabelLine>();
 				StringStream st = null;
 				ScriptPosition position = null;
 				int funcCount = 0;
@@ -394,6 +475,7 @@ namespace MinorShift.Emuera.GameProc
 						if (isFunction)
 						{
 							FunctionLabelLine label = (FunctionLabelLine)nextLine;
+							traceLabelCount++;
 							lastLabelLine = label;
 							if (label is InvalidLabelLine)
 							{
@@ -404,6 +486,8 @@ namespace MinorShift.Emuera.GameProc
 							else// if (label is FunctionLabelLine)
 							{
 								labelDic.AddLabel(label);
+								if (isLazyLoading)
+									tempFunctionLabels.Add(label);
 								if (!label.IsEvent && (Config.WarnNormalFunctionOverloading || Program.AnalysisMode))
 								{
 									FunctionLabelLine seniorLabel = labelDic.GetSameNameLabel(label);
@@ -452,9 +536,11 @@ namespace MinorShift.Emuera.GameProc
                         //        replacedLine = replacedLine.Replace(pair.Key, pair.Value);
                         //    st = new StringStream(replacedLine);
                         //}
-                        nextLine = LogicalLineParser.ParseLine(st, position, output);
+                        nextLine = LogicalLineParser.ParseLine(st, position, output, lastLabelLine);
 						if (nextLine == null)
 							continue;
+						if (nextLine is InstructionLine)
+							traceInstructionCount++;
 						if (nextLine is InvalidLine)
 						{
 							noError = false;
@@ -464,15 +550,32 @@ namespace MinorShift.Emuera.GameProc
 					if (lastLabelLine == null)
 						ParserMediator.Warn("関数が定義されるより前に行があります", position, 1);
 					nextLine.ParentLabelLine = lastLabelLine;
+					TryPreRegisterSnakeDynamicVariable(nextLine);
 					lastLine = addLine(nextLine, lastLine);
 				}
 				addLine(new NullLine(), lastLine);
 				position = new ScriptPosition(eReader.Filename, -1);
 				ppstate.FileEnd(position);
+				if (isLazyLoading)
+				{
+					foreach (FunctionLabelLine label in tempFunctionLabels)
+					{
+						setLabelsArg(label);
+						labelDic.SortLabel(label);
+					}
+					foreach (FunctionLabelLine label in tempFunctionLabels)
+						checkFunctionWithCatch(label);
+				}
 			}
 			finally
 			{
 				eReader.Close();
+				if (GenericUtils.IsScrollTraceActive)
+				{
+					GenericUtils.ScrollTrace(
+						"core",
+						$"erb_load_end file={GenericUtils.ClipTrace(filename, 120)} lines={enabledLineCount - traceStartEnabledLineCount} instructions={traceInstructionCount} labels={traceLabelCount} ms={WinmmTimer.TickCount - traceStartTick} lazy={isLazyLoading}");
+				}
 			}
 			return;
 		}
@@ -491,29 +594,34 @@ namespace MinorShift.Emuera.GameProc
 			List<FunctionLabelLine> labelList = labelDic.GetAllLabels(false);
 			foreach (FunctionLabelLine label in labelList)
 			{
-				try
-				{
-					if (label.Arg != null)
-						continue;
-					parentProcess.scaningLine = label;
-					parseLabel(label);
-				}
-				catch (Exception exc)
-				{
-					uEmuera.Media.SystemSounds.Hand.Play();
-					string errmes = exc.Message;
-					if (!(exc is EmueraException))
-						errmes = exc.GetType().ToString() + ":" + errmes;
-					ParserMediator.Warn("関数@" + label.LabelName + " の引数のエラー:" + errmes, label, 2, true, false);
-					label.ErrMes = "ロード時に解析に失敗した関数が呼び出されました";
-                    label.IsError = true;
-				}
-				finally
-				{
-					parentProcess.scaningLine = null;
-				}
+				setLabelsArg(label);
 			}
 			labelDic.SortLabels();
+		}
+
+		private void setLabelsArg(FunctionLabelLine label)
+		{
+			try
+			{
+				if (label.Arg != null)
+					return;
+				parentProcess.scaningLine = label;
+				parseLabel(label);
+			}
+			catch (Exception exc)
+			{
+				uEmuera.Media.SystemSounds.Hand.Play();
+				string errmes = exc.Message;
+				if (!(exc is EmueraException))
+					errmes = exc.GetType().ToString() + ":" + errmes;
+				ParserMediator.Warn("関数@" + label.LabelName + " の引数のエラー:" + errmes, label, 2, true, false);
+				label.ErrMes = "ロード時に解析に失敗した関数が呼び出されました";
+				label.IsError = true;
+			}
+			finally
+			{
+				parentProcess.scaningLine = null;
+			}
 		}
 
 		private void parseLabel(FunctionLabelLine label)
@@ -525,10 +633,10 @@ namespace MinorShift.Emuera.GameProc
 			SingleTerm[] defs = new SingleTerm[0];
 			int maxArg = -1;
 			int maxArgs = -1;
+			int maxArgF = -1;
 			bool hasVariadic = false;
 			int variadicArgIndex = -1;
-			if (Program.IsSnakeProfile)
-				RemoveSnakeVariadicMarker(wc, out hasVariadic, out variadicArgIndex);
+			RemoveSnakeVariadicMarker(wc, out hasVariadic, out variadicArgIndex);
 			//1807 非イベント関数のシステム関数については警告レベル低下＆エラー解除＆引数を設定するように。
 			if (label.IsEvent)
 			{
@@ -594,7 +702,9 @@ namespace MinorShift.Emuera.GameProc
                         { errMes = "関数定義の引数には代入可能な変数を指定してください"; goto err; }
                         else if (!vTerm.Identifier.IsReference)//参照型なら添え字不要
                         {
-							bool allowSnakePrivateArgument = Program.IsSnakeProfile && vTerm.Identifier.IsPrivate;
+							// TODO: Snake compatibility fallback — relax subscript requirement for PRIVATE arguments.
+							// Remove once snake scripts are updated to declare subscripts explicitly.
+							bool allowSnakePrivateArgument = Program.Compatibility.Snake.AllowsPrivateArguments && vTerm.Identifier.IsPrivate;
                             if (vTerm is VariableNoArgTerm && !allowSnakePrivateArgument)
                             { errMes = "関数定義の参照型でない引数\"" + vTerm.Identifier.Name + "\"に添え字が指定されていません"; goto err; }
                             if (!vTerm.isAllConst && !allowSnakePrivateArgument)
@@ -615,35 +725,37 @@ namespace MinorShift.Emuera.GameProc
 							if (maxArgs < vTerm.getEl1forArg + 1)
 								maxArgs = vTerm.getEl1forArg + 1;
 						}
-						else if (Program.IsSnakeProfile && vTerm.Identifier.Code == VariableCode.ARGF)
+						else if (vTerm.Identifier.Code == VariableCode.ARGF)
 						{
-							if (maxArg < vTerm.getEl1forArg + 1)
-								maxArg = vTerm.getEl1forArg + 1;
+							if (maxArgF < vTerm.getEl1forArg + 1)
+								maxArgF = vTerm.getEl1forArg + 1;
 						}
 						bool canDef = (vTerm.Identifier.Code == VariableCode.ARG || vTerm.Identifier.Code == VariableCode.ARGS
-							|| (Program.IsSnakeProfile && vTerm.Identifier.Code == VariableCode.ARGF)
+							|| (vTerm.Identifier.Code == VariableCode.ARGF)
 							|| vTerm.Identifier.IsPrivate);
 						term = argsRow[i * 2 + 1];
-						if (term is NullTerm)
-						{
-							if (canDef)// && label.ArgOptional)
+							if (term is NullTerm)
 							{
-								if (vTerm.GetOperandType() == typeof(Int64))
-									def = new SingleTerm(0);
-								else
-									def = new SingleTerm("");
+								if (canDef)// && label.ArgOptional)
+								{
+									if (vTerm.GetEraType() == EraType.Float)
+										def = new SingleTerm(0.0);
+									else if (vTerm.GetEraType() == EraType.Integer)
+										def = new SingleTerm(0);
+									else
+										def = new SingleTerm("");
+								}
 							}
-						}
 						else
 						{
 							def = term.Restructure(exm) as SingleTerm;
 							if (def == null)
 							{ errMes = "引数の初期値には定数のみを指定できます"; goto err; }
 							if (!canDef)
-							{ errMes = "引数の初期値を定義できるのは\"ARG\"、\"ARGS\"またはプライベート変数のみです"; goto err; }
+							{ errMes = "引数の初期値を定義できるのは\"ARG\"、\"ARGS\"、\"ARGF\"またはプライベート変数のみです"; goto err; }
 							else if (vTerm.Identifier.IsReference)
 							{ errMes = "参照渡しの引数に初期値は定義できません"; goto err; }
-							if (vTerm.GetOperandType() != def.GetOperandType())
+							if (vTerm.GetEraType() != def.GetEraType())
 							{ errMes = "引数の型と初期値の型が一致していません"; goto err; }
 						}
 						args[i] = vTerm;
@@ -668,9 +780,9 @@ namespace MinorShift.Emuera.GameProc
 					return;
 				}
 				VariableCode code = args[args.Length - 1].Identifier.Code;
-				if (code != VariableCode.ARG && code != VariableCode.ARGS && (!Program.IsSnakeProfile || code != VariableCode.ARGF))
+				if (code != VariableCode.ARG && code != VariableCode.ARGS && code != VariableCode.ARGF)
 				{
-					ParserMediator.Warn(Program.IsSnakeProfile ? "VARIADICはARG、ARGSまたはARGFだけを修飾できます" : "VARIADICはARGまたはARGSだけを修飾できます", label, 2, true, false);
+					ParserMediator.Warn("VARIADICはARG、ARGSまたはARGFだけを修飾できます", label, 2, true, false);
 					return;
 				}
 				for (int i = 0; i < args.Length - 1; i++)
@@ -689,6 +801,7 @@ namespace MinorShift.Emuera.GameProc
 			label.Def = defs;
 			label.ArgLength = maxArg;
 			label.ArgsLength = maxArgs;
+			label.ArgFloatLength = maxArgF;
 			return;
 		err:
 			ParserMediator.Warn("関数@" + label.LabelName + " の引数のエラー:" + errMes, label, 2, true, false);
@@ -712,6 +825,16 @@ namespace MinorShift.Emuera.GameProc
 					hasVariadic = true;
 					variadicArgIndex = commaCount;
 					wc.Remove();
+					// Remove adjacent comma to prevent double commas in argument lists
+					if (!wc.EOL && wc.Current is SymbolWord symNext && symNext.Type == ',')
+					{
+						wc.Remove();
+					}
+					else if (wc.Pointer > 0 && wc.Collection[wc.Pointer - 1] is SymbolWord symPrev && symPrev.Type == ',')
+					{
+						wc.Pointer--;
+						wc.Remove();
+					}
 					continue;
 				}
 				if (wc.Current is SymbolWord sym && sym.Type == ',')
@@ -1264,11 +1387,12 @@ namespace MinorShift.Emuera.GameProc
 
 								foreach (CaseExpression exp in caseExps)
 								{
-									if (exp.GetOperandType() != term.GetOperandType())
+									if (exp.GetEraType() != term.GetEraType())
 										ParserMediator.Warn("CASEの引数の型がSELECTCASEと一致しません", caseLine, 2, true, false);
 								}
 
 							}
+							selectLine.SelectCaseJumpTable = SelectCaseJumpTable.TryBuild(selectLine, term.GetEraType());
 						}
 						break;
 					case FunctionCode.REND:

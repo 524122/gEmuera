@@ -1,4 +1,5 @@
 using Godot;
+using GEmuera.Core.Compatibility;
 using System.Collections.Generic;
 using System.IO;
 
@@ -10,27 +11,110 @@ public partial class FirstWindow : Control
 	const string LauncherSettingsSection = "launcher";
 	const string LauncherLastGamePathKey = "last_game_path";
 	const string LauncherLastCoreProfileKey = "last_core_profile";
-	public const string CoreProfileV18 = "v18";
+	const string LauncherAdvancedCompatibilityKey = "advanced_compatibility";
+	const string LauncherManualCoreProfileKey = "manual_core_profile";
+	const string CompatibilityDirectoryName = "compat";
+	const string SnakeDirectoryName = "snake";
+	const int LauncherScrollBarWidth = 24;
+	const int LauncherBaseMarginLeft = 20;
+	const int LauncherBaseMarginTop = 22;
+	const int LauncherBaseMarginRight = 20;
+	const int LauncherBaseMarginBottom = 22;
+	// 启动器只做固定深度的目录枚举。上限既防止异常目录拖慢 Android 首屏，
+	// 也避免把扫描器重新演化成递归的游戏内容探测器。
+	const int MaxLauncherGameEntries = 512;
+	const int MaxCompatibilityProfilesPerRoot = 32;
+	const int MaxGamesPerCompatibilityProfile = 64;
+	// 扫描根下允许的额外嵌套深度：emuera/snake/归档目录/游戏（深度 1 的
+	// 嵌套）。再深的归档结构不扫描，避免把游戏内部子目录误识别为独立游戏，
+	// 也避免大目录树扫描拖慢启动器。
+	const int MaxLauncherScanDepth = 2;
+	const int MaxScanMessages = 6;
+	public const string CoreProfileV24Pure = "v24pure";
 	public const string CoreProfileSnake = "snake";
+	public const string CoreProfileEraFl = "erafl";
+	// 保留旧配置值，避免升级时无法读取 launcher.cfg；启动器不再执行自动探测。
+	public const string CoreProfileAutomatic = "auto";
 
 	enum LauncherGameCategory
 	{
-		V18,
+		V24Pure,
+		Snake
+	}
+
+	enum LauncherGameSource
+	{
+		V24Root,
+		SnakeRoot,
+		CompatibilityDirectory
+	}
+
+	/// <summary>
+	/// 启动器拥有游戏路径、目录路由得出的 profile 与展示来源；ItemList 只保存显示/选中状态。
+	/// 不能再由当前标签或游戏名反推 profile，否则 compat/&lt;profile&gt; 会被错误地按 v24 启动。
+	/// </summary>
+	sealed record LauncherGameEntry(
+		string DisplayName,
+		string GameRoot,
+		string ProfileId,
+		LauncherGameSource Source);
+
+	enum LauncherTab
+	{
+		V24Pure,
 		Snake,
-		All
+		Announcement
 	}
 
 	public static string SelectedGamePath { get; private set; }
-	public static string SelectedCoreProfileName { get; private set; } = CoreProfileV18;
+	public static string SelectedCoreProfileName { get; private set; } = CoreProfileV24Pure;
+	public static bool AdvancedCompatibilityEnabled { get; private set; }
+	public static string ManualCoreProfileName { get; private set; } = CoreProfileV24Pure;
+	static readonly CompatibilityProfileCatalog DirectoryRouteProfileCatalog = CreateDirectoryRouteProfileCatalog();
+
+	/// <summary>
+	/// M0 baseline runner-only session injection. The normal launcher never calls this method.
+	/// Unlike SetSelectedGamePath, this does not persist launcher.cfg and therefore cannot
+	/// change the next interactive startup.
+	/// </summary>
+	public static bool ConfigureM0RunnerSession(string path, string coreProfileName, out string errorMessage)
+	{
+		errorMessage = "";
+		if (!IsUsableEraGameDirectory(path))
+		{
+			errorMessage = "invalid_era_game_directory";
+			return false;
+		}
+
+		if (!TryNormalizeCoreProfileName(coreProfileName, out string normalizedProfileName))
+		{
+			errorMessage = "unsupported_compatibility_profile";
+			return false;
+		}
+
+		SelectedGamePath = path.TrimEnd('/', '\\');
+		SelectedCoreProfileName = normalizedProfileName;
+		return true;
+	}
 
 	ItemList gameList;
 	Button startButton;
 	Label statusLabel;
-	OptionButton categoryButton;
 	Label categoryHintLabel;
-	Control announcementOverlay;
 	Label announcementStatusLabel;
-	LauncherGameCategory currentCategory = LauncherGameCategory.V18;
+	CheckButton advancedCompatibilityToggle;
+	OptionButton compatibilityProfileOption;
+	MarginContainer launcherMargin;
+	SafeAreaApplicator launcherSafeArea;
+	Button v24TabButton;
+	Button snakeTabButton;
+	Button announcementTabButton;
+	Control gameTabContent;
+	Control announcementTabContent;
+	Tween tabFadeTween;
+	LauncherGameCategory currentCategory = LauncherGameCategory.V24Pure;
+	LauncherTab currentTab = LauncherTab.V24Pure;
+	readonly List<LauncherGameEntry> gameEntries = new();
 	bool androidPermissionCheckPending = false;
 	bool androidPermissionResultReceived = false;
 
@@ -39,7 +123,16 @@ public partial class FirstWindow : Control
 		FrameRateHelper.Apply();
 		ResolutionHelper.Apply();
 
+		// 企业级说明：Android APK 首屏可能停留在启动器和权限流程，尚未进入 EmueraMain。
+		// 这里提前初始化诊断系统，确保冷启动、权限失败和游戏路径选择都能写入 breadcrumb。
+		GenericUtils.SetMainThread();
+		GenericUtils.InitializeLogging();
+
+		// 统一深色主题：Theme 资源提供基线样式，代码 overrides 覆盖交互控件。
+		Theme = GEmueraTheme.LoadTheme();
+
 		BuildLauncherUi();
+		PlayLauncherEntrance();
 
 		if (OS.GetName() == "Android")
 		{
@@ -57,35 +150,60 @@ public partial class FirstWindow : Control
 
 	void BuildLauncherUi()
 	{
-		var background = new ColorRect();
-		background.Color = new Color(0.07f, 0.085f, 0.105f);
-		background.MouseFilter = MouseFilterEnum.Ignore;
+		// 深色背景 token（#14161D）替代旧的灰绿色调。
+		var background = GEmueraTheme.CreateBackground();
 		background.SetAnchorsPreset(LayoutPreset.FullRect);
 		AddChild(background);
 
-		var margin = new MarginContainer();
-		margin.SetAnchorsPreset(LayoutPreset.FullRect);
-		margin.AddThemeConstantOverride("margin_left", 20);
-		margin.AddThemeConstantOverride("margin_top", 22);
-		margin.AddThemeConstantOverride("margin_right", 20);
-		margin.AddThemeConstantOverride("margin_bottom", 22);
-		AddChild(margin);
+		launcherMargin = new MarginContainer();
+		launcherMargin.SetAnchorsPreset(LayoutPreset.FullRect);
+		AddChild(launcherMargin);
 
 		var root = new VBoxContainer();
 		root.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		root.SizeFlagsVertical = SizeFlags.ExpandFill;
 		root.AddThemeConstantOverride("separation", 10);
-		margin.AddChild(root);
+		launcherMargin.AddChild(root);
 
 		root.AddChild(CreateHeader());
-		root.AddChild(CreateGamePanel());
+		root.AddChild(CreateLauncherTabs());
 
 		statusLabel = new Label();
 		statusLabel.HorizontalAlignment = HorizontalAlignment.Center;
 		statusLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-		statusLabel.AddThemeColorOverride("font_color", new Color(0.78f, 0.84f, 0.9f));
+		statusLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
 		statusLabel.AddThemeFontSizeOverride("font_size", 14);
 		root.AddChild(statusLabel);
+
+		// 安全区组件：整页内容按系统安全区收边（刘海/挖孔/圆角裁切），数值与
+		// 旧内联实现逐位一致（基值 + inset），进入场景树与视口 SizeChanged 时
+		// 自动刷新，替代原来的 ApplyLauncherSafeArea/OnViewportSizeChanged。
+		launcherSafeArea = new SafeAreaApplicator
+		{
+			Target = launcherMargin,
+			Mode = SafeAreaApplicator.ApplyMode.ThemeMargins,
+			BaseLeft = LauncherBaseMarginLeft,
+			BaseTop = LauncherBaseMarginTop,
+			BaseRight = LauncherBaseMarginRight,
+			BaseBottom = LauncherBaseMarginBottom,
+		};
+		AddChild(launcherSafeArea);
+	}
+
+	/// <summary>启动器入场动效：fade + 轻微上移（300-400ms ease-out）。</summary>
+	void PlayLauncherEntrance()
+	{
+		if (launcherMargin == null)
+			return;
+		launcherMargin.Modulate = new Color(1, 1, 1, 0f);
+		launcherMargin.PivotOffset = launcherMargin.Size * 0.5f;
+		var tween = CreateTween();
+		tween.BindNode(launcherMargin);
+		tween.SetTrans(Tween.TransitionType.Cubic);
+		tween.SetEase(Tween.EaseType.Out);
+		tween.TweenProperty(launcherMargin, "modulate:a", 1.0f, GEmueraTheme.EnterSeconds);
+		tween.Parallel().TweenProperty(launcherMargin, "position:y", launcherMargin.Position.Y, GEmueraTheme.EnterSeconds)
+			.From(launcherMargin.Position.Y + 18);
 	}
 
 	Control CreateHeader()
@@ -102,98 +220,152 @@ public partial class FirstWindow : Control
 		title.Text = MultiLanguage.Get("FirstWindow.Title", "gEmuera(Emuera for Godot)");
 		title.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		title.AddThemeFontSizeOverride("font_size", 28);
-		title.AddThemeColorOverride("font_color", new Color(0.96f, 0.98f, 1.0f));
+		title.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
 		titleBlock.AddChild(title);
 
-		var noticeButton = new Button();
-		noticeButton.Text = MultiLanguage.Get("FirstWindow.NoticeButton", "公告");
-		noticeButton.CustomMinimumSize = new Vector2(96, 44);
-		noticeButton.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
-		noticeButton.SizeFlagsVertical = SizeFlags.ShrinkCenter;
-		noticeButton.AddThemeFontSizeOverride("font_size", 17);
-		noticeButton.Pressed += ShowAnnouncementDialog;
-		header.AddChild(noticeButton);
+		// 标题下的蓝紫强调渐变条（#6C8CFF → #9B6CFF），纯视觉装饰。
+		var accentBar = new ColorRect();
+		accentBar.CustomMinimumSize = new Vector2(96, 3);
+		accentBar.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+		accentBar.Color = GEmueraTheme.Accent;
+		accentBar.MouseFilter = MouseFilterEnum.Ignore;
+		titleBlock.AddChild(accentBar);
 
 		return header;
 	}
 
-	void ShowAnnouncementDialog()
+	Control CreateLauncherTabs()
 	{
-		if (announcementOverlay == null)
-			announcementOverlay = CreateAnnouncementOverlay();
-
-		announcementOverlay.Visible = true;
-		announcementOverlay.MoveToFront();
-	}
-
-	Control CreateAnnouncementOverlay()
-	{
-		var overlay = new Control();
-		overlay.SetAnchorsPreset(LayoutPreset.FullRect);
-		overlay.MouseFilter = MouseFilterEnum.Stop;
-		overlay.Visible = false;
-		AddChild(overlay);
-
-		var dim = new ColorRect();
-		dim.Color = new Color(0, 0, 0, 0.52f);
-		dim.MouseFilter = MouseFilterEnum.Stop;
-		dim.SetAnchorsPreset(LayoutPreset.FullRect);
-		overlay.AddChild(dim);
+		var panel = CreatePanel(GEmueraTheme.Surface, GEmueraTheme.Border, true);
+		panel.SizeFlagsVertical = SizeFlags.ExpandFill;
 
 		var margin = new MarginContainer();
-		margin.SetAnchorsPreset(LayoutPreset.FullRect);
-		margin.AddThemeConstantOverride("margin_left", 18);
-		margin.AddThemeConstantOverride("margin_top", 28);
-		margin.AddThemeConstantOverride("margin_right", 18);
-		margin.AddThemeConstantOverride("margin_bottom", 28);
-		overlay.AddChild(margin);
+		margin.AddThemeConstantOverride("margin_left", 12);
+		margin.AddThemeConstantOverride("margin_top", 12);
+		margin.AddThemeConstantOverride("margin_right", 12);
+		margin.AddThemeConstantOverride("margin_bottom", 12);
+		panel.AddChild(margin);
 
-		var panel = CreatePanel(new Color(0.105f, 0.125f, 0.15f), new Color(0.26f, 0.33f, 0.39f));
-		panel.SizeFlagsVertical = SizeFlags.ExpandFill;
-		margin.AddChild(panel);
+		var body = new HBoxContainer();
+		body.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		body.SizeFlagsVertical = SizeFlags.ExpandFill;
+		body.AddThemeConstantOverride("separation", 12);
+		margin.AddChild(body);
 
-		var content = CreatePanelContent(panel, 14);
-		content.AddThemeConstantOverride("separation", 10);
+		body.AddChild(CreateTabRail());
 
-		var header = new HBoxContainer();
-		header.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		header.AddThemeConstantOverride("separation", 12);
-		content.AddChild(header);
+		var contentStack = new Control();
+		contentStack.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		contentStack.SizeFlagsVertical = SizeFlags.ExpandFill;
+		body.AddChild(contentStack);
 
-		var title = CreateSectionTitle(MultiLanguage.Get("FirstWindow.NoticeTitle", "公告"));
-		title.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		header.AddChild(title);
+		gameTabContent = CreateGameContent();
+		gameTabContent.SetAnchorsPreset(LayoutPreset.FullRect);
+		contentStack.AddChild(gameTabContent);
 
-		var closeButton = new Button();
-		closeButton.Text = "X";
-		closeButton.CustomMinimumSize = new Vector2(44, 40);
-		closeButton.Pressed += HideAnnouncementOverlay;
-		header.AddChild(closeButton);
+		announcementTabContent = CreateAnnouncementContent();
+		announcementTabContent.SetAnchorsPreset(LayoutPreset.FullRect);
+		announcementTabContent.Visible = false;
+		contentStack.AddChild(announcementTabContent);
 
-		var tabs = new TabContainer();
-		tabs.CustomMinimumSize = new Vector2(0, 120);
-		tabs.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		tabs.SizeFlagsVertical = SizeFlags.ExpandFill;
-		content.AddChild(tabs);
-
-		tabs.AddChild(CreateNoticeTab());
-		tabs.AddChild(CreateFeedbackTab());
-		tabs.AddChild(CreateProjectTab());
-
-		var okButton = new Button();
-		okButton.Text = "OK";
-		okButton.CustomMinimumSize = new Vector2(0, 44);
-		okButton.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		okButton.Pressed += HideAnnouncementOverlay;
-		content.AddChild(okButton);
-
-		return overlay;
+		UpdateTabButtonStyles();
+		return panel;
 	}
 
-	void HideAnnouncementOverlay()
+	Control CreateTabRail()
 	{
-		if (announcementOverlay != null)
-			announcementOverlay.Visible = false;
+		var rail = new VBoxContainer();
+		rail.CustomMinimumSize = new Vector2(88, 0);
+		rail.SizeFlagsVertical = SizeFlags.ExpandFill;
+		rail.AddThemeConstantOverride("separation", 8);
+
+		v24TabButton = CreateRailButton("v24", () => SelectLauncherTab(LauncherTab.V24Pure));
+		snakeTabButton = CreateRailButton("snake", () => SelectLauncherTab(LauncherTab.Snake));
+		announcementTabButton = CreateRailButton(MultiLanguage.Get("FirstWindow.NoticeButton", "公告"), () => SelectLauncherTab(LauncherTab.Announcement));
+
+		rail.AddChild(v24TabButton);
+		rail.AddChild(snakeTabButton);
+		rail.AddChild(announcementTabButton);
+
+		var spacer = new Control();
+		spacer.SizeFlagsVertical = SizeFlags.ExpandFill;
+		rail.AddChild(spacer);
+
+		return rail;
+	}
+
+	Button CreateRailButton(string text, System.Action pressed)
+	{
+		var button = new Button();
+		button.Text = text;
+		button.CustomMinimumSize = new Vector2(88, 58);
+		button.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		button.AddThemeFontSizeOverride("font_size", text.Length > 4 ? 15 : 17);
+		button.Pressed += pressed;
+		return button;
+	}
+
+	void SelectLauncherTab(LauncherTab tab)
+	{
+		if (currentTab == tab && tab != LauncherTab.Announcement)
+			return;
+
+		currentTab = tab;
+		if (tab == LauncherTab.Snake)
+			currentCategory = LauncherGameCategory.Snake;
+		else if (tab == LauncherTab.V24Pure)
+			currentCategory = LauncherGameCategory.V24Pure;
+
+		bool showingAnnouncement = tab == LauncherTab.Announcement;
+		gameTabContent.Visible = !showingAnnouncement;
+		announcementTabContent.Visible = showingAnnouncement;
+		UpdateTabButtonStyles();
+
+		if (showingAnnouncement)
+			FadeInContent(announcementTabContent);
+		else
+		{
+			UpdateCategoryHint();
+			ScanGames();
+			FadeInContent(gameTabContent);
+		}
+	}
+
+	void UpdateTabButtonStyles()
+	{
+		ApplyRailButtonStyle(v24TabButton, currentTab == LauncherTab.V24Pure);
+		ApplyRailButtonStyle(snakeTabButton, currentTab == LauncherTab.Snake);
+		ApplyRailButtonStyle(announcementTabButton, currentTab == LauncherTab.Announcement);
+	}
+
+	void ApplyRailButtonStyle(Button button, bool active)
+	{
+		if (button == null)
+			return;
+
+		// 深色主题的 Tab 栏：选中态用强调蓝紫填充 + 边框，非选中态用中性表面。
+		// tab 切换会全量调本方法 3 次；状态未变的按钮跳过重挂样式（ApplyRailButton
+		// 会重建 5 个 stylebox + 6 个颜色 override），只刷新状态发生变化的 tab。
+		// 视觉状态由 meta 精确跟踪，与 theme 无关，其余调用方不受影响。
+		if (button.HasMeta("gemuera_rail_active") && button.GetMeta("gemuera_rail_active").AsBool() == active)
+			return;
+		button.SetMeta("gemuera_rail_active", active);
+		GEmueraTheme.ApplyRailButton(button, active);
+	}
+
+	void FadeInContent(Control content)
+	{
+		if (content == null)
+			return;
+		if (tabFadeTween != null && tabFadeTween.IsRunning())
+			tabFadeTween.Kill();
+
+		content.Modulate = new Color(1, 1, 1, 0.72f);
+		tabFadeTween = CreateTween();
+		tabFadeTween.BindNode(content);
+		tabFadeTween.SetTrans(Tween.TransitionType.Cubic);
+		tabFadeTween.SetEase(Tween.EaseType.Out);
+		tabFadeTween.TweenProperty(content, "modulate:a", 1.0, 0.22);
 	}
 
 	Control CreateNoticeTab()
@@ -201,7 +373,12 @@ public partial class FirstWindow : Control
 		var content = CreateDialogTab(MultiLanguage.Get("FirstWindow.NoticeTitle", "公告"));
 
 		var body = CreateDialogText(MultiLanguage.Get("FirstWindow.NoticeBody",
-			"如果遇到 bug、兼容性问题或游戏无法正常运行，可以加入 QQ 群反馈。\n\n选择游戏时请先确认分类：v18 用普通 emuera 游戏；snake 用蛇版 TW 等 snake 核心游戏；All 会显示所有可识别游戏。"));
+			"游戏放置说明:\n\n"
+			+ "新版蛇 TW 请放入 snake 文件夹下。详细路径: Android 为 /storage/emulated/0/emuera/snake/你的游戏文件夹；Windows 或编辑器测试时，为程序目录或项目目录下的 snake/你的游戏文件夹。放好后从左侧 snake 标签启动，会使用 snake 核心。\n\n"
+			+ "旧版蛇 TW 和其他 era 游戏请放入 emuera 文件夹下。详细路径: Android 为 /storage/emulated/0/emuera/你的游戏文件夹；Windows 或编辑器测试时，为程序目录或项目目录下的你的游戏文件夹。放好后从左侧 v24 标签启动。\n\n"
+			+ "如果出现 v24 无法启动、解析报错、资源路径异常等情况，可以把同一个游戏文件夹移动到 snake 文件夹下，再从 snake 标签启动，尝试放入 snake 核心。\n\n"
+			+ "eraFL 或其他独立 profile 请放入 compat/<profile>/游戏文件夹，例如 compat/erafl/eraFL0.48；它们仍显示在 v24 标签，但会按目录自动选择对应模块。启动器不会读取游戏内容自动识别类型。高级兼容模式只用于诊断或临时覆盖。\n\n"
+			+ "每个游戏文件夹内通常需要包含 ERB 文件夹，并至少包含 CSV、DAT 或 resources 其中之一。"));
 		content.AddChild(body);
 
 		return content;
@@ -227,13 +404,14 @@ public partial class FirstWindow : Control
 		copyButton.Text = MultiLanguage.Get("FirstWindow.CopyQQ", "复制群号");
 		copyButton.CustomMinimumSize = new Vector2(0, 40);
 		copyButton.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		GEmueraTheme.ApplyButton(copyButton, GEmueraTheme.Surface, GEmueraTheme.Border);
 		copyButton.Pressed += CopyFeedbackGroup;
 		content.AddChild(copyButton);
 
 		announcementStatusLabel = new Label();
 		announcementStatusLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		announcementStatusLabel.AddThemeFontSizeOverride("font_size", 13);
-		announcementStatusLabel.AddThemeColorOverride("font_color", new Color(0.67f, 0.76f, 0.84f));
+		announcementStatusLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
 		content.AddChild(announcementStatusLabel);
 
 		return content;
@@ -260,7 +438,7 @@ public partial class FirstWindow : Control
 		var content = new VBoxContainer();
 		content.Name = name;
 		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		content.SizeFlagsVertical = SizeFlags.ExpandFill;
+		content.SizeFlagsVertical = SizeFlags.ShrinkBegin;
 		content.AddThemeConstantOverride("separation", 12);
 		return content;
 	}
@@ -271,27 +449,47 @@ public partial class FirstWindow : Control
 		label.Text = text;
 		label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		label.AddThemeFontSizeOverride("font_size", 15);
-		label.AddThemeColorOverride("font_color", new Color(0.88f, 0.92f, 0.96f));
+		label.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
 		return label;
 	}
 
-	Control CreateGamePanel()
+	Control CreateAnnouncementContent()
 	{
-		var panel = CreatePanel(new Color(0.105f, 0.125f, 0.15f), new Color(0.2f, 0.25f, 0.31f));
-		panel.SizeFlagsVertical = SizeFlags.ExpandFill;
+		var scroll = new ScrollContainer();
+		scroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+		ApplyWideVerticalScrollbar(scroll.GetVScrollBar());
 
-		var content = CreatePanelContent(panel, 16);
+		var content = new VBoxContainer();
+		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		content.AddThemeConstantOverride("separation", 14);
+		scroll.AddChild(content);
+
+		content.AddChild(CreateSectionTitle(MultiLanguage.Get("FirstWindow.NoticeTitle", "公告")));
+		content.AddChild(CreateNoticeTab());
+		content.AddChild(CreateFeedbackTab());
+		content.AddChild(CreateProjectTab());
+
+		return scroll;
+	}
+
+	Control CreateGameContent()
+	{
+		var content = new VBoxContainer();
+		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		content.SizeFlagsVertical = SizeFlags.ExpandFill;
 		content.AddThemeConstantOverride("separation", 12);
 
 		content.AddChild(CreateSectionTitle(MultiLanguage.Get("FirstWindow.SelectGame", "选择游戏")));
-		content.AddChild(CreateCategorySelector());
 
 		categoryHintLabel = new Label();
 		categoryHintLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
 		categoryHintLabel.AddThemeFontSizeOverride("font_size", 13);
-		categoryHintLabel.AddThemeColorOverride("font_color", new Color(0.7f, 0.78f, 0.86f));
+		categoryHintLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
 		content.AddChild(categoryHintLabel);
 		UpdateCategoryHint();
+		content.AddChild(CreateCompatibilitySettings());
 
 		gameList = new ItemList();
 		gameList.SizeFlagsVertical = SizeFlags.ExpandFill;
@@ -299,6 +497,8 @@ public partial class FirstWindow : Control
 		gameList.AddThemeFontSizeOverride("font_size", 20);
 		gameList.AddThemeConstantOverride("v_separation", 12);
 		gameList.AddThemeConstantOverride("line_separation", 8);
+		GEmueraTheme.ApplyItemList(gameList);
+		ApplyWideVerticalScrollbar(gameList.GetVScrollBar());
 		gameList.ItemSelected += OnGameSelected;
 		gameList.ItemActivated += OnGameActivated;
 		content.AddChild(gameList);
@@ -308,43 +508,129 @@ public partial class FirstWindow : Control
 		startButton.Disabled = true;
 		startButton.CustomMinimumSize = new Vector2(0, 52);
 		startButton.AddThemeFontSizeOverride("font_size", 18);
+		GEmueraTheme.ApplyAccentButton(startButton);
 		startButton.Pressed += OnStartPressed;
 		content.AddChild(startButton);
 
-		return panel;
+		return content;
 	}
 
-	Control CreateCategorySelector()
+	Control CreateCompatibilitySettings()
 	{
-		var box = new VBoxContainer();
-		box.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		box.AddThemeConstantOverride("separation", 6);
+		LoadCompatibilitySettings();
 
-		var label = new Label();
-		label.Text = MultiLanguage.Get("FirstWindow.Category", "分类");
-		label.AddThemeFontSizeOverride("font_size", 14);
-		label.AddThemeColorOverride("font_color", new Color(0.84f, 0.89f, 0.94f));
-		box.AddChild(label);
+		var settings = new VBoxContainer();
+		settings.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		settings.AddThemeConstantOverride("separation", 6);
 
-		categoryButton = new OptionButton();
-		categoryButton.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		categoryButton.CustomMinimumSize = new Vector2(0, 44);
-		categoryButton.AddThemeFontSizeOverride("font_size", 17);
-		categoryButton.AddItem(MultiLanguage.Get("FirstWindow.CategoryV18", "v18"), (int)LauncherGameCategory.V18);
-		categoryButton.AddItem(MultiLanguage.Get("FirstWindow.CategorySnake", "snake"), (int)LauncherGameCategory.Snake);
-		categoryButton.AddItem(MultiLanguage.Get("FirstWindow.CategoryAll", "All"), (int)LauncherGameCategory.All);
-		categoryButton.Select((int)currentCategory);
-		categoryButton.ItemSelected += OnCategorySelected;
-		box.AddChild(categoryButton);
+		advancedCompatibilityToggle = new CheckButton();
+		advancedCompatibilityToggle.Text = MultiLanguage.Get(
+			"FirstWindow.AdvancedCompatibility",
+			"高级兼容模式");
+		advancedCompatibilityToggle.TooltipText = MultiLanguage.Get(
+			"FirstWindow.AdvancedCompatibilityTooltip",
+			"开启后可手动覆盖本次启动的兼容 profile；关闭时严格使用游戏目录路由。");
+		advancedCompatibilityToggle.ButtonPressed = AdvancedCompatibilityEnabled;
+		advancedCompatibilityToggle.CustomMinimumSize = new Vector2(0, 44);
+		advancedCompatibilityToggle.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		advancedCompatibilityToggle.AddThemeFontSizeOverride("font_size", 15);
+		advancedCompatibilityToggle.Toggled += OnAdvancedCompatibilityToggled;
+		settings.AddChild(advancedCompatibilityToggle);
 
-		return box;
+		compatibilityProfileOption = new OptionButton();
+		compatibilityProfileOption.TooltipText = MultiLanguage.Get(
+			"FirstWindow.CompatibilityProfileTooltip",
+			"选择后将在下一次启动游戏时生效。");
+		compatibilityProfileOption.CustomMinimumSize = new Vector2(180, 44);
+		compatibilityProfileOption.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		compatibilityProfileOption.AddThemeFontSizeOverride("font_size", 15);
+		compatibilityProfileOption.AddItem(CoreProfileV24Pure);
+		compatibilityProfileOption.AddItem(CoreProfileSnake);
+		compatibilityProfileOption.AddItem(CoreProfileEraFl);
+		compatibilityProfileOption.Select(GetManualProfileOptionIndex());
+		compatibilityProfileOption.ItemSelected += OnManualProfileSelected;
+		compatibilityProfileOption.Visible = AdvancedCompatibilityEnabled;
+		settings.AddChild(compatibilityProfileOption);
+
+		return settings;
 	}
 
-	PanelContainer CreatePanel(Color backgroundColor, Color borderColor)
+	void OnAdvancedCompatibilityToggled(bool enabled)
+	{
+		AdvancedCompatibilityEnabled = enabled;
+		if (!enabled)
+			ManualCoreProfileName = CoreProfileV24Pure;
+		SaveCompatibilitySettings();
+		if (compatibilityProfileOption != null)
+			compatibilityProfileOption.Visible = enabled;
+		UpdateSelectedGameCompatibilityHint();
+	}
+
+	void OnManualProfileSelected(long index)
+	{
+		ManualCoreProfileName = index switch
+		{
+			0 => CoreProfileV24Pure,
+			1 => CoreProfileSnake,
+			2 => CoreProfileEraFl,
+			_ => CoreProfileV24Pure,
+		};
+		SaveCompatibilitySettings();
+		UpdateSelectedGameCompatibilityHint();
+	}
+
+	static void LoadCompatibilitySettings()
+	{
+		var config = new ConfigFile();
+		if (config.Load(LauncherSettingsPath) != Error.Ok)
+			return;
+
+		AdvancedCompatibilityEnabled = config.GetValue(
+			LauncherSettingsSection,
+			LauncherAdvancedCompatibilityKey,
+			false).AsBool();
+		ManualCoreProfileName = NormalizeManualCoreProfileName(config.GetValue(
+			LauncherSettingsSection,
+			LauncherManualCoreProfileKey,
+			CoreProfileV24Pure).AsString());
+	}
+
+	static void SaveCompatibilitySettings()
+	{
+		var config = new ConfigFile();
+		config.Load(LauncherSettingsPath);
+		config.SetValue(LauncherSettingsSection, LauncherAdvancedCompatibilityKey, AdvancedCompatibilityEnabled);
+		config.SetValue(LauncherSettingsSection, LauncherManualCoreProfileKey, ManualCoreProfileName);
+		config.Save(LauncherSettingsPath);
+	}
+
+	static string NormalizeManualCoreProfileName(string profileName)
+	{
+		if (string.Equals(profileName, CoreProfileV24Pure, System.StringComparison.OrdinalIgnoreCase))
+			return CoreProfileV24Pure;
+		if (string.Equals(profileName, CoreProfileSnake, System.StringComparison.OrdinalIgnoreCase))
+			return CoreProfileSnake;
+		if (string.Equals(profileName, CoreProfileEraFl, System.StringComparison.OrdinalIgnoreCase))
+			return CoreProfileEraFl;
+		// 旧版本曾把“自动识别”写入配置，回退后按安全的 v24 基线处理。
+		return CoreProfileV24Pure;
+	}
+
+	int GetManualProfileOptionIndex()
+	{
+		return ManualCoreProfileName switch
+		{
+			CoreProfileSnake => 1,
+			CoreProfileEraFl => 2,
+			_ => 0,
+		};
+	}
+
+	PanelContainer CreatePanel(Color backgroundColor, Color borderColor, bool shadow = false)
 	{
 		var panel = new PanelContainer();
 		panel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		panel.AddThemeStyleboxOverride("panel", CreatePanelStyle(backgroundColor, borderColor));
+		panel.AddThemeStyleboxOverride("panel", CreatePanelStyle(backgroundColor, borderColor, shadow));
 		return panel;
 	}
 
@@ -369,18 +655,28 @@ public partial class FirstWindow : Control
 		var label = new Label();
 		label.Text = text;
 		label.AddThemeFontSizeOverride("font_size", 20);
-		label.AddThemeColorOverride("font_color", new Color(0.97f, 0.98f, 1.0f));
+		label.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
 		return label;
 	}
 
-	StyleBoxFlat CreatePanelStyle(Color backgroundColor, Color borderColor)
+	StyleBoxFlat CreatePanelStyle(Color backgroundColor, Color borderColor, bool shadow = false)
 	{
-		var style = new StyleBoxFlat();
-		style.BgColor = backgroundColor;
-		style.BorderColor = borderColor;
-		style.SetBorderWidthAll(1);
-		style.SetCornerRadiusAll(8);
-		return style;
+		// 卡片风格：8px 圆角 + 1px 边框 + 可选柔和阴影（深色主题 token）。
+		return GEmueraTheme.SurfaceStyle(
+			backgroundColor,
+			borderColor,
+			GEmueraTheme.CardRadius,
+			1,
+			shadow ? 8 : 0,
+			new Vector2(0, 4));
+	}
+
+	void ApplyWideVerticalScrollbar(VScrollBar scrollbar)
+	{
+		if (scrollbar == null)
+			return;
+
+		GEmueraTheme.ApplyWideScrollbar(scrollbar, LauncherScrollBarWidth);
 	}
 
 	void CopyFeedbackGroup()
@@ -392,27 +688,16 @@ public partial class FirstWindow : Control
 			statusLabel.Text = "";
 	}
 
-	void OnCategorySelected(long index)
-	{
-		if (categoryButton == null)
-			return;
-
-		currentCategory = (LauncherGameCategory)categoryButton.GetItemId((int)index);
-		UpdateCategoryHint();
-		ScanGames();
-	}
-
 	void UpdateCategoryHint()
 	{
 		if (categoryHintLabel == null)
 			return;
 
-		categoryHintLabel.Text = currentCategory switch
-		{
-			LauncherGameCategory.Snake => MultiLanguage.Get("FirstWindow.SnakeHint", $"snake：蛇版 TW 请放入 {GetSnakeRootHint()}，启动时会使用 snake 核心。"),
-			LauncherGameCategory.All => MultiLanguage.Get("FirstWindow.AllHint", $"All：显示 {GetNormalRootHint()} 下所有可识别游戏，包括 snake 目录。"),
-			_ => MultiLanguage.Get("FirstWindow.V18Hint", $"v18：扫描 {GetNormalRootHint()} 下的普通游戏，不显示 snake 目录。")
-		};
+		categoryHintLabel.Text = MultiLanguage.Get(
+			currentCategory == LauncherGameCategory.Snake ? "FirstWindow.SnakeHint" : "FirstWindow.V24PureHint",
+			currentCategory == LauncherGameCategory.Snake
+				? $"snake: 扫描 {GetSnakeRootHint()} 下的直接游戏目录，并使用 snake 核心。"
+				: $"v24: 扫描 {GetNormalRootHint()} 下的直接游戏目录，以及 compat/<profile>/<game>。例如 compat/erafl/eraFL0.48 会显示在本列表，但会自动使用 erafl 模块；不会读取游戏内容识别类型。");
 	}
 
 	public override void _ExitTree()
@@ -455,9 +740,12 @@ public partial class FirstWindow : Control
 
 		if (!canAccess)
 		{
-			// MANAGE_EXTERNAL_STORAGE not granted — guide user to settings
-			statusLabel.Text = "需要\"所有文件访问\"权限。请在系统设置中开启后返回此应用。\n"
-				+ "\"All files access\" permission required. Please enable in system settings.";
+			// Android 11+ 的 MANAGE_EXTERNAL_STORAGE 属于"特殊应用权限"，
+			// OS.RequestPermissions() 不会弹出授权对话框，必须由用户到系统设置页
+			// 手动开启。开启后返回应用会经 _Notification(ApplicationResumed) 自动
+			// 重新扫描，所以这里给出具体操作路径而不是只写"系统设置"。
+			statusLabel.Text = "需要\"所有文件访问\"权限：设置 → 应用 → gEmuera → 权限 → 所有文件访问。开启后返回本应用（将自动重新扫描游戏）。\n"
+				+ "\"All files access\" required: Settings → Apps → gEmuera → Permissions → All files access, then return (auto re-scan).";
 			// Still try to scan — user:// and app-specific dirs don't need this permission
 		}
 		androidPermissionCheckPending = !canAccess;
@@ -475,28 +763,51 @@ public partial class FirstWindow : Control
 	void ScanGames()
 	{
 		string selectedPath = null;
-		var selectedItems = gameList.GetSelectedItems();
-		if (selectedItems.Length > 0 && !gameList.IsItemDisabled(selectedItems[0]))
-			selectedPath = gameList.GetItemMetadata(selectedItems[0]).As<string>();
+		if (TryGetSelectedGameEntry(out LauncherGameEntry selectedEntry))
+			selectedPath = selectedEntry.GameRoot;
 		if (string.IsNullOrEmpty(selectedPath))
 			selectedPath = ResolveStartupGamePath();
 
 		gameList.Clear();
+		gameEntries.Clear();
 		startButton.Disabled = true;
 
 		var roots = GetScanRoots(currentCategory);
-		bool includeSnake = currentCategory != LauncherGameCategory.V18;
-
+		var scannedEntries = new List<LauncherGameEntry>();
 		var addedPaths = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+		var scanMessages = new List<string>();
 		foreach (var root in roots)
-			ScanGameRoot(root, selectedPath, addedPaths, includeSnake);
+		{
+			if (currentCategory == LauncherGameCategory.Snake)
+				ScanSnakeRoot(root, scannedEntries, addedPaths, scanMessages);
+			else
+				ScanV24Root(root, scannedEntries, addedPaths, scanMessages);
+		}
+
+		PopulateGameList(scannedEntries, selectedPath);
 
 		if (gameList.ItemCount == 0)
 		{
 			gameList.AddItem(MultiLanguage.Get("FirstWindow.NoGames", "No era games found"));
 			gameList.SetItemDisabled(0, true);
+			if (scanMessages.Count > 0)
+			{
+				string routeErrors = string.Join("\n", scanMessages);
+				statusLabel.Text = string.IsNullOrEmpty(statusLabel.Text)
+					? routeErrors
+					: statusLabel.Text + "\n" + routeErrors;
+			}
 			if (string.IsNullOrEmpty(statusLabel.Text))
 				statusLabel.Text = "请将 era 游戏文件夹放入以下路径:\n" + string.Join("\n", roots);
+		}
+		else if (scanMessages.Count > 0)
+		{
+			statusLabel.Text = string.Join("\n", scanMessages);
+		}
+		else if (!androidPermissionCheckPending)
+		{
+			statusLabel.Text = "";
+			UpdateSelectedGameCompatibilityHint();
 		}
 	}
 
@@ -523,7 +834,36 @@ public partial class FirstWindow : Control
 
 		if (OS.GetName() == "Android")
 		{
+			// 主存储卷必须显式加入：/storage 枚举在某些 ROM 上不可靠，且
+			// /storage/self/primary 是指向 emulated/0 的符号链接（见下方跳过）。
 			AddUniqueRoot(roots, "/storage/emulated/0/emuera");
+
+			// 枚举所有存储卷（外置 SD 卡等）。部分平板把游戏放在
+			// /storage/XXXX-XXXX/emuera 下，只扫主存储会"检测不到游戏"。
+			using var storageDir = DirAccess.Open("/storage");
+			if (storageDir != null)
+			{
+				// Android 沙箱下 /storage 根可能无法枚举：Java 侧 dirOpen 返回 0 使
+				// list_dir_begin 失败，而 Godot 核心 _get_contents 忽略该错误后直接
+				// 调 get_next，打印 "Condition 'id == 0' is true. Returning: ''"。
+				// 先用 ListDirBegin 探测可枚举性，失败则跳过卷枚举（主存储已由
+				// 上方显式路径覆盖，不受影响）。
+				if (storageDir.ListDirBegin() == Error.Ok)
+				{
+					storageDir.ListDirEnd();
+					foreach (string volume in storageDir.GetDirectories())
+					{
+						if (string.IsNullOrEmpty(volume) || volume == "self")
+							continue;
+						string volumeEmuera = "/storage/" + volume + "/emuera";
+						// 只把确实包含 emuera 容器的卷加入扫描根，避免把无关卷
+						// 全扫一遍导致启动器出现大量无效条目。
+						if (uEmuera.Utils.DirectoryExists(volumeEmuera))
+							AddUniqueRoot(roots, volumeEmuera);
+					}
+				}
+			}
+
 			string appDir = OS.GetUserDataDir();
 			if (!string.IsNullOrEmpty(appDir))
 				AddUniqueRoot(roots, appDir);
@@ -540,6 +880,12 @@ public partial class FirstWindow : Control
 				if (!string.IsNullOrEmpty(resDir))
 					AddUniqueRoot(roots, resDir);
 			}
+
+			string configuredLibrary = ProjectSettings.GetSetting(
+				"launcher/default_game_library",
+				"").AsString();
+			if (!string.IsNullOrWhiteSpace(configuredLibrary))
+				AddUniqueRoot(roots, configuredLibrary);
 		}
 
 		string userDir = ProjectSettings.GlobalizePath("user://");
@@ -580,39 +926,254 @@ public partial class FirstWindow : Control
 		return GetNormalRootHint().TrimEnd('/', '\\') + "/snake";
 	}
 
-	void ScanGameRoot(string root, string selectedPath, HashSet<string> addedPaths, bool includeSnake)
+	void ScanV24Root(
+		string root,
+		List<LauncherGameEntry> entries,
+		HashSet<string> addedPaths,
+		List<string> scanMessages)
 	{
 		if (string.IsNullOrEmpty(root))
 			return;
-		root = root.TrimEnd('/', '\\');
-		ScanGameDirectory(root, root, 0, OS.GetName() == "Android" ? 8 : 3, selectedPath, addedPaths, includeSnake);
+
+		string normalizedRoot = root.TrimEnd('/', '\\');
+		foreach (string directoryName in GetDirectDirectoryNames(normalizedRoot))
+		{
+			if (entries.Count >= MaxLauncherGameEntries)
+			{
+				AddScanMessage(scanMessages, $"游戏条目超过 {MaxLauncherGameEntries} 个，已停止继续扫描。");
+				break;
+			}
+
+			if (string.Equals(directoryName, SnakeDirectoryName, System.StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(directoryName, CompatibilityDirectoryName, System.StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			string gameRoot = CombineDirectory(normalizedRoot, directoryName);
+			if (IsEraGameDirectory(gameRoot))
+			{
+				AddGameEntry(
+					entries,
+					addedPaths,
+					GetGameDisplayName(normalizedRoot, gameRoot),
+					gameRoot,
+					CoreProfileV24Pure,
+					LauncherGameSource.V24Root,
+					scanMessages);
+			}
+			else
+			{
+				// 支持 emuera/归档目录/游戏 这类嵌套结构（部分平板用户习惯
+				// 用子目录归档游戏包）；只递归一层，配合 IsEraGameDirectory
+				// 校验避免把游戏内部目录误报为独立游戏。
+				ScanNestedEraGameDirectories(
+					gameRoot,
+					1,
+					CoreProfileV24Pure,
+					LauncherGameSource.V24Root,
+					entries,
+					addedPaths,
+					scanMessages);
+			}
+		}
+
+		ScanCompatibilityDirectory(normalizedRoot, entries, addedPaths, scanMessages);
 	}
 
-	void ScanGameDirectory(string root, string path, int depth, int maxDepth, string selectedPath, HashSet<string> addedPaths, bool includeSnake)
+	void ScanSnakeRoot(
+		string root,
+		List<LauncherGameEntry> entries,
+		HashSet<string> addedPaths,
+		List<string> scanMessages)
 	{
-		if (string.IsNullOrEmpty(path) || depth > maxDepth)
+		if (string.IsNullOrEmpty(root))
 			return;
 
-		if (IsEraGameDirectory(path))
+		string normalizedRoot = root.TrimEnd('/', '\\');
+		foreach (string directoryName in GetDirectDirectoryNames(normalizedRoot))
 		{
-			AddGamePath(root, path.TrimEnd('/'), selectedPath, addedPaths);
+			if (entries.Count >= MaxLauncherGameEntries)
+			{
+				AddScanMessage(scanMessages, $"游戏条目超过 {MaxLauncherGameEntries} 个，已停止继续扫描。");
+				break;
+			}
+
+			string gameRoot = CombineDirectory(normalizedRoot, directoryName);
+			if (IsEraGameDirectory(gameRoot))
+			{
+				AddGameEntry(
+					entries,
+					addedPaths,
+					GetGameDisplayName(normalizedRoot, gameRoot),
+					gameRoot,
+					CoreProfileSnake,
+					LauncherGameSource.SnakeRoot,
+					scanMessages);
+			}
+			else
+			{
+				ScanNestedEraGameDirectories(
+					gameRoot,
+					1,
+					CoreProfileSnake,
+					LauncherGameSource.SnakeRoot,
+					entries,
+					addedPaths,
+					scanMessages);
+			}
+		}
+	}
+
+	// 在非游戏目录内再找一层游戏目录（总深度不超过 2）。
+	void ScanNestedEraGameDirectories(
+		string directory,
+		int depth,
+		string profileId,
+		LauncherGameSource source,
+		List<LauncherGameEntry> entries,
+		HashSet<string> addedPaths,
+		List<string> scanMessages)
+	{
+		if (string.IsNullOrEmpty(directory) || depth > MaxLauncherScanDepth)
 			return;
+
+		foreach (string directoryName in GetDirectDirectoryNames(directory))
+		{
+			if (entries.Count >= MaxLauncherGameEntries)
+			{
+				AddScanMessage(scanMessages, $"游戏条目超过 {MaxLauncherGameEntries} 个，已停止继续扫描。");
+				return;
+			}
+
+			string gameRoot = CombineDirectory(directory, directoryName);
+			if (!IsEraGameDirectory(gameRoot))
+				continue;
+
+			AddGameEntry(
+				entries,
+				addedPaths,
+				GetGameDisplayName(directory, gameRoot),
+				gameRoot,
+				profileId,
+				source,
+				scanMessages);
+		}
+	}
+
+	void ScanCompatibilityDirectory(
+		string root,
+		List<LauncherGameEntry> entries,
+		HashSet<string> addedPaths,
+		List<string> scanMessages)
+	{
+		string compatibilityRoot = CombineDirectory(root, CompatibilityDirectoryName);
+		List<string> profileDirectoryNames = GetDirectDirectoryNames(compatibilityRoot);
+		if (profileDirectoryNames.Count > MaxCompatibilityProfilesPerRoot)
+		{
+			AddScanMessage(
+				scanMessages,
+				$"兼容目录 profile 超过 {MaxCompatibilityProfilesPerRoot} 个，已忽略其余目录。");
 		}
 
+		int profileCount = System.Math.Min(profileDirectoryNames.Count, MaxCompatibilityProfilesPerRoot);
+		for (int profileIndex = 0; profileIndex < profileCount; profileIndex++)
+		{
+			string profileDirectoryName = profileDirectoryNames[profileIndex];
+			if (!TryResolveCompatibilityRouteProfile(profileDirectoryName, scanMessages, out string profileId))
+				continue;
+
+			string profileRoot = CombineDirectory(compatibilityRoot, profileDirectoryName);
+			List<string> gameDirectoryNames = GetDirectDirectoryNames(profileRoot);
+			if (gameDirectoryNames.Count > MaxGamesPerCompatibilityProfile)
+			{
+				AddScanMessage(
+					scanMessages,
+					$"兼容目录 compat/{profileId} 的游戏超过 {MaxGamesPerCompatibilityProfile} 个，已忽略其余目录。");
+			}
+
+			int gameCount = System.Math.Min(gameDirectoryNames.Count, MaxGamesPerCompatibilityProfile);
+			for (int gameIndex = 0; gameIndex < gameCount; gameIndex++)
+			{
+				if (entries.Count >= MaxLauncherGameEntries)
+				{
+					AddScanMessage(scanMessages, $"游戏条目超过 {MaxLauncherGameEntries} 个，已停止继续扫描。");
+					return;
+				}
+
+				string gameDirectoryName = gameDirectoryNames[gameIndex];
+				string gameRoot = CombineDirectory(profileRoot, gameDirectoryName);
+				if (!IsEraGameDirectory(gameRoot))
+				{
+					AddScanMessage(
+						scanMessages,
+						$"兼容目录 compat/{profileId}/{gameDirectoryName} 不是有效游戏目录，已跳过（不递归扫描）。");
+					continue;
+				}
+
+				AddGameEntry(
+					entries,
+					addedPaths,
+					GetGameDisplayName(profileRoot, gameRoot),
+					gameRoot,
+					profileId,
+					LauncherGameSource.CompatibilityDirectory,
+					scanMessages);
+			}
+		}
+	}
+
+	bool TryResolveCompatibilityRouteProfile(
+		string profileDirectoryName,
+		List<string> scanMessages,
+		out string profileId)
+	{
+		profileId = null;
+		if (!string.Equals(
+				profileDirectoryName,
+				profileDirectoryName.ToLowerInvariant(),
+				System.StringComparison.Ordinal))
+		{
+			AddScanMessage(scanMessages, $"兼容目录 {profileDirectoryName} 必须使用小写 profile id，已跳过。");
+			return false;
+		}
+
+		if (string.Equals(profileDirectoryName, CoreProfileV24Pure, System.StringComparison.Ordinal)
+			|| string.Equals(profileDirectoryName, CoreProfileSnake, System.StringComparison.Ordinal))
+		{
+			AddScanMessage(scanMessages, $"兼容目录 {profileDirectoryName} 是保留 launcher lane，已跳过。");
+			return false;
+		}
+
+		if (!DirectoryRouteProfileCatalog.TryResolve(profileDirectoryName, out CompatibilityProfileDefinition definition))
+		{
+			AddScanMessage(scanMessages, $"不支持的兼容目录 {profileDirectoryName}，已跳过其中游戏。");
+			return false;
+		}
+
+		profileId = definition.ProfileId;
+		return true;
+	}
+
+	static List<string> GetDirectDirectoryNames(string path)
+	{
+		var names = new List<string>();
 		using var dir = DirAccess.Open(path);
 		if (dir == null)
-			return;
+			return names;
 
 		dir.IncludeHidden = true;
-		foreach (string entry in dir.GetDirectories())
+		foreach (string name in dir.GetDirectories())
 		{
-			if (string.IsNullOrEmpty(entry) || entry == "." || entry == "..")
+			if (string.IsNullOrEmpty(name) || name == "." || name == "..")
 				continue;
-			if (!includeSnake && string.Equals(entry, "snake", System.StringComparison.OrdinalIgnoreCase))
-				continue;
-			string child = path.TrimEnd('/') + "/" + entry;
-			ScanGameDirectory(root, child, depth + 1, maxDepth, selectedPath, addedPaths, includeSnake);
+			names.Add(name);
 		}
+		names.Sort(System.StringComparer.OrdinalIgnoreCase);
+		return names;
+	}
+
+	static string CombineDirectory(string root, string child)
+	{
+		return root.TrimEnd('/', '\\') + "/" + child;
 	}
 
 	bool IsEraGameDirectory(string path)
@@ -629,48 +1190,139 @@ public partial class FirstWindow : Control
 			|| uEmuera.Utils.DirectoryExists(path.TrimEnd('/') + "/" + name.ToUpperInvariant());
 	}
 
-	void AddGamePath(string root, string fullPath, string selectedPath, HashSet<string> addedPaths)
+	void AddGameEntry(
+		List<LauncherGameEntry> entries,
+		HashSet<string> addedPaths,
+		string displayName,
+		string fullPath,
+		string profileId,
+		LauncherGameSource source,
+		List<string> scanMessages)
 	{
-		if (!addedPaths.Add(fullPath))
+		if (!addedPaths.Add(fullPath.TrimEnd('/', '\\')))
 			return;
 
-		string label = GetGameDisplayName(root, fullPath);
-		gameList.AddItem(label);
-		gameList.SetItemMetadata(gameList.ItemCount - 1, fullPath);
-		if (PathsEqual(fullPath, selectedPath))
+		if (entries.Count >= MaxLauncherGameEntries)
 		{
-			gameList.Select(gameList.ItemCount - 1);
-			startButton.Disabled = false;
+			AddScanMessage(scanMessages, $"游戏条目超过 {MaxLauncherGameEntries} 个，已停止继续扫描。");
+			return;
 		}
+
+		entries.Add(new LauncherGameEntry(
+			displayName,
+			fullPath.TrimEnd('/', '\\'),
+			profileId,
+			source));
 	}
 
 	string GetGameDisplayName(string root, string fullPath)
 	{
-		string normalizedRoot = root.TrimEnd('/');
+		string normalizedRoot = root.TrimEnd('/', '\\');
 		if (fullPath.StartsWith(normalizedRoot + "/", System.StringComparison.OrdinalIgnoreCase))
 			return fullPath.Substring(normalizedRoot.Length + 1);
-		return Path.GetFileName(fullPath.TrimEnd('/'));
+		return Path.GetFileName(fullPath.TrimEnd('/', '\\'));
+	}
+
+	void PopulateGameList(List<LauncherGameEntry> scannedEntries, string selectedPath)
+	{
+		scannedEntries.Sort((left, right) =>
+		{
+			int displayNameComparison = System.StringComparer.OrdinalIgnoreCase.Compare(left.DisplayName, right.DisplayName);
+			if (displayNameComparison != 0)
+				return displayNameComparison;
+			int profileComparison = System.StringComparer.Ordinal.Compare(left.ProfileId, right.ProfileId);
+			if (profileComparison != 0)
+				return profileComparison;
+			return System.StringComparer.OrdinalIgnoreCase.Compare(left.GameRoot, right.GameRoot);
+		});
+
+		var duplicateDisplayNames = new Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+		foreach (LauncherGameEntry entry in scannedEntries)
+		{
+			duplicateDisplayNames.TryGetValue(entry.DisplayName, out int count);
+			duplicateDisplayNames[entry.DisplayName] = count + 1;
+		}
+
+		foreach (LauncherGameEntry entry in scannedEntries)
+		{
+			string label = duplicateDisplayNames[entry.DisplayName] > 1
+				? $"{entry.DisplayName} ({GetEntryRouteDescription(entry)})"
+				: entry.DisplayName;
+			gameList.AddItem(label);
+			gameEntries.Add(entry);
+			if (PathsEqual(entry.GameRoot, selectedPath))
+			{
+				gameList.Select(gameList.ItemCount - 1);
+				startButton.Disabled = false;
+			}
+		}
+	}
+
+	static string GetEntryRouteDescription(LauncherGameEntry entry)
+	{
+		return entry.Source switch
+		{
+			LauncherGameSource.V24Root => "v24",
+			LauncherGameSource.SnakeRoot => "snake",
+			_ => CompatibilityDirectoryName + "/" + entry.ProfileId,
+		};
+	}
+
+	bool TryGetSelectedGameEntry(out LauncherGameEntry entry)
+	{
+		var selectedItems = gameList.GetSelectedItems();
+		if (selectedItems.Length > 0)
+			return TryGetGameEntry(selectedItems[0], out entry);
+
+		entry = null;
+		return false;
+	}
+
+	bool TryGetGameEntry(long index, out LauncherGameEntry entry)
+	{
+		if (index >= 0 && index < gameEntries.Count)
+		{
+			entry = gameEntries[(int)index];
+			return true;
+		}
+
+		entry = null;
+		return false;
+	}
+
+	void AddScanMessage(List<string> scanMessages, string message)
+	{
+		if (scanMessages.Count >= MaxScanMessages || scanMessages.Contains(message))
+			return;
+		scanMessages.Add(message);
 	}
 
 	void OnGameSelected(long index)
 	{
+		if (!TryGetGameEntry(index, out LauncherGameEntry entry))
+			return;
+
 		startButton.Disabled = false;
+		UpdateSelectedGameCompatibilityHint(entry);
 	}
 
 	void OnGameActivated(long index)
 	{
-		if (gameList.IsItemDisabled((int)index))
+		if (!TryGetGameEntry(index, out LauncherGameEntry entry))
 			return;
-		SetSelectedGamePath(gameList.GetItemMetadata((int)index).As<string>(), GetSelectedCoreProfileName());
-		GetTree().ChangeSceneToFile("res://main.tscn");
+		LaunchGameEntry(entry);
 	}
 
 	void OnStartPressed()
 	{
-		var selected = gameList.GetSelectedItems();
-		if (selected.Length == 0)
+		if (!TryGetSelectedGameEntry(out LauncherGameEntry entry))
 			return;
-		SetSelectedGamePath(gameList.GetItemMetadata(selected[0]).As<string>(), GetSelectedCoreProfileName());
+		LaunchGameEntry(entry);
+	}
+
+	void LaunchGameEntry(LauncherGameEntry entry)
+	{
+		SetSelectedGamePath(entry.GameRoot, GetSelectedCoreProfileName(entry));
 		GetTree().ChangeSceneToFile("res://main.tscn");
 	}
 
@@ -690,26 +1342,83 @@ public partial class FirstWindow : Control
 		return null;
 	}
 
-	string GetSelectedCoreProfileName()
+	string GetSelectedCoreProfileName(LauncherGameEntry entry)
 	{
-		return currentCategory == LauncherGameCategory.Snake ? CoreProfileSnake : CoreProfileV18;
+		if (AdvancedCompatibilityEnabled)
+			return NormalizeCoreProfileName(ManualCoreProfileName);
+		return entry.ProfileId;
 	}
 
-	static void SetSelectedGamePath(string path, string coreProfileName = CoreProfileV18)
+	void UpdateSelectedGameCompatibilityHint()
+	{
+		if (TryGetSelectedGameEntry(out LauncherGameEntry entry))
+			UpdateSelectedGameCompatibilityHint(entry);
+	}
+
+	void UpdateSelectedGameCompatibilityHint(LauncherGameEntry entry)
+	{
+		if (statusLabel == null)
+			return;
+
+		string effectiveProfile = GetSelectedCoreProfileName(entry);
+		string routeDescription = GetEntryRouteDescription(entry);
+		statusLabel.Text = AdvancedCompatibilityEnabled
+			? $"高级兼容模式：本次启动使用 {effectiveProfile}（目录路由为 {entry.ProfileId}，来源 {routeDescription}）。"
+			: $"目录路由：{routeDescription} → {effectiveProfile}";
+	}
+
+	static void SetSelectedGamePath(string path, string coreProfileName = CoreProfileV24Pure)
 	{
 		if (string.IsNullOrEmpty(path))
 			return;
+		if (!TryNormalizeCoreProfileName(coreProfileName, out string normalizedProfileName))
+			throw new System.InvalidOperationException($"Unsupported compatibility profile: {coreProfileName}");
 
 		SelectedGamePath = path.TrimEnd('/', '\\');
-		SelectedCoreProfileName = NormalizeCoreProfileName(coreProfileName);
+		SelectedCoreProfileName = normalizedProfileName;
 		SaveLastGamePath(SelectedGamePath, SelectedCoreProfileName);
 	}
 
 	static string NormalizeCoreProfileName(string coreProfileName)
 	{
-		return string.Equals(coreProfileName, CoreProfileSnake, System.StringComparison.OrdinalIgnoreCase)
-			? CoreProfileSnake
-			: CoreProfileV18;
+		return TryNormalizeCoreProfileName(coreProfileName, out string normalizedProfileName)
+			? normalizedProfileName
+			: CoreProfileV24Pure;
+	}
+
+	static bool TryNormalizeCoreProfileName(string coreProfileName, out string normalizedProfileName)
+	{
+		normalizedProfileName = null;
+		// launcher.cfg 与 M0 runner 是旧入口，保留三个已存在 profile 的大小写兼容；
+		// compat 目录本身仍在扫描时按小写、精确 allowlist 校验。
+		if (string.Equals(coreProfileName, CoreProfileV24Pure, System.StringComparison.OrdinalIgnoreCase))
+		{
+			normalizedProfileName = CoreProfileV24Pure;
+			return true;
+		}
+		if (string.Equals(coreProfileName, CoreProfileSnake, System.StringComparison.OrdinalIgnoreCase))
+		{
+			normalizedProfileName = CoreProfileSnake;
+			return true;
+		}
+		if (string.Equals(coreProfileName, CoreProfileEraFl, System.StringComparison.OrdinalIgnoreCase))
+		{
+			normalizedProfileName = CoreProfileEraFl;
+			return true;
+		}
+
+		if (!DirectoryRouteProfileCatalog.TryResolve(coreProfileName, out CompatibilityProfileDefinition definition))
+			return false;
+
+		normalizedProfileName = definition.ProfileId;
+		return true;
+	}
+
+	static CompatibilityProfileCatalog CreateDirectoryRouteProfileCatalog()
+	{
+		CompatibilityProfileCatalog catalog = BuiltInDialectCatalog.CreateLegacyProfileCatalog();
+		catalog.Freeze();
+		return catalog;
 	}
 
 	static string LoadLastGamePath()
@@ -725,20 +1434,22 @@ public partial class FirstWindow : Control
 	{
 		var config = new ConfigFile();
 		if (config.Load(LauncherSettingsPath) != Error.Ok)
-			return CoreProfileV18;
+			return CoreProfileV24Pure;
 
-		return NormalizeCoreProfileName(config.GetValue(LauncherSettingsSection, LauncherLastCoreProfileKey, CoreProfileV18).As<string>());
+		return NormalizeCoreProfileName(config.GetValue(LauncherSettingsSection, LauncherLastCoreProfileKey, CoreProfileV24Pure).As<string>());
 	}
 
 	static void SaveLastGamePath(string path, string coreProfileName)
 	{
 		if (string.IsNullOrEmpty(path))
 			return;
+		if (!TryNormalizeCoreProfileName(coreProfileName, out string normalizedProfileName))
+			return;
 
 		var config = new ConfigFile();
 		config.Load(LauncherSettingsPath);
 		config.SetValue(LauncherSettingsSection, LauncherLastGamePathKey, path);
-		config.SetValue(LauncherSettingsSection, LauncherLastCoreProfileKey, NormalizeCoreProfileName(coreProfileName));
+		config.SetValue(LauncherSettingsSection, LauncherLastCoreProfileKey, normalizedProfileName);
 		config.Save(LauncherSettingsPath);
 	}
 

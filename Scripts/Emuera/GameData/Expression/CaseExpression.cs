@@ -19,11 +19,11 @@ namespace MinorShift.Emuera.GameData.Expression
 		public IOperandTerm RightTerm;
 
 		public OperatorCode Operator;
-		public Type GetOperandType()
+		public EraType GetEraType()
 		{
 			if(LeftTerm != null)
-				return LeftTerm.GetOperandType();
-			return typeof(void);
+				return LeftTerm.GetEraType();
+			return EraType.Void;
 		}
 		
 		public void Reduce(ExpressionMediator exm)
@@ -74,6 +74,17 @@ namespace MinorShift.Emuera.GameData.Expression
 			}
 			return LeftTerm.GetStrValue(exm) == Is;
 		}
+
+		public bool GetBool(double Is, ExpressionMediator exm)
+		{
+			if (CaseType == CaseExpressionType.To)
+				return LeftTerm.GetFloatValue(exm) <= Is && Is <= RightTerm.GetFloatValue(exm);
+			if (CaseType == CaseExpressionType.Is)
+			{
+				IOperandTerm term = OperatorMethodManager.ReduceBinaryTerm(Operator, new SingleTerm(Is), LeftTerm);
+				return term.GetIntValue(exm) != 0;
+			}
+			return LeftTerm.GetFloatValue(exm) == Is;
+		}
 	}
 }
-

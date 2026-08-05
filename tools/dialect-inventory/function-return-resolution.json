@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0.0",
+  "catalogId": "gemuera.m0.function-return-resolution",
+  "catalogVersion": "1.0.0",
+  "sourceWorkPackage": "M0-DIA-03",
+  "sourceDescriptorSetHash": "0ac8b25894d83eebdb929771b90497b8817f34058a249cf5ca1ce4767191d80c",
+  "rules": [
+    { "ruleId": "getconfig.integer", "handlerType": "GetConfigMethod", "matchKind": "Exact", "pattern": "GETCONFIG", "selectedReturnType": "EraType.Integer", "expectedMatchCount": 1, "rationale": "Creator 以 GetConfigMethod(true) 注册 GETCONFIG，构造器 true 分支设置 Integer。" },
+    { "ruleId": "getconfigs.string", "handlerType": "GetConfigMethod", "matchKind": "Exact", "pattern": "GETCONFIGS", "selectedReturnType": "EraType.String", "expectedMatchCount": 1, "rationale": "Creator 以 GetConfigMethod(false) 注册 GETCONFIGS，构造器 false 分支设置 String。" }
+  ]
+}

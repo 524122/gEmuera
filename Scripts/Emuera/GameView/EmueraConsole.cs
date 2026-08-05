@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.IO;
+using System.Threading;
 using Godot;
 using MinorShift._Library;
 using MinorShift.Emuera.Sub;
-//using MinorShift.Emuera.GameData;
+using MinorShift.Emuera.GameData;
 using MinorShift.Emuera.GameProc;
 //using System.Drawing.Imaging;
 //using MinorShift.Emuera.Forms;
@@ -30,6 +31,7 @@ namespace MinorShift.Emuera.GameView
 		Running = 7,
 		WaitInput = 20,
         Sleep = 21,//DoEvents
+		WaitInputNoFocus = 22,
 
         //WaitKey = 1,//WAIT
         //WaitSystemInteger = 2,//Systemが要求するInput
@@ -123,6 +125,7 @@ namespace MinorShift.Emuera.GameView
 		public EmueraConsole(MainWindow parent)
 		{
 			window = parent;
+			hotkeyState = new HotkeyState();
 
 			//1.713 この段階でsetStBarを使用してはいけない
 			//setStBar(StaticConfig.DrawLineString);
@@ -130,7 +133,7 @@ namespace MinorShift.Emuera.GameView
 			if (Config.FPS > 0)
 			{
 				int effectiveFps = Config.FPS;
-				if (Program.IsSnakeProfile && effectiveFps < 60)
+				if (Program.Compatibility.Snake.UsesFastDisplayRefresh && effectiveFps < 60)
 					effectiveFps = 60;
 				msPerFrame = 1000 / (uint)effectiveFps;
 			}
@@ -168,6 +171,9 @@ namespace MinorShift.Emuera.GameView
 		private readonly object displayLineLock = new object();
 		private readonly object cbgLock = new object();
 		private readonly List<ClientBackGroundImage> cbgList = new List<ClientBackGroundImage>();
+		// CBG 列表变化与 GraphicsImage 像素变化都可能要求 Godot 重提背景层。
+		// 该 revision 只描述展示快照，不参与 ERB 可见状态，避免普通文本刷新重复提交静态背景。
+		private int cbgPresentationRevision;
 		private GraphicsImage cbgButtonMap = null;
 		private int selectingCBGButtonInt = -1;
 		private int lastSelectingCBGButtonInt = -1;
@@ -188,47 +194,71 @@ namespace MinorShift.Emuera.GameView
 			public int width;
 			public int height;
 			public float opacity = 1.0f;
+			public float[][] colorMatrix = null;
+			public bool followScroll = false;
+			public int initialScrollY = int.MinValue;
 			public bool isSnakeImageLayer = false;
+			public long snakeImageDepth = 0;
 			public string snakeImageName = null;
 			public readonly int zdepth;
 			public bool isButton = false;
 			public int buttonValue;
 			public string tooltipString = null;
+			internal long ObservedImageDisplayRevision = long.MinValue;
+			internal long ObservedButtonImageDisplayRevision = long.MinValue;
 			public int CompareTo(ClientBackGroundImage other)
 			{
 				if (other == null)
 					return -1;
+				if (isSnakeImageLayer && other.isSnakeImageLayer)
+				{
+					int snakeDepthOrder = -snakeImageDepth.CompareTo(other.snakeImageDepth);
+					if (snakeDepthOrder != 0)
+						return snakeDepthOrder;
+				}
 				//逆順でSort
 				return -zdepth.CompareTo(other.zdepth);
 			}
 		}
 		public void CBG_Clear()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for(var i=0; i<cbgList.Count; ++i)
 				{
-                ClientBackGroundImage cimg = cbgList[i];
-                //使い捨て無名Imageを一応disposeしておく
-                if (cimg.Img != null && cimg.Img.Name.Length == 0)
+					ClientBackGroundImage cimg = cbgList[i];
+					if (cimg.isSnakeImageLayer)
+						continue;
+					//使い捨て無名Imageを一応disposeしておく
+					if (cimg.Img != null && cimg.Img.Name.Length == 0)
 						cimg.Img.Dispose();
+					cbgList.RemoveAt(i);
+					i--;
+					changed = true;
 				}
-				cbgList.Clear();
-				CBG_ClearBMap();
+				changed |= ClearCbgButtonMapState();
 				cbgList.Add(new ClientBackGroundImage(0));
+				cbgList.Sort();
+				changed = true;
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearRange(int zmin, int zmax)
 		{
 			if (zmin > zmax)
 				return;
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count;i++)
 				{
 					ClientBackGroundImage cimg = cbgList[i];
-					if (cimg.zdepth < zmin || cimg.zdepth > zmax || cimg.zdepth == 0)//0はダミーなので削除しない
+					// Snake 的 SETIMAGELAYER 在原实现里由独立 ImageLayerManager 管理。
+					// Godot 版复用 CBG 列表渲染时，CBGREMOVERANGE 仍只能影响 CBG 自己的层。
+					if (cimg.isSnakeImageLayer || cimg.zdepth < zmin || cimg.zdepth > zmax || cimg.zdepth == 0)//0はダミーなので削除しない
 						continue;
 
 					//使い捨て無名Imageを一応disposeしておく
@@ -236,12 +266,16 @@ namespace MinorShift.Emuera.GameView
 						cimg.Img.Dispose();
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearButton()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -255,16 +289,21 @@ namespace MinorShift.Emuera.GameView
 						cimg.Img.Dispose();
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
-				CBG_ClearBMap();
+				changed |= ClearCbgButtonMapState();
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void CBG_ClearBMap()
 		{
-			cbgButtonMap = null;
-			selectingCBGButtonInt = -1;
-			lastSelectingCBGButtonInt = -1;
+			bool changed;
+			lock (cbgLock)
+				changed = ClearCbgButtonMapState();
+			if (changed)
+				RequestCbgRefresh();
 		}
 		public List<ClientBackGroundImage> GetCBGList()
 		{
@@ -272,13 +311,85 @@ namespace MinorShift.Emuera.GameView
 				return new List<ClientBackGroundImage>(cbgList);
 		}
 
-		public bool CBG_SetGraphics(GraphicsImage gra, int x, int y, int zdepth)
+		/// <summary>
+		/// 仅在 CBG 结构、GraphicsImage 像素或逐帧 SpriteAnime 发生变化时复制图层列表。
+		/// Window.Update 会随地图文本高频调用本入口；静态背景不能因此在 Android 每帧重新 pin 纹理并失效 CanvasItem。
+		/// </summary>
+		public bool TryGetCBGListSnapshot(int knownRevision, out int revision, out List<ClientBackGroundImage> snapshot)
+		{
+			lock (cbgLock)
+			{
+				if (HasCbgDisplayContentChangedLocked())
+					Interlocked.Increment(ref cbgPresentationRevision);
+
+				revision = Volatile.Read(ref cbgPresentationRevision);
+				if (revision == knownRevision)
+				{
+					snapshot = null;
+					return false;
+				}
+
+				snapshot = new List<ClientBackGroundImage>(cbgList);
+				return true;
+			}
+		}
+
+		bool HasCbgDisplayContentChangedLocked()
+		{
+			bool changed = false;
+			for (int i = 0; i < cbgList.Count; i++)
+			{
+				var layer = cbgList[i];
+				if (layer == null)
+					continue;
+
+				// SpriteAnime 的当前帧由绘制时钟决定，无法只依赖列表结构 revision。
+				// 保持每次已有显示刷新都可提交新帧，不能因为去重而冻结动画。
+				if (layer.Img is SpriteAnime || layer.ImgB is SpriteAnime)
+					return true;
+
+				changed |= UpdateObservedCbgGraphicsRevision(layer.Img, ref layer.ObservedImageDisplayRevision);
+				changed |= UpdateObservedCbgGraphicsRevision(layer.ImgB, ref layer.ObservedButtonImageDisplayRevision);
+			}
+			return changed;
+		}
+
+		static bool UpdateObservedCbgGraphicsRevision(ASprite sprite, ref long observedRevision)
+		{
+			if (sprite is not ASpriteSingle single || single.BaseImage is not GraphicsImage graphics)
+				return false;
+
+			long revision = graphics.DisplayRevision;
+			if (observedRevision == revision)
+				return false;
+			observedRevision = revision;
+			return true;
+		}
+
+		private bool ClearCbgButtonMapState()
+		{
+			bool changed = cbgButtonMap != null || selectingCBGButtonInt != -1 || lastSelectingCBGButtonInt != -1;
+			cbgButtonMap = null;
+			selectingCBGButtonInt = -1;
+			lastSelectingCBGButtonInt = -1;
+			return changed;
+		}
+
+		private void RequestCbgRefresh()
+		{
+			// CBG/SETIMAGELAYER 只改背景列表时可能没有文本输出触发刷新。
+			// 这里只唤醒 uEmuera 窗口，实际 Godot 节点重建仍由 Window.Update 合并到下一帧执行。
+			Interlocked.Increment(ref cbgPresentationRevision);
+			window?.Refresh();
+		}
+
+		public bool CBG_SetGraphics(GraphicsImage gra, int x, int y, int zdepth, int width = 0, int height = 0, float opacity = 1.0f, float[][] colorMatrix = null)
 		{
 			if (gra == null || !gra.IsCreated)
 				return false;
-			return CBG_SetImage(new SpriteG("", gra, new Rectangle(0, 0, gra.Width, gra.Height)), x, y, zdepth);
+			return CBG_SetImage(new SpriteG("", gra, new Rectangle(0, 0, gra.Width, gra.Height)), x, y, zdepth, width, height, opacity, colorMatrix);
 		}
-		public bool CBG_SetImage(ASprite image, int x, int y, int zdepth)
+		public bool CBG_SetImage(ASprite image, int x, int y, int zdepth, int width = 0, int height = 0, float opacity = 1.0f, float[][] colorMatrix = null)
 		{
 			if (image == null || !image.IsCreated)
 				return false;
@@ -290,10 +401,15 @@ namespace MinorShift.Emuera.GameView
 				cbg.Img = image;
 				cbg.x = x;
 				cbg.y = y;
+				cbg.width = width;
+				cbg.height = height;
+				cbg.opacity = clampOpacity(opacity);
+				cbg.colorMatrix = colorMatrix;
 				//cbg.zdepth = zdepth;
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 			return true;
 		}
 
@@ -312,10 +428,12 @@ namespace MinorShift.Emuera.GameView
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 		}
 
 		public void ClearBackgroundImage()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -327,14 +445,18 @@ namespace MinorShift.Emuera.GameView
 						continue;
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void RemoveBackground(string key)
 		{
 			if (string.IsNullOrEmpty(key))
 				return;
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -347,24 +469,31 @@ namespace MinorShift.Emuera.GameView
 						continue;
 					cbgList.RemoveAt(i);
 					i--;
+					changed = true;
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
-		public void SetImageLayer(string spriteName, long depth, int x, int y, int width, int height, int opacity, float[] colorMatrix, bool followScroll)
+		public void SetImageLayer(string spriteName, long depth, int x, int y, int width, int height, int opacity, float[][] colorMatrix, bool followScroll)
 		{
 			ASprite sprite = GetSnakeSprite(spriteName);
 			if (sprite == null || !sprite.IsCreated)
 				return;
 			int zdepth = normalizeSnakeDepth(depth);
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
 				{
-					if (cbgList[i].isSnakeImageLayer && cbgList[i].zdepth == zdepth)
+					// SETIMAGELAYER 的脚本可见 depth 是 long，允许 0 和 -1 同时存在。
+					// CBG 渲染层内部保留 zdepth==0 作为文字哑元，因此这里只能用原始 depth 做逻辑匹配。
+					if (cbgList[i].isSnakeImageLayer && cbgList[i].snakeImageDepth == depth)
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 				ClientBackGroundImage cbg = new ClientBackGroundImage(zdepth);
@@ -374,31 +503,43 @@ namespace MinorShift.Emuera.GameView
 				cbg.width = width;
 				cbg.height = height;
 				cbg.opacity = clampOpacity(opacity / 255.0f);
+				cbg.colorMatrix = colorMatrix;
+				cbg.followScroll = followScroll;
 				cbg.isSnakeImageLayer = true;
+				cbg.snakeImageDepth = depth;
 				cbg.snakeImageName = spriteName;
 				cbgList.Add(cbg);
 				cbgList.Sort();
+				changed = true;
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void ClearImageLayer(long depth)
 		{
-			int zdepth = normalizeSnakeDepth(depth);
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
 				{
-					if (cbgList[i].isSnakeImageLayer && cbgList[i].zdepth == zdepth)
+					// SETIMAGELAYER 的脚本可见 depth 是 long，允许 0 和 -1 同时存在。
+					// CBG 渲染层内部保留 zdepth==0 作为文字哑元，因此这里只能用原始 depth 做逻辑匹配。
+					if (cbgList[i].isSnakeImageLayer && cbgList[i].snakeImageDepth == depth)
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public void ClearImageLayerAll()
 		{
+			bool changed = false;
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
@@ -407,19 +548,21 @@ namespace MinorShift.Emuera.GameView
 					{
 						cbgList.RemoveAt(i);
 						i--;
+						changed = true;
 					}
 				}
 			}
+			if (changed)
+				RequestCbgRefresh();
 		}
 
 		public bool ExistsImageLayer(long depth)
 		{
-			int zdepth = normalizeSnakeDepth(depth);
 			lock (cbgLock)
 			{
 				for (int i = 0; i < cbgList.Count; i++)
 				{
-					if (cbgList[i].isSnakeImageLayer && cbgList[i].zdepth == zdepth)
+					if (cbgList[i].isSnakeImageLayer && cbgList[i].snakeImageDepth == depth)
 						return true;
 				}
 			}
@@ -512,6 +655,7 @@ namespace MinorShift.Emuera.GameView
 			cbgButtonMap = gra;
 			selectingCBGButtonInt = -1;
 			lastSelectingCBGButtonInt = -1;
+			RequestCbgRefresh();
 			return true;
 		}
 
@@ -533,10 +677,24 @@ namespace MinorShift.Emuera.GameView
 				cbgList.Add(cbg);
 				cbgList.Sort();
 			}
+			RequestCbgRefresh();
 			return true;
 		}
-		public int ClientWidth { get { return (int)DisplayServer.WindowGetSize().X; } }
-		public int ClientHeight { get { return (int)DisplayServer.WindowGetSize().Y; } }
+		public int ClientWidth { get { return Config.WindowX; } }
+		public int ClientHeight { get { return Config.WindowY; } }
+		public int GetLinePointY(int lineNo)
+		{
+			int pointY = ClientHeight - Config.LineHeight;
+			int bottomLineNo = window.ScrollBar.Value - 1;
+			lock (displayLineLock)
+			{
+				if (displayLineList.Count - 1 < bottomLineNo)
+					bottomLineNo = displayLineList.Count - 1;
+			}
+			pointY -= (bottomLineNo - lineNo) * Config.LineHeight;
+			return pointY;
+		}
+
 #endregion
 
 		const string ErrorButtonsText = "__openFileWithDebug__";
@@ -571,8 +729,18 @@ namespace MinorShift.Emuera.GameView
 			{
 				if (state == ConsoleState.Initializing)
 					return true;
+				if (IsWaitInputState)
+					return false;
 				return (state == ConsoleState.Running || runningERBfromMemory);
 			}
+		}
+
+		/// <summary>
+		/// NF 输入和普通输入都属于同一类等待态，避免只更新一半分支导致输入流程失配。
+		/// </summary>
+		internal bool IsWaitInputState
+		{
+			get { return state == ConsoleState.WaitInput || state == ConsoleState.WaitInputNoFocus; }
 		}
 
 		internal bool IsInProcess
@@ -583,6 +751,8 @@ namespace MinorShift.Emuera.GameView
 					return true;
 				if (state == ConsoleState.Sleep)
 					return true;
+				if (IsWaitInputState)
+					return false;
 				if (inProcess)
 					return true;
 				return (state == ConsoleState.Running || runningERBfromMemory);
@@ -603,7 +773,7 @@ namespace MinorShift.Emuera.GameView
 			{
 				if ((state == ConsoleState.Quit) || (state == ConsoleState.Error))
 					return true;
-				if(state == ConsoleState.WaitInput)
+				if (IsWaitInputState)
 					return (inputReq.InputType == InputType.AnyKey || inputReq.InputType == InputType.EnterKey);
 				return false;
 			}
@@ -613,7 +783,7 @@ namespace MinorShift.Emuera.GameView
         {
             get
 			{
-				return (state == ConsoleState.WaitInput && inputReq.InputType == InputType.AnyKey);
+				return (IsWaitInputState && inputReq.InputType == InputType.AnyKey);
             }
         }
 
@@ -621,7 +791,7 @@ namespace MinorShift.Emuera.GameView
         {
             get
             {
-				return (state == ConsoleState.WaitInput && inputReq.OneInput);
+				return (IsWaitInputState && inputReq.OneInput);
             }
         }
 
@@ -629,7 +799,7 @@ namespace MinorShift.Emuera.GameView
 		{
 			get
 			{
-				return (state == ConsoleState.WaitInput && inputReq.Timelimit > 0 && !isTimeout);
+				return (IsWaitInputState && inputReq.Timelimit > 0 && !isTimeout);
 			}
 		}
 
@@ -637,9 +807,21 @@ namespace MinorShift.Emuera.GameView
 		{
 			get
 			{
-				if (state == ConsoleState.WaitInput)
+				if (IsWaitInputState)
 					return (inputReq.InputType == InputType.PrimitiveMouseKey);
 				return false;
+			}
+		}
+
+		internal bool IsWaitingDefaultableIntValue
+		{
+			get
+			{
+				return IsWaitInputState
+					&& inputReq != null
+					&& inputReq.InputType == InputType.IntValue
+					&& inputReq.HasDefValue
+					&& !IsRunningTimer;
 			}
 		}
 		
@@ -651,11 +833,19 @@ namespace MinorShift.Emuera.GameView
 					return null;
 				if (state == ConsoleState.Error)
 					return selectingButton.Inputs;
-				if (state != ConsoleState.WaitInput)
+				if (!IsWaitInputState)
 					return null;
 				if (inputReq.InputType == InputType.IntValue && (selectingButton.IsInteger))
 					return selectingButton.Input.ToString();
+				if (inputReq.InputType == InputType.IntButton && (selectingButton.IsInteger))
+					return selectingButton.Input.ToString();
 				if (inputReq.InputType == InputType.StrValue)
+					return selectingButton.Inputs;
+				if (inputReq.InputType == InputType.StrButton)
+					return selectingButton.Inputs;
+				if (inputReq.InputType == InputType.AnyValue && selectingButton.IsInteger)
+					return selectingButton.Input.ToString();
+				if (inputReq.InputType == InputType.AnyValue)
 					return selectingButton.Inputs;
 				return null;
 			}
@@ -673,7 +863,7 @@ namespace MinorShift.Emuera.GameView
 				window.Focus();
 			}
 			ClearDisplay();
-			if (!emuera.Initialize())
+			if (!emuera.InitializeAsync().GetAwaiter().GetResult())
 			{
 				state = ConsoleState.Error;
 				OutputLog(null);
@@ -728,7 +918,7 @@ namespace MinorShift.Emuera.GameView
 		private void newGeneration()
 		{
             //値の入力を求められない時は更新は必要ないはず
-			if (state != ConsoleState.WaitInput || !inputReq.NeedValue)
+			if (!IsWaitInputState || !inputReq.NeedValue)
 				return;
             if (!updatedGeneration && emuera.getCurrentLine != lastInputLine)
             {
@@ -739,7 +929,7 @@ namespace MinorShift.Emuera.GameView
                 updatedGeneration = false;
             lastInputLine = emuera.getCurrentLine;
 			//古い選択肢を選択できないように。INPUTで使った選択肢をINPUTSには流用できないように。
-			if (inputReq.InputType == InputType.IntValue)
+			if (inputReq.InputType == InputType.IntValue || inputReq.InputType == InputType.IntButton)
 			{
 				if (lastButtonGeneration == newButtonGeneration)
 					unchecked { newButtonGeneration++; }
@@ -747,7 +937,7 @@ namespace MinorShift.Emuera.GameView
 					lastButtonGeneration = newButtonGeneration;
 				lastButtonIsInput = true;
 			}
-			if (inputReq.InputType == InputType.StrValue)
+			if (inputReq.InputType == InputType.StrValue || inputReq.InputType == InputType.StrButton || inputReq.InputType == InputType.AnyValue)
 			{
 				if (lastButtonGeneration == newButtonGeneration)
 					unchecked { newButtonGeneration++; }
@@ -765,16 +955,149 @@ namespace MinorShift.Emuera.GameView
 		public ConsoleButtonString SelectingButton { get { return selectingButton; } }
 		public bool ButtonIsSelected(ConsoleButtonString button) { return selectingButton == button; }
 
-		/// <summary>
-		/// ToolTip表示したフラグ
-		/// </summary>
-		bool tooltipUsed = false;
+		internal bool HasCurrentGenerationButton(bool integerOnly)
+		{
+			lock (displayLineLock)
+			{
+				for (int i = displayLineList.Count - 1; i >= 0; i--)
+				{
+					bool generationEnded;
+					if (LineHasCurrentGenerationButton(displayLineList[i], integerOnly, out generationEnded))
+						return true;
+					if (generationEnded)
+						return false;
+				}
+			}
+			return false;
+		}
+
+		private bool LineHasCurrentGenerationButton(ConsoleDisplayLine line, bool integerOnly, out bool generationEnded)
+		{
+			generationEnded = false;
+			if (line == null || line.Buttons == null)
+				return false;
+			foreach (ConsoleButtonString button in line.Buttons)
+			{
+				if (button.Generation != 0 && button.Generation != lastButtonGeneration)
+				{
+					generationEnded = true;
+					return false;
+				}
+				if (button.IsButton && (!integerOnly || button.IsInteger))
+					return true;
+				foreach (AConsoleDisplayPart part in button.StrArray)
+				{
+					if (!(part is ConsoleDivPart div) || div.Children == null)
+						continue;
+					for (int i = div.Children.Length - 1; i >= 0; i--)
+					{
+						if (LineHasCurrentGenerationButton(div.Children[i], integerOnly, out generationEnded))
+							return true;
+						if (generationEnded)
+							return false;
+					}
+				}
+			}
+			return false;
+		}
+
+		private bool CurrentGenerationButtonAcceptsInt(long value)
+		{
+			lock (displayLineLock)
+			{
+				for (int i = displayLineList.Count - 1; i >= 0; i--)
+				{
+					bool generationEnded;
+					if (LineAcceptsCurrentGenerationInt(displayLineList[i], value, out generationEnded))
+						return true;
+					if (generationEnded)
+						return false;
+				}
+			}
+			return false;
+		}
+
+		private bool LineAcceptsCurrentGenerationInt(ConsoleDisplayLine line, long value, out bool generationEnded)
+		{
+			generationEnded = false;
+			if (line == null || line.Buttons == null)
+				return false;
+			foreach (ConsoleButtonString button in line.Buttons)
+			{
+				if (button.Generation != 0 && button.Generation != lastButtonGeneration)
+				{
+					generationEnded = true;
+					return false;
+				}
+				if (button.IsButton && button.IsInteger && button.Input == value)
+					return true;
+				foreach (AConsoleDisplayPart part in button.StrArray)
+				{
+					if (!(part is ConsoleDivPart div) || div.Children == null)
+						continue;
+					for (int i = div.Children.Length - 1; i >= 0; i--)
+					{
+						if (LineAcceptsCurrentGenerationInt(div.Children[i], value, out generationEnded))
+							return true;
+						if (generationEnded)
+							return false;
+					}
+				}
+			}
+			return false;
+		}
+
+		private bool CurrentGenerationButtonAcceptsString(string value)
+		{
+			lock (displayLineLock)
+			{
+				for (int i = displayLineList.Count - 1; i >= 0; i--)
+				{
+					bool generationEnded;
+					if (LineAcceptsCurrentGenerationString(displayLineList[i], value, out generationEnded))
+						return true;
+					if (generationEnded)
+						return false;
+				}
+			}
+			return false;
+		}
+
+		private bool LineAcceptsCurrentGenerationString(ConsoleDisplayLine line, string value, out bool generationEnded)
+		{
+			generationEnded = false;
+			if (line == null || line.Buttons == null)
+				return false;
+			foreach (ConsoleButtonString button in line.Buttons)
+			{
+				if (button.Generation != 0 && button.Generation != lastButtonGeneration)
+				{
+					generationEnded = true;
+					return false;
+				}
+				if (button.IsButton && (button.Inputs == value || (button.IsInteger && button.Input.ToString() == value)))
+					return true;
+				foreach (AConsoleDisplayPart part in button.StrArray)
+				{
+					if (!(part is ConsoleDivPart div) || div.Children == null)
+						continue;
+					for (int i = div.Children.Length - 1; i >= 0; i--)
+					{
+						if (LineAcceptsCurrentGenerationString(div.Children[i], value, out generationEnded))
+							return true;
+						if (generationEnded)
+							return false;
+					}
+				}
+			}
+			return false;
+		}
+
 		/// <summary>
 		/// マウスの直下にあるテキスト。ボタンであってもよい。
 		/// ToolTip表示用。世代無視、履歴中も表示
 		/// </summary>
 		ConsoleButtonString pointingString = null;
-		ConsoleButtonString lastPointingString = null;
 		#endregion
 
 		#region Input & Timer系
@@ -792,8 +1115,9 @@ namespace MinorShift.Emuera.GameView
 				return;
 			}
 			uint awaitStart = WinmmTimer.TickCount;
-			int refreshWaitMs = Program.IsSnakeProfile ? 4 : 40;
-			int frameWaitMs = Program.IsSnakeProfile ? (time > 0 ? Math.Min(8, time) : 0) : 20;
+			bool usesFastDisplayRefresh = Program.Compatibility.Snake.UsesFastDisplayRefresh;
+			int refreshWaitMs = usesFastDisplayRefresh ? 4 : 40;
+			int frameWaitMs = usesFastDisplayRefresh ? (time > 0 ? Math.Min(8, time) : 0) : 20;
 			int uiFrame = global::GenericUtils.UiFrameGeneration;
 			RefreshStrings(true);
 			int refreshGeneration = window.RefreshRequestGeneration;
@@ -802,11 +1126,12 @@ namespace MinorShift.Emuera.GameView
 			if (frameWaitMs > 0)
 				global::GenericUtils.WaitForUiFrameAfter(uiFrame, frameWaitMs);
 			state = ConsoleState.Sleep;
+			WinInput.ClearLatches();
 			emuera.UpdateCheckInfiniteLoopState();
 
 			if (time > 0)
 			{
-				if (Program.IsSnakeProfile)
+				if (usesFastDisplayRefresh)
 				{
 					int elapsed = (int)(WinmmTimer.TickCount - awaitStart);
 					int remaining = time - elapsed;
@@ -820,7 +1145,7 @@ namespace MinorShift.Emuera.GameView
 					System.Threading.Thread.Sleep(time);
 				}
 			}
-			else if (Program.IsSnakeProfile)
+			else if (usesFastDisplayRefresh)
 				System.Threading.Thread.Yield();
 
 			////DoEvents()の間にウインドウが閉じられたらおしまい。
@@ -833,10 +1158,35 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Running;
 		}
 
+		private void SimulateSequenceInput(InputRequest req)
+		{
+			string raw = emuera.SequenceInputValue ?? string.Empty;
+			emuera.HasSequenceInput = false;
+			emuera.SequenceInputValue = null;
+			inputReq = req;
+			state = ConsoleState.WaitInput;
+			PressEnterKey(false, raw, false);
+		}
+
 		public void WaitInput(InputRequest req)
 		{
-			state = ConsoleState.WaitInput;
+			// SEQUENCEINPUT schedules a synthetic input on the next wait; consume it once.
+			if (emuera != null && emuera.HasSequenceInput)
+			{
+				SimulateSequenceInput(req);
+				return;
+			}
+
+			state = req.NoFocus ? ConsoleState.WaitInputNoFocus : ConsoleState.WaitInput;
 			inputReq = req;
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
+			}
+			bool flushDeferredRewrite = ConsumeDisplayRewriteRefresh();
+			if (req.NoFocus || flushDeferredRewrite)
+				RefreshStrings(true);
 			if (req.Timelimit > 0)
 			{
 				if (req.OneInput)
@@ -863,7 +1213,14 @@ namespace MinorShift.Emuera.GameView
 			req.StopMesskip = stopMesskip;
 			inputReq = req;
 			state = ConsoleState.WaitInput;
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
+			}
 			emuera.NeedWaitToEventComEnd = false;
+			if (ConsumeDisplayRewriteRefresh())
+				RefreshStrings(true);
 		}
 
 
@@ -874,14 +1231,16 @@ namespace MinorShift.Emuera.GameView
 
 		private void tickRedrawTimer(object sender, EventArgs e)
 		{
-			if (!redrawTimer.Enabled)
-				return;
-			//INPUT待ちでないとき、又はタイマー付きINPUT状態の場合はこれ以外の処理に任せる
-			if (state != ConsoleState.WaitInput || timer.Enabled)
-			{
-				return;
-			}
-			window.Refresh();//OnPaint発行
+			// Godot 管线中本定时器为 no-op：SETANIMETIMER 期间的动画重绘已由 Godot 侧
+			// 每帧自驱动（RefreshCanvasImageAnimations / EmueraImage._Process 推进
+			// SpriteAnime / AnimatedWebp 帧并 QueueRedraw），不再需要 window.Refresh()
+			// 置 dirty 触发 MainWindow.Update() 的全量显示快照+diff（INPUT 等待时每帧
+			// 扫描全部显示行是纯开销）。定时器状态机（setRedrawTimer / AnimeTimer /
+			// GETANIMETIMER）语义保持原样：Enable/Interval 照常维护。
+			// 原实现（Windows 版）：
+			//   if (!redrawTimer.Enabled) return;
+			//   if (!IsWaitInputState || timer.Enabled) return;
+			//   window.Refresh();//OnPaint発行
 		}
 
 		/// <summary>
@@ -946,13 +1305,15 @@ namespace MinorShift.Emuera.GameView
 			timer_nextDisplayTime = timer_startTime + 100;
 
 		}
-        public void NeedSetTimer()
+        public bool NeedSetTimer()
         {
             if(need_settimer)
             {
                 need_settimer = false;
                 setTimer();
+                return true;
             }
+            return false;
         }
 
 		//汎用
@@ -960,7 +1321,7 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (!timer.Enabled)
 				return;
-			if (state != ConsoleState.WaitInput || inputReq.Timelimit <= 0 || timerID != inputReq.ID)
+			if (!IsWaitInputState || inputReq.Timelimit <= 0 || timerID != inputReq.ID)
 			{
 #if UEMUERA_DEBUG
 				throw new ExeEE("");
@@ -1013,7 +1374,7 @@ namespace MinorShift.Emuera.GameView
 			if(IsWaitingPrimitive)
 			{
 				//callEmueraProgramは呼び出し先で行う。
-				InputMouseKey(4, 0, 0, 0,0);
+				InputMouseKey(4, 0, 0, 0, 0, 0);
 				return;
 			}
 			if (inputReq.DisplayTime)
@@ -1021,7 +1382,7 @@ namespace MinorShift.Emuera.GameView
 			else if (inputReq.TimeUpMes != null)
 				PrintSingleLine(inputReq.TimeUpMes);
 			callEmueraProgram("");//ディフォルト入力の処理はcallEmueraProgram側で
-			if (state == ConsoleState.WaitInput && inputReq.NeedValue)
+			if (IsWaitInputState && inputReq.NeedValue)
 			{
 				Point point = window.MainPicBox.PointToClient(uEmuera.Forms.Control.MousePosition);
 				if (window.MainPicBox.ClientRectangle.Contains(point))
@@ -1044,16 +1405,22 @@ namespace MinorShift.Emuera.GameView
 		/// スクリプト実行。RefreshStringsはしないので呼び出し側がすること
 		/// </summary>
 		/// <param name="str"></param>
-		private void callEmueraProgram(string str)
+		private void callEmueraProgram(string str, bool changedByMouse = false)
 		{
 			//入力文字列の表示処理を行わない場合はstr == null
 			if (str != null)
 			{
 				//INPUT文字列をPRINTする処理など
-				if (!doInputToEmueraProgram(str))
+				if (!doInputToEmueraProgram(str, changedByMouse))
 					return;
 				if (state == ConsoleState.Error)
 					return;
+			}
+			if (global::gEmuera.M0.LegacyTrace.IsEnabled && inputReq != null)
+			{
+				global::gEmuera.M0.LegacyTrace.TryRecordWait("completion_consumed", inputReq.ID,
+					inputReq.InputType.ToString(), inputReq.NeedValue, inputReq.OneInput, inputReq.NoFocus,
+					inputReq.Timelimit, NewButtonGeneration);
 			}
 			state = ConsoleState.Running;
 			emuera.DoScript();
@@ -1070,9 +1437,10 @@ namespace MinorShift.Emuera.GameView
 			newGeneration();
 		}
 
-		private bool doInputToEmueraProgram(string str)
+		private bool doInputToEmueraProgram(string str, bool changedByMouse)
 		{
-			if (state == ConsoleState.WaitInput)
+			bool suppressInputEcho = false;
+			if (IsWaitInputState)
 			{
 				Int64 inputValue;
 
@@ -1091,18 +1459,65 @@ namespace MinorShift.Emuera.GameView
 						else
 							emuera.InputInteger(inputValue);
 						break;
+					case InputType.IntButton:
+						if (string.IsNullOrEmpty(str) && inputReq.HasDefValue && !IsRunningTimer)
+						{
+							inputValue = inputReq.DefIntValue;
+							str = inputValue.ToString();
+						}
+						else if (!Int64.TryParse(str, out inputValue))
+							return false;
+						if (!CurrentGenerationButtonAcceptsInt(inputValue))
+							return false;
+						if (inputReq.IsSystemInput)
+							emuera.InputSystemInteger(inputValue);
+						else
+							emuera.InputInteger(inputValue);
+						break;
 					case InputType.StrValue:
 						if (string.IsNullOrEmpty(str) && inputReq.HasDefValue && !IsRunningTimer)
 							str = inputReq.DefStrValue;
 						//空入力と時間切れ
 						if (str == null)
 							str = "";
+						if (changedByMouse && inputReq.EnablePointerInputMetadata)
+						{
+							// INPUTS ,1 的指针值是脚本内部协议，不是要显示给玩家的输入正文。
+							emuera.InputStringWithPointerMetadata(str);
+							suppressInputEcho = true;
+						}
+						else
+							emuera.InputString(str);
+						break;
+					case InputType.StrButton:
+						if (string.IsNullOrEmpty(str) && inputReq.HasDefValue && !IsRunningTimer)
+							str = inputReq.DefStrValue;
+						if (str == null)
+							str = "";
+						if (!CurrentGenerationButtonAcceptsString(str))
+							return false;
 						emuera.InputString(str);
+						break;
+					case InputType.AnyValue:
+						if (str == null)
+							str = "";
+						if (Int64.TryParse(str, out inputValue))
+						{
+							if (inputReq.IsSystemInput)
+								emuera.InputSystemInteger(inputValue);
+							else
+								emuera.InputInteger(inputValue);
+						}
+						else
+						{
+							emuera.InputString(str);
+						}
 						break;
 				}
 				stopTimer();
 			}
-			Print(str);
+			if (!suppressInputEcho)
+				Print(str);
 			PrintFlush(false);
 			return true;
 		}
@@ -1123,7 +1538,7 @@ namespace MinorShift.Emuera.GameView
 			//clientPointをクライアント左下基準の座標に置き換え
 			Point clientPoint = point;
 			clientPoint.Y = point.Y - ClientHeight;
-			InputMouseKey(2, delta, clientPoint.X, clientPoint.Y, 0);
+			InputMouseKey(2, delta, clientPoint.X, clientPoint.Y, 0, 0);
 		}
 
 		internal void MouseDown(Point point, MouseButtons button)
@@ -1150,27 +1565,27 @@ namespace MinorShift.Emuera.GameView
 				}
 
 			}
-			InputMouseKey(1, (int)button, clientPoint.X, clientPoint.Y, buttonNum);
+			InputMouseKey(1, (int)button, clientPoint.X, clientPoint.Y, buttonNum, 0);
 		}
 
 		//1823 Key入力を捕まえる
 		internal void PressPrimitiveKey(int keycode, int keydata, int keymod)
 		{
 			if (IsWaitingPrimitive)
-				InputMouseKey(3, keycode, keydata, 0, 0);
+				InputMouseKey(3, keycode, keydata, 0, 0, 0);
 		}
 
 		//1823 Key入力を捕まえる
-		internal void InputMouseKey(int type, int result1, int result2, int result3, int result4)
+		internal void InputMouseKey(int type, int result1, int result2, int result3, int result4, long result5)
 		{
-			emuera.InputResult5(type, result1, result2, result3, result4);
+			emuera.InputResult5(type, result1, result2, result3, result4, result5);
 
 			inProcess = true;
 			try
 			{
 				//1823 Escキーもマクロも右クリックも不可。単純に押されたキーを送るのみ。
 				callEmueraProgram(null);
-				if (state == ConsoleState.WaitInput && inputReq.NeedValue)
+				if (IsWaitInputState && inputReq.NeedValue)
 				{
 					Point point = window.MainPicBox.PointToClient(uEmuera.Forms.Control.MousePosition);
 					if (window.MainPicBox.ClientRectangle.Contains(point))
@@ -1205,18 +1620,19 @@ namespace MinorShift.Emuera.GameView
 				return;
 			}
 #if UEMUERA_DEBUG
-			if (state != ConsoleState.WaitInput || inputReq == null)
+			if (!IsWaitInputState || inputReq == null)
 				throw new ExeEE("");
 #endif
 			KillMacro = false;
 			try
 			{
 				string[] text;
-				if(changedByMouse)//1823 マウスによって入力されたならマクロ解析を行わない
+				bool inputMacroEnabled = emuera == null || emuera.InputMacroEnabled;
+				if (changedByMouse || !inputMacroEnabled) // Snake/EE can feed the sequence literally.
 				{ text = new string[] { str }; }
 				else
 				{
-					if (str.StartsWith("@") && !inputReq.OneInput)
+					if (str.Length > 1 && str.StartsWith("@") && !inputReq.OneInput)
 					{
 						doSystemCommand(str);
 						return;
@@ -1227,12 +1643,18 @@ namespace MinorShift.Emuera.GameView
 						(inputReq.InputType == InputType.AnyKey || inputReq.InputType == InputType.EnterKey))
 						stopTimer();
 					//if((inputReq.InputType == InputType.IntValue || inputReq.InputType == InputType.StrValue)
-					if (str.Contains("("))
+					if (str.Contains("(") && inputMacroEnabled)
 						str = parseInput(new StringStream(str), false);
 					text = str.Split(spliter, StringSplitOptions.None);
 				}
 				
 				inProcess = true;
+				if (!inputMacroEnabled)
+				{
+					callEmueraProgram(str, changedByMouse);
+					RefreshStrings(false);
+					goto endMacro;
+				}
 				for (int i = 0; i < text.Length; i++)
 				{
 					string inputs = text[i];
@@ -1251,9 +1673,9 @@ namespace MinorShift.Emuera.GameView
 						i--;
 						inputs = "";
 					}
-					callEmueraProgram(inputs);
+					callEmueraProgram(inputs, changedByMouse);
 					RefreshStrings(false);
-					while (MesSkip && state == ConsoleState.WaitInput)
+					while (MesSkip && IsWaitInputState)
 					{
 						//TODO:入力無効を通していいか？スキップ停止をマクロでは飛ばせていいのか？
 						if (inputReq.NeedValue)
@@ -1269,12 +1691,12 @@ namespace MinorShift.Emuera.GameView
 						//	goto endMacro;
 					}
 					MesSkip = false;
-					if (state != ConsoleState.WaitInput)
+					if (!IsWaitInputState)
 						break;
 					//マクロループ時は待ち処理が起こらないのでここでシステムキューを捌く
 					//Application.DoEvents();
 #if UEMUERA_DEBUG
-					if (state != ConsoleState.WaitInput || inputReq == null)
+					if (!IsWaitInputState || inputReq == null)
 						throw new ExeEE("");
 #endif
 					if (KillMacro)
@@ -1286,7 +1708,7 @@ namespace MinorShift.Emuera.GameView
 				inProcess = false;
 			}
 			endMacro:
-			if(state == ConsoleState.WaitInput && inputReq.NeedValue)
+			if (IsWaitInputState && inputReq.NeedValue)
 			{
 				Point point = window.MainPicBox.PointToClient(uEmuera.Forms.Control.MousePosition);
 				if (window.MainPicBox.ClientRectangle.Contains(point))
@@ -1500,6 +1922,8 @@ namespace MinorShift.Emuera.GameView
 		#region 描画系
 		uint lastUpdate = 0;
 		uint msPerFrame = 1000 / 60;//60FPS
+		bool deferDisplayRewriteRefresh = false;
+		bool displayRewriteRefreshDeferred = false;
 		ConsoleRedraw redraw = ConsoleRedraw.Normal;
         public ConsoleRedraw Redraw { get { return redraw; } }
 		public void SetRedraw(Int64 i)
@@ -1510,6 +1934,28 @@ namespace MinorShift.Emuera.GameView
 				redraw = ConsoleRedraw.Normal;
 			if ((i & 2) != 0)
 				RefreshStrings(true);
+		}
+
+		internal void MarkDisplayRewriteInProgress()
+		{
+			// Godot 版 UI 通过异步队列提交。动态地图这类 CLEARLINE 后逐行重画的内容，
+			// 如果在 Running 中途提交普通刷新，Android 会看见旧菜单、半张地图等中间态。
+			// 这里只合并非强制刷新，等 INPUT/TINPUT/WAIT 或显式强制刷新时提交完整画面。
+			if (state == ConsoleState.Running)
+				deferDisplayRewriteRefresh = true;
+		}
+
+		bool ShouldDeferDisplayRewriteRefresh(bool forcePaint)
+		{
+			return !forcePaint && deferDisplayRewriteRefresh && state == ConsoleState.Running;
+		}
+
+		bool ConsumeDisplayRewriteRefresh()
+		{
+			bool hadDeferredRefresh = deferDisplayRewriteRefresh || displayRewriteRefreshDeferred;
+			deferDisplayRewriteRefresh = false;
+			displayRewriteRefreshDeferred = false;
+			return hadDeferredRefresh;
 		}
 
 		string debugTitle = null;
@@ -1547,6 +1993,13 @@ namespace MinorShift.Emuera.GameView
 			window.TextBox.Text = text ?? "";
 		}
 
+		public string GetDisplayLine(int index)
+		{
+			if (index < 0 || index >= displayLineList.Count)
+				return "";
+			return displayLineList[index].ToString() ?? "";
+		}
+
 
 		/// <summary>
 		/// 1818以前のRefreshStringsからselectingButton部分を抽出
@@ -1565,14 +2018,21 @@ namespace MinorShift.Emuera.GameView
 				//if (isBackLog)
 				//	selectingButton = null;
 				//数値か文字列の入力待ち状態でなければ無効
-				if(state != ConsoleState.Error && state != ConsoleState.WaitInput)
+				if (state != ConsoleState.Error && !IsWaitInputState)
 					selectingButton = null;
-				else if((state == ConsoleState.WaitInput) && !inputReq.NeedValue)
+				else if (IsWaitInputState && !inputReq.NeedValue)
 					selectingButton = null;
 				//選択肢が最新でないなら無効
 				else if (selectingButton.Generation != lastButtonGeneration)
 					selectingButton = null;
 			}
+			if (ShouldDeferDisplayRewriteRefresh(force_Paint))
+			{
+				displayRewriteRefreshDeferred = true;
+				return;
+			}
+			if (force_Paint)
+				ConsumeDisplayRewriteRefresh();
 			if (!force_Paint)
 			{//forceならば確実に再描画。
 				//履歴表示中でなく、最終行を表示済みであり、選択中ボタンが変更されていないなら更新不要
@@ -1599,6 +2059,11 @@ namespace MinorShift.Emuera.GameView
 			}
 			verticalScrollBarUpdate();
 			window.Refresh();//OnPaint発行
+			lastUpdate = WinmmTimer.TickCount;
+			lastDrawnLineNo = lineNo;
+			lastSelectingButton = selectingButton;
+			if (state != ConsoleState.Running)
+				ConsumeDisplayRewriteRefresh();
 
 		}
 
@@ -1705,18 +2170,56 @@ namespace MinorShift.Emuera.GameView
         }
 
 		public uEmuera.Drawing.Color? TextBackgroundColor { get; set; }
-		public bool BitmapCacheEnabledForNextLine { get; set; }
+		public bool BitmapCacheEnabledForNextLine
+		{
+			set
+			{
+				// ERB 兼容入口必须保留，否则现有游戏会因未知指令中断。
+				// 这里只把成对的 BITMAP_CACHE_ENABLE 当作整帧重写提示，不保存任何缓存状态。
+				if (value)
+					MarkDisplayRewriteInProgress();
+			}
+		}
 		public bool StrictFontFallback { get; set; }
-		public int SnakeTextDrawingMode { get; set; }
-		public int SnakeImageQuality { get; private set; }
+		readonly HotkeyState hotkeyState;
+		// Godot 版不使用 SkiaSharp，但 v24 脚本会通过这些 API 探测渲染后端。
+		// 保留与改版 emuera 默认值一致的可见状态，避免迁移脚本误判为旧 GDI 模式。
+		public int SnakeTextDrawingMode { get; private set; } = 3;
+		public int SnakeImageQuality { get; private set; } = 3;
 		public int SnakeFontHinting { get; private set; }
-		public int SnakeFontEdging { get; private set; }
+		public int SnakeFontEdging { get; private set; } = 2;
+
+		public void SetSnakeTextDrawingMode(int mode)
+		{
+			if (mode == 1 || mode == 3)
+				SnakeTextDrawingMode = mode;
+		}
 
 		public void SetSnakeSkiaQuality(int imageQuality, int fontHinting, int fontEdging)
 		{
 			SnakeImageQuality = imageQuality;
 			SnakeFontHinting = fontHinting;
 			SnakeFontEdging = fontEdging;
+		}
+
+		public void HotkeyStateInitialize(long size)
+		{
+			hotkeyState.Initialize(size);
+		}
+
+		public void HotkeyStateSet(long index, long value)
+		{
+			hotkeyState.Set(index, value);
+		}
+
+		public bool ToggleHotkeyState(out string message)
+		{
+			return hotkeyState.Toggle(out message);
+		}
+
+		public bool TryEvaluateHotkey(int keyData, out long result)
+		{
+			return hotkeyState.TryEvaluate(keyData, out result);
 		}
 
 		public void PrintHTMLIsland(string html)
@@ -1894,7 +2397,7 @@ namespace MinorShift.Emuera.GameView
 					IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
 					if (term == null)
 						throw new CodeEE("解釈不能なコードです");
-					if (term.GetOperandType() == typeof(Int64))
+					if (term.GetEraType() == EraType.Integer)
 					{
 						if (outputDebugConsole)
 							com = "DEBUGPRINTFORML {" + com + "}";
@@ -2199,7 +2702,7 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Initializing;
 			PrintSingleLine("ERB再読み込み中……", true);
 			force_temporary = true;
-			emuera.ReloadErb();
+			emuera.ReloadErbAsync().GetAwaiter().GetResult();
 			force_temporary = false;
             PrintSingleLine("再読み込み完了", true);
 			RefreshStrings(true);
@@ -2249,7 +2752,7 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Initializing;
             PrintSingleLine("ERB再読み込み中……", true);
 			force_temporary = true;
-			emuera.ReloadPartialErb(path);
+			emuera.ReloadPartialErbAsync(path).GetAwaiter().GetResult();
 			force_temporary = false;
             PrintSingleLine("再読み込み完了", true);
 			RefreshStrings(true);
@@ -2300,7 +2803,7 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Initializing;
             PrintSingleLine("ERB再読み込み中……", true);
 			force_temporary = true;
-            emuera.ReloadPartialErb(paths);
+            emuera.ReloadPartialErbAsync(paths).GetAwaiter().GetResult();
 			force_temporary = false;
             PrintSingleLine("再読み込み完了", true);
 			RefreshStrings(true);

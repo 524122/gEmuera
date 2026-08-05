@@ -12,6 +12,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		public bool IsConst;
 		public string ConstStr;
 		public Int64 ConstInt;
+		public double ConstFloat;
 	}
 
 	/// <summary>
@@ -19,7 +20,7 @@ namespace MinorShift.Emuera.GameProc.Function
 	/// </summary>
 	internal sealed class ExpressionsArgument : Argument
 	{
-		public ExpressionsArgument(Type[] types, IOperandTerm[] terms)
+		public ExpressionsArgument(EraType[] types, IOperandTerm[] terms)
 		{
 			ArgumentTypeArray = types;
 			ArgumentArray = terms;
@@ -27,7 +28,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		/// <summary>
 		/// 引数の型(ArgumentArrayよりもLengthが大きい可能性があるので見るのはArgumentArrayにすること)
 		/// </summary>
-		readonly public Type[] ArgumentTypeArray;
+		readonly public EraType[] ArgumentTypeArray;
 		readonly public IOperandTerm[] ArgumentArray;
 	}
 
@@ -47,11 +48,13 @@ namespace MinorShift.Emuera.GameProc.Function
 
 	internal sealed class ExpressionArgument : Argument
 	{
-		public ExpressionArgument(IOperandTerm termSrc)
+		public ExpressionArgument(IOperandTerm termSrc, bool enablePointerInputMetadata = false)
 		{
 			Term = termSrc;
+			EnablePointerInputMetadata = enablePointerInputMetadata;
 		}
 		readonly public IOperandTerm Term;
+		readonly public bool EnablePointerInputMetadata;
 	}
 
 	internal sealed class ExpressionArrayArgument : Argument
@@ -62,6 +65,42 @@ namespace MinorShift.Emuera.GameProc.Function
 			termList.CopyTo(TermList);
 		}
 		readonly public IOperandTerm[] TermList;
+	}
+
+	internal sealed class MixedIntegerExprTerm
+	{
+		public IOperandTerm Num;
+		public bool IsPx;
+	}
+
+	internal sealed class SpPrintShapeArgument : Argument
+	{
+		public SpPrintShapeArgument(MixedIntegerExprTerm[] parameters)
+		{
+			Parameters = parameters;
+		}
+
+		public readonly MixedIntegerExprTerm[] Parameters;
+	}
+
+	internal sealed class SpPrintImgArgument : Argument
+	{
+		public SpPrintImgArgument(
+			IOperandTerm name,
+			IOperandTerm buttonName,
+			IOperandTerm mappingName,
+			MixedIntegerExprTerm[] parameters)
+		{
+			Name = name;
+			ButtonName = buttonName;
+			MappingName = mappingName;
+			Parameters = parameters;
+		}
+
+		public readonly IOperandTerm Name;
+		public readonly IOperandTerm ButtonName;
+		public readonly IOperandTerm MappingName;
+		public readonly MixedIntegerExprTerm[] Parameters;
 	}
 
 	internal sealed class SpPrintVArgument : Argument
@@ -75,13 +114,13 @@ namespace MinorShift.Emuera.GameProc.Function
 
 	internal sealed class SpTimesArgument : Argument
 	{
-		public SpTimesArgument(VariableTerm var, double d)
+		public SpTimesArgument(VariableTerm var, IOperandTerm multiplier)
 		{
 			VariableDest = var;
-			DoubleValue = d;
+			Multiplier = multiplier;
 		}
 		readonly public VariableTerm VariableDest;
-		readonly public double DoubleValue;
+		readonly public IOperandTerm Multiplier;
 	}
 
 	internal sealed class SpBarArgument : Argument
@@ -238,6 +277,68 @@ namespace MinorShift.Emuera.GameProc.Function
 		public readonly string InitialValue;
 	}
 
+	internal sealed class SpDtColumnOptionsArgument : Argument
+	{
+		public enum OptionType
+		{
+			Default,
+		}
+
+		public SpDtColumnOptionsArgument(IOperandTerm dataTable, IOperandTerm column, OptionType[] options, IOperandTerm[] values)
+		{
+			DataTable = dataTable;
+			Column = column;
+			Options = options;
+			Values = values;
+		}
+
+		public readonly IOperandTerm DataTable;
+		public readonly IOperandTerm Column;
+		public readonly OptionType[] Options;
+		public readonly IOperandTerm[] Values;
+	}
+
+	internal sealed class SpSetBgImageArgument : Argument
+	{
+		public SpSetBgImageArgument(IOperandTerm name, IOperandTerm depth, IOperandTerm opacity)
+		{
+			Name = name;
+			Depth = depth;
+			Opacity = opacity;
+		}
+
+		public readonly IOperandTerm Name;
+		public readonly IOperandTerm Depth;
+		public readonly IOperandTerm Opacity;
+	}
+
+	internal sealed class SpSetImageLayerArgument : Argument
+	{
+		public SpSetImageLayerArgument(IOperandTerm spriteName, IOperandTerm depth, IOperandTerm x, IOperandTerm y,
+			IOperandTerm width, IOperandTerm height, IOperandTerm opacity, IOperandTerm cmArray, IOperandTerm followScroll)
+		{
+			SpriteName = spriteName;
+			Depth = depth;
+			X = x;
+			Y = y;
+			Width = width;
+			Height = height;
+			Opacity = opacity;
+			CMArray = cmArray;
+			FollowScroll = followScroll;
+		}
+
+		readonly public IOperandTerm SpriteName;
+		readonly public IOperandTerm Depth;
+		readonly public IOperandTerm X;
+		readonly public IOperandTerm Y;
+		readonly public IOperandTerm Width;
+		readonly public IOperandTerm Height;
+		readonly public IOperandTerm Opacity;
+		readonly public IOperandTerm CMArray;
+		readonly public IOperandTerm FollowScroll;
+	}
+
 	internal sealed class SpForNextArgment : Argument
 	{
 		public SpForNextArgment(VariableTerm var, IOperandTerm start, IOperandTerm end, IOperandTerm step)
@@ -373,6 +474,17 @@ namespace MinorShift.Emuera.GameProc.Function
 		readonly public IOperandTerm G;
 		readonly public IOperandTerm B;
 		readonly public IOperandTerm RGB;
+	}
+
+	internal sealed class SpColorAlphaArgument : Argument
+	{
+		public SpColorAlphaArgument(IOperandTerm rgb, IOperandTerm alpha)
+		{
+			RGB = rgb;
+			Alpha = alpha;
+		}
+		readonly public IOperandTerm RGB;
+		readonly public IOperandTerm Alpha;
 	}
 
 	internal sealed class SpSplitArgument : Argument
@@ -567,10 +679,17 @@ namespace MinorShift.Emuera.GameProc.Function
 			TermList = termList;
 			ConstStrList = constList;
 		}
+		public SpSetArrayArgument(VariableTerm var, IOperandTerm[] termList, double[] constList)
+		{
+			VariableDest = var;
+			TermList = termList;
+			ConstFloatList = constList;
+		}
 		readonly public VariableTerm VariableDest;
 		readonly public IOperandTerm[] TermList;
 		readonly public Int64[] ConstIntList;
 		readonly public string[] ConstStrList;
+		readonly public double[] ConstFloatList;
 	}
 	#endregion
 

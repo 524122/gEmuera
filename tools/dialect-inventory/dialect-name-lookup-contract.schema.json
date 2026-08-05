@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemuera.local/schema/m0-dialect-name-lookup-contract-1.0.0.json",
+  "title": "gEmuera M0 legacy name lookup pipeline contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workPackage", "generatedAtUtc", "executionStatus", "gateStatus", "blockerCode", "result",
+    "sourceInventoryHash", "sourceOwnershipEvidenceHash", "catalogId", "catalogVersion", "catalogHash", "contractSetHash",
+    "sourceIdentity", "instructionRegistrationCount", "expressionRegistrationCount", "crossRegistryCollisionCount",
+    "instructionLookupSurfaceCount", "instructionLookup", "expressionLookup", "projection", "mutableDictionaryExposure",
+    "sourceTextRewrite", "semanticStatus", "keyDomain", "coverage", "currentRuntimeIsolation", "parserVmConsumption",
+    "uncovered", "collisions", "entries"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "workPackage": {"const": "M0-DIA-08"},
+    "generatedAtUtc": {"type": "string", "format": "date-time"},
+    "executionStatus": {"const": "InProgress"},
+    "gateStatus": {"const": "Blocked"},
+    "blockerCode": {"const": "EvidenceMissing"},
+    "result": {"const": "Partial"},
+    "sourceInventoryHash": {"$ref": "#/$defs/sha256"},
+    "sourceOwnershipEvidenceHash": {"$ref": "#/$defs/sha256"},
+    "catalogId": {"type": "string", "minLength": 1},
+    "catalogVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "catalogHash": {"$ref": "#/$defs/sha256"},
+    "contractSetHash": {"$ref": "#/$defs/sha256"},
+    "sourceIdentity": {"type": "array", "minItems": 8, "maxItems": 8, "items": {"$ref": "#/$defs/sourceFile"}},
+    "instructionRegistrationCount": {"const": 326},
+    "expressionRegistrationCount": {"const": 360},
+    "crossRegistryCollisionCount": {"const": 9},
+    "instructionLookupSurfaceCount": {"const": 677},
+    "instructionLookup": {"$ref": "#/$defs/instructionLookup"},
+    "expressionLookup": {"$ref": "#/$defs/expressionLookup"},
+    "projection": {"$ref": "#/$defs/projection"},
+    "mutableDictionaryExposure": {"$ref": "#/$defs/mutableExposure"},
+    "sourceTextRewrite": {"$ref": "#/$defs/sourceRewrite"},
+    "semanticStatus": {"$ref": "#/$defs/semanticStatus"},
+    "keyDomain": {"$ref": "#/$defs/keyDomain"},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "currentRuntimeIsolation": {"$ref": "#/$defs/runtimeIsolation"},
+    "parserVmConsumption": {"$ref": "#/$defs/parserVmConsumption"},
+    "uncovered": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "collisions": {"type": "array", "minItems": 9, "maxItems": 9, "items": {"$ref": "#/$defs/collision"}},
+    "entries": {"type": "array", "minItems": 686, "maxItems": 686, "items": {"$ref": "#/$defs/entry"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "count": {"type": "integer", "minimum": 0},
+    "sourceFile": {
+      "type": "object", "additionalProperties": false, "required": ["id", "path", "sha256"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "path": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "instructionLookup": {
+      "type": "object", "additionalProperties": false, "required": ["registryComparer", "normalizer", "parserInput", "lookupOperation"],
+      "properties": {
+        "registryComparer": {
+          "type": "object", "additionalProperties": false, "required": ["selector", "whenTrue", "whenFalse", "capture"],
+          "properties": {"selector": {"const": "Config.ICVariable"}, "whenTrue": {"const": "OrdinalIgnoreCase"}, "whenFalse": {"const": "Ordinal"}, "capture": {"const": "StaticInitialization"}}
+        },
+        "normalizer": {"const": "Identity"}, "parserInput": {"const": "LexicalIdentifierUnchanged"}, "lookupOperation": {"const": "Dictionary.TryGetValue"}
+      }
+    },
+    "expressionLookup": {
+      "type": "object", "additionalProperties": false, "required": ["registryComparer", "normalizer", "lookupOperation", "cultureRisk"],
+      "properties": {
+        "registryComparer": {"const": "Ordinal"},
+        "normalizer": {
+          "type": "object", "additionalProperties": false, "required": ["selector", "whenTrue", "whenFalse"],
+          "properties": {"selector": {"const": "Config.ICFunction"}, "whenTrue": {"const": "CurrentCultureToUpper"}, "whenFalse": {"const": "Identity"}}
+        },
+        "lookupOperation": {"const": "Dictionary.TryGetValue"}, "cultureRisk": {"const": "CurrentCultureDependent"}
+      }
+    },
+    "projection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "target", "projectedCount", "suppressedCollisionCount", "collisionPolicy", "implementation"],
+      "properties": {
+        "source": {"const": "ExpressionFunctionRegistry"}, "target": {"const": "InstructionLookup"},
+        "projectedCount": {"const": 351}, "suppressedCollisionCount": {"const": 9},
+        "collisionPolicy": {"const": "ExistingInstructionWins"}, "implementation": {"const": "ContainsKeyThenAddMethodInstruction"}
+      }
+    },
+    "mutableExposure": {
+      "type": "object", "additionalProperties": false,
+      "required": ["instructionRegistry", "instructionApi", "expressionRegistry", "expressionApi"],
+      "properties": {
+        "instructionRegistry": {"const": "RawStaticMutableDictionary"}, "instructionApi": {"const": "FunctionIdentifier.GetInstructionNameDic"},
+        "expressionRegistry": {"const": "RawStaticMutableDictionary"}, "expressionApi": {"const": "FunctionMethodCreator.GetMethodList"}
+      }
+    },
+    "sourceRewrite": {
+      "type": "object", "additionalProperties": false,
+      "required": ["classification", "source", "tokenForm", "stage", "algorithm", "registryAliasMechanism", "registryReplacementMechanism"],
+      "properties": {
+        "classification": {"const": "SourceTextRewrite"}, "source": {"const": "_Rename.csv"}, "tokenForm": {"const": "[[name]]"},
+        "stage": {"const": "EraStreamReaderBeforeLexicalAnalysis"}, "algorithm": {"const": "DictionaryEnumerationThenStringReplace"},
+        "registryAliasMechanism": {"const": "None"}, "registryReplacementMechanism": {"const": "None"}
+      }
+    },
+    "semanticStatus": {
+      "type": "object", "additionalProperties": false, "required": ["alias", "replacement", "reason"],
+      "properties": {"alias": {"const": "Unresolved"}, "replacement": {"const": "Unresolved"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "keyDomain": {
+      "type": "object", "additionalProperties": false, "required": ["comparerDomain", "asciiUpperPublicKeyCount", "nonAsciiOrMixedCasePublicKeyCount", "note"],
+      "properties": {"comparerDomain": {"const": "OrdinalString"}, "asciiUpperPublicKeyCount": {"const": 684}, "nonAsciiOrMixedCasePublicKeyCount": {"const": 2}, "note": {"type": "string", "minLength": 1}}
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["lookupContractResolvedCount", "semanticAliasUnresolvedCount", "semanticReplacementUnresolvedCount", "projectedExpressionInstructionCount", "suppressedExpressionCollisionCount"],
+      "properties": {
+        "lookupContractResolvedCount": {"const": 686}, "semanticAliasUnresolvedCount": {"const": 686}, "semanticReplacementUnresolvedCount": {"const": 686},
+        "projectedExpressionInstructionCount": {"const": 351}, "suppressedExpressionCollisionCount": {"const": 9}
+      }
+    },
+    "runtimeIsolation": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "Failed"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "parserVmConsumption": {
+      "type": "object", "additionalProperties": false, "required": ["status", "reason"],
+      "properties": {"status": {"const": "NotConsumed"}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "collision": {
+      "type": "object", "additionalProperties": false, "required": ["publicKey", "instructionHandler", "expressionHandler", "resolution"],
+      "properties": {"publicKey": {"type": "string", "minLength": 1}, "instructionHandler": {"type": "string", "minLength": 1}, "expressionHandler": {"type": "string", "minLength": 1}, "resolution": {"const": "InstructionPrecedence"}}
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["publicKey", "registryKind", "currentHandler", "lookupContract", "directLookup", "instructionProjection", "ownershipEvidenceStatus", "lookupAliasMechanism", "lookupReplacementMechanism", "semanticAliasStatus", "semanticReplacementStatus"],
+      "properties": {
+        "publicKey": {"type": "string", "minLength": 1}, "registryKind": {"enum": ["Instruction", "ExpressionFunction"]},
+        "currentHandler": {"type": "string", "minLength": 1},
+        "lookupContract": {"enum": ["InstructionConditionalICVariable", "ExpressionOrdinalWithConditionalCurrentCultureUpper"]},
+        "directLookup": {"enum": ["DirectInstruction", "DirectExpressionFunction"]},
+        "instructionProjection": {"enum": ["DirectInstruction", "ProjectedAsMethodInstruction", "SuppressedByInstructionCollision"]},
+        "ownershipEvidenceStatus": {"enum": ["UpstreamNameMatch", "ExplicitCurrentModuleCandidate", "Unresolved"]},
+        "lookupAliasMechanism": {"const": "None"}, "lookupReplacementMechanism": {"const": "None"},
+        "semanticAliasStatus": {"const": "Unresolved"}, "semanticReplacementStatus": {"const": "Unresolved"}
+      }
+    }
+  }
+}
