@@ -19,6 +19,19 @@ public partial class OptionWindow : Control
 	OptionButton languageOption;
 	OptionButton frameRateOption;
 
+	// MultiLanguage-driven description labels (values are slider-derived numbers
+	// and stay untouched); refreshed together when the language changes.
+	Label fontLabel;
+	Label quickWidthLabel;
+	Label quickFontLabel;
+	Label sensitivityLabel;
+	Label pinchZoomLabel;
+	Label maxLinesTextLabel;
+	Label resLabel;
+	Label fpsLabel;
+	Label langLabel;
+	Button closeBtn;
+
 	static readonly string[] languages = new string[] { "default", "zh_cn", "en_us", "jp" };
 	static readonly string[] languageNames = new string[] { "Default", "简体中文", "English", "日本語" };
 
@@ -51,8 +64,7 @@ public partial class OptionWindow : Control
 		// Font size
 		var fontHBox = new HBoxContainer();
 		vbox.AddChild(fontHBox);
-		var fontLabel = new Label();
-		fontLabel.Text = MultiLanguage.Get("OptionWindow.FontSize", "Font Size");
+		fontLabel = new Label();
 		fontHBox.AddChild(fontLabel);
 		fontSizeSlider = new HSlider();
 		fontSizeSlider.MinValue = 8;
@@ -70,8 +82,7 @@ public partial class OptionWindow : Control
 		// Quick button width
 		var quickWidthHBox = new HBoxContainer();
 		vbox.AddChild(quickWidthHBox);
-		var quickWidthLabel = new Label();
-		quickWidthLabel.Text = MultiLanguage.Get("OptionWindow.QuickButtonWidth", "Quick Width");
+		quickWidthLabel = new Label();
 		quickWidthHBox.AddChild(quickWidthLabel);
 		quickButtonWidthSlider = new HSlider();
 		quickButtonWidthSlider.MinValue = QuickButtons.MinQuickButtonWidth;
@@ -89,8 +100,7 @@ public partial class OptionWindow : Control
 		// Quick font size
 		var quickFontHBox = new HBoxContainer();
 		vbox.AddChild(quickFontHBox);
-		var quickFontLabel = new Label();
-		quickFontLabel.Text = MultiLanguage.Get("OptionWindow.QuickFontSize", "Quick Font");
+		quickFontLabel = new Label();
 		quickFontHBox.AddChild(quickFontLabel);
 		quickFontSizeSlider = new HSlider();
 		quickFontSizeSlider.MinValue = QuickButtons.MinQuickButtonFontSize;
@@ -108,8 +118,7 @@ public partial class OptionWindow : Control
 		// Button drag sensitivity
 		var sensitivityHBox = new HBoxContainer();
 		vbox.AddChild(sensitivityHBox);
-		var sensitivityLabel = new Label();
-		sensitivityLabel.Text = MultiLanguage.Get("OptionWindow.ButtonDragSensitivity", "Scroll Sensitivity");
+		sensitivityLabel = new Label();
 		sensitivityHBox.AddChild(sensitivityLabel);
 		buttonDragSensitivitySlider = new HSlider();
 		buttonDragSensitivitySlider.MinValue = 0.5;
@@ -127,8 +136,7 @@ public partial class OptionWindow : Control
 		// Pinch zoom
 		var pinchZoomHBox = new HBoxContainer();
 		vbox.AddChild(pinchZoomHBox);
-		var pinchZoomLabel = new Label();
-		pinchZoomLabel.Text = MultiLanguage.Get("OptionWindow.PinchZoom", "Pinch Zoom");
+		pinchZoomLabel = new Label();
 		pinchZoomHBox.AddChild(pinchZoomLabel);
 		pinchZoomToggle = new CheckButton();
 		pinchZoomToggle.ButtonPressed = EmueraContent.ContentPinchZoomEnabled;
@@ -140,8 +148,7 @@ public partial class OptionWindow : Control
 		// Max visible lines
 		var maxLinesHBox = new HBoxContainer();
 		vbox.AddChild(maxLinesHBox);
-		var maxLinesTextLabel = new Label();
-		maxLinesTextLabel.Text = MultiLanguage.Get("OptionWindow.MaxVisibleLines", "Max Lines");
+		maxLinesTextLabel = new Label();
 		maxLinesHBox.AddChild(maxLinesTextLabel);
 		maxVisibleLinesSlider = new HSlider();
 		maxVisibleLinesSlider.MinValue = EmueraContent.MinMaxVisibleLines;
@@ -159,8 +166,7 @@ public partial class OptionWindow : Control
 		// Resolution
 		var resHBox = new HBoxContainer();
 		vbox.AddChild(resHBox);
-		var resLabel = new Label();
-		resLabel.Text = MultiLanguage.Get("OptionWindow.Resolution", "Resolution");
+		resLabel = new Label();
 		resHBox.AddChild(resLabel);
 		resolutionOption = new OptionButton();
 		ResolutionHelper.RefreshResolutions();
@@ -176,8 +182,7 @@ public partial class OptionWindow : Control
 		// Frame rate
 		var fpsHBox = new HBoxContainer();
 		vbox.AddChild(fpsHBox);
-		var fpsLabel = new Label();
-		fpsLabel.Text = MultiLanguage.Get("OptionWindow.FrameRate", "Frame Rate");
+		fpsLabel = new Label();
 		fpsHBox.AddChild(fpsLabel);
 		frameRateOption = new OptionButton();
 		for (int i = 0; i < FrameRateHelper.FrameRates.Count; i++)
@@ -191,8 +196,7 @@ public partial class OptionWindow : Control
 		// Language
 		var langHBox = new HBoxContainer();
 		vbox.AddChild(langHBox);
-		var langLabel = new Label();
-		langLabel.Text = MultiLanguage.Get("OptionWindow.Language", "Language");
+		langLabel = new Label();
 		langHBox.AddChild(langLabel);
 		languageOption = new OptionButton();
 		for (int i = 0; i < languages.Length; i++)
@@ -204,11 +208,38 @@ public partial class OptionWindow : Control
 		langHBox.AddChild(languageOption);
 
 		// Close button
-		var closeBtn = new Button();
-		closeBtn.Text = MultiLanguage.Get("OptionWindow.Close", "Close");
+		closeBtn = new Button();
 		EmueraContent.StyleButton(closeBtn);
 		closeBtn.Pressed += () => popup.Hide();
 		vbox.AddChild(closeBtn);
+
+		ApplyLanguageTexts();
+	}
+
+	// Re-read every MultiLanguage-driven description label. Value labels
+	// (slider-derived numbers) are intentionally untouched. Idempotent.
+	void ApplyLanguageTexts()
+	{
+		if (fontLabel != null)
+			fontLabel.Text = MultiLanguage.Get("OptionWindow.FontSize", "Font Size");
+		if (quickWidthLabel != null)
+			quickWidthLabel.Text = MultiLanguage.Get("OptionWindow.QuickButtonWidth", "Quick Width");
+		if (quickFontLabel != null)
+			quickFontLabel.Text = MultiLanguage.Get("OptionWindow.QuickFontSize", "Quick Font");
+		if (sensitivityLabel != null)
+			sensitivityLabel.Text = MultiLanguage.Get("OptionWindow.ButtonDragSensitivity", "Scroll Sensitivity");
+		if (pinchZoomLabel != null)
+			pinchZoomLabel.Text = MultiLanguage.Get("OptionWindow.PinchZoom", "Pinch Zoom");
+		if (maxLinesTextLabel != null)
+			maxLinesTextLabel.Text = MultiLanguage.Get("OptionWindow.MaxVisibleLines", "Max Lines");
+		if (resLabel != null)
+			resLabel.Text = MultiLanguage.Get("OptionWindow.Resolution", "Resolution");
+		if (fpsLabel != null)
+			fpsLabel.Text = MultiLanguage.Get("OptionWindow.FrameRate", "Frame Rate");
+		if (langLabel != null)
+			langLabel.Text = MultiLanguage.Get("OptionWindow.Language", "Language");
+		if (closeBtn != null)
+			closeBtn.Text = MultiLanguage.Get("OptionWindow.Close", "Close");
 	}
 
 	public void ShowPopup()
@@ -308,6 +339,9 @@ public partial class OptionWindow : Control
 	void OnLanguageSelected(long index)
 	{
 		MultiLanguage.Load(languages[index]);
+		// LanguageChanged already refreshed EmueraContent texts; refresh this
+		// window's own description labels as well (idempotent).
+		ApplyLanguageTexts();
 	}
 
 	int GetLanguageIndex(string lang)

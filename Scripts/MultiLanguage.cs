@@ -1,8 +1,15 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
 internal static class MultiLanguage
 {
+	// Fired on the calling thread right after a new language is loaded. Language
+	// switching only happens from the UI thread (OptionWindow.OnLanguageSelected),
+	// so subscribers refresh their node texts directly; refresh handlers must be
+	// idempotent because Load() may also run for the same language.
+	public static event Action LanguageChanged;
+
 	const string SettingsPath = "user://settings.cfg";
 	const string Section = "Display";
 	const string LanguageKey = "Language";
@@ -21,6 +28,7 @@ internal static class MultiLanguage
 		if (string.IsNullOrEmpty(lang))
 			lang = "default";
 
+		string previous = currentLanguage;
 		loaded = true;
 		currentLanguage = lang;
 		texts.Clear();
@@ -47,6 +55,12 @@ internal static class MultiLanguage
 
 		if (explicitLanguage)
 			SaveLanguage(lang);
+
+		// Notify UI that cached one-time texts must be re-read. Fire only on an
+		// actual language change so repeated Load() calls stay cheap and refresh
+		// handlers stay idempotent.
+		if (previous != currentLanguage)
+			LanguageChanged?.Invoke();
 	}
 
 	public static string Get(string key, string fallback = null)
