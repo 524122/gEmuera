@@ -169,6 +169,30 @@ static ConfigData() { }
 			{ "DEBUG WINDOW Y POSITION", ConfigCode.DebugWindowPosY },
 		};
 
+		// GETCONFIG 热路径：启动时把别名表预归一化（NormalizeEnglishConfigKey 对固定
+		// 别名表是一次性成本），查询时直接按归一化键 O(1) 命中，不再逐次做 O(n²)
+		// 空白折叠。语义与逐次归一化完全一致（别名表键本身就是归一化形态）。
+		private static readonly Dictionary<string, ConfigCode> englishConfigAliasesNormalized =
+			BuildNormalizedConfigAliases(englishConfigAliases);
+		private static readonly Dictionary<string, ConfigCode> englishReplaceAliasesNormalized =
+			BuildNormalizedConfigAliases(englishReplaceAliases);
+		private static readonly Dictionary<string, ConfigCode> englishDebugAliasesNormalized =
+			BuildNormalizedConfigAliases(englishDebugAliases);
+
+		private static Dictionary<string, ConfigCode> BuildNormalizedConfigAliases(
+			Dictionary<string, ConfigCode> aliases)
+		{
+			var normalized = new Dictionary<string, ConfigCode>(aliases.Count, StringComparer.OrdinalIgnoreCase);
+			foreach (KeyValuePair<string, ConfigCode> pair in aliases)
+			{
+				string key = NormalizeEnglishConfigKey(pair.Key);
+				// 首个归一化键优先，与原始表“精确命中唯一键”的取法一致。
+				if (!normalized.ContainsKey(key))
+					normalized.Add(key, pair.Value);
+			}
+			return normalized;
+		}
+
 		private static readonly HashSet<string> ignoredEnglishConfigKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 		{
 			"SKIASHARP IMAGE QUALITY",
@@ -405,7 +429,7 @@ static ConfigData() { }
 			if (configItemsByName.TryGetValue(key, out item))
 				return item;
 			ConfigCode aliasCode;
-			if (TryGetEnglishConfigAlias(key, englishConfigAliases, out aliasCode))
+			if (TryGetEnglishConfigAlias(key, englishConfigAliasesNormalized, out aliasCode))
 				return GetConfigItem(aliasCode);
 			return null;
 		}
@@ -424,7 +448,7 @@ static ConfigData() { }
 			if (replaceItemsByName.TryGetValue(key, out item))
 				return item;
 			ConfigCode aliasCode;
-			if (TryGetEnglishConfigAlias(key, englishReplaceAliases, out aliasCode))
+			if (TryGetEnglishConfigAlias(key, englishReplaceAliasesNormalized, out aliasCode))
 				return GetReplaceItem(aliasCode);
 			return null;
 		}
@@ -443,7 +467,7 @@ static ConfigData() { }
 			if (debugItemsByName.TryGetValue(key, out item))
 				return item;
 			ConfigCode aliasCode;
-			if (TryGetEnglishConfigAlias(key, englishDebugAliases, out aliasCode))
+			if (TryGetEnglishConfigAlias(key, englishDebugAliasesNormalized, out aliasCode))
 				return GetDebugItem(aliasCode);
 			return null;
 		}
@@ -485,7 +509,11 @@ static ConfigData() { }
 			code = default(ConfigCode);
 			if (string.IsNullOrWhiteSpace(key))
 				return false;
-			string normalized = NormalizeEnglishConfigKey(key);
+			// 无空白快速路径：不含 tab 且不含连续空格时，归一化退化为 Trim + 大写，
+			// 跳过 O(n²) 的空白折叠 while 循环，结果与完整归一化逐字节一致。
+			string normalized = (key.IndexOf('\t') < 0 && key.IndexOf("  ") < 0)
+				? key.Trim().ToUpperInvariant()
+				: NormalizeEnglishConfigKey(key);
 			return aliases.TryGetValue(normalized, out code);
 		}
 

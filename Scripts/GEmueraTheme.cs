@@ -218,7 +218,15 @@ public static class GEmueraTheme
 		if (button == null)
 			return;
 		button.PivotOffset = button.Size * 0.5f;
+		// 与 QuickButtons 的 _press_tween 相同的 Kill-复用模式（M4/5 动效回归）：
+		// 连点/快速移出会在 100ms 内连续创建多个 tween，复用前必须 Kill 旧 tween，
+		// 否则旧动效会继续把 Scale 写回 0.97，按钮卡在缩小态。tween 已 BindNode，
+		// 节点释放时自动终止，meta 引用不泄漏。
+		var prevTween = button.GetMeta("_press_tween", default(Variant)).As<Tween>();
+		if (prevTween != null && GodotObject.IsInstanceValid(prevTween))
+			prevTween.Kill();
 		var tween = button.CreateTween();
+		button.SetMeta("_press_tween", tween);
 		tween.BindNode(button);
 		tween.SetTrans(Tween.TransitionType.Cubic);
 		tween.SetEase(Tween.EaseType.Out);

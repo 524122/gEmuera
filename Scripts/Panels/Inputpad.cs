@@ -12,6 +12,10 @@ public partial class Inputpad : Control
 	Button repeatBtn;
 	string lastInput;
 	int lastKeyboardHeight = -1;
+	// IME 高度查询节流：可见期间不必每帧调用 DisplayServer 原生查询，
+	// 累积到 ~100ms 再查一次即可；布局只在数值实际变化时应用。
+	const float ImePollIntervalSeconds = 0.1f;
+	float imePollAccumulator;
 	// Component interface: panels advertise their own show/hide state changes so
 	// host scenes can react without polling. Emitted purely additively; callers
 	// that never connect are unaffected.
@@ -95,7 +99,12 @@ public partial class Inputpad : Control
 			return;
 		// Android reports virtual keyboard height asynchronously after focus. Poll
 		// only while visible so the panel tracks IME animation without adding idle
-		// work during normal console rendering.
+		// work during normal console rendering. ~100ms 节流：数值变化才应用布局，
+		// 布局更新时机与未节流时一致（仅查询频率降低）。
+		imePollAccumulator += (float)delta;
+		if (imePollAccumulator < ImePollIntervalSeconds)
+			return;
+		imePollAccumulator = 0f;
 		int keyboardHeight = GetVirtualKeyboardHeight();
 		if (keyboardHeight != lastKeyboardHeight)
 			ApplyPanelLayout();
