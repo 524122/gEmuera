@@ -15,6 +15,33 @@ namespace MinorShift.Emuera.Sub
 			files.Clear();
 		}
 
+		/// <summary>
+		/// M8: 移除单个已解码文本条目。调用方保证该文件后续不再需要从缓存读取；
+		/// 未命中（或已被移除）时静默成功，EraStreamReader 会回退到直接磁盘读取。
+		/// </summary>
+		public static void Remove(string path)
+		{
+			if (string.IsNullOrEmpty(path))
+				return;
+			files.TryRemove(path, out _);
+		}
+
+		/// <summary>
+		/// M8: 按扩展名移除全部已解码文本条目（大小写不敏感，扩展名需带点，如 ".csv"）。
+		/// 仅用于解析阶段结束后释放整会话驻留的文本缓存；漏删时缓存仍可命中，
+		/// 行为等价于未移除，因此释放是纯内存优化，不影响语义。
+		/// </summary>
+		public static void RemoveByExtension(string extension)
+		{
+			if (string.IsNullOrEmpty(extension))
+				return;
+			foreach (string key in files.Keys)
+			{
+				if (Path.GetExtension(key).Equals(extension, StringComparison.OrdinalIgnoreCase))
+					files.TryRemove(key, out _);
+			}
+		}
+
 		public static bool TryGetFileLines(string path, out string[] lines)
 		{
 			return files.TryGetValue(path, out lines);
