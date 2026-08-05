@@ -354,6 +354,12 @@ public partial class FirstWindow : Control
 			return;
 
 		// 深色主题的 Tab 栏：选中态用强调蓝紫填充 + 边框，非选中态用中性表面。
+		// tab 切换会全量调本方法 3 次；状态未变的按钮跳过重挂样式（ApplyRailButton
+		// 会重建 5 个 stylebox + 6 个颜色 override），只刷新状态发生变化的 tab。
+		// 视觉状态由 meta 精确跟踪，与 theme 无关，其余调用方不受影响。
+		if (button.HasMeta("gemuera_rail_active") && button.GetMeta("gemuera_rail_active").AsBool() == active)
+			return;
+		button.SetMeta("gemuera_rail_active", active);
 		GEmueraTheme.ApplyRailButton(button, active);
 	}
 
