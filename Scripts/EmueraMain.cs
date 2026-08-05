@@ -216,7 +216,10 @@ public partial class EmueraMain : Node
 
 		SpriteManager.UpdateCleanup();
 		SpriteManager.UpdateOtherThreads();
-		MinorShift._Library.WinInput.UpdateKeyState();
+		// 按需轮询：仅在 VM 线程请求（GETKEY/GETKEYTRIGGERED）的帧才执行
+		// 42 键轮询，INPUT 等待期间不再每帧空转。
+		if (MinorShift._Library.WinInput.ConsumeKeyRefreshRequest())
+			MinorShift._Library.WinInput.UpdateKeyState();
 
 		var console = GlobalStatic.Console;
 		var content = EmueraContent.instance;
