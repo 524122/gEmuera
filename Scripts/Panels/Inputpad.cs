@@ -132,6 +132,15 @@ public partial class Inputpad : Control
 		return System.Math.Max(0, DisplayServer.VirtualKeyboardGetHeight());
 	}
 
+	// Re-read cached MultiLanguage texts after a language change. Idempotent.
+	public void RefreshUiTexts()
+	{
+		if (confirmBtn != null)
+			confirmBtn.Text = MultiLanguage.Get("Inputpad.Confirm", "OK");
+		if (repeatBtn != null)
+			repeatBtn.Text = MultiLanguage.Get("Inputpad.Repeat", "Repeat");
+	}
+
 	internal void UpdateInputType(InputType type)
 	{
 		// Godot 4 LineEdit does not expose VirtualKeyboardType in this version.

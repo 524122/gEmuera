@@ -6,6 +6,7 @@ public partial class Scalepad : Control
     HBoxContainer hbox;
     HSlider slider;
     Label valueLabel;
+    Button fitBtn;
 
     // Component interface: panels advertise their own show/hide state changes so
     // host scenes can react without polling. Emitted purely additively; callers
@@ -59,7 +60,7 @@ public partial class Scalepad : Control
         oneBtn.Pressed += () => SetScale(1.0f);
         hbox.AddChild(oneBtn);
 
-        var fitBtn = new Button();
+        fitBtn = new Button();
         fitBtn.Text = MultiLanguage.Get("Scalepad.AutoFit", "Fit");
         fitBtn.CustomMinimumSize = new Vector2(60, 44);
         EmueraContent.StyleButton(fitBtn);
@@ -148,6 +149,13 @@ public partial class Scalepad : Control
         }
         if (valueLabel != null)
             valueLabel.Text = string.Format("{0:F1}x", scale);
+    }
+
+    // Re-read cached MultiLanguage texts after a language change. Idempotent.
+    public void RefreshUiTexts()
+    {
+        if (fitBtn != null)
+            fitBtn.Text = MultiLanguage.Get("Scalepad.AutoFit", "Fit");
     }
 
     public void ShowPad()

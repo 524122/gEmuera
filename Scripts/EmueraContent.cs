@@ -996,6 +996,24 @@ public partial class EmueraContent : Control
 		AddChild(cbgContainer);
 
 		ApplySafeAreaLayout(true);
+
+		// Keep one-time MultiLanguage texts (msgBox buttons, in-process banner,
+		// input/scalepad buttons) in sync with the selected language.
+		MultiLanguage.LanguageChanged += RefreshUiTexts;
+	}
+
+	// Re-read every cached UI text driven by MultiLanguage.Get. Idempotent: safe
+	// to call repeatedly and on every language change.
+	void RefreshUiTexts()
+	{
+		if (inProcessLabel != null)
+			inProcessLabel.Text = MultiLanguage.Get("EmueraContent.InProcess", "Processing...");
+		if (msgBoxConfirmBtn != null)
+			msgBoxConfirmBtn.Text = MultiLanguage.Get("MsgBox.Confirm", "OK");
+		if (msgBoxCancelBtn != null)
+			msgBoxCancelBtn.Text = MultiLanguage.Get("MsgBox.Cancel", "Cancel");
+		inputpad?.RefreshUiTexts();
+		scalepad?.RefreshUiTexts();
 	}
 
 	// Clear all generated console state. This is used for title changes/reloads
@@ -1042,6 +1060,7 @@ public partial class EmueraContent : Control
 
 	public override void _ExitTree()
 	{
+		MultiLanguage.LanguageChanged -= RefreshUiTexts;
 		GetViewport().SizeChanged -= OnViewportSizeChanged;
 		ResetLineTexturePins();
 		ReleaseCbgTexturePins();
