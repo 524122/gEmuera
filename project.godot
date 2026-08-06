@@ -21,7 +21,6 @@ pixel_store=true
 
 AppBootstrap="*res://Scripts/GodotHost/AppBootstrap.cs"
 PlatformGateway="*res://Scripts/GodotHost/PlatformGateway.cs"
-McpRuntimeAgent="*uid://bfpv4bv6ctr8o"
 
 [display]
 
