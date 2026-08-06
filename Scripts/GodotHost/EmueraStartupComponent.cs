@@ -78,9 +78,9 @@ public sealed partial class EmueraStartupComponent : Node
         }
 
         char[] split = { '\r', '\n' };
-        const string shiftjisPath = "res://Text/emuera_config_shiftjis.bytes";
-        const string utf8Path = "res://Text/emuera_config_utf8.txt";
-        const string utf8CnPath = "res://Text/emuera_config_utf8_zhcn.txt";
+        const string shiftjisPath = "res://assets/text/emuera_config_shiftjis.bytes";
+        const string utf8Path = "res://assets/text/emuera_config_utf8.txt";
+        const string utf8CnPath = "res://assets/text/emuera_config_utf8_zhcn.txt";
 
         if (!Godot.FileAccess.FileExists(shiftjisPath) ||
             !Godot.FileAccess.FileExists(utf8Path) ||

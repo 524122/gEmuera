@@ -26,7 +26,7 @@ namespace MinorShift.Emuera
 
 	public static class Program
 	{
-		// M0 runner 的日志落点和兼容计划只由测试/会话宿主配置；普通启动保持现有游戏目录行为。
+		// Legacy runner 的日志落点和兼容计划只由测试/会话宿主配置；普通启动保持现有游戏目录行为。
 		static string m0RunnerStartupErrorLogPath = "";
 		static string m0RunnerDefaultOutputLogPath = "";
 		static CompatibilityPlan m1CompatibilityPlan;
@@ -172,6 +172,13 @@ namespace MinorShift.Emuera
 						return;
 					}
 				}
+				// launcher（user://launcher.cfg debug_show_window）覆盖 debug.config 的
+				// DebugShowWindow，避免宿主手写解析 debug.config。
+				if (DebugShowWindowOverride is bool showWindow)
+				{
+					ConfigData.Instance.GetDebugItem(ConfigCode.DebugShowWindow)?.SetValue(showWindow);
+					Config.SetDebugConfig(ConfigData.Instance);
+				}
 			}
 			if (args.Length > argsStart)
 			{
@@ -265,6 +272,12 @@ namespace MinorShift.Emuera
 
 		public static bool debugMode = false;
 		public static bool DebugMode { get { return debugMode; } }
+		/// <summary>
+		/// launcher（user://launcher.cfg [launcher] debug_show_window）对 DebugShowWindow
+		/// 的覆盖值；null 表示不覆盖（沿用 debug.config）。由 EmueraThread.Work 在
+		/// Program.Main 之前从宿主透传，仅 DebugMode 分支内消费。
+		/// </summary>
+		public static bool? DebugShowWindowOverride;
 		public static EmueraCoreProfile CoreProfile
 		{
 			get { return ResolveCompatibilityProfile(Compatibility.ProfileId); }
@@ -368,29 +381,29 @@ namespace MinorShift.Emuera
 			GenericUtils.Info($"[LOAD] Android keeps configured window width: {Config.WindowX}, safe={safeWidth}, viewport={viewportWidth}");
 		}
 
-		internal static void ConfigureM0RunnerStartupErrorLogPath(string path)
+		internal static void ConfigureLegacyRunnerStartupErrorLogPath(string path)
 		{
 			if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path))
-				throw new ArgumentException("M0 runner startup error log path must be absolute.", nameof(path));
+				throw new ArgumentException("Legacy runner startup error log path must be absolute.", nameof(path));
 
 			string normalized = Path.GetFullPath(path);
 			string directory = Path.GetDirectoryName(normalized);
 			if (string.IsNullOrEmpty(directory))
-				throw new ArgumentException("M0 runner startup error log path must have a directory.", nameof(path));
+				throw new ArgumentException("Legacy runner startup error log path must have a directory.", nameof(path));
 
 			Directory.CreateDirectory(directory);
 			System.Threading.Volatile.Write(ref m0RunnerStartupErrorLogPath, normalized);
 		}
 
-		internal static void ConfigureM0RunnerDefaultOutputLogPath(string path)
+		internal static void ConfigureLegacyRunnerDefaultOutputLogPath(string path)
 		{
 			if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path))
-				throw new ArgumentException("M0 runner default output log path must be absolute.", nameof(path));
+				throw new ArgumentException("Legacy runner default output log path must be absolute.", nameof(path));
 
 			string normalized = Path.GetFullPath(path);
 			string directory = Path.GetDirectoryName(normalized);
 			if (string.IsNullOrEmpty(directory))
-				throw new ArgumentException("M0 runner default output log path must have a directory.", nameof(path));
+				throw new ArgumentException("Legacy runner default output log path must have a directory.", nameof(path));
 
 			Directory.CreateDirectory(directory);
 			File.WriteAllText(normalized, string.Empty);
@@ -415,12 +428,13 @@ namespace MinorShift.Emuera
 			AnalysisFiles?.Clear();
 			AnalysisFiles = null;
 			debugMode = false;
+			DebugShowWindowOverride = null;
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
 			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 			StartTime = 0;
 		}
 
-		internal static bool TryResolveM0RunnerDefaultOutputLogPath(string requestedPath, out string outputPath)
+		internal static bool TryResolveLegacyRunnerDefaultOutputLogPath(string requestedPath, out string outputPath)
 		{
 			outputPath = "";
 			string runnerPath = System.Threading.Volatile.Read(ref m0RunnerDefaultOutputLogPath);

@@ -135,6 +135,10 @@ namespace gEmuera.Diagnostics
             // logging
             if (TryGetBool(sections, "logging", "enabled", out b)) cfg.LoggingEnabled = b;
             if (TryGetString(sections, "logging", "level", out v)) cfg.LoggingLevel = v;
+            // WS2 持续文件 sink：LoggingEnabled && FileSinkEnabled 双重门控；等级独立于全局 level。
+            if (TryGetBool(sections, "logging", "file_sink", out b)) cfg.FileSinkEnabled = b;
+            if (TryGetString(sections, "logging", "file_sink_level", out v)) cfg.FileSinkLevel = v;
+            // 诊断面板显示：等价键复用 RuntimePanelEnabled（[logging] panel_visible 由 ApplyMinimalLoggingSwitches 在 minimal 展开后应用）。
             if (TryGetBool(sections, "logging", "mirror_non_error_to_godot", out b)) cfg.LoggingMirrorNonErrorToGodot = b;
             if (TryGetInt(sections, "logging", "diagnostic_ring_capacity", out int i)) cfg.LoggingDiagnosticRingCapacity = i;
             if (TryGetInt(sections, "logging", "max_message_chars", out i)) cfg.LoggingMaxMessageChars = i;
@@ -386,6 +390,14 @@ namespace gEmuera.Diagnostics
             bool enabled = GetMinimalBool(sections, "enabled", false);
             bool mirrorToGodot = GetMinimalBool(sections, "mirror_to_godot",
                 GetMinimalBool(sections, "mirror_non_error_to_godot", false));
+            // WS2：显式 [logging] level 参与 minimal 展开，避免 enabled=true 强制回退 debug。
+            string levelOverride = null;
+            if (TryGetString(sections, "logging", "level", out string explicitLevel))
+                levelOverride = explicitLevel;
+            // WS2：面板显示等价键 [logging] panel_visible（默认 true）优先于旧 minimal runtime_panel（默认 false），
+            // 两者都映射到 RuntimePanelEnabled，避免 minimal 展开把用户设置吞掉。
+            bool panelVisible = GetMinimalBool(sections, "panel_visible",
+                GetMinimalBool(sections, "runtime_panel", false));
             cfg.ApplyMinimalLoggingConfig(
                 enabled,
                 GetMinimalBool(sections, "touch", false),
@@ -398,10 +410,31 @@ namespace gEmuera.Diagnostics
                 GetMinimalBool(sections, "android_storage", false),
                 GetMinimalBool(sections, "performance", GetMinimalBool(sections, "performance_sampling", false)),
                 GetMinimalBool(sections, "statement_recognition", false),
-                GetMinimalBool(sections, "runtime_panel", false),
+                panelVisible,
                 GetMinimalBool(sections, "input_replay", false),
                 GetMinimalBool(sections, "diagnostic_package", false),
-                mirrorToGodot);
+                mirrorToGodot,
+                levelOverride);
+            // 修复：minimal 展开内部 DisableAllDiagnostics 会清空 Categories 掩码，
+            // 若配置显式给出 [logging.categories] 键（设置页/面板保存），展开后按文件值恢复；
+            // 未给出的键保持 minimal 默认，避免分类过滤静默失效（文件 sink 只剩 error 记录）。
+            RestoreExplicitCategories(sections, cfg);
+        }
+
+        static void RestoreExplicitCategories(System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, string>> sections, RuntimeDiagnosticsConfig cfg)
+        {
+            if (!sections.TryGetValue("logging.categories", out _))
+                return;
+            if (TryGetBool(sections, "logging.categories", "general", out bool b)) cfg.Categories.General = b;
+            if (TryGetBool(sections, "logging.categories", "sprite", out b)) cfg.Categories.Sprite = b;
+            if (TryGetBool(sections, "logging.categories", "audio", out b)) cfg.Categories.Audio = b;
+            if (TryGetBool(sections, "logging.categories", "input", out b)) cfg.Categories.Input = b;
+            if (TryGetBool(sections, "logging.categories", "script", out b)) cfg.Categories.Script = b;
+            if (TryGetBool(sections, "logging.categories", "ui", out b)) cfg.Categories.UI = b;
+            if (TryGetBool(sections, "logging.categories", "file_system", out b)) cfg.Categories.FileSystem = b;
+            if (TryGetBool(sections, "logging.categories", "load", out b)) cfg.Categories.Load = b;
+            if (TryGetBool(sections, "logging.categories", "save", out b)) cfg.Categories.Save = b;
+            if (TryGetBool(sections, "logging.categories", "config", out b)) cfg.Categories.Config = b;
         }
 
         static bool GetMinimalBool(System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, string>> sections, string key, bool fallback)

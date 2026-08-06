@@ -249,7 +249,7 @@ public sealed partial class EmueraTextRenderComponent : Node
 		if (textRenderFont != null)
 			return;
 
-		textRenderFont = ResourceLoader.Load<FontFile>("res://Fonts/MS Gothic.ttf");
+		textRenderFont = ResourceLoader.Load<FontFile>("res://assets/fonts/MS Gothic.ttf");
 		if (textRenderFont == null)
 			return;
 

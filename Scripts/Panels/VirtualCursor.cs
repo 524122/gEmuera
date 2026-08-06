@@ -62,7 +62,7 @@ public partial class VirtualCursor : CanvasLayer
 	void BuildCursorVisual()
 	{
 		cursorVisual = new TextureRect();
-		cursorVisual.Texture = ResourceLoader.Load<Texture2D>("res://Icons/cursor.svg");
+		cursorVisual.Texture = ResourceLoader.Load<Texture2D>("res://assets/icons/cursor.svg");
 		cursorVisual.CustomMinimumSize = new Vector2(32, 32);
 		cursorVisual.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize;
 		cursorVisual.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;

@@ -1,35 +1,290 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.IO;
 using uEmuera.Forms;
 using uEmuera.Drawing;
+using MinorShift.Emuera;
 using MinorShift.Emuera.GameProc;
 using MinorShift.Emuera.GameView;
+using MinorShift.Emuera.GameData.Expression;
+using MinorShift.Emuera.Sub;
 using MinorShift._Library;
 using System.Threading;
+using gEmuera.GodotHost;
 using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace uEmuera.Window
 {
+    /// <summary>
+    /// Emuera DEBUG 模式调试窗口的引擎侧门面（参考 v24 DebugDialog 移植）。
+    /// 本对象全部生命周期运行在 Emuera worker 线程（OpenDebugDialog / @DEBUG 指令）：
+    /// - 引擎态访问（DebugConsoleLog、GetDebugTraceLog、watch 表达式求值、DebugCommand）
+    ///   一律在 worker 侧完成，通过 EmueraDebugSnapshot 推送给主线程面板；
+    /// - 主线程面板只能调用 EnqueueCommand / EnqueueWatchList / EnqueueCloseRequest
+    ///   （纯队列投递，由 worker 定时器在引擎空闲边界消费）。
+    /// 打开时注册 worker 侧定时器（uEmuera.Forms.Timer，由 EmueraThread 空闲循环驱动），
+    /// 每 200ms 在引擎 INPUT/WAIT 边界做一次命令执行 + watch 求值 + 快照推送。
+    /// 关闭时保存 debug\watchlist.csv 与 debug\console.log 到 Program.DebugDir。
+    /// </summary>
     public class DebugDialog : IDisposable
     {
-        public void Dispose()
-        { }
+        const int RefreshIntervalMilliseconds = 200;
+        const string WatchListFileName = "watchlist.csv";
+        const string ConsoleLogFileName = "console.log";
+
+        EmueraConsole console;
+        Process emuera;
+        volatile bool created;
+        readonly List<string> watchExpressions = new List<string>();
+        readonly ConcurrentQueue<string> pendingCommands = new ConcurrentQueue<string>();
+        readonly ConcurrentQueue<string[]> pendingWatchList = new ConcurrentQueue<string[]>();
+        readonly ConcurrentQueue<bool> pendingCloseRequests = new ConcurrentQueue<bool>();
+        uEmuera.Forms.Timer refreshTimer;
+
+        string WatchFilePath { get { return Program.DebugDir + WatchListFileName; } }
+        string ConsoleFilePath { get { return Program.DebugDir + ConsoleLogFileName; } }
+
+        public bool Created { get { return created; } }
 
         internal void SetParent(EmueraConsole emueraConsole, Process emuera)
         {
-            //throw new NotImplementedException();
+            console = emueraConsole;
+            this.emuera = emuera;
         }
 
         internal void Show()
         {
-            //throw new NotImplementedException();
+            if (created)
+                return;
+            created = true;
+            LoadWatchListFromDisk();
+            refreshTimer = new uEmuera.Forms.Timer
+            {
+                Interval = RefreshIntervalMilliseconds,
+                Enabled = true,
+            };
+            refreshTimer.Tick += OnRefreshTick;
+            EmueraDebugDialogPanel.ShowPanel(console, this);
         }
 
         internal void Focus()
         {
-            //throw new NotImplementedException();
+            if (!created)
+                return;
+            EmueraDebugDialogPanel.FocusPanel();
         }
 
-        public bool Created { get { return true; } }
+        public void Close()
+        {
+            Dispose();
+        }
+
+        public void Dispose()
+        {
+            if (!created)
+                return;
+            created = false;
+            if (refreshTimer != null)
+            {
+                refreshTimer.Enabled = false;
+                refreshTimer.Tick -= OnRefreshTick;
+                refreshTimer.Dispose();
+                refreshTimer = null;
+            }
+            // 面板在主线程可能已投递 watch 列表更新（✕ 关闭时），先消费再落盘。
+            while (pendingWatchList.TryDequeue(out string[] list))
+                ApplyWatchList(list);
+            SaveWatchListToDisk();
+            SaveConsoleLogToDisk();
+            EmueraDebugDialogPanel.HidePanel();
+        }
+
+        /// <summary>主线程面板 → worker：调试控制台命令（回车触发）。</summary>
+        public void EnqueueCommand(string text)
+        {
+            if (!string.IsNullOrEmpty(text))
+                pendingCommands.Enqueue(text);
+        }
+
+        /// <summary>主线程面板 → worker：watch 表达式整表替换。</summary>
+        public void EnqueueWatchList(string[] expressions)
+        {
+            if (expressions == null)
+                return;
+            pendingWatchList.Enqueue(expressions);
+        }
+
+        /// <summary>主线程面板 → worker：请求关闭（✕ 按钮，Dispose 仅在 worker 线程执行）。</summary>
+        public void EnqueueCloseRequest()
+        {
+            pendingCloseRequests.Enqueue(true);
+        }
+
+        void OnRefreshTick(object sender, EventArgs e)
+        {
+            if (!created || console == null)
+                return;
+            // 会话边界自愈：console 已随 GlobalStatic.Reset 解绑或 DEBUG 模式已关闭时
+            // 自行释放，避免定时器泄漏到下一个会话。
+            if (!Program.DebugMode || !ReferenceEquals(GlobalStatic.Console, console))
+            {
+                Dispose();
+                return;
+            }
+
+            while (pendingCloseRequests.TryDequeue(out _))
+            {
+                Dispose();
+                return;
+            }
+            while (pendingCommands.TryDequeue(out string command))
+                ExecuteDebugCommand(command);
+            while (pendingWatchList.TryDequeue(out string[] list))
+                ApplyWatchList(list);
+
+            EmueraDebugDialogPanel.PushSnapshot(BuildSnapshot());
+        }
+
+        void ExecuteDebugCommand(string command)
+        {
+            if (console == null || console.IsInProcess)
+                return; // 参考实现要求引擎空闲才执行；定时器仅在 INPUT/WAIT 边界触发
+            console.DebugPrint(command);
+            console.DebugNewLine();
+            console.DebugCommand(command, false, true);
+        }
+
+        void ApplyWatchList(string[] expressions)
+        {
+            watchExpressions.Clear();
+            for (int i = 0; i < expressions.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(expressions[i]))
+                    watchExpressions.Add(expressions[i]);
+            }
+        }
+
+        EmueraDebugSnapshot BuildSnapshot()
+        {
+            string consoleLog = console.DebugConsoleLog;
+            string traceLog = console.GetDebugTraceLog(false) ?? "";
+            string[] expressions = watchExpressions.ToArray();
+            string[] values = new string[expressions.Length];
+            if (expressions.Length > 0)
+                EvaluateWatches(expressions, values);
+            return new EmueraDebugSnapshot(consoleLog, traceLog, expressions, values);
+        }
+
+        // 参考 v24 DebugDialog.updateVarWatch + getValueString 移植：
+        // saveCurrentState(false) → 逐项 LexicalAnalyzer.Analyse +
+        // ExpressionParser.ReduceExpressionTerm + term.GetValue(EMediator)
+        // （RunERBFromMemory=true 包裹）→ finally clearMethodStack()+loadPrevState()。
+        // 只读求值；改值请走调试控制台命令框（@SET）。
+        void EvaluateWatches(string[] expressions, string[] values)
+        {
+            if (emuera == null || GlobalStatic.EMediator == null)
+                return;
+            GlobalStatic.Process.saveCurrentState(false);
+            try
+            {
+                for (int i = 0; i < expressions.Length; i++)
+                    values[i] = GetValueString(expressions[i]);
+            }
+            finally
+            {
+                GlobalStatic.Process.clearMethodStack();
+                GlobalStatic.Process.loadPrevState();
+            }
+        }
+
+        string GetValueString(string str)
+        {
+            if ((emuera == null) || (GlobalStatic.EMediator == null))
+                return "";
+            if (string.IsNullOrEmpty(str))
+                return "";
+            console.RunERBFromMemory = true;
+            try
+            {
+                StringStream st = new StringStream(str);
+                WordCollection wc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
+                IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+                if (term == null)
+                    return "";
+                SingleTerm value = term.GetValue(GlobalStatic.EMediator);
+                return value.ToString();
+            }
+            catch (CodeEE e)
+            {
+                return e.Message;
+            }
+            catch (Exception e)
+            {
+                return e.GetType().ToString() + ":" + e.Message;
+            }
+            finally
+            {
+                console.RunERBFromMemory = false;
+            }
+        }
+
+        void LoadWatchListFromDisk()
+        {
+            try
+            {
+                if (!File.Exists(WatchFilePath))
+                    return;
+                var lines = new List<string>();
+                using (StreamReader reader = new StreamReader(WatchFilePath, Config.Encode))
+                {
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        if (!string.IsNullOrEmpty(line))
+                            lines.Add(line);
+                    }
+                }
+                watchExpressions.Clear();
+                watchExpressions.AddRange(lines);
+            }
+            catch
+            {
+                // 参考实现加载失败仅提示；这里静默（debug 工具不阻塞会话）。
+            }
+        }
+
+        void SaveWatchListToDisk()
+        {
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(WatchFilePath, false, Config.Encode))
+                {
+                    for (int i = 0; i < watchExpressions.Count; i++)
+                    {
+                        if (!string.IsNullOrEmpty(watchExpressions[i]))
+                            writer.WriteLine(watchExpressions[i]);
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        void SaveConsoleLogToDisk()
+        {
+            if (console == null)
+                return;
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(ConsoleFilePath, false, Config.Encode))
+                    writer.Write(console.DebugConsoleLog);
+            }
+            catch
+            {
+            }
+        }
     }
 
     public class MainWindow : IDisposable

@@ -12,13 +12,13 @@ public static class GEmueraTheme
 	static Theme _loadedTheme;
 
 	/// <summary>
-	/// Loads the unified Theme resource (res://theme/gemuera_theme.tres) that supplies
+	/// Loads the unified Theme resource (res://assets/theme/gemuera_theme.tres) that supplies
 	/// dark-modern baseline styles for controls without explicit code overrides.
 	/// </summary>
 	public static Theme LoadTheme()
 	{
 		if (_loadedTheme == null)
-			_loadedTheme = GD.Load<Theme>("res://theme/gemuera_theme.tres");
+			_loadedTheme = GD.Load<Theme>("res://assets/theme/gemuera_theme.tres");
 		return _loadedTheme;
 	}
 

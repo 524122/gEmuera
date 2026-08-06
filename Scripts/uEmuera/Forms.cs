@@ -41,11 +41,15 @@ namespace uEmuera.Forms
 
         public static void Update()
         {
+            // 先拍快照再遍历：Tick 回调可能同步 Dispose 定时器（如 DebugDialog 关闭时
+            // refreshTimer.Dispose → timers.Remove），直接在 HashSet 枚举中增删元素
+            // 会使版本号失效，下一次 MoveNext 抛 InvalidOperationException。
             var curr_tick = WinmmTimer.TickCount;
-            var iter = timers.GetEnumerator();
-            while(iter.MoveNext())
+            var snapshot = new Timer[timers.Count];
+            timers.CopyTo(snapshot);
+            for (int i = 0; i < snapshot.Length; i++)
             {
-                var timer = iter.Current;
+                var timer = snapshot[i];
                 if(curr_tick - timer.last_tick < timer.Interval)
                     continue;
                 timer.last_tick = curr_tick;

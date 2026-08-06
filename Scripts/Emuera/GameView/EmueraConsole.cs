@@ -122,6 +122,10 @@ namespace MinorShift.Emuera.GameView
 
 	internal sealed partial class EmueraConsole :IDisposable
 	{
+		StreamWriter debuglog = null;
+		// 调试日志订阅句柄：闭包捕获的是字段，Dispose 置空 debuglog 前必须退订，
+		// 否则 displayLineList.Add 再触发 Changed 时会在 handler 内抛 NullReferenceException。
+		EventHandler<ChangedEventArgs> debugLoggingHandler = null;
 		public EmueraConsole(MainWindow parent)
 		{
 			window = parent;
@@ -139,20 +143,21 @@ namespace MinorShift.Emuera.GameView
 			}
 			//displayLineList = new List<ConsoleDisplayLine>();
             displayLineList = new DisplayLineList();
-            //if (Program.DebugMode)
-            //{
-            //    debuglog = new StreamWriter(Program.DebugDir + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log", true, Encoding.UTF8)
-            //    {
-            //        AutoFlush = true,
-            //    };
+            //DEBUG模式:全描画ログをdebugフォルダに出力する
+            if (Program.DebugMode)
+            {
+                debuglog = new StreamWriter(Program.DebugDir + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log", true, Encoding.UTF8)
+                {
+                    AutoFlush = true,
+                };
 
-            //    void logging(object sender, ChangedEventArgs e)
-            //    {
-            //        var s = e.ConsoleDisplayLine.ToString();
-            //        debuglog.WriteLine(s);
-            //    }
-            //    displayLineList.Changed += logging;
-            //}
+                debugLoggingHandler = (sender, e) =>
+                {
+                    var s = e.ConsoleDisplayLine.ToString();
+                    debuglog.WriteLine(s);
+                };
+                displayLineList.Changed += debugLoggingHandler;
+            }
 
 			printBuffer = new PrintStringBuffer(this);
 
@@ -1179,9 +1184,9 @@ namespace MinorShift.Emuera.GameView
 
 			state = req.NoFocus ? ConsoleState.WaitInputNoFocus : ConsoleState.WaitInput;
 			inputReq = req;
-			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			if (global::gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
 			{
-				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+				global::gEmuera.LegacyRunner.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
 					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
 			}
 			bool flushDeferredRewrite = ConsumeDisplayRewriteRefresh();
@@ -1213,9 +1218,9 @@ namespace MinorShift.Emuera.GameView
 			req.StopMesskip = stopMesskip;
 			inputReq = req;
 			state = ConsoleState.WaitInput;
-			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			if (global::gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
 			{
-				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+				global::gEmuera.LegacyRunner.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
 					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
 			}
 			emuera.NeedWaitToEventComEnd = false;
@@ -1416,9 +1421,9 @@ namespace MinorShift.Emuera.GameView
 				if (state == ConsoleState.Error)
 					return;
 			}
-			if (global::gEmuera.M0.LegacyTrace.IsEnabled && inputReq != null)
+			if (global::gEmuera.LegacyRunner.LegacyTrace.IsEnabled && inputReq != null)
 			{
-				global::gEmuera.M0.LegacyTrace.TryRecordWait("completion_consumed", inputReq.ID,
+				global::gEmuera.LegacyRunner.LegacyTrace.TryRecordWait("completion_consumed", inputReq.ID,
 					inputReq.InputType.ToString(), inputReq.NeedValue, inputReq.OneInput, inputReq.NoFocus,
 					inputReq.Timelimit, NewButtonGeneration);
 			}
@@ -2815,6 +2820,16 @@ namespace MinorShift.Emuera.GameView
 
 		public void Dispose()
 		{
+			if(debugLoggingHandler != null)
+			{
+				displayLineList.Changed -= debugLoggingHandler;
+				debugLoggingHandler = null;
+			}
+			if(debuglog != null)
+			{
+				debuglog.Dispose();
+				debuglog = null;
+			}
 			if(timer != null)
 				timer.Dispose();
 			//timer = null;

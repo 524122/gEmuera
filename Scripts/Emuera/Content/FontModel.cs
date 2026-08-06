@@ -12,8 +12,8 @@ namespace MinorShift.Emuera.Content
 	/// </summary>
 	public static class FontModel
 	{
-		private const string DefaultFontSourcePath = "res://Resources/Fonts/MS Gothic.ttf";
-		private const string FallbackFontSourcePath = "res://Resources/Fonts/Microsoft YaHei.ttf";
+		private const string DefaultFontSourcePath = "res://assets/fonts/MS Gothic.ttf";
+		private const string FallbackFontSourcePath = "res://assets/fonts/Microsoft YaHei.ttf";
 		private const string DefaultFontUserPath = "user://MS_Gothic.ttf";
 		private const string FallbackFontUserPath = "user://Microsoft_YaHei.ttf";
 

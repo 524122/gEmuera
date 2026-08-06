@@ -137,7 +137,7 @@ namespace MinorShift.Emuera.GameData
                 }
 				if (SWT is CurlyBraceSubWord)
 				{
-					if (operand.GetEraType() != EraType.Integer)
+					if (operand.GetEraType() != EraType.Integer && operand.GetEraType() != EraType.Float)
 						throw new CodeEE("{}の中の式が数式ではありません");
 					termArray[i] = new FunctionMethodTerm(formatCurlyBrace, new IOperandTerm[] { operand, second, third });
 					continue;
@@ -237,7 +237,9 @@ namespace MinorShift.Emuera.GameData
 		{
 			public override string GetStrValue(ExpressionMediator exm, IOperandTerm[] arguments)
 			{
-				string ret = arguments[0].GetIntValue(exm).ToString();
+				string ret = arguments[0].GetEraType() == EraType.Float
+					? arguments[0].GetFloatValue(exm).ToString()
+					: arguments[0].GetIntValue(exm).ToString();
 				if (arguments[1] == null)
 					return ret;
 				if (arguments[2] != null)

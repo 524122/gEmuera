@@ -32,9 +32,9 @@ internal static class MultiLanguage
 		loaded = true;
 		currentLanguage = lang;
 		texts.Clear();
-		var path = $"res://Lang/{lang}.txt";
+		var path = $"res://assets/lang/{lang}.txt";
 		if (!Godot.FileAccess.FileExists(path))
-			path = "res://Lang/default.txt";
+			path = "res://assets/lang/default.txt";
 		if (!Godot.FileAccess.FileExists(path))
 			return;
 

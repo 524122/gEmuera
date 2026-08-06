@@ -40,12 +40,16 @@ namespace gEmuera.Diagnostics
             var sb = new StringBuilder(512);
             sb.AppendLine("# gEmuera 运行时日志/诊断配置");
             sb.AppendLine("# enabled=false 表示日志/诊断系统完全关闭。");
-            sb.AppendLine("# migration.session_isolation 仅在下次启动时生效；默认 false 保持 M0 旧启动链。");
+            sb.AppendLine("# migration.session_isolation 仅在下次启动时生效；默认 false 保持旧版启动链。");
             sb.AppendLine("[migration]");
             sb.AppendLine("session_isolation = " + Bool(c.MigrationSessionIsolationEnabled));
             sb.AppendLine();
             sb.AppendLine("[logging]");
             sb.AppendLine("enabled = " + Bool(c.LoggingEnabled));
+            sb.AppendLine("level = \"" + c.LoggingLevel + "\"");
+            sb.AppendLine("file_sink = " + Bool(c.FileSinkEnabled));
+            sb.AppendLine("file_sink_level = \"" + c.FileSinkLevel + "\"");
+            sb.AppendLine("panel_visible = " + Bool(c.RuntimePanelEnabled));
             sb.AppendLine();
             sb.AppendLine("touch = " + Bool(c.TouchEnabled));
             sb.AppendLine("input = " + Bool(c.InputDebugEnabled));
@@ -57,6 +61,20 @@ namespace gEmuera.Diagnostics
             sb.AppendLine("android_storage = " + Bool(c.AndroidStorageEnabled));
             sb.AppendLine("performance = " + Bool(c.PerformanceEnabled || c.PerformanceSamplingEnabled));
             sb.AppendLine("statement_recognition = " + Bool(c.StatementRecognitionEnabled));
+            // 分类掩码必须持久化，否则设置页的“日志分类”勾选重启/热重载后全部还原为关，
+            // minimal 展开（DisableAllDiagnostics）也会把掩码清空（见 loader 的恢复逻辑）。
+            sb.AppendLine();
+            sb.AppendLine("[logging.categories]");
+            sb.AppendLine("general = " + Bool(c.Categories.General));
+            sb.AppendLine("sprite = " + Bool(c.Categories.Sprite));
+            sb.AppendLine("audio = " + Bool(c.Categories.Audio));
+            sb.AppendLine("input = " + Bool(c.Categories.Input));
+            sb.AppendLine("script = " + Bool(c.Categories.Script));
+            sb.AppendLine("ui = " + Bool(c.Categories.UI));
+            sb.AppendLine("file_system = " + Bool(c.Categories.FileSystem));
+            sb.AppendLine("load = " + Bool(c.Categories.Load));
+            sb.AppendLine("save = " + Bool(c.Categories.Save));
+            sb.AppendLine("config = " + Bool(c.Categories.Config));
             return sb.ToString();
         }
 

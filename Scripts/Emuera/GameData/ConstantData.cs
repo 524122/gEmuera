@@ -449,6 +449,9 @@ check1break:
 				case VariableCode.STRNAME:
 				case VariableCode.GLOBALNAME:
 				case VariableCode.GLOBALSNAME:
+				case VariableCode.DAYNAME:
+				case VariableCode.TIMENAME:
+				case VariableCode.MONEYNAME:
 					MaxDataList[(int)(id.Code & VariableCode.__LOWERCASE__)] = length;
 					break;
 				default:
@@ -1455,15 +1458,16 @@ check1break:
 
 		public CharacterTemplate GetCharacterTemplateFromCsvNo(Int64 index)
 		{
-            //foreach (CharacterTemplate chara in CharacterTmplList)
-            //{
-            //	if (chara.csvNo != index)
-            //		continue;
-            //	return chara;
-            //}
-            //return null;
-            return GetCharacterTemplate(index);
-
+            // 按 CSV 文件编号（csvNo）查找，而不是内部模板 No。
+            // 与 snake 参考实现一致：chara*.csv 的文件名数字可能与其 NO 字段不同，
+            // 用 No 二分查找会解析到错误的模板或静默回退到伪角色。
+            foreach (CharacterTemplate chara in CharacterTmplList)
+            {
+                if (chara.csvNo != index)
+                    continue;
+                return chara;
+            }
+            return null;
         }
 
 		public Int64 GetCsvNoByCharacterStr(CharacterStrData type, string name)

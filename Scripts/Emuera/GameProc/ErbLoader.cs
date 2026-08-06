@@ -24,7 +24,8 @@ namespace MinorShift.Emuera.GameProc
 		readonly Process parentProcess;
 		readonly ExpressionMediator exm;
 		readonly EmueraConsole output;
-        readonly List<string> ignoredFNFWarningFileList = new List<string>();
+        // snake 参考实现：用 OrdinalIgnoreCase HashSet 替换 List+ToUpper，O(1) 判重且避免每次 ToUpper 分配。
+        readonly HashSet<string> ignoredFNFWarningFileList = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 		int ignoredFNFWarningCount = 0;
 
 		int enabledLineCount = 0;
@@ -1025,7 +1026,7 @@ namespace MinorShift.Emuera.GameProc
 			else if (warnFlag == DisplayWarningFlag.ONCE)
 			{
 
-				string filename = line.Position.Filename.ToUpper();
+				string filename = line.Position.Filename;
 				if (!string.IsNullOrEmpty(filename))
 				{
 					if (ignoredFNFWarningFileList.Contains(filename))

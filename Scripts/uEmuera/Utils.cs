@@ -1210,7 +1210,7 @@ namespace uEmuera
         }
         /// <summary>
         /// Clears path/resource lookup state owned by one legacy
-        /// session.  The normal M0 shutdown path intentionally keeps its
+        /// session.  The normal Legacy shutdown path intentionally keeps its
         /// historical behaviour; only the canary bridge calls this boundary
         /// after the worker has quiesced.
         /// </summary>

@@ -1272,7 +1272,7 @@ Assert(
         !reference.Name!.Contains("GodotSharp", StringComparison.OrdinalIgnoreCase)),
     "Core assembly references Godot or GodotSharp.");
 
-M2DisplayContracts.Run();
-await M3M7ContractSmoke.RunAsync();
+DisplayContracts.Run();
+await ContractSmoke.RunAsync();
 
 Console.WriteLine("Core contract smoke passed.");

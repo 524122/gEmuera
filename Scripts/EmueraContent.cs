@@ -427,7 +427,7 @@ public partial class EmueraContent : Control
 	const string MaxVisibleLinesKey = "MaxVisibleLines";
 	const string ContentPinchZoomEnabledKey = "ContentPinchZoomEnabled";
 	const string ConsoleRenderBackendKey = "ConsoleRenderBackend";
-	// M0 runner 专用的显示后端覆盖值，不写入用户设置，避免影响正常启动。
+	// Legacy runner 专用的显示后端覆盖值，不写入用户设置，避免影响正常启动。
 	static string m0RunnerDisplayBackendOverride;
 	const ulong QuickInputGateFallbackMs = 500;
 	static float contentDragSensitivity = -1.0f;
@@ -469,11 +469,11 @@ public partial class EmueraContent : Control
 	// the same panel can be reused/mounted from any scene. Preloaded once and
 	// instantiated in _Ready, which replaces the previous `new X()` construction
 	// while keeping the exact same AddChild order and initialization contract.
-	static readonly PackedScene InputpadScene = GD.Load<PackedScene>("res://scenes/Inputpad.tscn");
-	static readonly PackedScene ScalepadScene = GD.Load<PackedScene>("res://scenes/Scalepad.tscn");
-	static readonly PackedScene QuickButtonsScene = GD.Load<PackedScene>("res://scenes/QuickButtons.tscn");
-	static readonly PackedScene OptionWindowScene = GD.Load<PackedScene>("res://scenes/OptionWindow.tscn");
-	static readonly PackedScene VirtualCursorScene = GD.Load<PackedScene>("res://scenes/VirtualCursor.tscn");
+	static readonly PackedScene InputpadScene = GD.Load<PackedScene>("res://assets/scenes/Inputpad.tscn");
+	static readonly PackedScene ScalepadScene = GD.Load<PackedScene>("res://assets/scenes/Scalepad.tscn");
+	static readonly PackedScene QuickButtonsScene = GD.Load<PackedScene>("res://assets/scenes/QuickButtons.tscn");
+	static readonly PackedScene OptionWindowScene = GD.Load<PackedScene>("res://assets/scenes/OptionWindow.tscn");
+	static readonly PackedScene VirtualCursorScene = GD.Load<PackedScene>("res://assets/scenes/VirtualCursor.tscn");
 
 	public static int ContentWidth { get; private set; }
 	public static int ContentHeight { get; private set; }
@@ -735,7 +735,7 @@ public partial class EmueraContent : Control
 		contentPinchZoomEnabledLoaded = true;
 	}
 
-	public static bool ConfigureM0RunnerDisplayBackend(string value, out string errorMessage)
+	public static bool ConfigureLegacyRunnerDisplayBackend(string value, out string errorMessage)
 	{
 		errorMessage = "";
 		if (!string.Equals(value, "controls", StringComparison.OrdinalIgnoreCase)
@@ -766,9 +766,9 @@ public partial class EmueraContent : Control
 
 	bool UseCanvasRenderBackend => consoleRenderBackend == ConsoleRenderBackend.Canvas;
 
-	public gEmuera.M0.LegacyDisplayObservation CaptureM0LegacyDisplayObservation(string requestedBackend)
+	public gEmuera.LegacyRunner.LegacyDisplayObservation CaptureLegacyDisplayObservation(string requestedBackend)
 	{
-		return BuildM0LegacyDisplayObservation(requestedBackend);
+		return BuildLegacyDisplayObservation(requestedBackend);
 	}
 
 	// Build the UI tree entirely in code because the emulator surface is dynamic:
@@ -847,25 +847,25 @@ public partial class EmueraContent : Control
 		menuPanel.AddChild(menuExpandedBar);
 
 		menuBar = menuExpandedBar;
-		AddIconButton("res://Icons/fenxiang.svg", OnBackPressed);
-		AddIconButton("res://Icons/restart.svg", OnRestartPressed);
-		AddIconButton("res://Icons/options.svg", OnOptionsPressed);
-		inputMenuButton = AddIconButton("res://Icons/io-input.svg", OnInputTogglePressed);
-		quickMenuButton = AddIconButton("res://Icons/quick.svg", OnQuickTogglePressed);
-		autoSkipMenuButton = AddIconButton("res://Icons/autoskip.svg", OnAutoSkipTogglePressed);
-		AddIconButton("res://Icons/menu_save_log.svg", OnSaveLogPressed);
-		AddIconButton("res://Icons/Title.svg", OnGotoTitlePressed);
-		AddIconButton("res://Icons/exit.svg", OnExitPressed);
-		scaleMenuButton = AddIconButton("res://Icons/Scale.svg", OnScaleTogglePressed);
-		mouseMenuButton = AddIconButton("res://Icons/mouse.svg", OnVirtualCursorTogglePressed);
+		AddIconButton("res://assets/icons/fenxiang.svg", OnBackPressed);
+		AddIconButton("res://assets/icons/restart.svg", OnRestartPressed);
+		AddIconButton("res://assets/icons/options.svg", OnOptionsPressed);
+		inputMenuButton = AddIconButton("res://assets/icons/io-input.svg", OnInputTogglePressed);
+		quickMenuButton = AddIconButton("res://assets/icons/quick.svg", OnQuickTogglePressed);
+		autoSkipMenuButton = AddIconButton("res://assets/icons/autoskip.svg", OnAutoSkipTogglePressed);
+		AddIconButton("res://assets/icons/menu_save_log.svg", OnSaveLogPressed);
+		AddIconButton("res://assets/icons/Title.svg", OnGotoTitlePressed);
+		AddIconButton("res://assets/icons/exit.svg", OnExitPressed);
+		scaleMenuButton = AddIconButton("res://assets/icons/Scale.svg", OnScaleTogglePressed);
+		mouseMenuButton = AddIconButton("res://assets/icons/mouse.svg", OnVirtualCursorTogglePressed);
 
 		// Toggle at the right edge (last child = rightmost in HBox).
 		var menuToggleBtn = new TextureButton();
 		menuToggleBtn.CustomMinimumSize = new Vector2(SystemButtonTouchSize, SystemButtonTouchSize);
 		menuToggleBtn.StretchMode = TextureButton.StretchModeEnum.KeepAspectCentered;
 		menuToggleBtn.MouseFilter = MouseFilterEnum.Stop;
-		if (ResourceLoader.Exists("res://Icons/menu.svg"))
-			menuToggleBtn.TextureNormal = ResourceLoader.Load<Texture2D>("res://Icons/menu.svg");
+		if (ResourceLoader.Exists("res://assets/icons/menu.svg"))
+			menuToggleBtn.TextureNormal = ResourceLoader.Load<Texture2D>("res://assets/icons/menu.svg");
 		WireSystemButton(menuToggleBtn, OnMenuTogglePressed);
 		menuRoot.AddChild(menuToggleBtn);
 
@@ -1085,7 +1085,7 @@ public partial class EmueraContent : Control
 			quickButtons.Clear();
 	}
 
-	// 仅供已停止 legacy worker 的 M0 会话切换调用，释放会话级 Godot 资源而不改变普通重载语义。
+	// 仅供已停止 legacy worker 的 Legacy 会话切换调用，释放会话级 Godot 资源而不改变普通重载语义。
 	internal void ClearForCanarySessionTransition()
 	{
 		Clear();
@@ -1153,7 +1153,7 @@ public partial class EmueraContent : Control
 		return textPart;
 	}
 
-	const string BundledConsoleFontPath = "res://Fonts/MS Gothic.ttf";
+	const string BundledConsoleFontPath = "res://assets/fonts/MS Gothic.ttf";
 
 	// Prefer the bundled console font on Android to avoid missing glyphs and
 	// device-specific font metric differences in exported APKs.

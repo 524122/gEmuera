@@ -815,7 +815,7 @@ namespace MinorShift.Emuera.GameView
 			if (!baseDir.EndsWith(Path.DirectorySeparatorChar.ToString()) && !baseDir.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
 				baseDir += Path.DirectorySeparatorChar;
 
-			bool runnerDefaultLogRedirected = Program.TryResolveM0RunnerDefaultOutputLogPath(filename, out string runnerDefaultLogPath);
+			bool runnerDefaultLogRedirected = Program.TryResolveLegacyRunnerDefaultOutputLogPath(filename, out string runnerDefaultLogPath);
 			if (runnerDefaultLogRedirected)
 				filename = runnerDefaultLogPath;
 			else if (string.IsNullOrEmpty(filename))

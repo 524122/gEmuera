@@ -31,23 +31,23 @@ public sealed record PrototypeStepResult(
 public sealed class PrototypeScheduler : IAsyncDisposable
 {
     private readonly object _gate = new();
-    private readonly M6FeatureFlags _flags;
+    private readonly FeatureFlags _flags;
     private readonly SessionStamp _session;
     private long _trace;
     private bool _disposed;
 
-    public PrototypeScheduler(SessionStamp session, M6FeatureFlags flags = default)
+    public PrototypeScheduler(SessionStamp session, FeatureFlags flags = default)
     {
         if (session.Generation.Value <= 0 || session.OperationId.Value <= 0)
             throw new ArgumentException("Prototype scheduler requires a live session stamp.", nameof(session));
         _session = session;
-        _flags = flags == default ? M6FeatureFlags.Default : flags;
+        _flags = flags == default ? FeatureFlags.Default : flags;
         Mode = _flags.Scheduler ? PrototypeSchedulerMode.CooperativeExperimental : PrototypeSchedulerMode.Legacy;
     }
 
     public PrototypeSchedulerMode Mode { get; }
     public bool IsDisposed { get { lock (_gate) return _disposed; } }
-    public M6FeatureFlags Flags => _flags;
+    public FeatureFlags Flags => _flags;
 
     public async ValueTask<PrototypeStepResult> StepAsync(
         int maxWorkUnits,
@@ -100,12 +100,12 @@ public sealed class PrototypeScheduler : IAsyncDisposable
 public sealed class PrototypeRendererExperimentGate
 {
     private readonly object _gate = new();
-    private M6FeatureFlags _flags;
+    private FeatureFlags _flags;
     private string? _activeArtifact;
 
-    public PrototypeRendererExperimentGate(M6FeatureFlags flags = default)
+    public PrototypeRendererExperimentGate(FeatureFlags flags = default)
     {
-        _flags = flags == default ? M6FeatureFlags.Default : flags;
+        _flags = flags == default ? FeatureFlags.Default : flags;
     }
 
     public bool IsEnabled { get { lock (_gate) return _flags.Renderer && _activeArtifact is not null; } }

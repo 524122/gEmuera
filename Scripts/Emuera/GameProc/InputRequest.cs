@@ -53,6 +53,9 @@ namespace MinorShift.Emuera.GameProc
 		public long DefIntValue;
 		public string DefStrValue;
 
+		// EE_INPUT 機能拡張：TINPUT 第5参数（鼠标输入开关）。
+		public bool MouseInput = false;
+
 		public long Timelimit = -1;
 		public bool DisplayTime;
 		public string TimeUpMes;

@@ -9,6 +9,11 @@ namespace MinorShift.Emuera.GameData.Function
 	internal abstract class FunctionMethod
 	{
 		public EraType ReturnType { get; protected set; }
+		/// <summary>
+		/// 数学系函数（MAX/MIN/ABS/POWER/SQRT 等）在任一参数为 Float 时，返回类型可动态切换为 Float。
+		/// FunctionMethodTerm 依赖该标志做动态类型解析（与 snake 参考实现一致）。
+		/// </summary>
+		public bool CanReturnFloat { get; protected set; }
 		protected EraType[] argumentTypeArray;
 		protected string Name { get; private set; }
 
@@ -92,6 +97,7 @@ namespace MinorShift.Emuera.GameData.Function
 			this.checker = checker ?? throw new ArgumentNullException(nameof(checker));
 			this.normalizer = normalizer;
 			ReturnType = inner.ReturnType;
+			CanReturnFloat = inner.CanReturnFloat;
 			argumentTypeArray = declaredArgumentTypes;
 			CanRestructure = inner.CanRestructure;
 			HasUniqueRestructure = inner.HasUniqueRestructure;

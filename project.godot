@@ -21,6 +21,7 @@ pixel_store=true
 
 AppBootstrap="*res://Scripts/GodotHost/AppBootstrap.cs"
 PlatformGateway="*res://Scripts/GodotHost/PlatformGateway.cs"
+McpRuntimeAgent="*uid://bfpv4bv6ctr8o"
 
 [display]
 
@@ -33,7 +34,7 @@ project/assembly_name="gemuera-c#"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")
+enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg", "res://addons/godot_mcp/plugin.cfg")
 
 [launcher]
 

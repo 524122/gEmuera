@@ -8,14 +8,48 @@ namespace MinorShift.Emuera.GameData.Function
 	internal sealed class FunctionMethodTerm : IOperandTerm
 	{
 		public FunctionMethodTerm(FunctionMethod meth, IOperandTerm[] args)
-			: base(meth.ReturnType)
+			: base(ResolveEraType(meth, args))
 		{
 			method = meth;
 			arguments = args;
 		}
 
+		// CanReturnFloat 方法（MAX/MIN/ABS/POWER/SQRT 等）：任一参数为 Float 时整个项类型为 Float。
+		// 与 snake 参考实现 FunctionMethodTerm 的 ResolveEraType 一致。
+		private static EraType ResolveEraType(FunctionMethod meth, IOperandTerm[] args)
+		{
+			if (meth.CanReturnFloat)
+			{
+				foreach (IOperandTerm arg in args)
+				{
+					if (arg != null && arg.GetEraType() == EraType.Float)
+						return EraType.Float;
+				}
+				return EraType.Integer;
+			}
+			return meth.ReturnType;
+		}
+
 		private FunctionMethod method;
 		private IOperandTerm[] arguments;
+
+		/// <summary>
+		/// 对 CanReturnFloat 方法，运行时重新检查参数类型（Restructure 后参数可能从表达式变为
+		/// SingleFloatTerm/SingleTerm(Float)），确保 MAX(0.5, 0.2) 这类调用的项类型正确解析为 Float。
+		/// </summary>
+		public override EraType GetEraType()
+		{
+			if (method.CanReturnFloat)
+			{
+				foreach (IOperandTerm arg in arguments)
+				{
+					if (arg != null && arg.GetEraType() == EraType.Float)
+						return EraType.Float;
+				}
+				return EraType.Integer;
+			}
+			return base.GetEraType();
+		}
 
         public override long GetIntValue(ExpressionMediator exm)
         {

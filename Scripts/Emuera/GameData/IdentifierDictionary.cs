@@ -154,6 +154,7 @@ namespace MinorShift.Emuera
 			nameDic.Add("SAVEDATA", DefinedNameType.Reserved);
 			nameDic.Add("CHARADATA", DefinedNameType.Reserved);//CHARDATAから変更
 			nameDic.Add("REF", DefinedNameType.Reserved);
+			nameDic.Add("REFF", DefinedNameType.Reserved);
 			nameDic.Add("__DEBUG__", DefinedNameType.Reserved);
 			nameDic.Add("__SKIP__", DefinedNameType.Reserved);
 			nameDic.Add("_", DefinedNameType.Reserved);

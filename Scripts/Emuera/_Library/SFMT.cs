@@ -59,7 +59,7 @@ namespace MinorShift._Library{
 			{
 				init_gen_rand((UInt32)seed);
 			}
-			traceStreamId = global::gEmuera.M0.LegacyTrace.RegisterRng("SFMT19937",
+			traceStreamId = global::gEmuera.LegacyRunner.LegacyTrace.RegisterRng("SFMT19937",
 				implicitClockSeed ? "implicit_clock" : "explicit", seed.ToString(System.Globalization.CultureInfo.InvariantCulture));
 		}
 
@@ -298,7 +298,7 @@ namespace MinorShift._Library{
 			if (traceStreamId != 0)
 			{
 				Int64 callIndex = System.Threading.Interlocked.Increment(ref traceCallIndex);
-				global::gEmuera.M0.LegacyTrace.TryRecordRngCall("SFMT19937", traceStreamId, callIndex,
+				global::gEmuera.LegacyRunner.LegacyTrace.TryRecordRngCall("SFMT19937", traceStreamId, callIndex,
 					"next_uint32", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
 			}
 			return value;

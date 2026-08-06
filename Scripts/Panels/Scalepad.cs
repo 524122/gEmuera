@@ -94,19 +94,30 @@ public partial class Scalepad : Control
             ApplyPanelLayout();
     }
 
+    bool isApplyingLayout;
     void ApplyPanelLayout()
     {
         if (panel == null)
             return;
-
-        var safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
-        var viewportSize = safeRect.Size;
-        Position = safeRect.Position;
-        Size = viewportSize;
-        var width = Mathf.Max(1, viewportSize.X - SideMargin * 2);
-        panel.Position = new Vector2(SideMargin, Mathf.Max(0, viewportSize.Y - BottomMargin - PanelHeight));
-        panel.Size = new Vector2(width, PanelHeight);
-        panel.CustomMinimumSize = panel.Size;
+        // 防重入：set_Size 触发 NotificationResized → _Notification → 本方法，需守卫防无限递归。
+        if (isApplyingLayout)
+            return;
+        isApplyingLayout = true;
+        try
+        {
+            var safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
+            var viewportSize = safeRect.Size;
+            Position = safeRect.Position;
+            Size = viewportSize;
+            var width = Mathf.Max(1, viewportSize.X - SideMargin * 2);
+            panel.Position = new Vector2(SideMargin, Mathf.Max(0, viewportSize.Y - BottomMargin - PanelHeight));
+            panel.Size = new Vector2(width, PanelHeight);
+            panel.CustomMinimumSize = panel.Size;
+        }
+        finally
+        {
+            isApplyingLayout = false;
+        }
     }
 
     void OnSliderChanged(double value)

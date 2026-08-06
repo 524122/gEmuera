@@ -188,6 +188,64 @@ namespace MinorShift.Emuera.Sub
 			return significand;
 		}
 
+		/// <summary>
+		/// ISNUMERIC 用：ReadInt64 を使うと不正な数値文字列（"123e"、"12e+"、"0b102" 等）で
+		/// CodeEE を投げてしまうため、非投げの事前検査。snake 参考実装（NumericCheck）由来。
+		/// 解析不能な場合は false、64ビット符号付整数の範囲を超える場合のみ CodeEE を投げる。
+		/// </summary>
+		public static bool NumericCheck(StringStream st)
+		{
+			Int64 significand;
+			int expBase = 0;
+			int exponent = 0;
+			int stStartPos = st.CurrentPosition;
+			int stEndPos;
+			int fromBase = 10;
+			if (st.Current == '0')
+			{
+				char c = st.Next;
+				if ((c == 'x') || (c == 'X'))
+				{
+					fromBase = 16;
+					st.ShiftNext();
+					st.ShiftNext();
+				}
+				else if ((c == 'b') || (c == 'B'))
+				{
+					fromBase = 2;
+					st.ShiftNext();
+					st.ShiftNext();
+				}
+			}
+			if (st.Current != '+' && st.Current != '-' && !char.IsDigit(st.Current))
+			{
+				if (fromBase != 16)
+					return false;
+				else if (!hexadecimalDigits.Contains(st.Current))
+					return false;
+			}
+			significand = readDigits(st, fromBase);
+			if ((st.Current == 'p') || (st.Current == 'P'))
+				expBase = 2;
+			else if ((st.Current == 'e') || (st.Current == 'E'))
+				expBase = 10;
+			if (expBase != 0)
+			{
+				st.ShiftNext();
+				if (st.EOS || !char.IsDigit(st.Current))
+					return false;
+				unchecked { exponent = (int)readDigits(st, fromBase); }
+			}
+			stEndPos = st.CurrentPosition;
+			if ((expBase != 0) && (exponent != 0))
+			{
+				double d = significand * Math.Pow(expBase, exponent);
+				if ((double.IsNaN(d)) || (double.IsInfinity(d)) || (d > Int64.MaxValue) || (d < Int64.MinValue))
+					throw new CodeEE("\"" + st.Substring(stStartPos, stEndPos) + "\"は64ビット符号付整数の範囲を超えています");
+			}
+			return true;
+		}
+
 		public static double ReadDouble(StringStream st, bool retZero)
 		{
 			int startPos = st.CurrentPosition;
@@ -462,69 +520,29 @@ namespace MinorShift.Emuera.Sub
         /// <returns></returns>
         public static string ReadSingleIdentifier(StringStream st)
 		{
-			//1819 やや遅い。でもいずれやりたい
-			//Match m = idReg.Match(st.RowString, st.CurrentPosition);
-			//st.Jump(m.Length);
-			//return m.Value;
+			// snake 参考实现：用 SearchValues<char> + IndexOfAny 的 SIMD 扫描替换逐字符 switch，
+			// 热路径（标识符 token 扫描）提速。保留 gEmuera 的全角空格语义
+			// （!SystemAllowFullSpace 时报错，否则视作定界符）。
 			int start = st.CurrentPosition;
-            char c;
-			while (!st.EOS)
+			var span = st.RowString.AsSpan(start);
+			int index = span.IndexOfAny(IdentifierDelimiterSearchValues);
+			if (index >= 0)
 			{
-                //switch (st.Current)
-                //{
-                //	case ' ':
-                //	case '\t':
-                //	case '+':
-                //	case '-':
-                //	case '*':
-                //	case '/':
-                //	case '%':
-                //	case '=':
-                //	case '!':
-                //	case '<':
-                //	case '>':
-                //	case '|':
-                //	case '&':
-                //	case '^':
-                //	case '~':
-                //	case '?':
-                //	case '#':
-                //	case ')':
-                //	case '}':
-                //	case ']':
-                //	case ',':
-                //	case ':':
-                //	case '(':
-                //	case '{':
-                //	case '[':
-                //	case '$':
-                //	case '\\':
-                //	case '\'':
-                //	case '\"':
-                //	case '@':
-                //	case '.':
-                //	case ';'://コメントに関しては直後に行われるであろうSkipWhiteSpaceなどが対応する。
-                //		goto end;
-                //	case '　':
-                //		if (!Config.SystemAllowFullSpace)
-                //			throw new CodeEE("予期しない全角スペースを発見しました(この警告はシステムオプション「" + Config.GetConfigName(ConfigCode.SystemAllowFullSpace) + "」により無視できます)");
-                //		goto end;
-                //}
-
-                c = st.Current;
-                if(IsIdentifierDelimiter(c))
-                    goto end;
-                else if(c == '　')
-                {
-                    if(!Config.SystemAllowFullSpace)
-                	    throw new CodeEE("予期しない全角スペースを発見しました(この警告はシステムオプション「" + Config.GetConfigName(ConfigCode.SystemAllowFullSpace) + "」により無視できます)");
-                    goto end;
-                }
-                st.ShiftNext();
+				if (span[index] == '　')
+				{
+					if (!Config.SystemAllowFullSpace)
+						throw new CodeEE("予期しない全角スペースを発見しました(この警告はシステムオプション「" + Config.GetConfigName(ConfigCode.SystemAllowFullSpace) + "」により無視できます)");
+				}
+				st.Jump(index);
+				return st.Substring(start, index);
 			}
-		end:
-			return st.Substring(start, st.CurrentPosition - start);
+			st.Jump(span.Length);
+			return st.Substring(start, span.Length);
 		}
+
+		// snake 参考实现：定界符集合的 SIMD 搜索表（与 IsIdentifierDelimiter + 全角空格一致）。
+		static readonly System.Buffers.SearchValues<char> IdentifierDelimiterSearchValues =
+			System.Buffers.SearchValues.Create(" \t.+-*/%=!<>|&^~?#)}],:({[$\\'\"@;　");
 
 		/// <summary>
 		/// endWithが見つかるまで読み込む。始点と終端のチェックは呼び出し側で行うこと。

@@ -139,26 +139,34 @@ gemuera-c#/
 ├── gemuera-c#.csproj          # .NET 项目文件
 ├── first_window.tscn          # 启动器场景
 ├── main.tscn                  # 主游戏场景
+├── assets/                    # 全部 Godot 运行时资源（统一管理、复用）
+│   ├── fonts/                 # 字体（MS Gothic / Microsoft YaHei，单一副本）
+│   ├── icons/                 # 界面图标（SVG）
+│   ├── lang/                  # 多语言文本（default/en_us/jp/zh_cn）
+│   ├── scenes/                # 面板场景（*.tscn）
+│   ├── text/                  # emuera_config 模板
+│   └── theme/                 # 全局 Theme（gemuera_theme.tres）
 ├── Scripts/
-│   ├── EmueraMain.cs          # Godot 入口，GPU 渲染管线
+│   ├── EmueraMain.cs          # Godot 入口
 │   ├── EmueraThread.cs        # 后台线程包装器
 │   ├── EmueraContent.cs       # UI 渲染器（行布局、节点管理）
-│   ├── EmueraImage.cs         # 纹理绘制控件
-│   ├── ColorMatrixGPU.cs      # GPU ColorMatrix shader 管理
-│   ├── SpriteManager.cs       # 纹理缓存（每帧限流加载）
-│   ├── SpriteDebugViewer.cs   # 精灵调试查看器（F3 切换）
 │   ├── GenericUtils.cs        # 引擎↔UI 桥接
 │   ├── FirstWindow.cs         # 启动器（游戏扫描）
 │   ├── Emuera/                # 核心 Emuera 引擎
 │   │   ├── Config/            # 配置系统
-│   │   ├── Content/           # 图片/资源管理（原生 BlendRect）
+│   │   ├── Content/           # 图片/资源管理
 │   │   ├── GameData/          # 数据模型、表达式、变量
 │   │   ├── GameProc/          # 脚本执行引擎
-│   │   └── GameView/          # 控制台模拟和渲染
+│   │   ├── GameView/          # 控制台模拟和渲染
+│   │   └── LegacyRunner/      # 旧版显示/输入回放诊断（LegacyRunner）
+│   ├── GodotHost/             # Godot 生命周期/平台桥
 │   ├── Shaders/
 │   │   └── color_matrix.gdshader
 │   └── uEmuera/               # System.Drawing/Forms 兼容层
-├── Fonts/                     # 内嵌字体 (MS Gothic)
+├── src/Core/                  # 纯 C# 核心契约（GEmuera.Core，独立编译）
+├── tools/                     # PowerShell 工具（governance/core-contracts 等）
+├── Fixtures/                  # 测试固件
+├── test/                      # 测试
 └── addons/                    # Godot 编辑器插件
 ```
 
