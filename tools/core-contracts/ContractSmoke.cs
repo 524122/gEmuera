@@ -92,7 +92,7 @@ internal static class ContractSmoke
         var generation = new SessionGeneration(1);
         var scheduler = new QueuedOwnerScheduler();
         var dispatcher = new CompletionDispatcher(generation, scheduler);
-        var request = new PortRequest<string>(M5PortManifest.Input, M5PortManifest.InputCapability, generation, new SessionOperationId(7), "input");
+        var request = new PortRequest<string>(DefaultPortManifest.Input, DefaultPortManifest.InputCapability, generation, new SessionOperationId(7), "input");
         var completion = PortCompletion<string>.From(request, "ok");
         var applied = false;
         var pending = dispatcher.DispatchAsync(request, completion, value => { applied = value.IsSuccess; return ValueTask.CompletedTask; }).AsTask();

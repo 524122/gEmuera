@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "workPackage": "M0-DIA-01",
+  "workPackage": "LEGACY-DIA-01",
   "classifications": [
     {
       "id": "program-core-profile-state",
@@ -247,7 +247,7 @@
       "behaviorKey": "",
       "capabilityId": "diagnostics.profile-identity.v1",
       "fixtureId": "DIA-REPORT-PLAN-001",
-      "notes": "Component mirrors launcher selection for current M0 startup diagnostics."
+      "notes": "Component mirrors launcher selection for current legacy startup diagnostics."
     },
     {
       "id": "prototype-runtime-profile-selection",
@@ -278,15 +278,15 @@
     {
       "id": "runner-v24-profile-id",
       "markerId": "profile.v24-id",
-      "fileRegex": "^Scripts/M0/LegacyRunnerConfig\\.cs$",
+      "fileRegex": "^Scripts/LegacyRunner/LegacyRunnerConfig\\.cs$",
       "category": "test-fixture-selection",
       "currentOwner": "LegacyRunnerConfig",
-      "intendedOwner": "M0 runner fixture",
+      "intendedOwner": "LegacyRunner fixture",
       "targetModule": "m0.runner",
       "behaviorKey": "",
       "capabilityId": "diagnostics.profile-identity.v1",
       "fixtureId": "DIA-REG-V24-001",
-      "notes": "M0 runner keeps the legacy profile vocabulary for baseline reproduction."
+      "notes": "LegacyRunner keeps the legacy profile vocabulary for baseline reproduction."
     },
     {
       "id": "program-v24-profile-id",
@@ -369,15 +369,15 @@
     {
       "id": "runner-snake-profile-id",
       "markerId": "profile.snake-id",
-      "fileRegex": "^Scripts/M0/LegacyRunnerConfig\\.cs$",
+      "fileRegex": "^Scripts/LegacyRunner/LegacyRunnerConfig\\.cs$",
       "category": "test-fixture-selection",
       "currentOwner": "LegacyRunnerConfig",
-      "intendedOwner": "M0 runner fixture",
+      "intendedOwner": "LegacyRunner fixture",
       "targetModule": "m0.runner",
       "behaviorKey": "",
       "capabilityId": "diagnostics.profile-identity.v1",
       "fixtureId": "DIA-REG-SNAKE-001",
-      "notes": "M0 runner keeps the legacy profile vocabulary for baseline reproduction."
+      "notes": "LegacyRunner keeps the legacy profile vocabulary for baseline reproduction."
     },
     {
       "id": "program-profile-detection",
