@@ -126,7 +126,10 @@ namespace MinorShift.Emuera.Compatibility
 			+ ":scoped-variable-instructions="
 			+ (scopedVariableInstructionsEnabled ? "enabled" : "disabled");
 		public bool UsesExtendedDisplayHistory => Snake.IsEnabled || EraFl.UsesExtendedDisplayHistory;
-		public bool UsesLazyResourceIndex => Snake.UsesLazyResourceIndex || EraFl.IsEnabled;
+		// 懒资源索引是性能实现细节而非方言语义：所有 profile（含 v24 基线）统一用它，
+		// 启动期零图片 I/O（只解析 CSV 元数据），像素解码与文件头读取延迟到首次使用。
+		// 脚本语义由 csvSpriteNames 全量注册 + SpriteExists 懒实体化校验保证不变。
+		public bool UsesLazyResourceIndex => true;
 
 		public bool IsInstructionVisible(string instructionName)
 		{

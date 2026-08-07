@@ -167,6 +167,14 @@ namespace uEmuera.Drawing
 			if (!uEmuera.Utils.FileExists(resolvedPath))
 				return false;
 
+			// 图片尺寸磁盘缓存：二次启动命中则跳过文件头读取（Android 30k 张图片的关键优化）。
+			// mtime 不匹配/缓存缺失时安全回退到下方读头。
+			if (ImageSizeCache.TryGet(resolvedPath, out int cachedW, out int cachedH))
+			{
+				imageSize = new Size(cachedW, cachedH);
+				return true;
+			}
+
 			try
 			{
 				// 企业级说明：Android/APK 主运行环境会从 /storage/emulated/0 等外部目录读取游戏资源。
@@ -177,7 +185,7 @@ namespace uEmuera.Drawing
 				using var stream = OpenImageHeaderStream(resolvedPath);
 				if (stream == null)
 					return false;
-				return ext switch
+				bool ok = ext switch
 				{
 					".png" => TryReadPngSize(stream, out imageSize),
 					".jpg" or ".jpeg" => TryReadJpegSize(stream, out imageSize),
@@ -185,6 +193,9 @@ namespace uEmuera.Drawing
 					".webp" => TryReadWebpSize(stream, out imageSize),
 					_ => false,
 				};
+				if (ok)
+					ImageSizeCache.Set(resolvedPath, imageSize.Width, imageSize.Height);
+				return ok;
 			}
 			catch
 			{

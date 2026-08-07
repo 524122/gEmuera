@@ -283,12 +283,16 @@ namespace MinorShift.Emuera.Content
 			if (StartTime < 0)
 			{
 				StartTime = MinorShift._Library.WinmmTimer.CurrentFrameTime;
+				lastFrameTime = MinorShift._Library.WinmmTimer.CurrentFrameTime;
 				lastFrame = 0;
 				return FrameList[0];
 			}
 			//時間経過なしに複数回呼ばれた場合はさっき返したフレームをもう一度返す。
 			if (MinorShift._Library.WinmmTimer.CurrentFrameTime == lastFrameTime && lastFrame >= 0)
 				return FrameList[lastFrame];
+			// 与 Snake 参考一致：每次扫描前推进 lastFrameTime，使上面"同帧重复调用"缓存真正生效，
+			// 避免同一渲染帧内多次 GetCurrentFrame 每次都从头线性扫描全部帧。
+			lastFrameTime = MinorShift._Library.WinmmTimer.CurrentFrameTime;
 			//StartTimeからの経過時間をtotaltimeで剰余計算
 			Int64 time = (MinorShift._Library.WinmmTimer.CurrentFrameTime - StartTime) % totaltime;
 			//winmmtimerは一周して0になることがあり得るのでその場合の対策。C#の剰余の結果の符号は左辺値の符号に等しい。
