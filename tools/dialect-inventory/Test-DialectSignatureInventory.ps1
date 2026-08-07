@@ -45,9 +45,9 @@ try {
     Assert-SignatureContract ($actual.executionStatus -eq 'InProgress' -and $actual.gateStatus -eq 'Blocked' -and $actual.blockerCode -eq 'EvidenceMissing') 'M0 gate status was incorrectly advanced.'
     Assert-SignatureContract ($actual.result -eq 'Partial') 'Static signature inventory must not claim behavior completion.'
     Assert-SignatureContract ($actual.sourceInventoryHash -eq $inventory.canonicalHash) 'Signature inventory source hash mismatch.'
-    Assert-SignatureContract ($actual.instructionCount -eq 326) "Unexpected instruction descriptor count: $($actual.instructionCount)."
-    Assert-SignatureContract ($actual.expressionFunctionCount -eq 360) "Unexpected expression descriptor count: $($actual.expressionFunctionCount)."
-    Assert-SignatureContract ($actual.coverage.instructionRegistrationSourceResolvedCount -eq 326) 'Not all instruction registration sources were resolved.'
+    Assert-SignatureContract ($actual.instructionCount -eq 327) "Unexpected instruction descriptor count: $($actual.instructionCount)."
+    Assert-SignatureContract ($actual.expressionFunctionCount -eq 362) "Unexpected expression descriptor count: $($actual.expressionFunctionCount)."
+    Assert-SignatureContract ($actual.coverage.instructionRegistrationSourceResolvedCount -eq 327) 'Not all instruction registration sources were resolved.'
     Assert-SignatureContract ($actual.coverage.instructionBindingUnknownCount -eq 0) 'Instruction binding kind extraction regressed.'
     Assert-SignatureContract ($actual.coverage.expressionHandlerSourceResolvedCount -ge 350) 'Expression handler source coverage unexpectedly shrank.'
     Assert-SignatureContract ($actual.coverage.expressionReturnResolvedCount -gt 250) 'Expression return type coverage unexpectedly shrank.'

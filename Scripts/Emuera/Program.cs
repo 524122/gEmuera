@@ -12,6 +12,7 @@ using uEmuera.Drawing;
 using uEmuera.Forms;
 using uEmuera.Window;
 using GEmuera.Core.Compatibility;
+using MinorShift.Emuera.Compatibility;
 
 namespace MinorShift.Emuera
 {
@@ -19,22 +20,19 @@ namespace MinorShift.Emuera
 	{
 		V24Pure,
 		Snake,
+		EraFl,
 		SnakeModernMobile,
 	}
 
 	public static class Program
 	{
-		// Explicit M0 runner-only diagnostic sink. Normal launchers never set this
-		// value and therefore retain the legacy game-root startup-error log path.
+		// Legacy runner 的日志落点和兼容计划只由测试/会话宿主配置；普通启动保持现有游戏目录行为。
 		static string m0RunnerStartupErrorLogPath = "";
-		// The runner also owns the legacy default console log. It must never leave
-		// a generated emuera.log in an isolated game fixture merely because the
-		// legacy VM reports a startup warning during an observation run.
 		static string m0RunnerDefaultOutputLogPath = "";
-		// The host binds one immutable plan before starting the legacy worker.
-		// Legacy code still owns execution, but profile selection must not silently
-		// drift away from the plan that was committed by the Core facade.
 		static CompatibilityPlan m1CompatibilityPlan;
+		static LegacyCompatibilityProfile m1CompatibilityProfile;
+		static readonly LegacyCompatibilityProfile defaultCompatibilityProfile =
+			LegacyCompatibilityProfile.CreateForProfile("v24pure", scopedVariableInstructionsEnabled: true);
 		/*
 		コードの開始地点。
 		ここでMainWindowを作り、
@@ -65,11 +63,14 @@ namespace MinorShift.Emuera
 		{
 
 			ExeDir = Sys.ExeDir;
-			var detectedProfile = DetectCoreProfile(ExeDir);
 			var boundPlan = CurrentCompatibilityPlan;
-			CoreProfile = boundPlan == null
-				? detectedProfile
-				: ResolveCompatibilityProfile(boundPlan.ProfileId);
+			if (boundPlan == null)
+			{
+				var detectedProfile = DetectCoreProfile();
+				ConfigureCompatibilityPlan(BuiltInDialectCatalog.CreateLegacySessionPlan(
+					GetCompatibilityProfileId(detectedProfile)));
+				boundPlan = CurrentCompatibilityPlan;
+			}
 #if UEMUERA_DEBUG
 			//debugMode = true;
 
@@ -128,6 +129,10 @@ namespace MinorShift.Emuera
 			Application.SetCompatibleTextRenderingDefault(false);
 			ConfigData.Instance.LoadConfig();
 			JSONConfig.Load(ConfigData.Instance);
+			// VARI/VARS changes the parser-visible instruction surface. Recompose
+			// the legacy projection only after both configuration layers have been
+			// loaded, while retaining the same immutable Core module plan.
+			ConfigureCompatibilityPlan(boundPlan, Config.UseScopedVariableInstruction);
 			ApplyAndroidWindowWidthPolicy();
 			global::FrameRateHelper.ApplyConfigFps();
 			//二重起動の禁止かつ二重起動
@@ -166,6 +171,13 @@ namespace MinorShift.Emuera
 						MessageBox.Show("debugフォルダの作成に失敗しました", "フォルダなし");
 						return;
 					}
+				}
+				// launcher（user://launcher.cfg debug_show_window）覆盖 debug.config 的
+				// DebugShowWindow，避免宿主手写解析 debug.config。
+				if (DebugShowWindowOverride is bool showWindow)
+				{
+					ConfigData.Instance.GetDebugItem(ConfigCode.DebugShowWindow)?.SetValue(showWindow);
+					Config.SetDebugConfig(ConfigData.Instance);
 				}
 			}
 			if (args.Length > argsStart)
@@ -260,42 +272,66 @@ namespace MinorShift.Emuera
 
 		public static bool debugMode = false;
 		public static bool DebugMode { get { return debugMode; } }
-		public static EmueraCoreProfile CoreProfile { get; private set; } = EmueraCoreProfile.V24Pure;
+		/// <summary>
+		/// launcher（user://launcher.cfg [launcher] debug_show_window）对 DebugShowWindow
+		/// 的覆盖值；null 表示不覆盖（沿用 debug.config）。由 EmueraThread.Work 在
+		/// Program.Main 之前从宿主透传，仅 DebugMode 分支内消费。
+		/// </summary>
+		public static bool? DebugShowWindowOverride;
+		public static EmueraCoreProfile CoreProfile
+		{
+			get { return ResolveCompatibilityProfile(Compatibility.ProfileId); }
+		}
 		public static CompatibilityPlan CurrentCompatibilityPlan
 		{
 			get { return System.Threading.Volatile.Read(ref m1CompatibilityPlan); }
 		}
+		internal static LegacyCompatibilityProfile Compatibility
+		{
+			get
+			{
+				return System.Threading.Volatile.Read(ref m1CompatibilityProfile)
+					?? defaultCompatibilityProfile;
+			}
+		}
 		public static bool IsSnakeProfile
 		{
-			get { return CoreProfile == EmueraCoreProfile.Snake || CoreProfile == EmueraCoreProfile.SnakeModernMobile; }
+			get { return Compatibility.Snake.IsEnabled; }
+		}
+		public static bool IsEraFlProfile
+		{
+			get { return Compatibility.EraFl.IsEnabled; }
 		}
 		public static bool SupportsLazyLoading { get { return true; } }
 		public static bool IsSnakeModernMobileProfile { get { return CoreProfile == EmueraCoreProfile.SnakeModernMobile; } }
 
 		/// <summary>
-		/// Binds the Core plan at the legacy-host boundary. The plan is immutable;
-		/// replacing a live plan is rejected so an asynchronous completion cannot
-		/// continue under a different dialect profile.
+		/// 兼容计划在启动 legacy 引擎前绑定，避免异步会话运行期间切换方言配置。
 		/// </summary>
 		internal static void ConfigureCompatibilityPlan(CompatibilityPlan plan)
+		{
+			// This early binding occurs before the game configuration is available.
+			// Program.Main rebuilds the profile with the loaded value before any
+			// IdentifierDictionary or parser registry is constructed.
+			ConfigureCompatibilityPlan(plan, scopedVariableInstructionsEnabled: true);
+		}
+
+		internal static void ConfigureCompatibilityPlan(
+			CompatibilityPlan plan,
+			bool scopedVariableInstructionsEnabled)
 		{
 			if (plan == null)
 				throw new ArgumentNullException(nameof(plan));
 
-			EmueraCoreProfile expected = plan.ProfileId switch
-			{
-				"v24pure" => EmueraCoreProfile.V24Pure,
-				"snake" => EmueraCoreProfile.Snake,
-				_ => throw new InvalidOperationException(
-					$"Compatibility plan profile '{plan.ProfileId}' is not supported by the legacy bridge.")
-			};
-
+			LegacyCompatibilityProfile profile = LegacyCompatibilityProfile.Create(
+				plan,
+				scopedVariableInstructionsEnabled);
 			var existing = System.Threading.Volatile.Read(ref m1CompatibilityPlan);
 			if (existing != null && !string.Equals(existing.CanonicalHash, plan.CanonicalHash, StringComparison.Ordinal))
 				throw new InvalidOperationException("A different compatibility plan is already bound to the active legacy session.");
 
-			CoreProfile = expected;
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, plan);
+			System.Threading.Volatile.Write(ref m1CompatibilityProfile, profile);
 		}
 
 		internal static void ClearCompatibilityPlan(CompatibilityPlan plan)
@@ -306,8 +342,19 @@ namespace MinorShift.Emuera
 			if (existing != null && string.Equals(existing.CanonicalHash, plan.CanonicalHash, StringComparison.Ordinal))
 			{
 				System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
-				CoreProfile = EmueraCoreProfile.V24Pure;
+				System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 			}
+		}
+
+		/// <summary>
+		/// The legacy VM is process-wide, so its compatibility context must be
+		/// released after the worker has stopped and before another launcher
+		/// selection can bind a new immutable plan.
+		/// </summary>
+		internal static void ClearCompatibilityPlan()
+		{
+			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
+			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 		}
 
 		private static void ApplyAndroidWindowWidthPolicy()
@@ -334,45 +381,35 @@ namespace MinorShift.Emuera
 			GenericUtils.Info($"[LOAD] Android keeps configured window width: {Config.WindowX}, safe={safeWidth}, viewport={viewportWidth}");
 		}
 
-		internal static void ConfigureM0RunnerStartupErrorLogPath(string path)
+		internal static void ConfigureLegacyRunnerStartupErrorLogPath(string path)
 		{
 			if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path))
-				throw new ArgumentException("M0 runner startup error log path must be absolute.", nameof(path));
+				throw new ArgumentException("Legacy runner startup error log path must be absolute.", nameof(path));
 
 			string normalized = Path.GetFullPath(path);
 			string directory = Path.GetDirectoryName(normalized);
 			if (string.IsNullOrEmpty(directory))
-				throw new ArgumentException("M0 runner startup error log path must have a directory.", nameof(path));
+				throw new ArgumentException("Legacy runner startup error log path must have a directory.", nameof(path));
 
 			Directory.CreateDirectory(directory);
 			System.Threading.Volatile.Write(ref m0RunnerStartupErrorLogPath, normalized);
 		}
 
-		/// <summary>
-		/// Configures the explicit runner-owned sink for the legacy default
-		/// <c>emuera.log</c>. Normal launchers never call this method and retain
-		/// their existing game-root log behavior.
-		/// </summary>
-		internal static void ConfigureM0RunnerDefaultOutputLogPath(string path)
+		internal static void ConfigureLegacyRunnerDefaultOutputLogPath(string path)
 		{
 			if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path))
-				throw new ArgumentException("M0 runner default output log path must be absolute.", nameof(path));
+				throw new ArgumentException("Legacy runner default output log path must be absolute.", nameof(path));
 
 			string normalized = Path.GetFullPath(path);
 			string directory = Path.GetDirectoryName(normalized);
 			if (string.IsNullOrEmpty(directory))
-				throw new ArgumentException("M0 runner default output log path must have a directory.", nameof(path));
+				throw new ArgumentException("Legacy runner default output log path must have a directory.", nameof(path));
 
 			Directory.CreateDirectory(directory);
-			// The external runner collects this deterministic artifact even when the
-			// fixture does not trigger a legacy error that writes a console log.
 			File.WriteAllText(normalized, string.Empty);
 			System.Threading.Volatile.Write(ref m0RunnerDefaultOutputLogPath, normalized);
 		}
 
-		// Canary-only boundary for process-wide startup state. The M0 baseline
-		// intentionally keeps its historical reset behavior; a canary restart
-		// must not expose the previous game's roots to the next Program.Main call.
 		internal static void ResetSessionState()
 		{
 			ExeDir = null;
@@ -391,20 +428,13 @@ namespace MinorShift.Emuera
 			AnalysisFiles?.Clear();
 			AnalysisFiles = null;
 			debugMode = false;
-			CoreProfile = EmueraCoreProfile.V24Pure;
+			DebugShowWindowOverride = null;
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
+			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 			StartTime = 0;
-			// Runner-owned diagnostic sinks are process-scoped and must survive an
-			// in-process canary switch; clearing them would write later-session logs
-			// back into the isolated game fixture and violate zero-mutation evidence.
 		}
 
-		/// <summary>
-		/// Resolves only the legacy default <c>emuera.log</c> to the runner-owned
-		/// artifact. Custom game-requested log paths remain constrained to the
-		/// active game directory by <see cref="GameView.EmueraConsole.OutputLog"/>.
-		/// </summary>
-		internal static bool TryResolveM0RunnerDefaultOutputLogPath(string requestedPath, out string outputPath)
+		internal static bool TryResolveLegacyRunnerDefaultOutputLogPath(string requestedPath, out string outputPath)
 		{
 			outputPath = "";
 			string runnerPath = System.Threading.Volatile.Read(ref m0RunnerDefaultOutputLogPath);
@@ -525,21 +555,17 @@ namespace MinorShift.Emuera
 
 		public static uint StartTime { get; private set; }
 
-		private static EmueraCoreProfile DetectCoreProfile(string exeDir)
+		private static EmueraCoreProfile DetectCoreProfile()
 		{
-			if (string.IsNullOrEmpty(exeDir))
-				return EmueraCoreProfile.V24Pure;
-
 			string launcherProfile = global::FirstWindow.SelectedCoreProfileName;
-			if (string.Equals(launcherProfile, global::FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase))
-				return EmueraCoreProfile.Snake;
-
-			if (IsModernSnakeCoreRequested(exeDir))
-				return EmueraCoreProfile.SnakeModernMobile;
-			if (IsLegacySnakeCoreRequested(exeDir))
-				return EmueraCoreProfile.Snake;
-
-			return EmueraCoreProfile.V24Pure;
+			return launcherProfile switch
+			{
+				global::FirstWindow.CoreProfileV24Pure => EmueraCoreProfile.V24Pure,
+				global::FirstWindow.CoreProfileSnake => EmueraCoreProfile.Snake,
+				global::FirstWindow.CoreProfileEraFl => EmueraCoreProfile.EraFl,
+				_ => throw new InvalidOperationException(
+					$"Compatibility profile '{launcherProfile}' is not supported by the legacy bridge.")
+			};
 		}
 
 		private static EmueraCoreProfile ResolveCompatibilityProfile(string profileId)
@@ -548,38 +574,22 @@ namespace MinorShift.Emuera
 			{
 				"v24pure" => EmueraCoreProfile.V24Pure,
 				"snake" => EmueraCoreProfile.Snake,
+				"erafl" => EmueraCoreProfile.EraFl,
 				_ => throw new InvalidOperationException(
 					$"Compatibility plan profile '{profileId}' is not supported by the legacy bridge.")
 			};
 		}
 
-		private static bool IsLegacySnakeCoreRequested(string exeDir)
+		private static string GetCompatibilityProfileId(EmueraCoreProfile profile)
 		{
-			try
+			return profile switch
 			{
-				string normalized = uEmuera.Utils.NormalizePath(exeDir);
-				return uEmuera.Utils.FileExists(Path.Combine(normalized, "snake_core.txt"))
-					|| uEmuera.Utils.FileExists(Path.Combine(normalized, "legacy_snake_core.txt"));
-			}
-			catch
-			{
-			}
-			return false;
-		}
-
-		private static bool IsModernSnakeCoreRequested(string exeDir)
-		{
-			try
-			{
-				string normalized = uEmuera.Utils.NormalizePath(exeDir);
-				if (uEmuera.Utils.FileExists(Path.Combine(normalized, "modern_core.txt"))
-					|| uEmuera.Utils.FileExists(Path.Combine(normalized, "snake_modern_core.txt")))
-					return true;
-			}
-			catch
-			{
-			}
-			return false;
+				EmueraCoreProfile.V24Pure => "v24pure",
+				EmueraCoreProfile.Snake => "snake",
+				EmueraCoreProfile.EraFl => "erafl",
+				_ => throw new InvalidOperationException(
+					$"Legacy core profile '{profile}' has no built-in compatibility plan."),
+			};
 		}
 
 	}

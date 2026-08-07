@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -52,7 +51,38 @@ internal enum EmueraDisplayScrollMode
 
 internal static class GenericUtils
 {
-    static readonly ConcurrentQueue<Action> uiQueue = new ConcurrentQueue<Action>();
+    // UI 动作队列改为 lock + 环形缓冲 + 信封对象池：每次入队复用信封对象，不再
+    // 为每个动作分配闭包和 ConcurrentQueue 内部节点（Android Mono GC 暂停的主要人为来源）。
+    static readonly object uiQueueLock = new object();
+    static UiEnvelope[] uiQueueRing = new UiEnvelope[256];
+    static readonly Stack<UiEnvelope> uiEnvelopePool = new Stack<UiEnvelope>();
+    static int uiQueueHead = 0;
+    static int uiQueueCount = 0;
+
+    /// <summary>
+    /// 复用信封：承载一个待执行 UI 动作。出队执行后归还池，避免逐动作分配闭包。
+    /// 计数递减放在 finally，保证动作抛异常时 pending 计数仍被正确回退。
+    /// </summary>
+    sealed class UiEnvelope
+    {
+        public Action Action;
+        public bool DisplayWork;
+
+        public void Run()
+        {
+            try
+            {
+                Action();
+            }
+            finally
+            {
+                if (DisplayWork)
+                    Interlocked.Decrement(ref pendingDisplayActions);
+                Interlocked.Decrement(ref pendingUiActions);
+            }
+        }
+    }
+
     static int mainThreadId = -1;
     static int pendingUiActions = 0;
     static int pendingDisplayActions = 0;
@@ -99,27 +129,180 @@ internal static class GenericUtils
     static long _lastPerformanceSampleMs;
     static double _performanceFrameMsTotal;
     static double _performanceFrameMsMax;
+    static int _performanceFrameMaxUiPending;
+    static int _performanceFrameMaxDisplayPending;
+    static int _performanceFrameMaxGpuRenderQueue;
+    static int _performanceFrameMaxTextRenderQueue;
     static int _performanceFrameCount;
     static long _lastConsoleRenderSampleMs;
-    static double _consoleRenderMsTotal;
-    static double _consoleRenderMsMax;
-    static int _consoleRenderSampleCount;
-    static int _consoleRenderDrawCount;
-    static int _consoleRenderHitOnlyCount;
-    static int _consoleRenderHitRebuildCount;
-    static int _consoleRenderVisibleRowsTotal;
-    static int _consoleRenderVisibleRowsMax;
-    static int _consoleRenderCanvasRowsTotal;
-    static int _consoleRenderCanvasRowsMax;
-    static int _consoleRenderOverlayRowsTotal;
-    static int _consoleRenderOverlayRowsMax;
-    static int _consoleRenderPartsTotal;
-    static int _consoleRenderPartsMax;
-    static int _consoleRenderHitRectsTotal;
-    static int _consoleRenderHitRectsMax;
-    static readonly double[] _consoleRenderMsSamples = new double[512];
-    static int _consoleRenderMsSampleCount;
-    static int _consoleRenderMsSampleOverflow;
+    static int _consoleRenderCallbackCount;
+    static readonly ConsoleRenderSamplingWindow _consoleRenderDrawWindow = new ConsoleRenderSamplingWindow();
+    static readonly ConsoleRenderSamplingWindow _consoleRenderHitRebuildWindow = new ConsoleRenderSamplingWindow();
+    static long _lastDisplayBridgeSampleMs;
+    static readonly DisplayBridgeSamplingWindow _displayBridgeSamplingWindow = new DisplayBridgeSamplingWindow();
+    static readonly object cbgRefreshStateLock = new object();
+    static EmueraConsole lastCbgSnapshotConsole;
+    static int lastCbgSnapshotRevision = int.MinValue;
+
+    // 这里只统计 Godot Canvas 回调中的 CPU 工作，不包含 GPU 栅格化、提交或驱动等待。
+    // 两类回调必须分开累计，避免点击前命中表重建污染可视绘制的耗时判断。
+    sealed class ConsoleRenderSamplingWindow
+    {
+        const int MaxP95Samples = 512;
+        readonly double[] elapsedMsSamples = new double[MaxP95Samples];
+
+        public int Callbacks { get; private set; }
+        public double ElapsedMsTotal { get; private set; }
+        public double ElapsedMsMax { get; private set; }
+        public int VisibleRowsTotal { get; private set; }
+        public int VisibleRowsMax { get; private set; }
+        public int CanvasRowsTotal { get; private set; }
+        public int CanvasRowsMax { get; private set; }
+        public int OverlayRowsTotal { get; private set; }
+        public int OverlayRowsMax { get; private set; }
+        public int DrawnPartsTotal { get; private set; }
+        public int DrawnPartsMax { get; private set; }
+        public int RebuiltHitRectsTotal { get; private set; }
+        public int RebuiltHitRectsMax { get; private set; }
+        public int SampleCount { get; private set; }
+        public int SampleOverflow { get; private set; }
+
+        public void Add(double elapsedMs, int visibleRows, int canvasRows, int overlayRows, int drawnParts, int rebuiltHitRects)
+        {
+            Callbacks++;
+            ElapsedMsTotal += elapsedMs;
+            ElapsedMsMax = Math.Max(ElapsedMsMax, elapsedMs);
+            VisibleRowsTotal += Math.Max(0, visibleRows);
+            VisibleRowsMax = Math.Max(VisibleRowsMax, visibleRows);
+            CanvasRowsTotal += Math.Max(0, canvasRows);
+            CanvasRowsMax = Math.Max(CanvasRowsMax, canvasRows);
+            OverlayRowsTotal += Math.Max(0, overlayRows);
+            OverlayRowsMax = Math.Max(OverlayRowsMax, overlayRows);
+            DrawnPartsTotal += Math.Max(0, drawnParts);
+            DrawnPartsMax = Math.Max(DrawnPartsMax, drawnParts);
+            RebuiltHitRectsTotal += Math.Max(0, rebuiltHitRects);
+            RebuiltHitRectsMax = Math.Max(RebuiltHitRectsMax, rebuiltHitRects);
+            if (SampleCount < elapsedMsSamples.Length)
+                elapsedMsSamples[SampleCount++] = elapsedMs;
+            else
+                SampleOverflow++;
+        }
+
+        public double AverageMs => Callbacks == 0 ? 0.0 : ElapsedMsTotal / Callbacks;
+        public int AverageVisibleRows => Callbacks == 0 ? 0 : VisibleRowsTotal / Callbacks;
+        public int AverageCanvasRows => Callbacks == 0 ? 0 : CanvasRowsTotal / Callbacks;
+        public int AverageOverlayRows => Callbacks == 0 ? 0 : OverlayRowsTotal / Callbacks;
+        public int AverageDrawnParts => Callbacks == 0 ? 0 : DrawnPartsTotal / Callbacks;
+        public int AverageRebuiltHitRects => Callbacks == 0 ? 0 : RebuiltHitRectsTotal / Callbacks;
+
+        public double GetP95Ms()
+        {
+            if (SampleCount == 0)
+                return 0.0;
+            Array.Sort(elapsedMsSamples, 0, SampleCount);
+            int p95Index = Math.Clamp((int)Math.Ceiling(SampleCount * 0.95) - 1, 0, SampleCount - 1);
+            return elapsedMsSamples[p95Index];
+        }
+
+        public void Reset()
+        {
+            Callbacks = 0;
+            ElapsedMsTotal = 0.0;
+            ElapsedMsMax = 0.0;
+            VisibleRowsTotal = 0;
+            VisibleRowsMax = 0;
+            CanvasRowsTotal = 0;
+            CanvasRowsMax = 0;
+            OverlayRowsTotal = 0;
+            OverlayRowsMax = 0;
+            DrawnPartsTotal = 0;
+            DrawnPartsMax = 0;
+            RebuiltHitRectsTotal = 0;
+            RebuiltHitRectsMax = 0;
+            SampleCount = 0;
+            SampleOverflow = 0;
+            Array.Clear(elapsedMsSamples, 0, elapsedMsSamples.Length);
+        }
+    }
+
+    // 显示桥由 uEmuera 主窗口和 Godot UI 队列在同一主线程顺序执行。
+    // 只在显式性能开关开启时累计，以便把地图刷新中的快照、diff、Control 回退和 CBG
+    // 提交成本与 ConsoleRenderSurface 的 _Draw() CPU 回调分开观察。
+    sealed class DisplayBridgeSamplingWindow
+    {
+        public int Refreshes { get; private set; }
+        public int SnapshotLinesTotal { get; private set; }
+        public int SnapshotLinesMax { get; private set; }
+        public int RemoveBottomTotal { get; private set; }
+        public int AddLinesTotal { get; private set; }
+        public int DataOnlyLinesTotal { get; private set; }
+        public int CbgSubmits { get; private set; }
+        public int FallbackBuilds { get; private set; }
+        public int FallbackReplacements { get; private set; }
+        public int ApplyCalls { get; private set; }
+        public double SnapshotMsTotal { get; private set; }
+        public double SnapshotMsMax { get; private set; }
+        public double DiffMsTotal { get; private set; }
+        public double DiffMsMax { get; private set; }
+        public double ApplyMsTotal { get; private set; }
+        public double ApplyMsMax { get; private set; }
+
+        public void AddBridge(double snapshotMs, double diffMs, int snapshotLines, int removeBottom,
+            int addLines, int dataOnlyLines, bool cbgSubmitted)
+        {
+            Refreshes++;
+            SnapshotMsTotal += Math.Max(0.0, snapshotMs);
+            SnapshotMsMax = Math.Max(SnapshotMsMax, snapshotMs);
+            DiffMsTotal += Math.Max(0.0, diffMs);
+            DiffMsMax = Math.Max(DiffMsMax, diffMs);
+            SnapshotLinesTotal += Math.Max(0, snapshotLines);
+            SnapshotLinesMax = Math.Max(SnapshotLinesMax, snapshotLines);
+            RemoveBottomTotal += Math.Max(0, removeBottom);
+            AddLinesTotal += Math.Max(0, addLines);
+            DataOnlyLinesTotal += Math.Max(0, dataOnlyLines);
+            if (cbgSubmitted)
+                CbgSubmits++;
+        }
+
+        public void AddFallbackBuild(bool replacing)
+        {
+            FallbackBuilds++;
+            if (replacing)
+                FallbackReplacements++;
+        }
+
+        public void AddApply(double elapsedMs)
+        {
+            ApplyCalls++;
+            ApplyMsTotal += Math.Max(0.0, elapsedMs);
+            ApplyMsMax = Math.Max(ApplyMsMax, elapsedMs);
+        }
+
+        public double AverageSnapshotMs => Refreshes == 0 ? 0.0 : SnapshotMsTotal / Refreshes;
+        public double AverageDiffMs => Refreshes == 0 ? 0.0 : DiffMsTotal / Refreshes;
+        public double AverageApplyMs => ApplyCalls == 0 ? 0.0 : ApplyMsTotal / ApplyCalls;
+        public int AverageSnapshotLines => Refreshes == 0 ? 0 : SnapshotLinesTotal / Refreshes;
+
+        public void Reset()
+        {
+            Refreshes = 0;
+            SnapshotLinesTotal = 0;
+            SnapshotLinesMax = 0;
+            RemoveBottomTotal = 0;
+            AddLinesTotal = 0;
+            DataOnlyLinesTotal = 0;
+            CbgSubmits = 0;
+            FallbackBuilds = 0;
+            FallbackReplacements = 0;
+            ApplyCalls = 0;
+            SnapshotMsTotal = 0.0;
+            SnapshotMsMax = 0.0;
+            DiffMsTotal = 0.0;
+            DiffMsMax = 0.0;
+            ApplyMsTotal = 0.0;
+            ApplyMsMax = 0.0;
+        }
+    }
 
     public static bool HasPendingUIWork => Volatile.Read(ref pendingUiActions) > 0;
     public static bool HasPendingDisplayWork => Volatile.Read(ref pendingDisplayActions) > 0;
@@ -282,7 +465,20 @@ internal static class GenericUtils
         // All queued actions at this point were produced by the stopped
         // candidate.  A stale action must never mutate the next candidate's
         // Godot view, so discard the envelopes and their accounting together.
-        while (uiQueue.TryDequeue(out _)) { }
+        // 主线程调用且生产者已停，清空环形缓冲并把信封全部归还池，不留下悬空引用。
+        lock (uiQueueLock)
+        {
+            while (uiQueueCount > 0)
+            {
+                UiEnvelope envelope = uiQueueRing[uiQueueHead];
+                uiQueueRing[uiQueueHead] = null;
+                uiQueueHead = (uiQueueHead + 1) % uiQueueRing.Length;
+                uiQueueCount--;
+                envelope.Action = null;
+                envelope.DisplayWork = false;
+                uiEnvelopePool.Push(envelope);
+            }
+        }
         Interlocked.Exchange(ref pendingUiActions, 0);
         Interlocked.Exchange(ref pendingDisplayActions, 0);
         Interlocked.Increment(ref uiFrameGeneration);
@@ -303,25 +499,18 @@ internal static class GenericUtils
         _lastPerformanceSampleMs = 0;
         _performanceFrameMsTotal = 0.0;
         _performanceFrameMsMax = 0.0;
+        _performanceFrameMaxUiPending = 0;
+        _performanceFrameMaxDisplayPending = 0;
+        _performanceFrameMaxGpuRenderQueue = 0;
+        _performanceFrameMaxTextRenderQueue = 0;
         _performanceFrameCount = 0;
-        _lastConsoleRenderSampleMs = 0;
-        _consoleRenderMsTotal = 0.0;
-        _consoleRenderMsMax = 0.0;
-        _consoleRenderSampleCount = 0;
-        _consoleRenderDrawCount = 0;
-        _consoleRenderHitOnlyCount = 0;
-        _consoleRenderHitRebuildCount = 0;
-        _consoleRenderVisibleRowsTotal = 0;
-        _consoleRenderVisibleRowsMax = 0;
-        _consoleRenderCanvasRowsTotal = 0;
-        _consoleRenderCanvasRowsMax = 0;
-        _consoleRenderOverlayRowsTotal = 0;
-        _consoleRenderOverlayRowsMax = 0;
-        _consoleRenderPartsTotal = 0;
-        _consoleRenderPartsMax = 0;
-        _consoleRenderHitRectsTotal = 0;
-        _consoleRenderHitRectsMax = 0;
-        Array.Clear(_consoleRenderMsSamples, 0, _consoleRenderMsSamples.Length);
+        ResetConsoleRenderSampling();
+        ResetDisplayBridgeSampling();
+        lock (cbgRefreshStateLock)
+        {
+            lastCbgSnapshotConsole = null;
+            lastCbgSnapshotRevision = int.MinValue;
+        }
     }
 
     static void ResetSnakeAudioStateLocked(SnakeAudioState state)
@@ -356,15 +545,29 @@ internal static class GenericUtils
         ulong budgetUsec = OS.GetName() == "Android" ? AndroidUiBudgetUsec : DesktopUiBudgetUsec;
         ulong startUsec = Time.GetTicksUsec();
         int count = 0;
-        while (count < maxActions && uiQueue.TryDequeue(out var action))
+        while (count < maxActions)
         {
+            UiEnvelope envelope;
+            lock (uiQueueLock)
+            {
+                if (uiQueueCount == 0)
+                    break;
+                envelope = uiQueueRing[uiQueueHead];
+                uiQueueRing[uiQueueHead] = null;
+                uiQueueHead = (uiQueueHead + 1) % uiQueueRing.Length;
+                uiQueueCount--;
+            }
             try
             {
-                action();
+                envelope.Run();
             }
             catch (Exception ex)
             {
                 Error(EmueraLogCategory.UI, () => $"[UI Queue] {ex}");
+            }
+            finally
+            {
+                ReleaseUiEnvelope(envelope);
             }
             count++;
             if (Time.GetTicksUsec() - startUsec >= budgetUsec)
@@ -397,19 +600,43 @@ internal static class GenericUtils
         if (displayWork)
             Interlocked.Increment(ref pendingDisplayActions);
 
-        uiQueue.Enqueue(() =>
+        lock (uiQueueLock)
         {
-            try
-            {
-                action();
-            }
-            finally
-            {
-                if (displayWork)
-                    Interlocked.Decrement(ref pendingDisplayActions);
-                Interlocked.Decrement(ref pendingUiActions);
-            }
-        });
+            if (uiQueueCount == uiQueueRing.Length)
+                GrowUiRingLocked();
+            UiEnvelope envelope = AcquireUiEnvelope();
+            envelope.Action = action;
+            envelope.DisplayWork = displayWork;
+            int tail = (uiQueueHead + uiQueueCount) % uiQueueRing.Length;
+            uiQueueRing[tail] = envelope;
+            uiQueueCount++;
+        }
+    }
+
+    // 从空闲池取一个信封，仅允许在持有 uiQueueLock 时调用。
+    static UiEnvelope AcquireUiEnvelope()
+    {
+        return uiEnvelopePool.Count > 0 ? uiEnvelopePool.Pop() : new UiEnvelope();
+    }
+
+    // 环形缓冲已满时扩容（仅在超大突发时发生，不属于逐动作热路径）。
+    static void GrowUiRingLocked()
+    {
+        int oldCapacity = uiQueueRing.Length;
+        var newRing = new UiEnvelope[oldCapacity * 2];
+        for (int i = 0; i < uiQueueCount; i++)
+            newRing[i] = uiQueueRing[(uiQueueHead + i) % oldCapacity];
+        uiQueueHead = 0;
+        uiQueueRing = newRing;
+    }
+
+    // 执行完毕后归还信封：先清空 Action 引用，避免池长期持有闭包/游戏对象引用。
+    static void ReleaseUiEnvelope(UiEnvelope envelope)
+    {
+        envelope.Action = null;
+        envelope.DisplayWork = false;
+        lock (uiQueueLock)
+            uiEnvelopePool.Push(envelope);
     }
 
     public static EmueraLogLevel RuntimeLogLevel
@@ -492,6 +719,8 @@ internal static class GenericUtils
             MirrorNonErrorLogsToGodot = false;
             ScrollTraceEnabled = false;
             DiagnosticLogSinks.SetMirrorNonErrorToGodot(false);
+            DiagnosticLogSinks.Reload(_runtimeConfig);
+            RuntimeDiagnosticsPanel.SetDiagnosticsPanelVisible(false);
             _inputReplay = null;
             return;
         }
@@ -513,9 +742,21 @@ internal static class GenericUtils
         RuntimeLogCategories = _runtimeConfig.GetActiveDebugModelCategoryMask();
 
         DiagnosticLogSinks.SetMirrorNonErrorToGodot(MirrorNonErrorLogsToGodot);
+        DiagnosticLogSinks.Reload(_runtimeConfig);
+        RuntimeDiagnosticsPanel.SetDiagnosticsPanelVisible(_runtimeConfig.RuntimePanelEnabled);
         _inputReplay = _runtimeConfig.InputReplayEnabled
             ? new InputReplayBuffer(_runtimeConfig.InputReplayMaxEvents)
             : null;
+    }
+
+    /// <summary>
+    /// 运行时显示/隐藏诊断悬浮球与面板（悬浮球与面板节点均由 RuntimeDiagnosticsPanel 静态管理）。
+    /// 悬浮窗未挂载（debug.runtime_panel.enabled=false 或启动时 panel_visible=false）时为空操作，
+    /// 此时需重启或开启挂载门后生效。
+    /// </summary>
+    public static void SetDiagnosticsPanelVisible(bool visible)
+    {
+        RuntimeDiagnosticsPanel.SetDiagnosticsPanelVisible(visible);
     }
 
     static void WriteConfigSelfCheck(RuntimeDiagnosticsConfigLoader.LoadResult loadResult)
@@ -1345,136 +1586,6 @@ internal static class GenericUtils
             messageFactory, member, file, line);
     }
 
-    public static bool ContainsDynamicMapFunctionScope(IReadOnlyList<ConsoleDisplayLine> lines)
-    {
-        if (lines == null)
-            return false;
-        for (int i = 0; i < lines.Count; i++)
-        {
-            if (LineHasDynamicMapFunctionScope(lines[i]))
-                return true;
-        }
-        return false;
-    }
-
-    public static bool ContainsDynamicMapFunctionScope(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
-    {
-        if (lines == null)
-            return false;
-        for (int i = 0; i < lines.Count; i++)
-        {
-            if (LineHasDynamicMapFunctionScope(lines[i].Line))
-                return true;
-        }
-        return false;
-    }
-
-    public static bool LineHasDynamicMapFunctionScope(ConsoleDisplayLine line)
-    {
-        return LineHasDynamicMapFunctionScope(line, 0);
-    }
-
-    static bool LineHasDynamicMapFunctionScope(ConsoleDisplayLine line, int depth)
-    {
-        if (line == null || depth > 4)
-            return false;
-        if (line.DynamicMapFunctionScoped)
-            return true;
-        var buttons = line.Buttons;
-        if (buttons == null)
-            return false;
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            var parts = buttons[i]?.StrArray;
-            if (parts == null)
-                continue;
-            for (int j = 0; j < parts.Length; j++)
-            {
-                if (parts[j] is ConsoleDivPart div && div.Children != null)
-                {
-                    for (int k = 0; k < div.Children.Length; k++)
-                    {
-                        if (LineHasDynamicMapFunctionScope(div.Children[k], depth + 1))
-                            return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    public static bool ContainsDynamicMapBitmapContext(IReadOnlyList<ConsoleDisplayLine> lines)
-    {
-        if (lines == null)
-            return false;
-        for (int i = 0; i < lines.Count; i++)
-        {
-            if (LineHasDynamicMapBitmapContext(lines[i]))
-                return true;
-        }
-        return false;
-    }
-
-    public static bool ContainsDynamicMapBitmapContext(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
-    {
-        if (lines == null)
-            return false;
-        for (int i = 0; i < lines.Count; i++)
-        {
-            if (LineHasDynamicMapBitmapContext(lines[i].Line))
-                return true;
-        }
-        return false;
-    }
-
-    public static bool ContainsDynamicMapBitmapContextTail(IReadOnlyList<ConsoleDisplayLine> lines)
-    {
-        if (lines == null || lines.Count == 0)
-            return false;
-        int maxLines = GetDynamicMapMaxLines();
-        int start = Math.Max(0, lines.Count - maxLines);
-        for (int i = start; i < lines.Count; i++)
-        {
-            if (LineHasDynamicMapBitmapContext(lines[i]))
-                return true;
-        }
-        return false;
-    }
-
-    public static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line)
-    {
-        return LineHasDynamicMapBitmapContext(line, 0);
-    }
-
-    static bool LineHasDynamicMapBitmapContext(ConsoleDisplayLine line, int depth)
-    {
-        if (line == null || depth > 4)
-            return false;
-        if (line.BitmapCacheEnabled || line.DynamicMapFunctionScoped)
-            return true;
-        var buttons = line.Buttons;
-        if (buttons == null)
-            return false;
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            var parts = buttons[i]?.StrArray;
-            if (parts == null)
-                continue;
-            for (int j = 0; j < parts.Length; j++)
-            {
-                if (parts[j] is ConsoleDivPart div && div.Children != null)
-                {
-                    for (int k = 0; k < div.Children.Length; k++)
-                    {
-                        if (LineHasDynamicMapBitmapContext(div.Children[k], depth + 1))
-                            return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
     public static string BuildDynamicMapLineTailSummary(IReadOnlyList<ConsoleDisplayLine> lines)
     {
         if (lines == null || lines.Count == 0)
@@ -1518,11 +1629,9 @@ internal static class GenericUtils
         AccumulateDynamicMapCommandSummary(line, commands, ref commandCount, ref commandWritten, 0);
 
         int maxTextChars = GetDynamicMapMaxTextChars();
-        var sb = new StringBuilder(160);
-        sb.Append("{no=").Append(line.LineNo)
-            .Append(",bmp=").Append(line.BitmapCacheEnabled ? 1 : 0)
-            .Append(",mapfn=").Append(line.DynamicMapFunctionScoped ? 1 : 0)
-            .Append(",logic=").Append(line.IsLogicalLine ? 1 : 0)
+		var sb = new StringBuilder(160);
+		sb.Append("{no=").Append(line.LineNo)
+			.Append(",logic=").Append(line.IsLogicalLine ? 1 : 0)
             .Append(",tmp=").Append(line.IsTemporary ? 1 : 0)
             .Append(",end=").Append(line.IsLineEnd ? 1 : 0)
             .Append(",seg=").Append(line.Buttons?.Length ?? 0)
@@ -1814,9 +1923,12 @@ internal static class GenericUtils
         var cfg = _runtimeConfig;
         if (cfg != null && cfg.LoggingEnabled && cfg.BreadcrumbEnabled && cfg.BreadcrumbWriteOnShutdown)
             DiagnosticLogExporter.WriteBreadcrumb(cfg, "BREADCRUMB.WRITE", "event=shutdown");
+        // WS2：退出前刷新并关闭持续文件 sink，确保 gemuera_runtime_*.log 完整落盘。
+        DiagnosticLogSinks.Shutdown();
     }
 
-    public static void SamplePerformanceFrame(double deltaSeconds, int textureQueueCount)
+    public static void SamplePerformanceFrame(double deltaSeconds, int gpuRenderQueueCount, int textRenderQueueCount,
+        string rendererIdentity)
     {
         var cfg = _runtimeConfig;
         if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
@@ -1824,7 +1936,14 @@ internal static class GenericUtils
 
         double frameMs = Math.Max(0.0, deltaSeconds * 1000.0);
         _performanceFrameMsTotal += frameMs;
-        _performanceFrameMsMax = Math.Max(_performanceFrameMsMax, frameMs);
+        if (frameMs >= _performanceFrameMsMax)
+        {
+            _performanceFrameMsMax = frameMs;
+            _performanceFrameMaxUiPending = Volatile.Read(ref pendingUiActions);
+            _performanceFrameMaxDisplayPending = Volatile.Read(ref pendingDisplayActions);
+            _performanceFrameMaxGpuRenderQueue = gpuRenderQueueCount;
+            _performanceFrameMaxTextRenderQueue = textRenderQueueCount;
+        }
         _performanceFrameCount++;
 
         long nowMs = GetTickMs();
@@ -1836,8 +1955,16 @@ internal static class GenericUtils
         int count = Math.Max(1, _performanceFrameCount);
         double avg = _performanceFrameMsTotal / count;
         double max = _performanceFrameMsMax;
+        int maxUiPending = _performanceFrameMaxUiPending;
+        int maxDisplayPending = _performanceFrameMaxDisplayPending;
+        int maxGpuRenderQueue = _performanceFrameMaxGpuRenderQueue;
+        int maxTextRenderQueue = _performanceFrameMaxTextRenderQueue;
         _performanceFrameMsTotal = 0.0;
         _performanceFrameMsMax = 0.0;
+        _performanceFrameMaxUiPending = 0;
+        _performanceFrameMaxDisplayPending = 0;
+        _performanceFrameMaxGpuRenderQueue = 0;
+        _performanceFrameMaxTextRenderQueue = 0;
         _performanceFrameCount = 0;
 
         var data = new StringBuilder(160);
@@ -1846,10 +1973,23 @@ internal static class GenericUtils
         if (cfg.PerformanceSamplingIncludeFrameMs)
             data.Append("frame_ms_avg=").Append(avg.ToString("0.###")).Append(" frame_ms_max=").Append(max.ToString("0.###")).Append(' ');
         if (cfg.PerformanceSamplingIncludeUiQueue)
+        {
             data.Append("ui_pending=").Append(Volatile.Read(ref pendingUiActions))
-                .Append(" display_pending=").Append(Volatile.Read(ref pendingDisplayActions)).Append(' ');
+                .Append(" display_pending=").Append(Volatile.Read(ref pendingDisplayActions));
+            if (cfg.PerformanceSamplingIncludeFrameMs)
+                data.Append(" frame_max_ui_pending=").Append(maxUiPending)
+                    .Append(" frame_max_display_pending=").Append(maxDisplayPending);
+            data.Append(' ');
+        }
         if (cfg.PerformanceSamplingIncludeTextureQueue)
-            data.Append("texture_queue=").Append(textureQueueCount).Append(' ');
+        {
+            data.Append("gpu_render_queue=").Append(gpuRenderQueueCount)
+                .Append(" text_render_queue=").Append(textRenderQueueCount);
+            if (cfg.PerformanceSamplingIncludeFrameMs)
+                data.Append(" frame_max_gpu_render_queue=").Append(maxGpuRenderQueue)
+                    .Append(" frame_max_text_render_queue=").Append(maxTextRenderQueue);
+            data.Append(' ');
+        }
         if (cfg.PerformanceSamplingIncludeRingBuffer)
             data.Append("ring_count=").Append(DiagnosticLogSinks.RingCount)
                 .Append(" ring_capacity=").Append(DiagnosticLogSinks.RingCapacity).Append(' ');
@@ -1857,11 +1997,87 @@ internal static class GenericUtils
             data.Append("dropped=").Append(DiagnosticLogRouter.GetDroppedTotal()).Append(' ');
         if (cfg.PerformanceSamplingIncludeMemory)
             data.Append("static_memory=").Append(OS.GetStaticMemoryUsage()).Append(' ');
+        if (!string.IsNullOrWhiteSpace(rendererIdentity))
+            data.Append(rendererIdentity).Append(' ');
 
         // 企业级说明：性能采样是低频诊断事件，只在显式开启后每 interval 输出一次。
         // 采样数据写入 ring buffer，不在每帧构造日志文本，避免诊断系统反向拖慢 APK。
         DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Performance,
             "PERF.SAMPLE", "performance sample", data.ToString().TrimEnd());
+    }
+
+    static void ResetConsoleRenderSampling()
+    {
+        _lastConsoleRenderSampleMs = 0;
+        _consoleRenderCallbackCount = 0;
+        _consoleRenderDrawWindow.Reset();
+        _consoleRenderHitRebuildWindow.Reset();
+    }
+
+    static void ResetDisplayBridgeSampling()
+    {
+        _lastDisplayBridgeSampleMs = 0;
+        _displayBridgeSamplingWindow.Reset();
+    }
+
+    /// <summary>
+    /// 记录一次 uEmuera 显示桥刷新。传入值只在性能采样显式开启时聚合，不生成高频日志。
+    /// </summary>
+    public static void SampleDisplayBridge(double snapshotMs, double diffMs, int snapshotLines, int removeBottom,
+        int addLines, int dataOnlyLines, bool cbgSubmitted)
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
+            return;
+
+        _displayBridgeSamplingWindow.AddBridge(snapshotMs, diffMs, snapshotLines, removeBottom,
+            addLines, dataOnlyLines, cbgSubmitted);
+
+        long nowMs = GetTickMs();
+        long interval = Math.Max(250, cfg.PerformanceSamplingIntervalMs);
+        if (_lastDisplayBridgeSampleMs != 0 && nowMs - _lastDisplayBridgeSampleMs < interval)
+            return;
+        _lastDisplayBridgeSampleMs = nowMs;
+
+        var window = _displayBridgeSamplingWindow;
+        var data = new StringBuilder(420);
+        data.Append("refreshes=").Append(window.Refreshes)
+            .Append(" snapshot_ms_avg=").Append(FormatDiagnosticNumber(window.AverageSnapshotMs))
+            .Append(" snapshot_ms_max=").Append(FormatDiagnosticNumber(window.SnapshotMsMax))
+            .Append(" diff_ms_avg=").Append(FormatDiagnosticNumber(window.AverageDiffMs))
+            .Append(" diff_ms_max=").Append(FormatDiagnosticNumber(window.DiffMsMax))
+            .Append(" apply_calls=").Append(window.ApplyCalls)
+            .Append(" apply_ms_avg=").Append(FormatDiagnosticNumber(window.AverageApplyMs))
+            .Append(" apply_ms_max=").Append(FormatDiagnosticNumber(window.ApplyMsMax))
+            .Append(" snapshot_lines_avg=").Append(window.AverageSnapshotLines)
+            .Append(" snapshot_lines_max=").Append(window.SnapshotLinesMax)
+            .Append(" remove_bottom=").Append(window.RemoveBottomTotal)
+            .Append(" add_lines=").Append(window.AddLinesTotal)
+            .Append(" data_only=").Append(window.DataOnlyLinesTotal)
+            .Append(" fallback_built=").Append(window.FallbackBuilds)
+            .Append(" fallback_replaced=").Append(window.FallbackReplacements)
+            .Append(" cbg_submits=").Append(window.CbgSubmits);
+
+        DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Performance,
+            "PERF.DISPLAY_BRIDGE", "display bridge performance sample", data.ToString());
+        ResetDisplayBridgeSampling();
+        _lastDisplayBridgeSampleMs = nowMs;
+    }
+
+    public static void RecordDisplayFallbackLineBuild(bool replacing)
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
+            return;
+        _displayBridgeSamplingWindow.AddFallbackBuild(replacing);
+    }
+
+    public static void RecordDisplayApplyBatch(double elapsedMs)
+    {
+        var cfg = _runtimeConfig;
+        if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
+            return;
+        _displayBridgeSamplingWindow.AddApply(elapsedMs);
     }
 
     public static void SampleConsoleRenderFrame(double elapsedMs, bool draw, bool rebuildHits,
@@ -1871,49 +2087,21 @@ internal static class GenericUtils
         var cfg = _runtimeConfig;
         if (cfg == null || !cfg.LoggingEnabled || !cfg.PerformanceSamplingEnabled)
             return;
+        if (!draw && !rebuildHits)
+            return;
 
         double safeElapsedMs = Math.Max(0.0, elapsedMs);
-        _consoleRenderMsTotal += safeElapsedMs;
-        _consoleRenderMsMax = Math.Max(_consoleRenderMsMax, safeElapsedMs);
-        _consoleRenderSampleCount++;
+        _consoleRenderCallbackCount++;
         if (draw)
-            _consoleRenderDrawCount++;
-        else
-            _consoleRenderHitOnlyCount++;
+            _consoleRenderDrawWindow.Add(safeElapsedMs, visibleRows, canvasRows, overlayRows, drawnParts, rebuiltHitRects);
         if (rebuildHits)
-            _consoleRenderHitRebuildCount++;
-        _consoleRenderVisibleRowsTotal += Math.Max(0, visibleRows);
-        _consoleRenderVisibleRowsMax = Math.Max(_consoleRenderVisibleRowsMax, visibleRows);
-        _consoleRenderCanvasRowsTotal += Math.Max(0, canvasRows);
-        _consoleRenderCanvasRowsMax = Math.Max(_consoleRenderCanvasRowsMax, canvasRows);
-        _consoleRenderOverlayRowsTotal += Math.Max(0, overlayRows);
-        _consoleRenderOverlayRowsMax = Math.Max(_consoleRenderOverlayRowsMax, overlayRows);
-        _consoleRenderPartsTotal += Math.Max(0, drawnParts);
-        _consoleRenderPartsMax = Math.Max(_consoleRenderPartsMax, drawnParts);
-        _consoleRenderHitRectsTotal += Math.Max(0, rebuiltHitRects);
-        _consoleRenderHitRectsMax = Math.Max(_consoleRenderHitRectsMax, rebuiltHitRects);
-        if (_consoleRenderMsSampleCount < _consoleRenderMsSamples.Length)
-            _consoleRenderMsSamples[_consoleRenderMsSampleCount++] = safeElapsedMs;
-        else
-            _consoleRenderMsSampleOverflow++;
+            _consoleRenderHitRebuildWindow.Add(safeElapsedMs, visibleRows, canvasRows, overlayRows, drawnParts, rebuiltHitRects);
 
         long nowMs = GetTickMs();
         long interval = Math.Max(250, cfg.PerformanceSamplingIntervalMs);
         if (_lastConsoleRenderSampleMs != 0 && nowMs - _lastConsoleRenderSampleMs < interval)
             return;
         _lastConsoleRenderSampleMs = nowMs;
-
-        int count = Math.Max(1, _consoleRenderSampleCount);
-        double avg = _consoleRenderMsTotal / count;
-        double max = _consoleRenderMsMax;
-        int p95SampleCount = _consoleRenderMsSampleCount;
-        double p95 = max;
-        if (p95SampleCount > 0)
-        {
-            Array.Sort(_consoleRenderMsSamples, 0, p95SampleCount);
-            int p95Index = Math.Clamp((int)Math.Ceiling(p95SampleCount * 0.95) - 1, 0, p95SampleCount - 1);
-            p95 = _consoleRenderMsSamples[p95Index];
-        }
 
         string snapshotData = "";
         try
@@ -1925,52 +2113,46 @@ internal static class GenericUtils
             snapshotData = "snapshot_error=" + ex.GetType().Name;
         }
 
-        var data = new StringBuilder(320);
+        var drawWindow = _consoleRenderDrawWindow;
+        var hitRebuildWindow = _consoleRenderHitRebuildWindow;
+        var data = new StringBuilder(560);
         data.Append("backend=canvas")
-            .Append(" samples=").Append(count)
-            .Append(" draw_calls=").Append(_consoleRenderDrawCount)
-            .Append(" hit_only_rebuilds=").Append(_consoleRenderHitOnlyCount)
-            .Append(" hit_rebuilds=").Append(_consoleRenderHitRebuildCount)
-            .Append(" draw_ms_avg=").Append(FormatDiagnosticNumber(avg))
-            .Append(" draw_ms_p95=").Append(FormatDiagnosticNumber(p95))
-            .Append(" draw_ms_max=").Append(FormatDiagnosticNumber(max))
-            .Append(" visible_rows_avg=").Append(_consoleRenderVisibleRowsTotal / count)
-            .Append(" visible_rows_max=").Append(_consoleRenderVisibleRowsMax)
-            .Append(" canvas_rows_avg=").Append(_consoleRenderCanvasRowsTotal / count)
-            .Append(" canvas_rows_max=").Append(_consoleRenderCanvasRowsMax)
-            .Append(" overlay_rows_avg=").Append(_consoleRenderOverlayRowsTotal / count)
-            .Append(" overlay_rows_max=").Append(_consoleRenderOverlayRowsMax)
-            .Append(" parts_avg=").Append(_consoleRenderPartsTotal / count)
-            .Append(" parts_max=").Append(_consoleRenderPartsMax)
-            .Append(" hit_rects_avg=").Append(_consoleRenderHitRectsTotal / count)
-            .Append(" hit_rects_max=").Append(_consoleRenderHitRectsMax)
-            .Append(" sample_overflow=").Append(_consoleRenderMsSampleOverflow);
+            .Append(" sample_callbacks=").Append(_consoleRenderCallbackCount)
+            .Append(" draw_callbacks=").Append(drawWindow.Callbacks)
+            .Append(" draw_ms_avg=").Append(FormatDiagnosticNumber(drawWindow.AverageMs))
+            .Append(" draw_ms_p95=").Append(FormatDiagnosticNumber(drawWindow.GetP95Ms()))
+            .Append(" draw_ms_max=").Append(FormatDiagnosticNumber(drawWindow.ElapsedMsMax))
+            .Append(" draw_sample_overflow=").Append(drawWindow.SampleOverflow)
+            .Append(" draw_visible_rows_avg=").Append(drawWindow.AverageVisibleRows)
+            .Append(" draw_visible_rows_max=").Append(drawWindow.VisibleRowsMax)
+            .Append(" draw_canvas_rows_avg=").Append(drawWindow.AverageCanvasRows)
+            .Append(" draw_canvas_rows_max=").Append(drawWindow.CanvasRowsMax)
+            .Append(" draw_overlay_rows_avg=").Append(drawWindow.AverageOverlayRows)
+            .Append(" draw_overlay_rows_max=").Append(drawWindow.OverlayRowsMax)
+            .Append(" draw_parts_avg=").Append(drawWindow.AverageDrawnParts)
+            .Append(" draw_parts_max=").Append(drawWindow.DrawnPartsMax)
+            .Append(" hit_rebuild_callbacks=").Append(hitRebuildWindow.Callbacks)
+            .Append(" hit_rebuild_ms_avg=").Append(FormatDiagnosticNumber(hitRebuildWindow.AverageMs))
+            .Append(" hit_rebuild_ms_p95=").Append(FormatDiagnosticNumber(hitRebuildWindow.GetP95Ms()))
+            .Append(" hit_rebuild_ms_max=").Append(FormatDiagnosticNumber(hitRebuildWindow.ElapsedMsMax))
+            .Append(" hit_rebuild_sample_overflow=").Append(hitRebuildWindow.SampleOverflow)
+            .Append(" hit_rebuild_visible_rows_avg=").Append(hitRebuildWindow.AverageVisibleRows)
+            .Append(" hit_rebuild_visible_rows_max=").Append(hitRebuildWindow.VisibleRowsMax)
+            .Append(" hit_rebuild_canvas_rows_avg=").Append(hitRebuildWindow.AverageCanvasRows)
+            .Append(" hit_rebuild_canvas_rows_max=").Append(hitRebuildWindow.CanvasRowsMax)
+            .Append(" hit_rebuild_overlay_rows_avg=").Append(hitRebuildWindow.AverageOverlayRows)
+            .Append(" hit_rebuild_overlay_rows_max=").Append(hitRebuildWindow.OverlayRowsMax)
+            .Append(" hit_rects_avg=").Append(hitRebuildWindow.AverageRebuiltHitRects)
+            .Append(" hit_rects_max=").Append(hitRebuildWindow.RebuiltHitRectsMax);
         if (!string.IsNullOrEmpty(snapshotData))
             data.Append(' ').Append(snapshotData.Trim());
 
-        _consoleRenderMsTotal = 0.0;
-        _consoleRenderMsMax = 0.0;
-        _consoleRenderSampleCount = 0;
-        _consoleRenderDrawCount = 0;
-        _consoleRenderHitOnlyCount = 0;
-        _consoleRenderHitRebuildCount = 0;
-        _consoleRenderVisibleRowsTotal = 0;
-        _consoleRenderVisibleRowsMax = 0;
-        _consoleRenderCanvasRowsTotal = 0;
-        _consoleRenderCanvasRowsMax = 0;
-        _consoleRenderOverlayRowsTotal = 0;
-        _consoleRenderOverlayRowsMax = 0;
-        _consoleRenderPartsTotal = 0;
-        _consoleRenderPartsMax = 0;
-        _consoleRenderHitRectsTotal = 0;
-        _consoleRenderHitRectsMax = 0;
-        _consoleRenderMsSampleCount = 0;
-        _consoleRenderMsSampleOverflow = 0;
-
-        // 性能采样打开时才聚合输出，默认 APK 不会进入这里；采样窗口记录 p95/max，
-        // 用于判断 Canvas 后端是否接近移动端可视绘制预算，而不是只看应用能否启动。
+        // 性能采样打开时才聚合输出，默认 APK 不会进入这里。draw_* 和 hit_rebuild_*
+        // 都是 Canvas 回调的 CPU 时间；真实 GPU draw call 需要另读 Godot Performance monitor。
         DiagnosticLogExporter.WriteInfrastructureRecord(EmueraLogLevel.Info, EmueraLogCategory.Performance,
             "PERF.CONSOLE_RENDER", "console render performance sample", data.ToString());
+        ResetConsoleRenderSampling();
+        _lastConsoleRenderSampleMs = nowMs;
     }
 
     static string FormatDiagnosticNumber(double value)
@@ -2060,22 +2242,22 @@ internal static class GenericUtils
 
     public static void RemoveTextCount(int count)
     {
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("remove_bottom", count, 0, false, -1, "preserve_viewport", 0);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordDisplayProjection("remove_bottom", count, 0, false, -1, "preserve_viewport", 0);
         EnqueueUI(() => EmueraContent.instance?.RemoveBottomLines(count), true);
     }
 
     public static void AddText(ConsoleDisplayLine line, bool update)
     {
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("append", 0, line == null ? 0 : 1, update, -1, "unspecified", 0);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordDisplayProjection("append", 0, line == null ? 0 : 1, update, -1, "unspecified", 0);
         EnqueueUI(() => EmueraContent.instance?.AddLine(line, update), true);
     }
 
     public static void AddTexts(IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines)
     {
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("append_batch", 0, lines?.Count ?? 0, false, -1, "unspecified", 0);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordDisplayProjection("append_batch", 0, lines?.Count ?? 0, false, -1, "unspecified", 0);
         EnqueueUI(() => EmueraContent.instance?.AddLines(lines), true);
     }
 
@@ -2087,15 +2269,15 @@ internal static class GenericUtils
             dataOnlyLines);
     }
 
-    public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
-        int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
-    {
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-        {
-            gEmuera.M0.LegacyTrace.TryRecordDisplayProjection("apply_text_changes", removeBottomCount, lines?.Count ?? 0,
-                update, lastButtonGeneration, scrollMode.ToString(), dataOnlyLines?.Count ?? 0);
-        }
-        EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration, scrollMode, dataOnlyLines), true);
+	public static void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines, bool update,
+		int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
+	{
+		if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+		{
+			gEmuera.LegacyRunner.LegacyTrace.TryRecordDisplayProjection("apply_text_changes", removeBottomCount, lines?.Count ?? 0,
+				update, lastButtonGeneration, scrollMode.ToString(), dataOnlyLines?.Count ?? 0);
+		}
+		EnqueueUI(() => EmueraContent.instance?.ApplyTextChanges(removeBottomCount, lines, update, lastButtonGeneration, scrollMode, dataOnlyLines), true);
     }
 
     public static void SetLastButtonGeneration(int generation)
@@ -2113,12 +2295,30 @@ internal static class GenericUtils
         EnqueueUI(() => EmueraContent.instance?.ShowIsInProcess(show));
     }
 
-    public static void RefreshCBG(EmueraConsole console)
+    /// <summary>
+    /// 将 CBG 提交限制为实际展示内容发生变化的时刻。文本/地图计时器可以高频刷新，
+    /// 但静态背景不应因此重复复制图层、重新 pin 纹理并让同一批 CanvasItem 失效。
+    /// </summary>
+    public static bool RefreshCBG(EmueraConsole console)
     {
         if (console == null)
-            return;
-        var cbgList = console.GetCBGList();
+            return false;
+
+        List<EmueraConsole.ClientBackGroundImage> cbgList;
+        lock (cbgRefreshStateLock)
+        {
+            if (!ReferenceEquals(lastCbgSnapshotConsole, console))
+            {
+                lastCbgSnapshotConsole = console;
+                lastCbgSnapshotRevision = int.MinValue;
+            }
+            if (!console.TryGetCBGListSnapshot(lastCbgSnapshotRevision, out int revision, out cbgList))
+                return false;
+            lastCbgSnapshotRevision = revision;
+        }
+
         EnqueueUI(() => EmueraContent.instance?.RefreshCBG(cbgList), true);
+        return true;
     }
 
     public static void PlaySoundFile(string path, bool loop)
@@ -2151,8 +2351,8 @@ internal static class GenericUtils
             state.TotalMs = 0;
             state.LastKnownCurrentMs = 0;
         }
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", path, "play", channel, repeat);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", path, "play", channel, repeat);
         EnqueueUI(() => EmueraContent.instance?.PlaySoundFile(path, repeat, channel));
     }
 
@@ -2169,8 +2369,8 @@ internal static class GenericUtils
                 state.LastKnownCurrentMs = 0;
             }
         }
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", "", "stop_all", -1, 0);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", "", "stop_all", -1, 0);
         EnqueueUI(() => EmueraContent.instance?.StopSounds());
     }
 
@@ -2188,8 +2388,8 @@ internal static class GenericUtils
             snakeBgm.TotalMs = 0;
             snakeBgm.LastKnownCurrentMs = 0;
         }
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", path, "play", -1, -1);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", path, "play", -1, -1);
         EnqueueUI(() => EmueraContent.instance?.PlayBgmFile(path));
     }
 
@@ -2203,8 +2403,8 @@ internal static class GenericUtils
             snakeBgm.Repeat = 1;
             snakeBgm.LastKnownCurrentMs = 0;
         }
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", "", "stop", -1, 0);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", "", "stop", -1, 0);
         EnqueueUI(() => EmueraContent.instance?.StopBgm());
     }
 
@@ -2215,8 +2415,8 @@ internal static class GenericUtils
             foreach (var state in snakeSounds)
                 state.Volume = ClampEraVolume(volume);
         }
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", "", "set_volume", -1, volume);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordEffect("audio_enqueued", "sound", "", "set_volume", -1, volume);
         EnqueueUI(() => EmueraContent.instance?.SetSoundVolume(volume));
     }
 
@@ -2224,8 +2424,8 @@ internal static class GenericUtils
     {
         lock (snakeAudioLock)
             snakeBgm.Volume = ClampEraVolume(volume);
-        if (gEmuera.M0.LegacyTrace.IsEnabled)
-            gEmuera.M0.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", "", "set_volume", -1, volume);
+        if (gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
+            gEmuera.LegacyRunner.LegacyTrace.TryRecordEffect("audio_enqueued", "bgm", "", "set_volume", -1, volume);
         EnqueueUI(() => EmueraContent.instance?.SetBgmVolume(volume));
     }
 

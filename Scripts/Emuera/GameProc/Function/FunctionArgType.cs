@@ -37,7 +37,9 @@ namespace MinorShift.Emuera.GameProc.Function
         SP_TINPUTS,//<数値>,<文字列式>(,<数値>,<文字列>)
 		SP_SORTCHARA,//<キャラクタ変数>,<ソート順序>(両方省略可能)
 		SP_CALL,//<文字列>,<引数>,... //引数は省略可能
+		SP_CALLS,//<文字列>,<引数>,... //引数は省略可能 (snake 接口面)
 		SP_CALLF,
+		SP_CALLCSHARP,//C# 调用 (snake 接口面)
 		SP_CALLFORM,//<書式付文字列>,<引数>,... //引数は省略可能
 		SP_CALLFORMF,//<書式付文字列>,<引数>,... //引数は省略可能
 		SP_FOR_NEXT,//<可変数値変数>,<数値>,<数値>,<数値> //引数は省略可能
@@ -59,6 +61,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		SP_SET_ARRAY,//可変数値変数・<数式配列型>。未使用
 		SP_SETS_ARRAY,//可変文字列変数・<文字列配列型>。未使用
 		SP_COLOR,
+		SP_COLOR_ALPHA,//<RGB>,<透明度%>
 		SP_SPLIT,//<文字列式>, <文字列式>, <可変文字変数>
 		SP_CVAR_SET,//<可変変数>,<式>,<数式 or 文字列式 or null>(,<範囲初値>, <範囲終値>)
 		SP_CONTROL_ARRAY,//<可変変数>,<数値>,<数値>
@@ -73,7 +76,15 @@ namespace MinorShift.Emuera.GameProc.Function
 		SP_REF,
 		SP_REFBYNAME,
 		SP_SETBGIMAGE,
+		SP_SETIMAGELAYER,
+		SP_SETIMAGELAYERL,
 		SP_HTMLSPLIT,
+		STR_DOUBLE,//双精度字符串 (snake 接口面)
+		SP_HTML_PRINT,//HTML 打印 (snake 接口面)
+		SP_HTML_PRINTC,//HTML 打印居中 (snake 接口面)
 		SP_DT_COLUMN_OPTIONS,
+		SP_PRINT_IMG,
+		SP_PRINT_RECT,
+		SP_PRINT_SPACE,
 	}
 }

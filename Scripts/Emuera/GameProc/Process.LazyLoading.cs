@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using MinorShift.Emuera.Sub;
 
 namespace MinorShift.Emuera.GameProc
@@ -11,8 +12,8 @@ namespace MinorShift.Emuera.GameProc
 	{
 		private readonly Dictionary<string, List<string>> lazyLoadingTable =
 			new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-		private readonly Dictionary<string, List<string>> lazyLoadingFileToFunctions =
-			new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, HashSet<string>> lazyLoadingFileToFunctions =
+			new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 		private readonly Dictionary<string, long> lazyLoadingFilesTable =
 			new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
@@ -183,11 +184,10 @@ namespace MinorShift.Emuera.GameProc
 			{
 				string relative = RelativeErbPath(file);
 				string normalizedFull = NormalizeFullPath(ErbPath(relative));
-				if (lazyLoadingFileToFunctions.TryGetValue(relative, out List<string> functions))
+				if (lazyLoadingFileToFunctions.TryGetValue(relative, out HashSet<string> functions))
 				{
-					for (int i = 0; i < functions.Count; i++)
+					foreach (string functionName in functions)
 					{
-						string functionName = functions[i];
 						if (!lazyLoadingTable.TryGetValue(functionName, out List<string> paths))
 							continue;
 						paths.RemoveAll(path => string.Equals(NormalizeFullPath(path), normalizedFull, StringComparison.OrdinalIgnoreCase));
@@ -228,13 +228,12 @@ namespace MinorShift.Emuera.GameProc
 			if (!ContainsIgnoreCase(paths, fullPath))
 				paths.Add(fullPath);
 
-			if (!lazyLoadingFileToFunctions.TryGetValue(relative, out List<string> functions))
+			if (!lazyLoadingFileToFunctions.TryGetValue(relative, out HashSet<string> functions))
 			{
-				functions = new List<string>();
+				functions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 				lazyLoadingFileToFunctions.Add(relative, functions);
 			}
-			if (!ContainsIgnoreCase(functions, functionName))
-				functions.Add(functionName);
+			functions.Add(functionName);
 
 			LazyLoadingFiles.Add(NormalizeFullPath(fullPath));
 		}
@@ -303,7 +302,13 @@ namespace MinorShift.Emuera.GameProc
 			{
 				HashSet<string> files = GetLazyFiles(erbFiles);
 
-				using (var metaStream = new FileStream(LazyLoadingFilesFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536))
+				//N6: 合并读档——单次流读取（整文件读入内存后解析），消除逐条 ReadString 反复跨越文件边界。
+				//逐文件 stat（存在性 + 最后写入时间）并行化，结果按原文件顺序串行回填，
+				//DeletedFiles/ChangedFiles/lazyLoadingFilesTable 的内容与顺序语义与串行完全一致。
+				byte[] metaBytes = ReadWholeFile(LazyLoadingFilesFilePath);
+				string[] names;
+				long[] lastWrites;
+				using (var metaStream = new MemoryStream(metaBytes, false))
 				using (var metaReader = new BinaryReader(metaStream, Encoding.UTF8))
 				{
 					if (metaReader.ReadUInt32() != LazyMagicNumber || metaReader.ReadUInt32() != LazyVersion)
@@ -313,29 +318,61 @@ namespace MinorShift.Emuera.GameProc
 					}
 
 					int fileCount = metaReader.ReadInt32();
+					names = new string[fileCount];
+					lastWrites = new long[fileCount];
 					for (int i = 0; i < fileCount; i++)
 					{
-						string name = NormalizeRelativePath(metaReader.ReadString());
-						long lastWrite = metaReader.ReadInt64();
-						string path = ErbPath(name);
+						names[i] = NormalizeRelativePath(metaReader.ReadString());
+						lastWrites[i] = metaReader.ReadInt64();
+					}
+				}
 
+				//0=文件缺失, 1=时间戳已变(Changed), 2=未变
+				byte[] statResults = new byte[names.Length];
+				Exception firstError = null;
+				Parallel.For(0, names.Length, GetLazyIndexParallelOptions(), i =>
+				{
+					try
+					{
+						string path = ErbPath(names[i]);
 						if (!uEmuera.Utils.FileExists(path))
 						{
-							DeletedFiles.Add(name);
-							continue;
+							statResults[i] = 0;
+							return;
 						}
+						statResults[i] = GetLazyFileTimestamp(path) == lastWrites[i] ? (byte)2 : (byte)1;
+					}
+					catch (Exception e)
+					{
+						//与原串行实现相同：stat 抛出的首个异常原样上抛，
+						//由外层 catch 走“重建索引表”路径（消息与行为一致）。
+						System.Threading.Interlocked.CompareExchange(ref firstError, e, null);
+					}
+				});
+				if (firstError != null)
+					System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(firstError).Throw();
 
-						if (GetLazyFileTimestamp(path) != lastWrite)
-							ChangedFiles.Add(name);
-						else
-							lazyLoadingFilesTable[name] = lastWrite;
+				for (int i = 0; i < statResults.Length; i++)
+				{
+					switch (statResults[i])
+					{
+						case 0:
+							DeletedFiles.Add(names[i]);
+							break;
+						case 1:
+							ChangedFiles.Add(names[i]);
+							break;
+						default:
+							lazyLoadingFilesTable[names[i]] = lastWrites[i];
+							break;
 					}
 				}
 
 				files.ExceptWith(lazyLoadingFilesTable.Keys);
 				ChangedFiles.UnionWith(files);
 
-				using (var dataStream = new FileStream(LazyLoadingDataFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536))
+				byte[] dataBytes = ReadWholeFile(LazyLoadingDataFilePath);
+				using (var dataStream = new MemoryStream(dataBytes, false))
 				using (var dataReader = new BinaryReader(dataStream, Encoding.UTF8))
 				{
 					if (dataReader.ReadUInt32() != LazyMagicNumber || dataReader.ReadUInt32() != LazyVersion)
@@ -365,6 +402,31 @@ namespace MinorShift.Emuera.GameProc
 
 			LazyCurrentLazyStatus =
 				ChangedFiles.Count != 0 || DeletedFiles.Count != 0 ? LazyStatus.UpdateTable : LazyStatus.Loaded;
+		}
+
+		private static ParallelOptions GetLazyIndexParallelOptions()
+		{
+			return new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Math.Min(Environment.ProcessorCount, 8)) };
+		}
+
+		private static byte[] ReadWholeFile(string path)
+		{
+			using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536))
+			{
+				long length = stream.Length;
+				byte[] buffer = new byte[length];
+				int offset = 0;
+				while (offset < buffer.Length)
+				{
+					int read = stream.Read(buffer, offset, buffer.Length - offset);
+					if (read <= 0)
+						break;
+					offset += read;
+				}
+				if (offset < buffer.Length)
+					Array.Resize(ref buffer, offset);
+				return buffer;
+			}
 		}
 
 		private void RebuildLazyLoadingIndex(List<KeyValuePair<string, string>> erbFiles)

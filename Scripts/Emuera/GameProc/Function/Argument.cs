@@ -48,11 +48,13 @@ namespace MinorShift.Emuera.GameProc.Function
 
 	internal sealed class ExpressionArgument : Argument
 	{
-		public ExpressionArgument(IOperandTerm termSrc)
+		public ExpressionArgument(IOperandTerm termSrc, bool enablePointerInputMetadata = false)
 		{
 			Term = termSrc;
+			EnablePointerInputMetadata = enablePointerInputMetadata;
 		}
 		readonly public IOperandTerm Term;
+		readonly public bool EnablePointerInputMetadata;
 	}
 
 	internal sealed class ExpressionArrayArgument : Argument
@@ -63,6 +65,42 @@ namespace MinorShift.Emuera.GameProc.Function
 			termList.CopyTo(TermList);
 		}
 		readonly public IOperandTerm[] TermList;
+	}
+
+	internal sealed class MixedIntegerExprTerm
+	{
+		public IOperandTerm Num;
+		public bool IsPx;
+	}
+
+	internal sealed class SpPrintShapeArgument : Argument
+	{
+		public SpPrintShapeArgument(MixedIntegerExprTerm[] parameters)
+		{
+			Parameters = parameters;
+		}
+
+		public readonly MixedIntegerExprTerm[] Parameters;
+	}
+
+	internal sealed class SpPrintImgArgument : Argument
+	{
+		public SpPrintImgArgument(
+			IOperandTerm name,
+			IOperandTerm buttonName,
+			IOperandTerm mappingName,
+			MixedIntegerExprTerm[] parameters)
+		{
+			Name = name;
+			ButtonName = buttonName;
+			MappingName = mappingName;
+			Parameters = parameters;
+		}
+
+		public readonly IOperandTerm Name;
+		public readonly IOperandTerm ButtonName;
+		public readonly IOperandTerm MappingName;
+		public readonly MixedIntegerExprTerm[] Parameters;
 	}
 
 	internal sealed class SpPrintVArgument : Argument
@@ -141,17 +179,25 @@ namespace MinorShift.Emuera.GameProc.Function
 
 	internal sealed class SpTInputsArgument : Argument
 	{
-		public SpTInputsArgument(IOperandTerm time, IOperandTerm def, IOperandTerm disp, IOperandTerm timeout)
+		// snake 参考实现：TINPUT/TINPUTS 支持第5、6参数（Mouse、CanSkip）。
+		// gEmuera 之前声明了 6-slot 类型数组却只读取前 4 个，静默丢弃这两个参数。
+		public SpTInputsArgument(IOperandTerm time, IOperandTerm def, IOperandTerm disp, IOperandTerm timeout,
+			IOperandTerm mouse = null, IOperandTerm canSkip = null)
 		{
 			Time = time;
 			Def = def;
 			Disp = disp;
             Timeout = timeout;
+			Mouse = mouse;
+			CanSkip = canSkip;
 		}
 		readonly public IOperandTerm Time;
 		readonly public IOperandTerm Def;
 		readonly public IOperandTerm Disp;
         readonly public IOperandTerm Timeout;
+		// EE_INPUT 機能拡張：鼠标输入开关（第5参数）与消息跳过时可跳过等待（第6参数）。
+		readonly public IOperandTerm Mouse;
+		readonly public IOperandTerm CanSkip;
 	}
 
 	//難読化用属性。enum.ToString()やenum.Parse()を行うなら(Exclude=true)にすること。
@@ -272,6 +318,33 @@ namespace MinorShift.Emuera.GameProc.Function
 		public readonly IOperandTerm Name;
 		public readonly IOperandTerm Depth;
 		public readonly IOperandTerm Opacity;
+	}
+
+	internal sealed class SpSetImageLayerArgument : Argument
+	{
+		public SpSetImageLayerArgument(IOperandTerm spriteName, IOperandTerm depth, IOperandTerm x, IOperandTerm y,
+			IOperandTerm width, IOperandTerm height, IOperandTerm opacity, IOperandTerm cmArray, IOperandTerm followScroll)
+		{
+			SpriteName = spriteName;
+			Depth = depth;
+			X = x;
+			Y = y;
+			Width = width;
+			Height = height;
+			Opacity = opacity;
+			CMArray = cmArray;
+			FollowScroll = followScroll;
+		}
+
+		readonly public IOperandTerm SpriteName;
+		readonly public IOperandTerm Depth;
+		readonly public IOperandTerm X;
+		readonly public IOperandTerm Y;
+		readonly public IOperandTerm Width;
+		readonly public IOperandTerm Height;
+		readonly public IOperandTerm Opacity;
+		readonly public IOperandTerm CMArray;
+		readonly public IOperandTerm FollowScroll;
 	}
 
 	internal sealed class SpForNextArgment : Argument
@@ -409,6 +482,17 @@ namespace MinorShift.Emuera.GameProc.Function
 		readonly public IOperandTerm G;
 		readonly public IOperandTerm B;
 		readonly public IOperandTerm RGB;
+	}
+
+	internal sealed class SpColorAlphaArgument : Argument
+	{
+		public SpColorAlphaArgument(IOperandTerm rgb, IOperandTerm alpha)
+		{
+			RGB = rgb;
+			Alpha = alpha;
+		}
+		readonly public IOperandTerm RGB;
+		readonly public IOperandTerm Alpha;
 	}
 
 	internal sealed class SpSplitArgument : Argument

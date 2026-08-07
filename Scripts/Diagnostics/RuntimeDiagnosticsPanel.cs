@@ -11,6 +11,9 @@ namespace gEmuera.Diagnostics
     /// </summary>
     public partial class RuntimeDiagnosticsPanel : PanelContainer
     {
+        static FloatingDiagnosticsHost _activeFloatingHost;
+        static Node _floatingAttachParent;
+
         RuntimeDiagnosticsConfig config;
         VBoxContainer optionRoot;
         TabContainer optionTabs;
@@ -20,6 +23,9 @@ namespace gEmuera.Diagnostics
         Label statsLabel;
         Label consoleUserPathLabel;
         TextEdit consoleTextEdit;
+        Label logViewStatusLabel;
+        TextEdit logViewTextEdit;
+        OptionButton logViewFilter;
         Control optionBody;
         bool collapsed;
         bool addingQuickOptions;
@@ -42,11 +48,21 @@ namespace gEmuera.Diagnostics
                 RefreshResponsiveLayout();
         }
 
+        /// <summary>
+        /// WS2：启动挂载门仍为 RuntimePanelEnabled（debug.runtime_panel.enabled / [logging] panel_visible 等价复用，行为保留）。
+        /// 热重载通过 SetDiagnosticsPanelVisible 即时显隐悬浮球与面板。
+        /// </summary>
         public static void AttachFloatingTo(Node parent)
         {
+            // 宿主引用必须在门控之前无条件记录：启动时 panel_visible=false 不挂载，
+            // 之后热重载/设置页改回 true 时 SetDiagnosticsPanelVisible 依赖该引用补挂载。
+            if (parent != null)
+                _floatingAttachParent = parent;
             var currentConfig = global::GenericUtils.GetRuntimeDiagnosticsConfig()
                 ?? RuntimeDiagnosticsConfigLoader.Load().Config;
             if (parent == null || currentConfig == null || !currentConfig.RuntimePanelEnabled)
+                return;
+            if (_activeFloatingHost != null && GodotObject.IsInstanceValid(_activeFloatingHost))
                 return;
 
             var layer = new CanvasLayer { Layer = 100 };
@@ -56,7 +72,43 @@ namespace gEmuera.Diagnostics
             host.SetAnchorsPreset(LayoutPreset.FullRect);
             host.MouseFilter = MouseFilterEnum.Ignore;
             layer.AddChild(host);
-            host.TreeExiting += () => layer.QueueFree();
+            _activeFloatingHost = host;
+            host.TreeExiting += () =>
+            {
+                if (_activeFloatingHost == host)
+                    _activeFloatingHost = null;
+                layer.QueueFree();
+            };
+        }
+
+        /// <summary>
+        /// 运行时显示/隐藏悬浮球与面板。请求显示但尚未挂载时（例如热重载把 panel_visible 从 false 改为 true），
+        /// 会按当前配置补挂载；门控不通过时为空操作，可安全调用。
+        /// </summary>
+        public static void SetDiagnosticsPanelVisible(bool visible)
+        {
+            var host = _activeFloatingHost;
+            if ((host == null || !GodotObject.IsInstanceValid(host)) && visible)
+            {
+                var cfg = global::GenericUtils.GetRuntimeDiagnosticsConfig();
+                if (_floatingAttachParent != null && GodotObject.IsInstanceValid(_floatingAttachParent)
+                    && cfg != null && cfg.RuntimePanelEnabled)
+                {
+                    AttachFloatingTo(_floatingAttachParent);
+                }
+                host = _activeFloatingHost;
+            }
+            if (host == null || !GodotObject.IsInstanceValid(host))
+                return;
+            host.SetBallAndPanelVisible(visible);
+        }
+
+        public static bool GetDiagnosticsPanelVisible()
+        {
+            var host = _activeFloatingHost;
+            if (host == null || !GodotObject.IsInstanceValid(host))
+                return false;
+            return host.IsBallVisible();
         }
 
         void BuildPanel()
@@ -161,6 +213,7 @@ namespace gEmuera.Diagnostics
             button.CustomMinimumSize = new Vector2(88, 44);
             button.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
             button.AddThemeFontSizeOverride("font_size", 15);
+            GEmueraTheme.ApplyButton(button, GEmueraTheme.Surface, GEmueraTheme.Border);
             return button;
         }
 
@@ -221,12 +274,18 @@ namespace gEmuera.Diagnostics
             optionRoot = null;
             consoleUserPathLabel = null;
             consoleTextEdit = null;
+            logViewStatusLabel = null;
+            logViewTextEdit = null;
+            logViewFilter = null;
 
             BeginTab("快捷");
             BuildQuickDebugTab();
 
             BeginTab("GDPrint");
             BuildGdPrintTab();
+
+            BeginTab("日志查看");
+            BuildLogViewTab();
 
             BeginTab("基础");
             AddSection("基础开关", "先启用调试档，再打开具体模块。APK 排查时只开启正在定位的最小范围。");
@@ -248,8 +307,8 @@ namespace gEmuera.Diagnostics
                 () => config.DebugModelEn.Enabled,
                 value => config.DebugModelEn.Enabled = value);
             AddChoice("[debug_model_zh_cn] log_level", "中文调试档等级",
-                "debug 记录最多，error 最适合 APK 常规游玩。开启 debug 前请确认只打开必要模块。",
-                new[] { "error", "warn", "info", "debug", "none" },
+                "trace/debug 记录最多，error 最适合 APK 常规游玩。开启 debug 前请确认只打开必要模块。",
+                new[] { "error", "warn", "info", "debug", "trace", "none" },
                 () => config.DebugModelZhCn.LogLevel,
                 value => config.DebugModelZhCn.LogLevel = value);
             AddCheck("[debug_model_zh_cn] mirror_to_godot", "镜像到 Godot 控制台",
@@ -263,14 +322,27 @@ namespace gEmuera.Diagnostics
 
             AddSection("全局日志", "控制最低等级、类别、ring buffer 和限流。");
             AddChoice("[logging] level", "默认最低等级",
-                "debug/info/warn/error/none。debug_model 未启用时使用该值；APK 默认 error。",
-                new[] { "error", "warn", "info", "debug", "none" },
+                "error|warn|info|debug|trace|none（none=关闭全部，trace=全量）。debug_model 未启用时使用该值；APK 默认 error。",
+                new[] { "error", "warn", "info", "debug", "trace", "none" },
                 () => config.LoggingLevel,
                 value => config.LoggingLevel = value);
             AddCheck("[logging] mirror_non_error_to_godot", "全局镜像非 Error",
                 "将 debug/info/warn 同步到 Godot 控制台。手机实机一般关闭，只在桌面排查时打开。",
                 () => config.LoggingMirrorNonErrorToGodot,
                 value => config.LoggingMirrorNonErrorToGodot = value);
+            AddCheck("[logging] file_sink", "持续文件日志",
+                "把通过路由的日志持续写入 user://gemuera_runtime_*.log，单文件 1 MiB 写满自动轮转为新时间戳文件。需要 logging.enabled 同时开启。",
+                () => config.FileSinkEnabled,
+                value => config.FileSinkEnabled = value);
+            AddChoice("[logging] file_sink_level", "文件日志等级",
+                "文件 sink 独立的最低等级（error|warn|info|debug|trace|none），与全局 level 互不影响。默认 info。",
+                new[] { "error", "warn", "info", "debug", "trace", "none" },
+                () => config.FileSinkLevel,
+                value => config.FileSinkLevel = value);
+            AddCheck("[logging] panel_visible", "诊断面板可见",
+                "与 debug.runtime_panel.enabled 等价复用（都是 RuntimePanelEnabled）。false 时启动不挂载悬浮窗；保存/热重载后可即时显示或隐藏悬浮球。",
+                () => config.RuntimePanelEnabled,
+                value => config.RuntimePanelEnabled = value);
             AddInt("[logging] diagnostic_ring_capacity", "ring buffer 容量",
                 "内存中保留的最近日志数量。修改后建议重启生效；容量越大越占内存。",
                 64, 10000, 64,
@@ -918,8 +990,8 @@ namespace gEmuera.Diagnostics
                 1, 5000, 1,
                 () => config.AndroidStorageMaxPathRecords,
                 value => config.AndroidStorageMaxPathRecords = value);
-            AddCheck("[debug.performance_sampling] enabled", "性能采样",
-                "按固定间隔记录 FPS、帧时间、队列和 ring buffer 摘要。默认关闭。",
+            AddCheck("[logging] performance", "性能采样",
+                "按固定间隔记录 PERF.SAMPLE，并记录 Canvas 绘制和命中表重建的独立 CPU 回调采样。默认关闭。",
                 () => config.PerformanceSamplingEnabled,
                 value => config.PerformanceSamplingEnabled = value);
             AddInt("[debug.performance_sampling] sample_interval_ms", "采样间隔 ms",
@@ -1111,6 +1183,67 @@ namespace gEmuera.Diagnostics
 
             RefreshUserDirectoryLabel();
             RefreshConsoleLog();
+        }
+
+        void BuildLogViewTab()
+        {
+            // 企业级说明：日志查看页只读取内存 ring buffer（Snapshot 快照），不订阅业务事件、不持续写盘。
+            // 提供最低等级过滤，便于快速过滤触摸/布局等高频噪声；持续文件 sink 状态单独展示。
+            AddSection("日志查看", "实时展示内存 ring buffer 最近记录，可按最低等级过滤。持续文件日志由 [logging] file_sink 控制，写入 user://gemuera_runtime_*.log。");
+
+            var filterRow = CreateOptionRow("log_view.level_filter", "最低等级过滤", "只显示选定等级及以上的记录；选择“全部”显示所有记录。");
+            var filterLine = new HBoxContainer();
+            filterLine.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            filterLine.AddThemeConstantOverride("separation", 8);
+            filterRow.AddChild(filterLine);
+
+            var filterLabel = CreateOptionTitle("最低等级", "log_view.level_filter");
+            filterLine.AddChild(filterLabel);
+
+            logViewFilter = new OptionButton();
+            logViewFilter.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            logViewFilter.CustomMinimumSize = new Vector2(220, 44);
+            logViewFilter.AddItem("全部", 0);
+            logViewFilter.AddItem("error", 1);
+            logViewFilter.AddItem("warn", 2);
+            logViewFilter.AddItem("info", 3);
+            logViewFilter.AddItem("debug", 4);
+            logViewFilter.Select(0);
+            logViewFilter.ItemSelected += _ => RefreshLogView();
+            filterLine.AddChild(logViewFilter);
+            AddOptionDescription(filterRow, "log_view.level_filter", "只显示选定等级及以上的记录；选择“全部”显示所有记录。");
+
+            var actions = new HFlowContainer();
+            actions.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            actions.AddThemeConstantOverride("h_separation", 8);
+            actions.AddThemeConstantOverride("v_separation", 8);
+            optionRoot.AddChild(actions);
+
+            var refresh = CreateActionButton("刷新", "从内存 ring buffer 重新读取最近日志，不访问磁盘。");
+            refresh.Pressed += RefreshLogView;
+            actions.AddChild(refresh);
+
+            var export = CreateActionButton("导出日志", "把当前 ring buffer 写入启动游戏目录，按钮触发时才写盘。");
+            export.Pressed += ExportDiagnosticLog;
+            actions.AddChild(export);
+
+            var exportPackage = CreateActionButton("导出诊断包", "导出完整诊断包（日志、配置快照、设备、屏幕、Godot、APK、游戏与摘要信息）。");
+            exportPackage.Pressed += ExportDiagnosticPackage;
+            actions.AddChild(exportPackage);
+
+            logViewStatusLabel = CreateSmallLabel("");
+            optionRoot.AddChild(logViewStatusLabel);
+
+            logViewTextEdit = new TextEdit();
+            logViewTextEdit.Editable = false;
+            logViewTextEdit.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            logViewTextEdit.SizeFlagsVertical = SizeFlags.ExpandFill;
+            logViewTextEdit.CustomMinimumSize = new Vector2(0, FloatingMode ? 220 : 320);
+            logViewTextEdit.AddThemeFontSizeOverride("font_size", 13);
+            optionRoot.AddChild(logViewTextEdit);
+
+            RefreshLogViewStatus();
+            RefreshLogView();
         }
 
         void BeginTab(string title)
@@ -1352,7 +1485,7 @@ namespace gEmuera.Diagnostics
             label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
             label.MouseFilter = MouseFilterEnum.Ignore;
             label.AddThemeFontSizeOverride("font_size", 13);
-            label.AddThemeColorOverride("font_color", new Color(0.72f, 0.8f, 0.86f));
+            label.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
             return label;
         }
 
@@ -1508,6 +1641,92 @@ namespace gEmuera.Diagnostics
             RefreshStats();
         }
 
+        void RefreshLogView()
+        {
+            if (logViewTextEdit == null)
+                return;
+
+            var records = DiagnosticLogSinks.Snapshot();
+            if (records.Length == 0)
+            {
+                logViewTextEdit.Text = "暂无运行时日志。进入游戏主场景后，日志会先写入内存 ring buffer；点击“刷新”可重新读取。";
+                RefreshStats();
+                return;
+            }
+
+            EmueraLogLevel minLevel = SelectedLogViewLevel();
+            string levelText = minLevel == EmueraLogLevel.None
+                ? "全部"
+                : minLevel.ToString().ToLowerInvariant();
+            const int MaxLogViewRecords = 200;
+
+            int matched = 0;
+            foreach (var r in records)
+            {
+                if (minLevel == EmueraLogLevel.None || r.Level >= minLevel)
+                    matched++;
+            }
+            int skipped = Math.Max(0, matched - MaxLogViewRecords);
+
+            var sb = new StringBuilder(Math.Min(matched, MaxLogViewRecords) * 160);
+            sb.AppendLine("显示最近 " + Math.Min(matched, MaxLogViewRecords) + " / " + matched
+                + " 条 ring buffer 日志（level >= " + levelText + "）；完整内容请点“导出日志”。");
+            int written = 0;
+            foreach (var r in records)
+            {
+                if (minLevel != EmueraLogLevel.None && r.Level < minLevel)
+                    continue;
+                if (written < skipped)
+                {
+                    written++;
+                    continue;
+                }
+                if (written - skipped >= MaxLogViewRecords)
+                    break;
+                sb.Append(r.Seq.ToString("D6"))
+                    .Append(" ")
+                    .Append(r.Level.ToString().ToUpperInvariant())
+                    .Append(" ")
+                    .Append(r.Category)
+                    .Append(" ")
+                    .Append(r.EventId)
+                    .Append(" | ")
+                    .Append(r.Message);
+                if (!string.IsNullOrEmpty(r.Data))
+                    sb.Append(" | ").Append(r.Data);
+                sb.AppendLine();
+                written++;
+            }
+            logViewTextEdit.Text = sb.ToString();
+            RefreshLogViewStatus();
+            RefreshStats();
+        }
+
+        EmueraLogLevel SelectedLogViewLevel()
+        {
+            if (logViewFilter == null)
+                return EmueraLogLevel.None;
+            switch (logViewFilter.Selected)
+            {
+                case 1: return EmueraLogLevel.Error;
+                case 2: return EmueraLogLevel.Warn;
+                case 3: return EmueraLogLevel.Info;
+                case 4: return EmueraLogLevel.Debug;
+                default: return EmueraLogLevel.None;
+            }
+        }
+
+        void RefreshLogViewStatus()
+        {
+            if (logViewStatusLabel == null)
+                return;
+            if (DiagnosticLogSinks.IsFileSinkEnabled)
+                logViewStatusLabel.Text = "持续文件日志：开启 → " + DiagnosticLogSinks.FileSinkCurrentPath
+                    + "（单文件 1 MiB 轮转，等级 " + config?.FileSinkLevel + "）";
+            else
+                logViewStatusLabel.Text = "持续文件日志：关闭（[logging] file_sink=false 或 logging.enabled=false，文件不会生成）。";
+        }
+
         static string BuildPathDisplay(string godotPath)
         {
             if (string.IsNullOrWhiteSpace(godotPath))
@@ -1560,26 +1779,23 @@ namespace gEmuera.Diagnostics
 
         StyleBoxFlat CreatePanelStyle()
         {
-            var style = new StyleBoxFlat();
-            style.BgColor = new Color(0.085f, 0.098f, 0.105f, 0.96f);
-            style.BorderColor = new Color(0.32f, 0.42f, 0.44f);
-            style.SetBorderWidthAll(1);
-            style.SetCornerRadiusAll(8);
-            style.ContentMarginLeft = 8;
-            style.ContentMarginRight = 8;
-            style.ContentMarginTop = 8;
-            style.ContentMarginBottom = 8;
-            return style;
+            // 深色现代卡片：表面 token + 边框 + 8px 圆角。
+            return GEmueraTheme.SurfaceStyle(
+                GEmueraTheme.WithAlpha(GEmueraTheme.Surface, 0.96f),
+                GEmueraTheme.Border,
+                GEmueraTheme.CardRadius,
+                1,
+                8,
+                new Vector2(0, 4),
+                8, 8, 8, 8);
         }
 
         StyleBoxFlat CreateRowStyle()
         {
-            var style = new StyleBoxFlat();
-            style.BgColor = new Color(0.115f, 0.13f, 0.135f, 0.95f);
-            style.BorderColor = new Color(0.2f, 0.26f, 0.27f);
-            style.SetBorderWidthAll(1);
-            style.SetCornerRadiusAll(6);
-            return style;
+            return GEmueraTheme.SurfaceStyle(
+                GEmueraTheme.Surface,
+                GEmueraTheme.Border,
+                GEmueraTheme.SmallRadius);
         }
     }
 
@@ -1711,6 +1927,21 @@ namespace gEmuera.Diagnostics
                 ClampPanelToViewport();
             UpdateResizeHandles();
         }
+
+        /// <summary>
+        /// WS2：运行时显隐 API（GenericUtils.SetDiagnosticsPanelVisible → 静态转发）。
+        /// true 时显示悬浮球并保持面板当前开合状态；false 时同时隐藏悬浮球与面板。
+        /// </summary>
+        public void SetBallAndPanelVisible(bool visible)
+        {
+            if (ballButton == null)
+                return;
+            ballButton.Visible = visible;
+            if (!visible)
+                SetPanelVisible(false);
+        }
+
+        public bool IsBallVisible() => ballButton?.Visible ?? false;
 
         void HandleResizeInput(InputEvent inputEvent, int mask)
         {
@@ -1925,20 +2156,23 @@ namespace gEmuera.Diagnostics
 
         static void ApplyFloatingBallStyle(Button button)
         {
-            var normal = CreateBallStyle(new Color(0.16f, 0.38f, 0.44f, 0.94f));
-            var hover = CreateBallStyle(new Color(0.20f, 0.46f, 0.52f, 0.98f));
-            var pressed = CreateBallStyle(new Color(0.10f, 0.30f, 0.36f, 1.0f));
+            // 悬浮诊断球：强调蓝紫填充 + 高亮边框（深色主题），hover 提亮。
+            var normal = CreateBallStyle(GEmueraTheme.WithAlpha(GEmueraTheme.Accent, 0.94f));
+            var hover = CreateBallStyle(GEmueraTheme.WithAlpha(GEmueraTheme.Lighten(GEmueraTheme.Accent), 0.98f));
+            var pressed = CreateBallStyle(GEmueraTheme.WithAlpha(GEmueraTheme.Darken(GEmueraTheme.Accent, 0.14f), 1.0f));
             button.AddThemeStyleboxOverride("normal", normal);
             button.AddThemeStyleboxOverride("hover", hover);
             button.AddThemeStyleboxOverride("pressed", pressed);
-            button.AddThemeColorOverride("font_color", new Color(0.95f, 1.0f, 1.0f));
+            button.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
+            button.AddThemeColorOverride("font_hover_color", GEmueraTheme.TextPrimary);
+            button.AddThemeColorOverride("font_pressed_color", GEmueraTheme.TextPrimary);
         }
 
         static StyleBoxFlat CreateBallStyle(Color color)
         {
             var style = new StyleBoxFlat();
             style.BgColor = color;
-            style.BorderColor = new Color(0.72f, 0.92f, 0.95f, 0.85f);
+            style.BorderColor = GEmueraTheme.AccentAlt;
             style.SetBorderWidthAll(2);
             style.SetCornerRadiusAll(32);
             return style;

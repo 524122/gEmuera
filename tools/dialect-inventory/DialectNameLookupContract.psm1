@@ -147,10 +147,10 @@ function New-DialectNameLookupContractReport {
     foreach ($id in $requiredSourceIds) { if (-not $sourceById.ContainsKey($id)) { throw "Missing DIA-08 source evidence: $id" } }
 
     Assert-LookupSourcePattern $sourceById.FunctionIdentifier 'new\s+Dictionary<string,\s*FunctionIdentifier>\s*\(\s*Config\.ICVariable\s*\?\s*System\.StringComparer\.OrdinalIgnoreCase\s*:\s*System\.StringComparer\.Ordinal\s*\)' 'instruction comparer conditional on Config.ICVariable'
-    Assert-LookupSourcePattern $sourceById.FunctionIdentifier 'GetInstructionNameDic\s*\(\s*\)\s*\{\s*return\s+funcDic\s*;' 'raw instruction dictionary exposure'
-    Assert-LookupSourcePattern $sourceById.FunctionIdentifier 'FunctionMethodCreator\.GetMethodList\s*\(\s*\).*?if\s*\(\s*!funcDic\.ContainsKey\s*\(\s*key\s*\)\s*\).*?funcDic\.Add\s*\(\s*key\s*,\s*new\s+FunctionIdentifier\s*\(\s*key\s*,\s*pair\.Value\s*,\s*methodInstruction\s*\)\s*\)' 'expression-to-instruction projection with existing instruction precedence'
+    Assert-LookupSourcePattern $sourceById.FunctionIdentifier 'public\s+static\s+IReadOnlyDictionary<string,\s*FunctionIdentifier>\s+GetInstructionNameDic\s*\(\s*LegacyCompatibilityProfile' 'profile-scoped read-only instruction surface'
+    Assert-LookupSourcePattern $sourceById.FunctionIdentifier 'FunctionMethodCreator\.GetMethodList\s*\(\s*compatibility\s*\).*?if\s*\(\s*selected\.ContainsKey\s*\(\s*pair\.Key\s*\)|!funcDic\.TryGetValue\s*\(\s*pair\.Key' 'expression-to-instruction projection preserves existing instruction precedence'
     Assert-LookupSourcePattern $sourceById.FunctionMethodCreator 'methodList\s*=\s*new\s+Dictionary<string,\s*FunctionMethod>\s*\{' 'ordinal expression dictionary construction'
-    Assert-LookupSourcePattern $sourceById.FunctionMethodCreator 'GetMethodList\s*\(\s*\)\s*\{\s*return\s+methodList\s*;' 'raw expression dictionary exposure'
+    Assert-LookupSourcePattern $sourceById.FunctionMethodCreator 'public\s+static\s+IReadOnlyDictionary<string,\s*FunctionMethod>\s+GetMethodList\s*\(\s*LegacyCompatibilityProfile' 'profile-scoped read-only expression surface'
     Assert-LookupSourcePattern $sourceById.IdentifierDictionary 'GetFunctionIdentifier\s*\(\s*string\s+str\s*\).*?var\s+lookup\s*=\s*compatibilityInstructionDic\s*\?\?\s*instructionDic.*?lookup\.TryGetValue\s*\(\s*str\s*,' 'descriptor-routed instruction lookup without key normalization'
     Assert-LookupSourcePattern $sourceById.IdentifierDictionary 'GetFunctionMethod\s*\(.*?if\s*\(\s*Config\.ICFunction\s*\)\s*codeStr\s*=\s*codeStr\.ToUpper\s*\(\s*\)\s*;.*?var\s+methods\s*=\s*compatibilityMethodDic\s*\?\?\s*methodDic.*?methods\.TryGetValue\s*\(\s*codeStr\s*,' 'descriptor-routed expression normalization followed by ordinal lookup'
     Assert-LookupSourcePattern $sourceById.LogicalLineParser 'ReadFirstIdentifier\s*\(\s*stream\s*\).*?GetFunctionIdentifier\s*\(\s*idCode\s*\)' 'instruction parser passes the lexical key directly to lookup'
@@ -234,8 +234,8 @@ function New-DialectNameLookupContractReport {
         suppressedCollisionCount=$collisionSet.Count; collisionPolicy='ExistingInstructionWins'; implementation='ContainsKeyThenAddMethodInstruction'
     }
     $mutableExposure = [ordered]@{
-        instructionRegistry='RawStaticMutableDictionary'; instructionApi='FunctionIdentifier.GetInstructionNameDic'
-        expressionRegistry='RawStaticMutableDictionary'; expressionApi='FunctionMethodCreator.GetMethodList'
+        instructionRegistry='ImmutableProfileSurface'; instructionApi='FunctionIdentifier.GetInstructionNameDic(LegacyCompatibilityProfile)'
+        expressionRegistry='ImmutableProfileSurface'; expressionApi='FunctionMethodCreator.GetMethodList(LegacyCompatibilityProfile)'
     }
     $sourceRewrite = [ordered]@{
         classification='SourceTextRewrite'; source='_Rename.csv'; tokenForm='[[name]]'; stage='EraStreamReaderBeforeLexicalAnalysis'

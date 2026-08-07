@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- Godot 4.7 consumes net8.0; net10.0 remains the local validation target. -->
-    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <!-- Godot desktop uses net8.0; Android and local validation use the repository-supported net9.0 SDK. -->
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
     <RootNamespace>GEmuera.Core</RootNamespace>
     <AssemblyName>GEmuera.Core</AssemblyName>
     <Nullable>enable</Nullable>

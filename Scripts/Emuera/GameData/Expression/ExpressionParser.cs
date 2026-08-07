@@ -269,9 +269,13 @@ namespace MinorShift.Emuera.GameData.Expression
 					return refToken;
 				if (varCode != VariableCode.__NULL__ && GlobalStatic.ConstantData.isDefined(varCode, idStr))//連想配列的な可能性アリ
 					return new SingleTerm(idStr);
-				if ((Config.UseERD || Program.IsSnakeProfile) && varCode != VariableCode.__NULL__ && varId != null && GlobalStatic.ConstantData.isUserDefined(varId.Name, idStr, varId.Dimension))
+				if ((Config.UseERD || Program.Compatibility.Snake.AllowsUserDefinedVariableResolution) && varCode != VariableCode.__NULL__ && varId != null && GlobalStatic.ConstantData.isUserDefined(varId.Name, idStr, varId.Dimension))
 					return new SingleTerm(idStr);
-				if (varCode != VariableCode.__NULL__ && varId != null && Program.IsSnakeProfile && isSnakeUserDefinedVariableCode(varId.Code))
+				// snake 兼容：var-arg 位置按用户定义变量代码回退为字符串字面量时，必须经过
+				// isUserDefined 定义门控，避免未定义关联键（如 VAR:foo）被静默解析为 "foo"。
+				if (varCode != VariableCode.__NULL__ && varId != null && Program.Compatibility.Snake.AllowsUserDefinedVariableResolution
+					&& isSnakeUserDefinedVariableCode(varId.Code)
+					&& GlobalStatic.ConstantData.isUserDefined(varId.Name, idStr, varId.Dimension))
 					return new SingleTerm(idStr);
 				GlobalStatic.IdentifierDictionary.ThrowException(idStr, false);
 			}

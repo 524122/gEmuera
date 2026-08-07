@@ -75,7 +75,7 @@ public sealed class LegacySessionBackend : ILegacySessionBackend
     }
 
     /// <summary>
-    /// Preserves the M0 startup order for the default rollout path. The caller
+    /// Preserves the Legacy startup order for the default rollout path. The caller
     /// intentionally supplies no compatibility plan, because the legacy VM is
     /// still the owner of profile-dependent behavior on this path.
     /// </summary>
@@ -142,12 +142,13 @@ public sealed class LegacySessionBackend : ILegacySessionBackend
         cancellationToken.ThrowIfCancellationRequested();
         global::EmueraThread.instance.End();
         global::MinorShift.Emuera.GlobalStatic.Reset();
+        global::MinorShift.Emuera.Program.ClearCompatibilityPlan();
         return ValueTask.CompletedTask;
     }
 
     private static void ApplyLaunchConfiguration(LegacySessionLaunchConfiguration launch)
     {
-        if (!global::FirstWindow.ConfigureM0RunnerSession(
+        if (!global::FirstWindow.ConfigureLegacyRunnerSession(
                 launch.GameRoot,
                 launch.ProfileId,
                 out var error))
@@ -168,7 +169,7 @@ public sealed class LegacySessionBackend : ILegacySessionBackend
     /// <summary>
     /// ConfigData is a process-wide mutable singleton. The legacy loader
     /// overlays files onto it, so leaving B's values in place makes a later A
-    /// start depend on switch history. This remains canary-only: the M0
+    /// start depend on switch history. This remains canary-only: the Legacy
     /// baseline path deliberately retains its original startup sequence.
     /// </summary>
     private static void ResetCanarySessionConfiguration()

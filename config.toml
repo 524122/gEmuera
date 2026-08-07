@@ -9,6 +9,33 @@ session_isolation = false
 [logging]
 enabled = true
 
+# 全局日志最低等级 / Global minimum log level: error|warn|info|debug|trace|none。
+# none=关闭全部日志（错误也不记录）；trace=全量（与 debug 同级，语义“尽可能多”）。
+# 生效时机：启动生效，保存后热重载立即生效。注意：启用 debug_model（debug_model_*.enabled=true）时
+# 以其 log_level 为准（见 GetRuntimeLogLevel）。默认 warn。
+# Takes effect at startup and on hot reload. When a debug_model is enabled, its log_level wins.
+level = "warn"
+
+# 持续文件日志 / Persistent file sink switch.
+# 开启后把通过路由的日志持续写入 user://gemuera_runtime_<yyyyMMdd-HHmmss>.log；
+# 单文件上限 1 MiB，写满后自动轮转为新时间戳文件；受 logging.enabled 双重门控。
+# Writes routed records to user://gemuera_runtime_*.log; 1 MiB per file, rotates to a new
+# timestamped file when full. Only effective when logging.enabled is also true.
+file_sink = false
+
+# 文件日志最低等级 / File sink minimum level (independent of [logging] level): error|warn|info|debug|none。
+# 只决定哪些记录写入文件，不影响 ring buffer / Godot 控制台。默认 info。
+file_sink_level = "info"
+
+# 诊断面板可见 / Diagnostics panel visible.
+# 与 debug.runtime_panel.enabled 等价复用（同一字段 RuntimePanelEnabled，二选一即可）：
+# true=启动挂载悬浮窗；false=启动不挂载。运行中可经 GenericUtils.SetDiagnosticsPanelVisible(bool)
+# 即时显隐（热重载同样生效）。
+# Equivalent to debug.runtime_panel.enabled (shared RuntimePanelEnabled field): true = mount the
+# floating ball at startup; false = never mount. GenericUtils.SetDiagnosticsPanelVisible(bool)
+# toggles it at runtime (hot reload applies too).
+panel_visible = true
+
 touch = false
 input = false
 image = false
@@ -17,5 +44,7 @@ dynamic_map = false
 resource = false
 load_save = false
 android_storage = false
+# true 时记录 PERF.SAMPLE（含 renderer 配置、实际方法/驱动和图形适配器身份）；Canvas
+# 控制台还会分别记录 _Draw 与命中表重建的 CPU 回调采样。
 performance = false
 statement_recognition = false

@@ -3,7 +3,7 @@
   "catalogId": "gemuera.m0.instruction-signature-resolution",
   "catalogVersion": "1.0.0",
   "sourceWorkPackage": "M0-DIA-03",
-  "sourceDescriptorSetHash": "d347bdd7bfbff61ee11504b30e5d5acaa1ab4c7a04482ac272f8db6115ba2fa9",
+  "sourceDescriptorSetHash": "0ac8b25894d83eebdb929771b90497b8817f34058a249cf5ca1ce4767191d80c",
   "rules": [
     { "ruleId": "call.form", "handlerType": "CALL_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^.*FORM$", "selectedArgumentSchema": "FunctionArgType.SP_CALLFORM", "expectedMatchCount": 6, "rationale": "CALL_Instruction 构造参数 form=true 的公开键均以 FORM 结尾。" },
     { "ruleId": "call.plain", "handlerType": "CALL_Instruction", "matchKind": "PublicKeyRegex", "pattern": "^(?!.*FORM$).+$", "selectedArgumentSchema": "FunctionArgType.SP_CALL", "expectedMatchCount": 6, "rationale": "CALL_Instruction 构造参数 form=false 的公开键不以 FORM 结尾。" },

@@ -54,7 +54,7 @@ public sealed class RuntimePortHub : IAsyncDisposable
     {
         if (generation.Value <= 0)
             throw new ArgumentOutOfRangeException(nameof(generation));
-        Manifest = manifest ?? M5PortManifest.CreateDefault();
+        Manifest = manifest ?? DefaultPortManifest.CreateDefault();
         _ownerScheduler = new InlinePortOwnerScheduler(ownerThreadId ?? Environment.CurrentManagedThreadId);
         _dispatcher = new CompletionDispatcher(generation, _ownerScheduler);
         _input = new InputCoordinator(generation);

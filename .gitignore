@@ -1,6 +1,11 @@
 # Godot 4+ specific ignores
+# 注意：.import 侧车文件（如 main.jpg.import、*.ttf.import）是导入设置，官方要求提交 VCS，
+# 不要把它们加入 ignore。真正应忽略的是 .godot/（其下 imported/ 才是可再生的二进制缓存）。
 .godot/
 /android/
+
+# 预编译原生库（Android 导出前由 csproj 从 NuGet 包自愈恢复，不入库）
+/NativeLibs/
 
 # Build output
 .mono/
@@ -38,3 +43,53 @@ era*/
 *.apk
 *.aab
 *.idsig
+*.exe
+*.pck
+*.console.exe
+
+# Node.js (tooling)
+node_modules/
+
+# IDE-specific (TRAE)
+.trae/
+
+# Build artifacts
+artifacts/
+
+# Test report output (gdUnit4 HTML/xml)
+reports/
+
+# Stray test output
+1600
+
+# Logs, crash dumps, and one-off diagnostic output
+*.log
+*.dmp
+*.stackdump
+logs/
+
+# Temporary files and editor recovery copies
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*~
+
+# Test and coverage output
+TestResults/
+TestResults.xml
+*.trx
+*.coverage
+*.coveragexml
+coverage/
+
+# Additional IDE metadata
+.idea/
+.fleet/
+*.sln.iml
+
+# Local worktrees created by Agent/Workflow tooling
+.claude/worktrees/

@@ -14,13 +14,42 @@ namespace uEmuera.Forms
 
     public class Timer : IDisposable
     {
-        public static void Update()
+        /// <summary>
+        /// 返回工作线程下一次检查兼容定时器前最多可等待的毫秒数。
+        /// 没有活动定时器时保留调用方给出的低频等待，避免普通 INPUT 空转；
+        /// 有 TINPUT/动画定时器时则按最近到期时间唤醒，不能被输入轮询周期限制精度。
+        /// </summary>
+        public static int GetNextWaitMilliseconds(int fallbackMilliseconds)
         {
-            var curr_tick = WinmmTimer.TickCount;
+            int waitMilliseconds = Math.Max(0, fallbackMilliseconds);
+            uint currTick = WinmmTimer.TickCount;
             var iter = timers.GetEnumerator();
-            while(iter.MoveNext())
+            while (iter.MoveNext())
             {
                 var timer = iter.Current;
+                if (!timer.Enabled)
+                    continue;
+
+                int interval = Math.Max(1, timer.Interval);
+                uint elapsed = currTick - timer.last_tick;
+                if (elapsed >= interval)
+                    return 0;
+                waitMilliseconds = Math.Min(waitMilliseconds, interval - (int)elapsed);
+            }
+            return waitMilliseconds;
+        }
+
+        public static void Update()
+        {
+            // 先拍快照再遍历：Tick 回调可能同步 Dispose 定时器（如 DebugDialog 关闭时
+            // refreshTimer.Dispose → timers.Remove），直接在 HashSet 枚举中增删元素
+            // 会使版本号失效，下一次 MoveNext 抛 InvalidOperationException。
+            var curr_tick = WinmmTimer.TickCount;
+            var snapshot = new Timer[timers.Count];
+            timers.CopyTo(snapshot);
+            for (int i = 0; i < snapshot.Length; i++)
+            {
+                var timer = snapshot[i];
                 if(curr_tick - timer.last_tick < timer.Interval)
                     continue;
                 timer.last_tick = curr_tick;
@@ -37,12 +66,22 @@ namespace uEmuera.Forms
             timers.Add(this);
         }
 
-        public bool Enabled { get; set; }
+        volatile bool enabled;
+        public bool Enabled
+        {
+            get { return enabled; }
+            set
+            {
+                if (value && !enabled)
+                    last_tick = WinmmTimer.TickCount;
+                enabled = value;
+            }
+        }
         public int Interval { get; set; }
         public object Tag { get; set; }
 
         public event EventHandler Tick;
-        public uint last_tick = 0;
+        public volatile uint last_tick = 0;
 
         public void Start()
         {}

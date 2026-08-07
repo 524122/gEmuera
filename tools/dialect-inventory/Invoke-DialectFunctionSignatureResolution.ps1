@@ -12,7 +12,7 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($ClassificationPath)) { $ClassificationPath = Join-Path $scriptRoot 'dialect-classification.json' }
 if ([string]::IsNullOrWhiteSpace($ResolutionCatalogPath)) { $ResolutionCatalogPath = Join-Path $scriptRoot 'function-return-resolution.json' }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path ([IO.Path]::GetFullPath($ProjectRoot)) 'NewFrameworkDesign\generated\dialect-function-signature-resolution.json'
+    $OutputPath = Join-Path ([IO.Path]::GetFullPath($ProjectRoot)) 'docs\NewFrameworkDesign\generated\dialect-function-signature-resolution.json'
 }
 
 try {

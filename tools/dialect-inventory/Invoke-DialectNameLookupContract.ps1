@@ -10,10 +10,10 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $project = [IO.Path]::GetFullPath($ProjectRoot)
 if ([string]::IsNullOrWhiteSpace($CatalogPath)) { $CatalogPath = Join-Path $scriptRoot 'dialect-name-lookup-contract.json' }
-if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $project 'NewFrameworkDesign\generated\dialect-name-lookup-contract.json' }
+if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $project 'docs\NewFrameworkDesign\generated\dialect-name-lookup-contract.json' }
 
 function Read-GeneratedLookupJson([string]$Name) {
-    $path = Join-Path $project ('NewFrameworkDesign\generated\' + $Name)
+    $path = Join-Path $project ('docs\NewFrameworkDesign\generated\' + $Name)
     return (Get-Content -Raw -Encoding UTF8 -LiteralPath $path | ConvertFrom-Json)
 }
 

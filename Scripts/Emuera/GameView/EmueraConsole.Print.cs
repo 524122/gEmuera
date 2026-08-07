@@ -31,7 +31,6 @@ namespace MinorShift.Emuera.GameView
 				lineNo = 0;
 				lastDrawnLineNo = -1;
 			}
-			BitmapCacheEnabledForNextLine = false;
 			ConsumeDisplayRewriteRefresh();
 			verticalScrollBarUpdate();
 			window.Refresh();//OnPaint発行
@@ -108,6 +107,7 @@ namespace MinorShift.Emuera.GameView
 		int lineNo = 0;
 		Int64 logicalLineCount = 0;
 		public long LineCount { get { return logicalLineCount; } }
+		public int GetLineNo { get { return lineNo; } }
 		private void addRangeDisplayLine(ConsoleDisplayLine[] lineList)
 		{
 			for (int i = 0; i < lineList.Length; i++)
@@ -118,27 +118,19 @@ namespace MinorShift.Emuera.GameView
 		{
 			if (lineList == null)
 				return;
-			bool dynamicMapFunctionScoped = IsDynamicMapOutputScopeActive;
 			for (int i = 0; i < lineList.Length; i++)
 			{
 				if (lineList[i] == null)
 					continue;
-				ApplyCurrentLineMetadata(lineList[i], dynamicMapFunctionScoped);
+				ApplyCurrentLineMetadata(lineList[i]);
 			}
 		}
 
 		internal void ApplyCurrentLineMetadata(ConsoleDisplayLine line)
 		{
-			ApplyCurrentLineMetadata(line, IsDynamicMapOutputScopeActive);
-		}
-
-		private void ApplyCurrentLineMetadata(ConsoleDisplayLine line, bool dynamicMapFunctionScoped)
-		{
 			if (line == null)
 				return;
 			line.TextBackgroundColor = TextBackgroundColor;
-			line.BitmapCacheEnabled = BitmapCacheEnabledForNextLine;
-			line.DynamicMapFunctionScoped = dynamicMapFunctionScoped;
 			if (line.Buttons == null)
 				return;
 			for (int i = 0; i < line.Buttons.Length; i++)
@@ -151,7 +143,7 @@ namespace MinorShift.Emuera.GameView
 					if (parts[j] is ConsoleDivPart div && div.Children != null)
 					{
 						for (int k = 0; k < div.Children.Length; k++)
-							ApplyCurrentLineMetadata(div.Children[k], dynamicMapFunctionScoped);
+							ApplyCurrentLineMetadata(div.Children[k]);
 					}
 				}
 			}
@@ -438,16 +430,27 @@ namespace MinorShift.Emuera.GameView
 		}
 
 		
-		public void PrintImg(string str)
-		{
-			printBuffer.Append(new ConsoleImagePart(str, null, 0, 0, 0));
-		}
+			public void PrintImg(string str)
+			{
+				printBuffer.Append(new ConsoleImagePart(str, null, 0, 0, 0));
+			}
 
-		public void PrintShape(string type, int[] param)
-		{
-			ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
-			printBuffer.Append(part);
-		}
+			public void PrintImg(string name, string buttonName, string mappingName, MixedNum height, MixedNum width, MixedNum ypos)
+			{
+				printBuffer.Append(new ConsoleImagePart(name, buttonName, mappingName, height, width, ypos));
+			}
+
+			public void PrintShape(string type, int[] param)
+			{
+				ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
+				printBuffer.Append(part);
+			}
+
+			public void PrintShape(string type, MixedNum[] param)
+			{
+				ConsoleShapePart part = ConsoleShapePart.CreateShape(type, param, userStyle.Color, userStyle.ButtonColor, false);
+				printBuffer.Append(part);
+			}
 
 		public void PrintHtml(string str)
 		{
@@ -784,7 +787,7 @@ namespace MinorShift.Emuera.GameView
 					}
 					foreach (ConsoleDisplayLine line in lines)
 				{
-					writer.WriteLine(line.ToString());
+					writer.WriteLine(line.ToLogString());
 				}
 			}
 			catch (Exception)
@@ -812,7 +815,7 @@ namespace MinorShift.Emuera.GameView
 			if (!baseDir.EndsWith(Path.DirectorySeparatorChar.ToString()) && !baseDir.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
 				baseDir += Path.DirectorySeparatorChar;
 
-			bool runnerDefaultLogRedirected = Program.TryResolveM0RunnerDefaultOutputLogPath(filename, out string runnerDefaultLogPath);
+			bool runnerDefaultLogRedirected = Program.TryResolveLegacyRunnerDefaultOutputLogPath(filename, out string runnerDefaultLogPath);
 			if (runnerDefaultLogRedirected)
 				filename = runnerDefaultLogPath;
 			else if (string.IsNullOrEmpty(filename))

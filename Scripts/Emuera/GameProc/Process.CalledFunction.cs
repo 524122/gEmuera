@@ -122,6 +122,35 @@ namespace MinorShift.Emuera.GameProc
 	}
 
 	/// <summary>
+	/// eraFL 任务起点查询的调用帧快照。参数必须在进入函数时固定，不能等到 RETURN 时
+	/// 再读取会随嵌套调用变化的私有变量。
+	/// </summary>
+	internal readonly struct EraFlQuestStartLookupContext
+	{
+		public EraFlQuestStartLookupContext(
+			string requestedRoomTag,
+			Int64 random,
+			Int64 mapId,
+			Int64 fromSavedata,
+			string questType)
+		{
+			IsCaptured = true;
+			RequestedRoomTag = requestedRoomTag;
+			Random = random;
+			MapId = mapId;
+			FromSavedata = fromSavedata;
+			QuestType = questType;
+		}
+
+		public bool IsCaptured { get; }
+		public string RequestedRoomTag { get; }
+		public Int64 Random { get; }
+		public Int64 MapId { get; }
+		public Int64 FromSavedata { get; }
+		public string QuestType { get; }
+	}
+
+	/// <summary>
 	/// 現在呼び出し中の関数
 	/// 预解析缓存的 CalledFunction 只能作为模板使用。
 	/// 实际执行时 returnAddress、IsJump、VariadicArgCount 等会随调用帧变化，
@@ -211,7 +240,7 @@ namespace MinorShift.Emuera.GameProc
             IOperandTerm[] convertedArg = new IOperandTerm[func.Arg.Length];
 			// snake fork 的 ConvertArg 原实现不会检查普通 CALL 的多余实参，会只绑定形参范围内的值。
 			// v24 仍保持严格报错；TRYCALL 继续沿用 ignoreExtraArgs 的宽松路径。
-			if(!ignoreExtraArgs && !Program.IsSnakeProfile && variadicIndex < 0 && convertedArg.Length < srcArgs.Length)
+			if(!ignoreExtraArgs && !Program.Compatibility.Snake.AllowsExtraCallArguments && variadicIndex < 0 && convertedArg.Length < srcArgs.Length)
 			{
 				errMes = "引数の数が関数\"@" + func.LabelName + "\"に設定された数を超えています";
 				return null;
@@ -302,7 +331,7 @@ namespace MinorShift.Emuera.GameProc
 							return null;
 						}
 						if (tostrMethod == null)
-							tostrMethod = FunctionMethodCreator.GetMethodList()["TOSTR"];
+							tostrMethod = FunctionMethodCreator.GetMethodList(Program.Compatibility)["TOSTR"];
 						term = new FunctionMethodTerm(tostrMethod, new IOperandTerm[] { term });
 					}
 				}
@@ -341,7 +370,7 @@ namespace MinorShift.Emuera.GameProc
 								return null;
 							}
 							if (tostrMethod == null)
-								tostrMethod = FunctionMethodCreator.GetMethodList()["TOSTR"];
+							tostrMethod = FunctionMethodCreator.GetMethodList(Program.Compatibility)["TOSTR"];
 							term = new FunctionMethodTerm(tostrMethod, new IOperandTerm[] { term });
 						}
 					}
@@ -389,6 +418,7 @@ namespace MinorShift.Emuera.GameProc
 		public bool IsJump { get; set; }
 		public bool Finished { get; private set; }
 		public int VariadicArgCount { get; set; }
+		public EraFlQuestStartLookupContext EraFlQuestStartLookup { get; set; }
 		public LogicalLine ReturnAddress
 		{
 			get { return returnAddress; }

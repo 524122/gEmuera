@@ -1,15 +1,21 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Text;
 using MinorShift.Emuera.GameData.Expression;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameProc;
+using MinorShift.Emuera.Compatibility;
 
 
 namespace MinorShift.Emuera.GameData.Function
 {
 	internal static partial class FunctionMethodCreator
 	{
+		static readonly object registrySurfaceGate = new object();
+		static readonly Dictionary<string, IReadOnlyDictionary<string, FunctionMethod>> registrySurfaces =
+			new Dictionary<string, IReadOnlyDictionary<string, FunctionMethod>>(StringComparer.Ordinal);
+
 		static FunctionMethodCreator()
 		{
             methodList = new Dictionary<string, FunctionMethod>
@@ -130,6 +136,7 @@ namespace MinorShift.Emuera.GameData.Function
                 ["CHARATU"] = new CharAtMethod(),
                 ["GETLINESTR"] = new GetLineStrMethod(),
                 ["STRFORM"] = new StrFormMethod(),
+                ["STRFORMCHECK"] = new StrFormCheckMethod(),
                 ["STRJOIN"] = new JoinMethod(),
                 ["GETCONFIG"] = new GetConfigMethod(true),
                 ["GETCONFIGS"] = new GetConfigMethod(false),
@@ -224,6 +231,7 @@ namespace MinorShift.Emuera.GameData.Function
                 ["HTML_STRINGLINES"] = new HtmlStringLinesMethod(),
                 ["EXISTSOUND"] = new ExistSoundMethod(),
                 ["EXISTSIMAGELAYER"] = new ExistsImageLayerMethod(),
+                ["GETLINEY"] = new GetLineYMethod(),
                 ["EXISTFUNCTION"] = new ExistFunctionMethod(),
                 ["EXISTFILE"] = new ExistFileMethod(),
                 ["GETCSVNOBYNAME"] = new GetCsvNoByNameMethod(CharacterStrData.NAME),
@@ -251,6 +259,9 @@ namespace MinorShift.Emuera.GameData.Function
                 ["ROUND"] = new V24RoundMathMethod("ROUND", value => Math.Round(value, MidpointRounding.AwayFromZero)),
                 ["ARGLEN"] = new ArgLengthMethod(),
                 ["GETARGCOUNT"] = new ArgLengthMethod(),
+                ["SEQUENCEINPUT"] = new SequenceInputMethod(),
+                ["DISABLE_INPUT_MACRO"] = new DisableInputMacroMethod(),
+                ["ENABLE_INPUT_MACRO"] = new EnableInputMacroMethod(),
                 ["TOFLOAT"] = new ToFloatMethod(),
                 ["UNCHECKED_ADD"] = new UncheckedMathMethod("ADD"),
                 ["UNCHECKED_SUB"] = new UncheckedMathMethod("SUB"),
@@ -395,10 +406,42 @@ namespace MinorShift.Emuera.GameData.Function
 				pair.Value.SetMethodName(pair.Key);
         }
 
+		// The complete table remains a private legacy handler store. Parser-facing
+		// registries must use the profile-scoped surface below.
 		private static readonly Dictionary<string, FunctionMethod> methodList;
-		public static Dictionary<string, FunctionMethod> GetMethodList()
+
+		internal static IReadOnlyDictionary<string, FunctionMethod> GetLegacyHandlerMethodList()
 		{
 			return methodList;
+		}
+
+		public static IReadOnlyDictionary<string, FunctionMethod> GetMethodList(
+			LegacyCompatibilityProfile compatibility)
+		{
+			if (compatibility == null)
+				throw new ArgumentNullException(nameof(compatibility));
+
+			lock (registrySurfaceGate)
+			{
+				string cacheKey = compatibility.Plan.CanonicalHash;
+				if (registrySurfaces.TryGetValue(cacheKey, out var existing))
+					return existing;
+
+				var selected = new Dictionary<string, FunctionMethod>(StringComparer.Ordinal);
+				foreach (KeyValuePair<string, FunctionMethod> pair in methodList)
+				{
+					if (!compatibility.IsFunctionVisible(pair.Key))
+						continue;
+
+					FunctionMethod projected = DialectFunctionContracts.Project(pair.Key, pair.Value, compatibility);
+					projected.SetMethodName(pair.Key);
+					selected.Add(pair.Key, projected);
+				}
+
+				var frozen = new ReadOnlyDictionary<string, FunctionMethod>(selected);
+				registrySurfaces.Add(cacheKey, frozen);
+				return frozen;
+			}
 		}
 	}
 }

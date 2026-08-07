@@ -14,7 +14,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/session-state-inventor
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/session-state-inventory/Test-LegacySessionStateInventory.ps1 -ProjectRoot .
 ```
 
-默认生成 `NewFrameworkDesign/generated/legacy-session-state-inventory.json`。工具不启动 Godot、不会读取或写入 Era 游戏目录，也不改动 `Scripts/**/*.cs`。
+默认生成 `docs/NewFrameworkDesign/generated/legacy-session-state-inventory.json`。工具不启动 Godot、不会读取或写入 Era 游戏目录，也不改动 `Scripts/**/*.cs`。
 
 ## 输出和边界
 

@@ -1,6 +1,6 @@
 namespace GEmuera.Core.Ports;
 
-public static class M5PortManifest
+public static class DefaultPortManifest
 {
     public static readonly PortTypeId Input = new("IInputPort");
     public static readonly PortTypeId PointerPolicy = new("IPointerInputSubmissionPolicy");

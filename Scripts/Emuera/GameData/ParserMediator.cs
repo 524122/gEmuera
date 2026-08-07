@@ -37,7 +37,7 @@ namespace MinorShift.Emuera
 		public static void Initialize(EmueraConsole console)
 		{
 			ParserMediator.console = console;
-			if (Program.IsSnakeProfile && !Program.AnalysisMode)
+			if (Program.Compatibility.Snake.UsesParserDiagnostics && !Program.AnalysisMode)
 				snakeLoggedWarnings.Clear();
 		}
 
@@ -55,7 +55,8 @@ namespace MinorShift.Emuera
 				compatibilityPlan = null;
 				return;
 			}
-			if (!string.Equals(plan.ProfileId, Program.IsSnakeProfile ? "snake" : "v24pure", StringComparison.Ordinal))
+			string expectedProfile = Program.Compatibility.ProfileId;
+			if (!string.Equals(plan.ProfileId, expectedProfile, StringComparison.Ordinal))
 				throw new InvalidOperationException("Parser plan profile does not match the selected legacy profile.");
 			var startupPlan = Program.CurrentCompatibilityPlan;
 			if (startupPlan == null || !string.Equals(startupPlan.CanonicalHash, plan.CanonicalHash, StringComparison.Ordinal))
@@ -205,7 +206,7 @@ namespace MinorShift.Emuera
 
 		public static void FlushWarningList()
 		{
-			if (Program.IsSnakeProfile && !Program.AnalysisMode)
+			if (Program.Compatibility.Snake.UsesParserDiagnostics && !Program.AnalysisMode)
 			{
 				var logLines = new List<string>();
 				for (int i = 0; i < warningList.Count; i++)

@@ -115,6 +115,7 @@ function Get-InstructionRegistrations {
         $block = Get-CSharpBlock -Lines $lines -DeclarationRegex $definition.declaration -Label $definition.id
         for ($offset = 0; $offset -lt $block.lines.Count; $offset++) {
             $line = [string]$block.lines[$offset]
+            if ($line.TrimStart().StartsWith('//', [StringComparison]::Ordinal)) { continue }
             $match = [regex]::Match($line, 'add(?<kind>Function|PrintFunction|PrintDataFunction)\s*\(\s*FunctionCode\.(?<key>[A-Za-z0-9_]+)(?<tail>.*)\)\s*;')
             if (-not $match.Success) { continue }
 
@@ -168,6 +169,8 @@ function Get-ExpressionRegistrations {
     $path = Join-Path $ProjectRoot ($relativePath.Replace('/', '\'))
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
     $text = [IO.File]::ReadAllText([IO.Path]::GetFullPath($path), [Text.Encoding]::UTF8)
+    $text = [regex]::Replace($text, '/\*.*?\*/', '', [Text.RegularExpressions.RegexOptions]::Singleline)
+    $text = [regex]::Replace($text, '//.*$', '', [Text.RegularExpressions.RegexOptions]::Multiline)
     $matches = [regex]::Matches($text, '\[\s*"(?<key>(?:\\.|[^"\\])*)"\s*\]\s*=\s*new\s+(?<handler>[A-Za-z_][A-Za-z0-9_]*)\s*\(', [Text.RegularExpressions.RegexOptions]::CultureInvariant)
     $registrations = New-Object System.Collections.Generic.List[object]
     foreach ($match in $matches) {
@@ -300,6 +303,9 @@ function New-DialectInventory {
         gateStatus = 'Blocked'
         blockerCode = 'EvidenceMissing'
         result = 'Partial'
+        # Kept out of the canonical payload: it is execution context used only
+        # to verify the local legacy lookup binding when generating DIA-02.
+        projectRoot = $resolvedRoot
         canonicalHash = $canonicalHash
         branchHitCount = @($sortedHits).Count
         unmappedHitCount = 0
@@ -480,6 +486,124 @@ function New-DialectRegistrySnapshot {
     }
 }
 
+function Get-LegacyProfileSurfaceNames {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$FieldName,
+        [string]$ClassName = 'LegacySnakeCompatibilityModule'
+    )
+
+    $relativePath = 'Scripts/Emuera/Compatibility/LegacyCompatibilityModules.cs'
+    $path = Join-Path $ProjectRoot ($relativePath.Replace('/', '\'))
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Legacy compatibility surface source is missing: $relativePath"
+    }
+
+    $lines = [IO.File]::ReadAllLines([IO.Path]::GetFullPath($path), [Text.Encoding]::UTF8)
+    $classBlock = Get-CSharpBlock -Lines $lines `
+        -DeclarationRegex ('^\s*internal\s+sealed\s+class\s+' + [regex]::Escape($ClassName) + '\b') `
+        -Label $ClassName
+    $fieldBlock = Get-CSharpBlock -Lines $classBlock.lines `
+        -DeclarationRegex ('^\s*private\s+static\s+readonly\s+IReadOnlyCollection<string>\s+' + [regex]::Escape($FieldName) + '\s*=') `
+        -Label "$ClassName.$FieldName"
+    $text = $fieldBlock.lines -join "`n"
+    $matches = [regex]::Matches($text, '"(?<name>(?:\\.|[^"\\])*)"', [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+    if ($matches.Count -eq 0) {
+        throw "Legacy profile field has no public keys: $FieldName"
+    }
+
+    $names = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($match in $matches) {
+        $name = [regex]::Unescape($match.Groups['name'].Value)
+        if (-not $names.Add($name)) {
+            throw "Duplicate public key in ${ClassName}.${FieldName}: $name"
+        }
+    }
+    return @($names | Sort-Object)
+}
+
+function New-LegacyRuntimeSurfaceSnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object]$Inventory,
+        [Parameter(Mandatory = $true)][string]$ProfileId,
+        [string[]]$ExcludedInstructionNames = @(),
+        [string[]]$ExcludedFunctionNames = @()
+    )
+
+    $excludedInstructions = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($name in $ExcludedInstructionNames) { [void]$excludedInstructions.Add($name) }
+    $excludedFunctions = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($name in $ExcludedFunctionNames) { [void]$excludedFunctions.Add($name) }
+
+    $knownInstructions = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($registration in @($Inventory.instructionRegistrations)) { [void]$knownInstructions.Add([string]$registration.publicKey) }
+    foreach ($name in $excludedInstructions) {
+        if (-not $knownInstructions.Contains($name)) { throw "Profile '$ProfileId' excludes an unknown instruction: $name" }
+    }
+    $knownFunctions = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($registration in @($Inventory.expressionRegistrations)) { [void]$knownFunctions.Add([string]$registration.publicKey) }
+    foreach ($name in $excludedFunctions) {
+        if (-not $knownFunctions.Contains($name)) { throw "Profile '$ProfileId' excludes an unknown expression function: $name" }
+    }
+
+    $instructions = @($Inventory.instructionRegistrations | Where-Object { -not $excludedInstructions.Contains([string]$_.publicKey) })
+    $functions = @($Inventory.expressionRegistrations | Where-Object { -not $excludedFunctions.Contains([string]$_.publicKey) })
+    $instructions = Sort-Ordinal -Items $instructions -KeySelector { param($item) [string]$item.publicKey }
+    $functions = Sort-Ordinal -Items $functions -KeySelector { param($item) [string]$item.publicKey }
+
+    $payload = [ordered]@{
+        profileId = $ProfileId
+        sourceInventoryHash = [string]$Inventory.canonicalHash
+        excludedInstructions = @($ExcludedInstructionNames | Sort-Object)
+        excludedFunctions = @($ExcludedFunctionNames | Sort-Object)
+        instructions = @($instructions | ForEach-Object { [string]$_.publicKey })
+        expressionFunctions = @($functions | ForEach-Object { [string]$_.publicKey })
+    }
+    $canonicalJson = $payload | ConvertTo-Json -Depth 20 -Compress
+
+    return [pscustomobject][ordered]@{
+        schemaVersion = '1.0.0'
+        profileId = $ProfileId
+        sourceInventoryHash = [string]$Inventory.canonicalHash
+        canonicalHash = Get-Sha256Hex -Bytes $script:Utf8NoBom.GetBytes($canonicalJson)
+        nameComparison = 'Ordinal profile surface (legacy comparer remains a separate compatibility contract)'
+        instructionCount = @($instructions).Count
+        expressionFunctionCount = @($functions).Count
+        instructions = @($instructions)
+        expressionFunctions = @($functions)
+    }
+}
+
+function Test-LegacyRuntimeSurfaceBinding {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$ProjectRoot)
+
+    $functionText = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'Scripts\Emuera\GameProc\Function\FunctionIdentifier.cs'), [Text.Encoding]::UTF8)
+    $methodText = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'Scripts\Emuera\GameData\Function\Creator.cs'), [Text.Encoding]::UTF8)
+    $identifierText = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'Scripts\Emuera\GameData\IdentifierDictionary.cs'), [Text.Encoding]::UTF8)
+
+    $instructionSurface = $functionText -match 'GetInstructionNameDic\s*\(\s*LegacyCompatibilityProfile\s+compatibility\s*\)' -and
+        $functionText -match 'compatibility\.IsInstructionVisible\s*\(\s*pair\.Key\s*\)'
+    $functionSurface = $methodText -match 'GetMethodList\s*\(\s*LegacyCompatibilityProfile\s+compatibility\s*\)' -and
+        $methodText -match 'compatibility\.IsFunctionVisible\s*\(\s*pair\.Key\s*\)'
+    $parserBinding = $identifierText -match 'instructionDic\s*=\s*FunctionIdentifier\.GetInstructionNameDic\s*\(\s*compatibility\s*\)' -and
+        $identifierText -match 'methodDic\s*=\s*FunctionMethodCreator\.GetMethodList\s*\(\s*compatibility\s*\)' -and
+        $identifierText -match 'var\s+compatibility\s*=\s*Program\.Compatibility\s*;'
+    $lookupBinding = $identifierText -match 'compatibilityInstructionDic\s*\?\?\s*instructionDic' -and
+        $identifierText -match 'compatibilityMethodDic\s*\?\?\s*methodDic'
+
+    return [pscustomobject][ordered]@{
+        status = if ($instructionSurface -and $functionSurface -and $parserBinding -and $lookupBinding) { 'Passed' } else { 'Failed' }
+        instructionSurfaceBound = $instructionSurface
+        functionSurfaceBound = $functionSurface
+        parserBindingPresent = $parserBinding
+        lookupBindingPresent = $lookupBinding
+        assertion = 'Legacy parser and expression lookup tables are built from the immutable LegacyCompatibilityProfile surface before parsing begins.'
+    }
+}
+
 function New-DialectRegistrySnapshotReport {
     [CmdletBinding()]
     param(
@@ -487,14 +611,19 @@ function New-DialectRegistrySnapshotReport {
         [string]$OutputPath = ''
     )
 
-    $baseModules = @('legacy.current.common', 'legacy.current.expression', 'gemuera.v24')
-    $allModules = @('legacy.current.common', 'legacy.current.expression', 'gemuera.v24', 'game.snake')
-    $v24Minimal = New-DialectRegistrySnapshot -Inventory $Inventory -ProfileId 'v24-projection' `
-        -SelectedModuleIds $baseModules -AvailableModuleIds $baseModules
-    $v24 = New-DialectRegistrySnapshot -Inventory $Inventory -ProfileId 'v24-projection' `
-        -SelectedModuleIds $baseModules -AvailableModuleIds $allModules
-    $snake = New-DialectRegistrySnapshot -Inventory $Inventory -ProfileId 'snake-projection' `
-        -SelectedModuleIds $allModules -AvailableModuleIds $allModules
+    if (-not $Inventory.PSObject.Properties['projectRoot']) {
+        throw 'Dialect inventory does not carry its project root for legacy profile surface verification.'
+    }
+    $projectRoot = [string]$Inventory.projectRoot
+    $portOnlyInstructionNames = Get-LegacyProfileSurfaceNames -ProjectRoot $projectRoot -ClassName 'LegacyV24CompatibilityModule' -FieldName 'PortOnlyInstructionNames'
+    $snakeInstructionNames = Get-LegacyProfileSurfaceNames -ProjectRoot $projectRoot -FieldName 'InstructionNames'
+    $v24ExcludedFunctionNames = Get-LegacyProfileSurfaceNames -ProjectRoot $projectRoot -FieldName 'FunctionNames'
+    $snakeExcludedFunctionNames = Get-LegacyProfileSurfaceNames -ProjectRoot $projectRoot -FieldName 'SnakeExcludedFunctionNames'
+    $v24ExcludedInstructionNames = @(@($portOnlyInstructionNames) + @($snakeInstructionNames))
+    $v24 = New-LegacyRuntimeSurfaceSnapshot -Inventory $Inventory -ProfileId 'v24pure' `
+        -ExcludedInstructionNames $v24ExcludedInstructionNames -ExcludedFunctionNames $v24ExcludedFunctionNames
+    $snake = New-LegacyRuntimeSurfaceSnapshot -Inventory $Inventory -ProfileId 'snake' `
+        -ExcludedInstructionNames $portOnlyInstructionNames -ExcludedFunctionNames $snakeExcludedFunctionNames
 
     $v24InstructionKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     foreach ($entry in $v24.instructions) { [void]$v24InstructionKeys.Add($entry.publicKey) }
@@ -505,14 +634,9 @@ function New-DialectRegistrySnapshotReport {
     $snakeOnlyFunctions = @($snake.expressionFunctions | Where-Object { -not $v24FunctionKeys.Contains($_.publicKey) })
     $snakeOnlyFunctions = Sort-Ordinal -Items $snakeOnlyFunctions -KeySelector { param($item) $item.publicKey }
 
-    $unconditionalV24Calls = @($Inventory.branchHits | Where-Object {
-        $_.markerId -eq 'registry.v24-method' -and $_.sourceText -match '^addV24CompatibilityFunctions\s*\(\s*\)\s*;'
-    })
-    $unconditionalSnakeCalls = @($Inventory.branchHits | Where-Object {
-        $_.markerId -eq 'registry.snake-method' -and $_.sourceText -match '^addSnakeCompatibilityFunctions\s*\(\s*\)\s*;'
-    })
-    $runtimeStatus = if ($unconditionalV24Calls.Count -gt 0 -and $unconditionalSnakeCalls.Count -gt 0) { 'Failed' } else { 'Uncovered' }
-    $projectionStatus = if ($v24Minimal.canonicalHash -eq $v24.canonicalHash) { 'Passed' } else { 'Failed' }
+    $runtimeBinding = Test-LegacyRuntimeSurfaceBinding -ProjectRoot $projectRoot
+    $runtimeStatus = [string]$runtimeBinding.status
+    $projectionStatus = if ($runtimeStatus -eq 'Passed') { 'Passed' } else { 'Failed' }
 
     $setPayload = [ordered]@{
         schemaVersion = '1.0.0'
@@ -540,15 +664,16 @@ function New-DialectRegistrySnapshotReport {
         snapshotSetHash = $snapshotSetHash
         testProjectionInvariant = [ordered]@{
             status = $projectionStatus
-            baselineV24Hash = $v24Minimal.canonicalHash
-            fullCatalogV24Hash = $v24.canonicalHash
-            assertion = 'Adding game.snake to the available catalog without selecting it must not change the v24 projection.'
+            v24ProfileHash = $v24.canonicalHash
+            assertion = 'The v24 surface excludes the exact Snake public-key delta declared by the legacy profile boundary.'
         }
         currentRuntimeIsolation = [ordered]@{
             status = $runtimeStatus
-            unconditionalV24CallCount = $unconditionalV24Calls.Count
-            unconditionalSnakeCallCount = $unconditionalSnakeCalls.Count
-            assertion = 'Current legacy static initialization must not be mistaken for profile-isolated runtime registration.'
+            instructionSurfaceBound = $runtimeBinding.instructionSurfaceBound
+            functionSurfaceBound = $runtimeBinding.functionSurfaceBound
+            parserBindingPresent = $runtimeBinding.parserBindingPresent
+            lookupBindingPresent = $runtimeBinding.lookupBindingPresent
+            assertion = $runtimeBinding.assertion
         }
         profiles = [ordered]@{
             v24 = $v24
@@ -561,9 +686,8 @@ function New-DialectRegistrySnapshotReport {
             snakeOnlyExpressionFunctions = @($snakeOnlyFunctions)
         }
         uncovered = @(
-            'This is a test-only projection over M0-DIA-01 inventory, not a runtime DialectPlan or parser catalog.',
-            'Current legacy static initialization still registers both v24 and Snake contributions unconditionally.',
-            'legacy.current.common and legacy.current.expression are unresolved holding modules, not stable distribution module ids.',
+            'The report verifies parser-visible legacy surfaces, not instruction/function behavior, errors, waits, rendering, or timing.',
+            'The legacy handler store remains static; profile isolation is enforced by immutable lookup surfaces, not per-profile handler allocation.',
             'Effective name comparer, aliases, replacements, signatures, completion modes, typed policies, and behavior fixtures remain Uncovered.',
             'D1 session ownership, D2 runtime frozen registry switch, upstream/target/APK/device evidence, and gate signatures are not implemented.'
         )

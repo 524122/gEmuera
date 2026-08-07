@@ -9,6 +9,11 @@ public sealed partial class EmueraLifecycleComponent : Node
     bool applicationPauseActive = false;
     int maxFpsBeforeApplicationPause = -1;
 
+    public override void _Notification(int what)
+    {
+        HandleNotification(what);
+    }
+
     public bool HandleNotification(int what)
     {
         if (what == NotificationApplicationPaused)

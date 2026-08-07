@@ -65,6 +65,11 @@ namespace gEmuera.Diagnostics
         // ---------- logging ----------
         public string LoggingLevel { get; set; } = "error";
         public bool LoggingMirrorNonErrorToGodot { get; set; } = false;
+        // 持续文件 sink：LoggingEnabled && FileSinkEnabled 双重门控；等级独立于全局 level（FileSinkLevel）。
+        public bool FileSinkEnabled { get; set; } = false;
+        public string FileSinkLevel { get; set; } = "info";
+        // 诊断面板显示：复用 RuntimePanelEnabled（等价键 debug.runtime_panel.enabled / [logging] panel_visible）。
+        // false 时启动不挂载悬浮窗；运行时 GenericUtils.SetDiagnosticsPanelVisible 可即时显隐。
         public int LoggingDiagnosticRingCapacity { get; set; } = 1000;
         public int LoggingMaxMessageChars { get; set; } = 8192;
         public string LoggingExportDirectory { get; set; } = "game://";
@@ -283,7 +288,7 @@ namespace gEmuera.Diagnostics
         public bool AndroidStorageLogScopedStorage { get; set; } = true;
         public int AndroidStorageMaxPathRecords { get; set; } = 64;
 
-        // ---------- debug.performance_sampling ----------
+        // ---------- [logging].performance 映射的运行时采样 ----------
         public bool PerformanceSamplingEnabled { get; set; } = false;
         public int PerformanceSamplingIntervalMs { get; set; } = 1000;
         public bool PerformanceSamplingIncludeFps { get; set; } = true;
@@ -425,19 +430,22 @@ namespace gEmuera.Diagnostics
             bool runtimePanel,
             bool inputReplay,
             bool diagnosticPackage,
-            bool mirrorToGodot)
+            bool mirrorToGodot,
+            string levelOverride = null)
         {
             DisableAllDiagnostics();
             if (!enabled)
                 return;
 
             LoggingEnabled = true;
-            LoggingLevel = "debug";
+            // 企业级说明：配置文件显式给出 [logging] level 时，minimal 展开以它为基准，
+            // 避免旧“enabled=true 强制 debug”把用户设置的文件等级吞掉；缺省仍保持历史行为 debug。
+            LoggingLevel = string.IsNullOrWhiteSpace(levelOverride) ? "debug" : levelOverride;
             LoggingMirrorNonErrorToGodot = mirrorToGodot;
             ActiveDebugModel = "debug_model_zh_cn";
             DebugModelZhCn.Enabled = true;
             DebugModelZhCn.Language = "zh_cn";
-            DebugModelZhCn.LogLevel = "debug";
+            DebugModelZhCn.LogLevel = LoggingLevel;
             DebugModelZhCn.MirrorToGodot = mirrorToGodot;
             DebugModelZhCn.ScrollTrace = false;
 
@@ -838,11 +846,16 @@ namespace gEmuera.Diagnostics
 
         public static EmueraLogLevel ParseLogLevel(string level)
         {
+            // 值域：error|warn|info|debug|trace|none（设计契约 §3.2-B 含 trace，语义为全量）。
+            if (string.Equals(level, "trace", StringComparison.OrdinalIgnoreCase)) return EmueraLogLevel.Debug;
             if (string.Equals(level, "debug", StringComparison.OrdinalIgnoreCase)) return EmueraLogLevel.Debug;
             if (string.Equals(level, "info", StringComparison.OrdinalIgnoreCase)) return EmueraLogLevel.Info;
             if (string.Equals(level, "warn", StringComparison.OrdinalIgnoreCase)) return EmueraLogLevel.Warn;
             if (string.Equals(level, "error", StringComparison.OrdinalIgnoreCase)) return EmueraLogLevel.Error;
             if (string.Equals(level, "none", StringComparison.OrdinalIgnoreCase)) return EmueraLogLevel.None;
+            // 未知值静默回退 Error 会掩盖配置笔误（如 UI 写入 trace 而解析器不认），
+            // 显式告警一次便于排查；仅配置加载路径调用，不落热路径。
+            Godot.GD.PushWarning("[RuntimeDiagnosticsConfig] 未知日志等级 '" + level + "'，回退为 error（合法值域 error|warn|info|debug|trace|none）");
             return EmueraLogLevel.Error;
         }
 

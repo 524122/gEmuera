@@ -74,6 +74,14 @@ namespace MinorShift.Emuera.GameData.Variable
 			return rand.NextInt64(max);
 		}
 
+		// snake 参考实现：浮点 RAND（RANDF / RAND 浮点路径）使用的 [0,1) 双精度随机数。
+		public double GetNextRandDouble()
+		{
+			if (Config.UseNewRandom)
+				return newRand.NextDouble();
+			return rand.NextDouble();
+		}
+
 		public Int64 getPalamLv(Int64 pl, Int64 maxlv)
 		{
 			for (int i = 0; i < (int)maxlv; i++)
@@ -2951,18 +2959,19 @@ namespace MinorShift.Emuera.GameData.Variable
 			}
 			catch (SystemException ex)
 			{
-				if (!isAndroid)
+				if (!isAndroid && IsSaveFileLockException(ex))
 				{
+					// A desktop reader may transiently retain global.sav after the bounded
+					// atomic-replace retry. Preserve the legacy false return without emitting
+					// a fatal diagnostic for a recoverable external lock.
+					GenericUtils.Warn(EmueraLogCategory.Save, () =>
+						"[SAVEGLOBAL] Skipped global save because global.sav remained locked after retries: \"" + filepath + "\"");
+					return false;
+				}
+				if (!isAndroid)
 					GenericUtils.Error(EmueraLogCategory.Save, () =>
 						"[SAVEGLOBAL] Failed to save global data to \"" + filepath + "\": "
 						+ ex.GetType().Name + ": " + ex.Message + Environment.NewLine + ex.StackTrace);
-					if (IsSaveFileLockException(ex))
-					{
-						GenericUtils.Warn(EmueraLogCategory.Save, () =>
-							"[SAVEGLOBAL] Skipped global save because global.sav is locked by another process: \"" + filepath + "\"");
-						return false;
-					}
-				}
 				throw new CodeEE("グローバルデータの保存中にエラーが発生しました");
 				//console.PrintError(
 				//console.NewLine();
@@ -3067,20 +3076,22 @@ namespace MinorShift.Emuera.GameData.Variable
 
 		private static void CommitSaveFileWithRetry(string tempFilePath, string filepath)
 		{
-			int delayMs = 40;
-			for (int attempt = 0; ; attempt++)
+			const int maxAttempts = 9;
+			int delayMs = 25;
+			for (int attempt = 0; attempt < maxAttempts; attempt++)
 			{
 				try
 				{
 					CommitSaveFile(tempFilePath, filepath);
 					return;
 				}
-				catch (IOException) when (attempt < 5)
+				catch (IOException) when (attempt + 1 < maxAttempts)
 				{
 					System.Threading.Thread.Sleep(delayMs);
 					delayMs *= 2;
 				}
 			}
+			throw new IOException("Unable to atomically replace the save file after bounded retries.");
 		}
 
 		private static void CommitSaveFile(string tempFilePath, string filepath)
@@ -3496,37 +3507,46 @@ namespace MinorShift.Emuera.GameData.Variable
 		public bool SaveTo(int saveIndex, string saveText)
 		{
 			string filepath = getSaveDataPath(saveIndex);
-			FileStream fs = null;
-			EraDataWriter writer = null;
-			EraBinaryDataWriter bWriter = null;
+			// 主线程はメモリに一括バッファしてから一時ファイルへ同期で一括書き込み、原子リネームで確定する。
+			// SAVEDATA の「保存完了」同期セマンティクス（戻り時にディスクへ確定）とエラー処理（失敗時 false）を
+			// 保つため、バックグラウンドスレッド化は行わない（一時ファイルは失敗時に削除される）。
+			string tmpPath = filepath + ".tmp";
 			try
 			{
 				Config.CreateSavDir();
-				fs = new FileStream(filepath, FileMode.Create, FileAccess.Write);
-				if (Config.SystemSaveInBinary)
+				byte[] saveBytes;
+				using (MemoryStream ms = new MemoryStream())
 				{
-					bWriter = new EraBinaryDataWriter(fs);
-					SaveToStreamBinary(bWriter, saveText);
+					if (Config.SystemSaveInBinary)
+					{
+						using (EraBinaryDataWriter bWriter = new EraBinaryDataWriter(ms))
+							SaveToStreamBinary(bWriter, saveText);
+					}
+					else
+					{
+						using (EraDataWriter writer = new EraDataWriter(ms))
+							SaveToStream(writer, saveText);
+					}
+					// ライタの Close で ms が閉じられても（非zip/テキスト時）、ToArray は内部バッファを
+					// そのまま返すので有効な完全データを取得できる。
+					saveBytes = ms.ToArray();
 				}
-				else
-				{
-					writer = new EraDataWriter(fs);
-					SaveToStream(writer, saveText);
-				}
+				using (FileStream fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write))
+					fs.Write(saveBytes, 0, saveBytes.Length);
+				File.Move(tmpPath, filepath, true);
 				return true;
 			}
 			catch (Exception)
 			{
+				try
+				{
+					if (File.Exists(tmpPath))
+						File.Delete(tmpPath);
+				}
+				catch
+				{
+				}
 				return false;
-			}
-			finally
-			{
-				if (writer != null)
-					writer.Close();
-				else if (bWriter != null)
-					bWriter.Close();
-				else if (fs != null)
-					fs.Close();
 			}
 		}
 

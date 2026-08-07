@@ -55,11 +55,11 @@ try {
     Assert-ResolutionContract ($actual.executionStatus -eq 'InProgress' -and $actual.gateStatus -eq 'Blocked' -and $actual.blockerCode -eq 'EvidenceMissing') 'M0 gate status was incorrectly advanced.'
     Assert-ResolutionContract ($actual.result -eq 'Partial') 'Static signature resolution must not claim behavior completion.'
     Assert-ResolutionContract ($actual.sourceDescriptorSetHash -eq $signatures.descriptorSetHash) 'DIA-04 source descriptor hash mismatch.'
-    Assert-ResolutionContract ($actual.instructionCount -eq 326) "Unexpected resolved instruction count: $($actual.instructionCount)."
-    Assert-ResolutionContract ($actual.coverage.sourceResolvedCount -eq 214) 'Unexpected DIA-03 preserved signature count.'
+    Assert-ResolutionContract ($actual.instructionCount -eq 327) "Unexpected resolved instruction count: $($actual.instructionCount)."
+    Assert-ResolutionContract ($actual.coverage.sourceResolvedCount -eq 215) 'Unexpected DIA-03 preserved signature count.'
     Assert-ResolutionContract ($actual.coverage.sourceConditionalCount -eq 112) 'Unexpected DIA-03 conditional signature count.'
     Assert-ResolutionContract ($actual.coverage.resolvedStaticByRuleCount -eq 112) 'Not all conditional signatures were resolved by rules.'
-    Assert-ResolutionContract ($actual.coverage.preservedStaticCount -eq 214) 'Resolved DIA-03 signatures were not preserved.'
+    Assert-ResolutionContract ($actual.coverage.preservedStaticCount -eq 215) 'Resolved DIA-03 signatures were not preserved.'
     Assert-ResolutionContract ($actual.coverage.unresolvedCount -eq 0) 'DIA-04 left unresolved instruction signatures.'
     Assert-ResolutionContract ($actual.coverage.catalogRuleCount -eq 19) 'Unexpected signature resolution rule count.'
     Assert-ResolutionContract ($actual.catalogHash -match '^[0-9a-f]{64}$' -and $actual.resolutionSetHash -match '^[0-9a-f]{64}$') 'DIA-04 canonical hashes are invalid.'

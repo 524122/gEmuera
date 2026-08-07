@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $toolRoot = Join-Path $ProjectRoot 'tools\dialect-inventory'
-$generatedRoot = Join-Path $ProjectRoot 'NewFrameworkDesign\generated'
+$generatedRoot = Join-Path $ProjectRoot 'docs\NewFrameworkDesign\generated'
 $modulePath = Join-Path $toolRoot 'DialectPolicySurface.psm1'
 $catalogPath = Join-Path $toolRoot 'dialect-policy-surface.json'
 $reportSchemaPath = Join-Path $toolRoot 'dialect-policy-surface.schema.json'
@@ -75,7 +75,7 @@ try {
     Assert-PolicySurfaceContract ($displayHistory.Count -eq 1 -and $displayHistory[0].contractKind -ceq 'BridgeProjection') 'Display projection surface drifted.'
     Assert-PolicySurfaceContract (@($actual.contracts | Where-Object { $_.contractDraftStatus -cne 'InterfaceDraftOnly' -or $_.policyValueStatus -cne 'Unspecified' -or $_.runtimeStatus -cne 'NotImplemented' }).Count -eq 0) 'DIA-15 incorrectly advanced an interface or policy value.'
 
-    $designPath = Join-Path $ProjectRoot 'NewFrameworkDesign\DialectExtensionSystem.md'
+    $designPath = Join-Path $ProjectRoot 'docs\NewFrameworkDesign\DialectExtensionSystem.md'
     Assert-PolicySurfaceContract (Test-Path -LiteralPath $designPath -PathType Leaf) 'DIA-15 design authority document is missing.'
     $designText = Get-Content -Raw -Encoding UTF8 -LiteralPath $designPath
     foreach ($contract in @($actual.contracts)) {

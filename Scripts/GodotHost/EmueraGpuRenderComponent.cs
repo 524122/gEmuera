@@ -2,6 +2,7 @@ using Godot;
 using MinorShift.Emuera.Content;
 using System.Collections.Concurrent;
 using System.Threading;
+using gEmuera.GodotHost;
 
 /// <summary>
 /// Godot 宿主 GPU 渲染组件，负责处理后台线程提交的 ColorMatrix 离屏渲染请求。
@@ -36,6 +37,8 @@ public sealed partial class EmueraGpuRenderComponent : Node
             item.Completed.Set();
         }
         currentInstance?.ResetPendingRenderState();
+        // M5：丢弃旧会话合成的 CPU ColorMatrix 结果缓存，避免新会话引用过期内容。
+        GraphicsImage.ResetColorMatrixMemoize();
         GpuReady = false;
     }
 
@@ -77,6 +80,12 @@ public sealed partial class EmueraGpuRenderComponent : Node
         currentInstance = this;
     }
 
+    public override void _Process(double delta)
+    {
+        MarkFrameReady();
+        ProcessQueue();
+    }
+
     public void ProcessQueue()
     {
         if (!ShouldUseGpuRenderer())
@@ -85,6 +94,9 @@ public sealed partial class EmueraGpuRenderComponent : Node
                 CompleteWithCpuFallback(queuedItem);
             return;
         }
+
+        if (!gpuWaitingForRender && workQueue.IsEmpty)
+            return;
 
         if (gpuViewport == null)
             SetupGpuRenderer();
@@ -225,6 +237,9 @@ public sealed partial class EmueraGpuRenderComponent : Node
 
     static bool ShouldUseGpuRenderer()
     {
-        return !OS.HasFeature("mobile");
+        // OpenGL Compatibility has no RenderingDevice pipeline cache. Avoid a
+        // texture upload, shader draw, and GPU readback for an image that the
+        // legacy worker immediately needs on the CPU.
+        return !OS.HasFeature("mobile") && !RendererRuntimeIdentity.UsesCompatibilityRenderer;
     }
 }

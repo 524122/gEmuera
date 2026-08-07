@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text;
 //using System.Drawing;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameData;
@@ -14,6 +15,13 @@ namespace MinorShift.Emuera.GameProc
 {
 	internal sealed partial class Process
 	{
+		// PUTFORM による SAVEDATA_TEXT 累積用。SAVEDATA_TEXT は文字列変数として常に現在値を保持する必要が
+		// あるため、StringBuilder 累積＋書き戻し方式で += の逐次文字列連結を避ける。
+		// PUTFORM 以外（SystemProc の初期化や ERB からの代入）で SAVEDATA_TEXT が書き換えられた場合は
+		// 参照比較で検出してバッファを再同期する（結果は従来の += と同一）。
+		StringBuilder saveTextBuilder = null;
+		string lastSaveTextMaterialized = null;
+
 		private void runScriptProc()
 		{
 			uint snakeStart = 0;
@@ -330,10 +338,19 @@ namespace MinorShift.Emuera.GameProc
 					{
 						term = ((ExpressionArgument)func.Argument).Term;
 						str = term.GetStrValue(exm);
-						if (vEvaluator.SAVEDATA_TEXT != null)
-							vEvaluator.SAVEDATA_TEXT += str;
-						else
-							vEvaluator.SAVEDATA_TEXT = str;
+						string current = vEvaluator.SAVEDATA_TEXT;
+						// 外部（SystemProc の初期化・ERB からの代入）で書き換えられた場合はバッファを再同期。
+						// 通常の PUTFORM 連続時は参照一致のため再同期不要（結果は従来の += と同一）。
+						if (saveTextBuilder == null)
+							saveTextBuilder = new StringBuilder(current ?? "");
+						else if (!object.ReferenceEquals(current, lastSaveTextMaterialized))
+						{
+							saveTextBuilder.Length = 0;
+							saveTextBuilder.Append(current ?? "");
+						}
+						saveTextBuilder.Append(str);
+						lastSaveTextMaterialized = saveTextBuilder.ToString();
+						vEvaluator.SAVEDATA_TEXT = lastSaveTextMaterialized;
 						break;
 					}
 				case FunctionCode.QUIT://ゲームを終了
@@ -370,6 +387,12 @@ namespace MinorShift.Emuera.GameProc
 						if (!vEvaluator.SaveTo((int)target, savemes))
 						{
 							console.PrintError("SAVEDATA命令によるセーブ中に予期しないエラーが発生しました");
+						}
+						else
+						{
+							// 脚本 SAVEDATA 直写后使槽位头部缓存失效（与菜单/自动保存路径一致），
+							// 否则粗时间戳文件系统（FAT32/秒级）下存档列表可能显示旧 DataMes。
+							InvalidateSaveSlotHeaderCache((int)target);
 						}
 					}
 					break;
@@ -419,15 +442,18 @@ namespace MinorShift.Emuera.GameProc
 					}
 				case FunctionCode.GETTIME:
 					{
-						long date = DateTime.Now.Year;
-						date = date * 100 + DateTime.Now.Month;
-						date = date * 100 + DateTime.Now.Day;
-						date = date * 100 + DateTime.Now.Hour;
-						date = date * 100 + DateTime.Now.Minute;
-						date = date * 100 + DateTime.Now.Second;
-						date = date * 1000 + DateTime.Now.Millisecond;
+						// 取一次 DateTime.Now 复用：同一条 GETTIME 内的 8 个字段来自同一
+						// 时刻，值不变，且省去 7 次系统时钟调用。
+						DateTime now = DateTime.Now;
+						long date = now.Year;
+						date = date * 100 + now.Month;
+						date = date * 100 + now.Day;
+						date = date * 100 + now.Hour;
+						date = date * 100 + now.Minute;
+						date = date * 100 + now.Second;
+						date = date * 1000 + now.Millisecond;
 						vEvaluator.RESULT = date;//17桁。2京くらい。
-						vEvaluator.RESULTS = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
+						vEvaluator.RESULTS = now.ToString("yyyy/MM/dd HH:mm:ss");
 					}
 					break;
 				case FunctionCode.SETCOLOR:

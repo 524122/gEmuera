@@ -502,6 +502,14 @@ namespace MinorShift.Emuera.GameProc
 					//命令文
 					if (func != null)//関数文
 					{
+						// v24 declares VARI/VARS while building the logical line.  Snake
+						// retains its dynamic ArgumentBuilder path, so the selected profile
+						// determines the grammar once during parsing rather than execution.
+						if ((func.Code == FunctionCode.VARI || func.Code == FunctionCode.VARS)
+							&& !Program.Compatibility.Snake.IsEnabled)
+						{
+							return ParseV24ScopedVariableDeclaration(position, func, currentLabel, stream);
+						}
 						if (ShouldPreferPrivateVariableAssignment(idCode, currentLabel, stream))
 						{
 							stream.Seek(0, System.IO.SeekOrigin.Begin);
@@ -518,7 +526,15 @@ namespace MinorShift.Emuera.GameProc
 									errMes = "命令で行が始まっていますが、命令の直後に半角スペース・タブ以外の文字が来ています";
 								goto err;
 							}
+							char commandSeparator = stream.Current;
 							stream.ShiftNext();
+							// 裸文字列/書式文字列を受ける PRINT 系は、命令後の「最初の区切り空白」
+							// 以外を表示内容として扱う。
+							// ここで SkipWhiteSpace すると "PRINT    X" の追加空白が消え、さらに
+							// "PRINT ;;;;;" や "PRINTFORM ;;;;;" が行中コメント扱いになって
+							// eraTW のAA表示が崩れる。
+							if (ShouldPreserveRawPrintArgument(func, commandSeparator))
+								return new InstructionLine(position, func, stream);
 							// 命令名と同名の変数への代入を優先する
 							// VARS/VARI など snake 拡張命令名と同名の変数を使用するゲームへの対応
 							// ※PRINTFORM = ... のような正当な命令呼び出しを誤判定しないよう、
@@ -601,6 +617,74 @@ namespace MinorShift.Emuera.GameProc
 			return result;
 		}
 
+		private static LogicalLine ParseV24ScopedVariableDeclaration(
+			ScriptPosition position,
+			FunctionIdentifier func,
+			FunctionLabelLine currentLabel,
+			StringStream stream)
+		{
+			var line = new InstructionLine(position, func, stream)
+			{
+				ParentLabelLine = currentLabel,
+			};
+			string statement = line.PopArgumentPrimitive()?.Substring() ?? string.Empty;
+			int commentIndex = statement.IndexOf(';');
+			if (commentIndex >= 0)
+				statement = statement.Substring(0, commentIndex);
+
+			int equalsIndex = statement.IndexOf('=');
+			string left = equalsIndex < 0 ? statement : statement.Substring(0, equalsIndex);
+			string right = equalsIndex < 0 ? string.Empty : statement.Substring(equalsIndex + 1);
+			string[] leftParts = left.Split(',');
+			string name = leftParts[0].Trim();
+			if (name.Length == 0)
+				throw new CodeEE("VARI/VARS requires a private variable name.");
+
+			var lengths = new List<int> { 1 };
+			if (leftParts.Length > 1)
+			{
+				lengths.Clear();
+				for (int i = 1; i < leftParts.Length; i++)
+					lengths.Add(int.Parse(leftParts[i].Trim()));
+			}
+
+			bool isString = func.Code == FunctionCode.VARS;
+			var variable = new UserDefinedVariableData
+			{
+				Name = name,
+				Static = false,
+				Lengths = lengths.ToArray(),
+				Dimension = lengths.Count,
+				TypeIsStr = isString,
+			};
+			currentLabel.AddPrivateVariable(variable);
+
+			if (isString)
+			{
+				string value = null;
+				if (leftParts.Length == 1 && !string.IsNullOrWhiteSpace(right))
+				{
+					int literalStart = right.IndexOf('"');
+					int literalEnd = right.LastIndexOf('"');
+					if (literalStart < 0 || literalEnd <= literalStart)
+						throw new CodeEE("VARS initial value must be a quoted string literal.");
+					value = right.Substring(literalStart + 1, literalEnd - literalStart - 1);
+				}
+				line.Argument = new SnakeVarsArgument(name, value);
+				return line;
+			}
+
+			IOperandTerm initialValue = new SingleTerm(0);
+			if (leftParts.Length == 1 && !string.IsNullOrWhiteSpace(right))
+			{
+				GlobalStatic.Process.scaningLine = line;
+				WordCollection words = LexicalAnalyzer.Analyse(new StringStream(right), LexEndWith.EoL, LexAnalyzeFlag.None);
+				initialValue = ExpressionParser.ReduceIntegerTerm(words, TermEndWith.EoL);
+			}
+			line.Argument = new SnakeVariArgument(name, initialValue);
+			return line;
+		}
+
 		static bool IsPrivateVariableAssignmentStart(StringStream stream)
 		{
 			if (stream.EOS)
@@ -612,6 +696,21 @@ namespace MinorShift.Emuera.GameProc
 			if ((stream.Current == '+' || stream.Current == '-' || stream.Current == '*' || stream.Current == '/' || stream.Current == '%' || stream.Current == '&' || stream.Current == '|' || stream.Current == '^') && stream.Next == '=')
 				return true;
 			return false;
+		}
+
+		static bool ShouldPreserveRawPrintArgument(FunctionIdentifier func, char commandSeparator)
+		{
+			if (commandSeparator == ';')
+				return false;
+			return func.IsPrint()
+			    && !func.IsPrintData()
+			    && IsRawPrintableArgumentBuilder(func.ArgBuilder);
+		}
+
+		static bool IsRawPrintableArgumentBuilder(ArgumentBuilder argBuilder)
+		{
+			return object.ReferenceEquals(argBuilder, ArgumentParser.GetArgumentBuilder(FunctionArgType.STR_NULLABLE))
+			    || object.ReferenceEquals(argBuilder, ArgumentParser.GetArgumentBuilder(FunctionArgType.FORM_STR_NULLABLE));
 		}
 		
 	}

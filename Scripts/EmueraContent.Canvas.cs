@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using MinorShift.Emuera;
 using MinorShift.Emuera.Content;
 using MinorShift.Emuera.GameView;
@@ -25,6 +26,7 @@ public partial class EmueraContent
 	struct CanvasImageRenderInfo
 	{
 		public Texture2D SourceTexture;
+		public string AnimatedWebpPath;
 		public Rect2 SourceRegion;
 		public Vector2 Position;
 		public Vector2 Size;
@@ -38,6 +40,7 @@ public partial class EmueraContent
 	{
 		public EmueraImage Node;
 		public ConsoleImagePart Image;
+		public ConsoleButtonString Button;
 		public int LineNo;
 		public int RelX;
 		public float LineY;
@@ -109,11 +112,14 @@ public partial class EmueraContent
 		var lineSize = new Vector2(maxLineRight, lineHeight);
 
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		int previousRenderLineNo = activeRenderLineNo;
 		var newTexturePins = new List<SpriteManager.TextureInfo>();
+		var newGraphicsImagePins = new List<Texture2D>();
 		var newOverlayNodes = new List<CanvasImageOverlay>();
 		var newDivOverlayNodes = new List<CanvasDivOverlay>();
 		activeTexturePinCollector = newTexturePins;
+		activeGraphicsImagePinCollector = newGraphicsImagePins;
 		activeRenderLineNo = line.LineNo;
 		try
 		{
@@ -125,12 +131,14 @@ public partial class EmueraContent
 			ReleaseCanvasImageOverlayList(newOverlayNodes);
 			ReleaseCanvasDivOverlayList(newDivOverlayNodes);
 			ReleaseTexturePinList(newTexturePins);
+			UnpinGraphicsImageTextures(newGraphicsImagePins);
 			asyncTexturePendingLineNos.Remove(line.LineNo);
 			throw;
 		}
 		finally
 		{
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 			activeRenderLineNo = previousRenderLineNo;
 		}
 
@@ -141,6 +149,7 @@ public partial class EmueraContent
 			ReleaseCanvasImageOverlayList(newOverlayNodes);
 			ReleaseCanvasDivOverlayList(newDivOverlayNodes);
 			ReleaseTexturePinList(newTexturePins);
+			UnpinGraphicsImageTextures(newGraphicsImagePins);
 			return;
 		}
 
@@ -159,6 +168,7 @@ public partial class EmueraContent
 		RegisterCanvasImageOverlays(line.LineNo, newOverlayNodes);
 		RegisterCanvasDivOverlays(line.LineNo, newDivOverlayNodes);
 		RegisterLineTexturePins(line.LineNo, newTexturePins);
+		RegisterLineGraphicsImagePins(line.LineNo, newGraphicsImagePins);
 		if (asyncTexturePendingDuringRender)
 			asyncTexturePendingLineNos.Add(line.LineNo);
 		else
@@ -196,6 +206,16 @@ public partial class EmueraContent
 	{
 		if (part == null)
 			return;
+		if (part is ConsoleStyledString styled)
+		{
+			consoleRenderSurface?.PrepareTextRenderPlan(styled, styled.Str);
+			return;
+		}
+		if (part is ConsoleErrorShapePart errorShape)
+		{
+			consoleRenderSurface?.PrepareTextRenderPlan(errorShape, errorShape.AltText ?? errorShape.Str ?? "");
+			return;
+		}
 		if (part is ConsoleImagePart image)
 		{
 			TryResolveCanvasImage(image, 0, out _);
@@ -232,20 +252,23 @@ public partial class EmueraContent
 			foreach (var part in button.StrArray)
 			{
 				if (part is ConsoleImagePart image && NeedsCanvasImageOverlay(image))
-					AddCanvasImageOverlay(line.LineNo, image, 0, imageOverlays);
+					AddCanvasImageOverlay(line.LineNo, image, button, 0, imageOverlays);
 				else if (part is ConsoleDivPart div && CanUseCanvasDivOverlay(div))
 					AddCanvasDivOverlay(line.LineNo, div, 0, divOverlays);
 			}
 		}
 	}
 
-	ASprite ResolveCanvasImageSprite(ConsoleImagePart image)
+	ASprite ResolveCanvasImageSprite(ConsoleImagePart image, bool isSelecting = false)
 	{
 		if (image == null)
 			return null;
-		ASprite sprite = image.Image;
-		if (sprite == null && !string.IsNullOrEmpty(image.ResourceName))
-			sprite = AppContents.GetSprite(image.ResourceName);
+		string resourceName = isSelecting && !string.IsNullOrEmpty(image.ButtonResourceName)
+			? image.ButtonResourceName
+			: image.ResourceName;
+		ASprite sprite = isSelecting && image.ImageBackground != null ? image.ImageBackground : image.Image;
+		if (sprite == null && !string.IsNullOrEmpty(resourceName))
+			sprite = AppContents.GetSprite(resourceName);
 		return sprite;
 	}
 
@@ -261,9 +284,9 @@ public partial class EmueraContent
 			&& !failedTextureSearches.Contains(resourceName);
 	}
 
-	void AddCanvasImageOverlay(int lineNo, ConsoleImagePart image, int relX, List<CanvasImageOverlay> overlays)
+	void AddCanvasImageOverlay(int lineNo, ConsoleImagePart image, ConsoleButtonString button, int relX, List<CanvasImageOverlay> overlays)
 	{
-		if (!TryResolveCanvasImage(image, relX, out var info))
+		if (!TryResolveCanvasImage(image, relX, false, out var info))
 			return;
 
 		var emuImg = new EmueraImage();
@@ -288,10 +311,12 @@ public partial class EmueraContent
 		{
 			Node = emuImg,
 			Image = image,
+			Button = button,
 			LineNo = lineNo,
 			RelX = relX,
 			LineY = 0,
-			IsAnimation = ResolveCanvasImageSprite(image) is SpriteAnime,
+			IsAnimation = ResolveCanvasImageSprite(image) is SpriteAnime
+				|| ResolveCanvasImageSprite(image, true) is SpriteAnime,
 			EscapesLine = escapesLine,
 		};
 		UpdateCanvasImageOverlay(overlay, 0);
@@ -303,9 +328,19 @@ public partial class EmueraContent
 		if (image == null)
 			return false;
 		var sprite = ResolveCanvasImageSprite(image);
+		var selectedSprite = ResolveCanvasImageSprite(image, true);
 		return image.ColorMatrix != null
 			|| image.Display != DisplayMode.Relative
-			|| sprite is SpriteAnime;
+			|| sprite is SpriteAnime
+			|| selectedSprite is SpriteAnime
+			// Canvas 自绘只能处理已经存在的静态 Texture2D。动画 WebP 的当前帧
+			// 由 EmueraImage._Process 切换，因此即使是普通 relative <img> 也必须
+			// 建立 overlay；否则 SourceTexture 为空时整张动态图会被静默跳过。
+			|| GetAnimatedWebpSourcePath(sprite) != null
+			|| GetAnimatedWebpSourcePath(selectedSprite) != null
+			// 逻辑行高度不会为图片溢出扩张；静态相对图片跨行时也必须进入 overlay，
+			// 才能在源行离开可视行范围后继续按真实绘制矩形裁剪和刷新可见性。
+			|| ImageEscapesLine(image);
 	}
 
 	bool CanUseCanvasDivOverlay(ConsoleDivPart div)
@@ -357,10 +392,13 @@ public partial class EmueraContent
 		var node = overlay.Node;
 		if (node == null || !GodotObject.IsInstanceValid(node))
 			return;
-		node.Position = GetHtmlDivPosition(overlay.Div, overlay.RelX) + new Vector2(0, lineY);
+		if (ShouldAnchorRelativeDivToViewport(overlay.Div))
+			node.Position = GetViewportAnchoredRelativeDivPosition(overlay.Div);
+		else
+			node.Position = GetHtmlDivPosition(overlay.Div, overlay.RelX) + new Vector2(0, lineY);
 		node.Size = new Vector2(overlay.Div.DivWidth, overlay.Div.DivHeight);
 		node.CustomMinimumSize = node.Size;
-		node.ZIndex = GetGodotZIndexForHtmlDepth(overlay.Div.Depth);
+		node.ZIndex = GetGodotZIndexForHtmlDiv(overlay.Div);
 		node.Visible = IsCanvasOverlayRectVisible(new Rect2(node.Position, node.Size), visible);
 	}
 
@@ -374,17 +412,20 @@ public partial class EmueraContent
 		var node = overlay.Node;
 		if (node == null || !GodotObject.IsInstanceValid(node))
 			return;
-			if (!TryResolveCanvasImage(overlay.Image, overlay.RelX, out var info))
+		bool isSelecting = IsCanvasButtonVisuallySelected(overlay.Button);
+			if (!TryResolveCanvasImage(overlay.Image, overlay.RelX, isSelecting, out var info))
 			{
 				// XRay/HTML 差分图刷新时，新帧可能还在异步解码。已有节点继续显示旧纹理，
 				// 等新纹理解析成功后再替换，避免刷新瞬间露出空白或白色图块。
 				node.Visible = node.SourceTexture != null && IsCanvasOverlayRectVisible(GetCanvasImageOverlayRect(node), visible);
 				return;
 			}
-		node.SourceTexture = info.SourceTexture;
-		node.SourceRegion = info.SourceRegion;
-		node.DrawOffset = info.DrawOffset;
-		node.DrawSize = info.DrawSize;
+		node.SetImageSource(new EmueraImage.ImageSourceState(
+			info.SourceTexture,
+			info.SourceRegion,
+			info.AnimatedWebpPath,
+			info.DrawOffset,
+			info.DrawSize));
 		node.Position = info.Position + new Vector2(0, lineY);
 		node.Size = info.Size;
 		node.FlipX = info.FlipX;
@@ -393,23 +434,81 @@ public partial class EmueraContent
 		node.Visible = IsCanvasOverlayRectVisible(GetCanvasImageOverlayRect(node), visible);
 	}
 
+	// Canvas 图片 overlay 不参与 Control 节点树的 MouseEntered/MouseExited 递归。
+	// hover 身份改变时借助现有 generation→行索引，只刷新旧、新按钮所在行的图片，
+	// 避免鼠标移动热路径全量扫描所有历史控制台行。
+	void RefreshCanvasImageOverlaySelection(string previousInput, long previousGeneration, string currentInput, long currentGeneration)
+	{
+		if (!UseCanvasRenderBackend || canvasImageOverlayNodes.Count == 0)
+			return;
+		Rect2 visible = GetVisibleCanvasContentRange();
+		RefreshCanvasImageOverlaySelectionForButton(previousInput, previousGeneration, visible);
+		if (currentGeneration != previousGeneration
+			|| !string.Equals(currentInput ?? "", previousInput ?? "", StringComparison.Ordinal))
+		{
+			RefreshCanvasImageOverlaySelectionForButton(currentInput, currentGeneration, visible);
+		}
+	}
+
+	void RefreshCanvasImageOverlaySelectionForButton(string input, long generation, Rect2 visible)
+	{
+		if (generation == long.MinValue
+			|| !buttonGenerationLineNumbers.TryGetValue(generation, out var lineNumbers)
+			|| lineNumbers == null)
+			return;
+		foreach (int lineNo in lineNumbers)
+		{
+			if (!canvasImageOverlayNodes.TryGetValue(lineNo, out var overlays) || overlays == null)
+				continue;
+			for (int i = 0; i < overlays.Count; i++)
+			{
+				var overlay = overlays[i];
+				if (overlay.Button == null
+					|| overlay.Button.Generation != generation
+					|| !string.Equals(overlay.Button.Inputs ?? "", input ?? "", StringComparison.Ordinal))
+					continue;
+				UpdateCanvasImageOverlay(overlay, overlay.LineY, visible);
+			}
+		}
+	}
+
 	bool TryResolveCanvasImage(ConsoleImagePart image, int relX, out CanvasImageRenderInfo info)
+	{
+		return TryResolveCanvasImage(image, relX, false, out info);
+	}
+
+	bool TryResolveCanvasImage(ConsoleImagePart image, int relX, bool isSelecting, out CanvasImageRenderInfo info)
 	{
 		info = default;
 		if (image == null)
 			return false;
 
-		ASprite sprite = ResolveCanvasImageSprite(image);
+		string resourceName = isSelecting && !string.IsNullOrEmpty(image.ButtonResourceName)
+			? image.ButtonResourceName
+			: image.ResourceName;
+		ASprite sprite = ResolveCanvasImageSprite(image, isSelecting);
 
-		var texture = GetSpriteTexture(sprite);
-		if (texture == null
-			&& ShouldUseRawImageResourceFallback(image.ResourceName, sprite))
+		string animatedWebpPath = GetAnimatedWebpSourcePath(sprite);
+		// Canvas 的图片会在需要时转为 EmueraImage overlay；动画资源必须在这里
+		// 直接保留该 overlay，不能把静态纹理解码失败误判为整个图片不可显示。
+		SpriteAnimeFrameLayoutInfo animeFrameLayout = default;
+		// SpriteAnime 帧未推进时复用上次解析，跳过纹理链；命中仍重新 TrackTexturePin。
+		var texture = animatedWebpPath == null ? GetCachedAnimatedSpriteTexture(sprite, out animeFrameLayout) : null;
+		if (texture == null && animatedWebpPath == null
+			&& ShouldUseRawImageResourceFallback(resourceName, sprite))
 		{
-			texture = ResolveCanvasTextureByResourceName(image.ResourceName);
+			texture = ResolveCanvasTextureByResourceName(resourceName);
 		}
 
-		if (texture == null)
+		if (texture == null && animatedWebpPath == null)
 			return false;
+
+		int sourceWidth = texture?.GetWidth() ?? sprite?.DestBaseSize.Width ?? 1;
+		int sourceHeight = texture?.GetHeight() ?? sprite?.DestBaseSize.Height ?? 1;
+		if (sourceWidth <= 0)
+			sourceWidth = 1;
+		if (sourceHeight <= 0)
+			sourceHeight = 1;
 
 		int w;
 		int imgH;
@@ -421,17 +520,17 @@ public partial class EmueraContent
 		else if (image.dest_rect.Width > 0)
 		{
 			w = image.dest_rect.Width;
-			imgH = texture.GetHeight() > 0 ? texture.GetHeight() * w / texture.GetWidth() : w;
+			imgH = sourceHeight * w / sourceWidth;
 		}
-		else if (image.dest_rect.Height > 0 && texture.GetHeight() > 0)
+		else if (image.dest_rect.Height > 0)
 		{
 			imgH = image.dest_rect.Height;
-			w = texture.GetWidth() * imgH / texture.GetHeight();
+			w = sourceWidth * imgH / sourceHeight;
 		}
 		else
 		{
-			w = texture.GetWidth() > 0 ? texture.GetWidth() : 32;
-			imgH = texture.GetHeight() > 0 ? texture.GetHeight() : 32;
+			w = sourceWidth;
+			imgH = sourceHeight;
 		}
 
 		if (image.Width > 0 && image.Width != w)
@@ -454,11 +553,12 @@ public partial class EmueraContent
 		}
 		info.Position = GetHtmlImagePosition(image, relX);
 		info.Size = new Vector2(w, imgH);
-		info.DrawOffset = GetSpriteHtmlDrawOffset(sprite, image.ResourceName, w, imgH);
-		info.DrawSize = GetSpriteHtmlDrawSize(sprite, image.ResourceName, w, imgH);
+		info.DrawOffset = GetSpriteHtmlDrawOffset(sprite, resourceName, w, imgH, animeFrameLayout);
+		info.DrawSize = GetSpriteHtmlDrawSize(sprite, resourceName, w, imgH, animeFrameLayout);
 		info.FlipX = image.FlipX;
 		info.FlipY = image.FlipY;
-		return info.SourceTexture != null;
+		info.AnimatedWebpPath = animatedWebpPath;
+		return info.SourceTexture != null || info.AnimatedWebpPath != null;
 	}
 
 	Texture2D ResolveCanvasTextureByResourceName(string resName)
@@ -584,6 +684,8 @@ public partial class EmueraContent
 				&& GodotObject.IsInstanceValid(control))
 			{
 				control.Position = new Vector2(0, y);
+				if (viewportAnchoredRelativeDivLineNos.Contains(lineNo))
+					RefreshViewportAnchoredRelativeDivs(control, y);
 			}
 			if (canvasImageOverlayNodes.TryGetValue(lineNo, out var overlays) && overlays != null)
 			{
@@ -614,6 +716,7 @@ public partial class EmueraContent
 		if (!UseCanvasRenderBackend)
 			return;
 		var visible = GetVisibleCanvasContentRange();
+		RefreshViewportAnchoredRelativeDivRows();
 		canvasVisibilityTargetRows.Clear();
 		canvasVisibilityTargetRowSet.Clear();
 		canvasCurrentVisibilityRows.Clear();
@@ -666,7 +769,7 @@ public partial class EmueraContent
 				var node = imageOverlays[i].Node;
 				if (node == null || !GodotObject.IsInstanceValid(node))
 					continue;
-				if (node.SourceTexture == null)
+				if (node.SourceTexture == null && !node.HasAnimatedWebpSource)
 				{
 					node.Visible = false;
 					continue;
@@ -678,6 +781,13 @@ public partial class EmueraContent
 		{
 			for (int i = 0; i < divOverlays.Count; i++)
 			{
+				if (ShouldAnchorRelativeDivToViewport(divOverlays[i].Div))
+				{
+					var overlay = divOverlays[i];
+					UpdateCanvasDivOverlay(overlay, overlay.LineY, visible);
+					divOverlays[i] = overlay;
+					continue;
+				}
 				var node = divOverlays[i].Node;
 				if (node == null || !GodotObject.IsInstanceValid(node))
 					continue;
@@ -791,6 +901,8 @@ public partial class EmueraContent
 				canvasAnimatedImageOverlayKeys.RemoveAt(i);
 				continue;
 			}
+			if (ResolveCanvasImageSprite(overlay.Image, IsCanvasButtonVisuallySelected(overlay.Button)) is not SpriteAnime)
+				continue;
 			if (IsCanvasImageOverlayVisibleOrNear(overlay))
 				UpdateCanvasImageOverlayAnimationFrame(overlay);
 		}
@@ -809,13 +921,20 @@ public partial class EmueraContent
 		// 动画帧可能来自不同 TextureInfo。刷新时临时复用该行的 pin 列表，
 		// 让新触达的帧纹理跟随行生命周期释放，避免缓存清理回收正在显示的帧。
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		int previousRenderLineNo = activeRenderLineNo;
 		if (!lineTexturePins.TryGetValue(overlay.LineNo, out var pins))
 		{
 			pins = new List<SpriteManager.TextureInfo>();
 			lineTexturePins[overlay.LineNo] = pins;
 		}
+		if (!lineGraphicsImagePins.TryGetValue(overlay.LineNo, out var graphicsPins))
+		{
+			graphicsPins = new List<Texture2D>();
+			lineGraphicsImagePins[overlay.LineNo] = graphicsPins;
+		}
 		activeTexturePinCollector = pins;
+		activeGraphicsImagePinCollector = graphicsPins;
 		activeRenderLineNo = overlay.LineNo;
 		try
 		{
@@ -824,6 +943,7 @@ public partial class EmueraContent
 		finally
 		{
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 			activeRenderLineNo = previousRenderLineNo;
 		}
 	}
@@ -833,12 +953,17 @@ public partial class EmueraContent
 		readonly EmueraContent owner;
 		readonly List<ConsoleButtonHit> hitRects = new List<ConsoleButtonHit>(128);
 		readonly Dictionary<int, List<int>> hitRectBuckets = new Dictionary<int, List<int>>();
+		readonly Stack<List<int>> hitRectBucketPool = new Stack<List<int>>();
+		readonly List<int> escapedHitLineNumbers = new List<int>();
+		readonly ConditionalWeakTable<AConsoleDisplayPart, ConsoleTextRenderPlanEntry> textRenderPlans = new ConditionalWeakTable<AConsoleDisplayPart, ConsoleTextRenderPlanEntry>();
+		readonly IComparer<int> escapedHitLineComparer;
 		bool hitRectsDirty = true;
 		int lastScrollX = int.MinValue;
 		int lastScrollY = int.MinValue;
 		Vector2 lastViewportSize = Vector2.Zero;
 		float lastScale = -1;
 		const float HitBucketHeight = 64.0f;
+		const int MaxPooledHitRectBucketLists = 128;
 
 		struct ConsoleRenderStats
 		{
@@ -849,10 +974,105 @@ public partial class EmueraContent
 			public int RebuiltHitRects;
 		}
 
+		sealed class EscapedHitLineComparer : IComparer<int>
+		{
+			readonly EmueraContent owner;
+
+			public EscapedHitLineComparer(EmueraContent owner)
+			{
+				this.owner = owner;
+			}
+
+			public int Compare(int left, int right)
+			{
+				int leftIndex = owner != null && owner.lineLayoutIndexByLineNo.TryGetValue(left, out int resolvedLeft)
+					? resolvedLeft
+					: int.MaxValue;
+				int rightIndex = owner != null && owner.lineLayoutIndexByLineNo.TryGetValue(right, out int resolvedRight)
+					? resolvedRight
+					: int.MaxValue;
+				int comparison = leftIndex.CompareTo(rightIndex);
+				return comparison != 0 ? comparison : left.CompareTo(right);
+			}
+		}
+
+		sealed class ConsoleTextRenderPlanEntry
+		{
+			string source;
+			ConsoleTextRenderPlan plan;
+
+			public ConsoleTextRenderPlan Get(string currentSource)
+			{
+				currentSource ??= string.Empty;
+				// ConsoleStyledString.DivideAt 会替换 Str。按字符串引用失效，避免把裁剪前文本用于新片段。
+				if (plan == null || !ReferenceEquals(source, currentSource))
+				{
+					source = currentSource;
+					plan = new ConsoleTextRenderPlan(currentSource);
+				}
+				return plan;
+			}
+		}
+
+		sealed class ConsoleTextRenderPlan
+		{
+			// 仅为出现过的字符分配字符串；数组避免每格都执行 char.ToString() 和字典查找。
+			static readonly string[] GridGlyphTexts = new string[char.MaxValue + 1];
+
+			public string Text { get; }
+			public bool UsesGridDrawing { get; }
+
+			public ConsoleTextRenderPlan(string source)
+			{
+				Text = uEmuera.Utils.StripZeroWidth(source) ?? string.Empty;
+				UsesGridDrawing = ShouldUseGridDrawing(Text);
+				if (UsesGridDrawing)
+				{
+					for (int i = 0; i < Text.Length; i++)
+						_ = GetGlyph(i);
+				}
+			}
+
+			public string GetGlyph(int index)
+			{
+				char value = Text[index];
+				return GridGlyphTexts[value] ??= value.ToString();
+			}
+
+			static bool ShouldUseGridDrawing(string value)
+			{
+				for (int i = 0; i < value.Length; i++)
+				{
+					char c = value[i];
+					if (uEmuera.Utils.CheckZeroWidth(c))
+						continue;
+					if (char.IsWhiteSpace(c) || IsGridSensitiveChar(c))
+						return true;
+				}
+				return false;
+			}
+
+			static bool IsGridSensitiveChar(char c)
+			{
+				return (c >= '\u2500' && c <= '\u257F')
+					|| (c >= '\u2580' && c <= '\u259F')
+					|| (c >= '\u25A0' && c <= '\u25FF')
+					|| (c >= '\u2800' && c <= '\u28FF')
+					|| c == '\u3000';
+			}
+		}
+
 		public ConsoleRenderSurface(EmueraContent owner)
 		{
 			this.owner = owner;
+			escapedHitLineComparer = new EscapedHitLineComparer(owner);
 			TextureFilter = TextureFilterEnum.Nearest;
+		}
+
+		public void PrepareTextRenderPlan(AConsoleDisplayPart part, string source)
+		{
+			if (part != null)
+				GetTextRenderPlan(part, source);
 		}
 
 		public void MarkDirty()
@@ -939,41 +1159,78 @@ public partial class EmueraContent
 		{
 			var stats = new ConsoleRenderStats();
 			if (rebuildHits)
-			{
-				hitRects.Clear();
-				hitRectBuckets.Clear();
-			}
+				ClearHitRects();
 			if (owner == null || owner.lineNumbers.Count == 0)
 				return stats;
 
 			var visible = owner.GetVisibleCanvasContentRange();
-			if (!owner.TryGetVisibleCanvasLineLayoutRange(visible, out int firstIndex, out int lastIndex))
-				return stats;
-			stats.VisibleRows = lastIndex - firstIndex + 1;
-			for (int i = firstIndex; i <= lastIndex; i++)
+			bool hasVisibleRange = owner.TryGetVisibleCanvasLineLayoutRange(visible, out int firstIndex, out int lastIndex);
+			if (hasVisibleRange)
 			{
-				var entry = owner.lineLayoutEntries[i];
-				int lineNo = entry.LineNo;
-				if (owner.IsCanvasOverlayLine(lineNo))
+				stats.VisibleRows = lastIndex - firstIndex + 1;
+				for (int i = firstIndex; i <= lastIndex; i++)
 				{
-					stats.OverlayRows++;
-					continue;
-				}
-				if (owner.lineObjects.TryGetValue(lineNo, out var line))
-				{
-					stats.CanvasRows++;
-					bool usedCachedHits = false;
-					if (rebuildHits)
-						usedCachedHits = AddCachedLineHitRects(lineNo, entry.Top, ref stats);
-					if (rebuildHits && !draw && usedCachedHits)
+					var entry = owner.lineLayoutEntries[i];
+					int lineNo = entry.LineNo;
+					if (owner.IsCanvasOverlayLine(lineNo))
+					{
+						stats.OverlayRows++;
 						continue;
-					DrawLine(lineNo, line, entry.Top, entry.Size, draw, rebuildHits, ref stats);
+					}
+					if (owner.lineObjects.TryGetValue(lineNo, out var line))
+					{
+						stats.CanvasRows++;
+						bool usedCachedHits = false;
+						if (rebuildHits)
+							usedCachedHits = AddCachedLineHitRects(lineNo, entry.Top, false, visible, ref stats);
+						if (rebuildHits && !draw && usedCachedHits)
+							continue;
+						DrawLine(lineNo, line, entry.Top, entry.Size, draw, rebuildHits, false, visible, ref stats);
+					}
 				}
 			}
+			if (rebuildHits)
+				AddEscapedOverlayHitRects(visible, firstIndex, lastIndex, ref stats);
 			return stats;
 		}
 
-		void DrawLine(int lineNo, ConsoleDisplayLine line, float y, Vector2 size, bool draw, bool rebuildHits, ref ConsoleRenderStats stats)
+		void AddEscapedOverlayHitRects(Rect2 visible, int firstVisibleIndex, int lastVisibleIndex, ref ConsoleRenderStats stats)
+		{
+			escapedHitLineNumbers.Clear();
+			if (owner == null || owner.canvasRowsWithEscapedOverlays.Count == 0)
+				return;
+			foreach (int lineNo in owner.canvasRowsWithEscapedOverlays)
+			{
+				if (!owner.lineLayoutIndexByLineNo.TryGetValue(lineNo, out int layoutIndex)
+					|| layoutIndex < 0
+					|| layoutIndex >= owner.lineLayoutEntries.Count
+					|| (layoutIndex >= firstVisibleIndex && layoutIndex <= lastVisibleIndex))
+					continue;
+				escapedHitLineNumbers.Add(lineNo);
+			}
+
+			// HashSet 的槽位顺序会随裁剪和重建变化；按逻辑行顺序注册，
+			// 让 TryHitGlobal 的逆序扫描继续稳定地优先命中后绘制的同层按钮。
+			escapedHitLineNumbers.Sort(escapedHitLineComparer);
+			for (int i = 0; i < escapedHitLineNumbers.Count; i++)
+			{
+				int lineNo = escapedHitLineNumbers[i];
+				if (!owner.lineLayoutIndexByLineNo.TryGetValue(lineNo, out int layoutIndex)
+					|| layoutIndex < 0
+					|| layoutIndex >= owner.lineLayoutEntries.Count
+					|| owner.IsCanvasOverlayLine(lineNo)
+					|| !owner.lineObjects.TryGetValue(lineNo, out var line))
+					continue;
+
+				var entry = owner.lineLayoutEntries[layoutIndex];
+				if (AddCachedLineHitRects(lineNo, entry.Top, true, visible, ref stats))
+					continue;
+				DrawLine(lineNo, line, entry.Top, entry.Size, false, true, true, visible, ref stats);
+			}
+		}
+
+		void DrawLine(int lineNo, ConsoleDisplayLine line, float y, Vector2 size, bool draw, bool rebuildHits,
+			bool restrictHitRectsToVisible, Rect2 visible, ref ConsoleRenderStats stats)
 		{
 			if (line == null)
 				return;
@@ -999,6 +1256,8 @@ public partial class EmueraContent
 						buttonHeight = owner.EffectiveLineHeight;
 					var bounds = owner.GetButtonVisualBounds(button, buttonTop, buttonHeight, button.PointX, button.PointX);
 					var hitRect = new Rect2(bounds.Position + new Vector2(0, y), bounds.Size);
+					if (restrictHitRectsToVisible && !visible.Intersects(hitRect, true))
+						continue;
 					AddHitRect(new ConsoleButtonHit
 					{
 						Rect = hitRect,
@@ -1023,7 +1282,7 @@ public partial class EmueraContent
 			}
 		}
 
-		bool AddCachedLineHitRects(int lineNo, float lineY, ref ConsoleRenderStats stats)
+		bool AddCachedLineHitRects(int lineNo, float lineY, bool restrictHitRectsToVisible, Rect2 visible, ref ConsoleRenderStats stats)
 		{
 			if (owner == null || !owner.canvasLineButtonHits.TryGetValue(lineNo, out var lineHits) || lineHits == null)
 				return false;
@@ -1033,6 +1292,8 @@ public partial class EmueraContent
 				var hit = lineHits[i];
 				hit.Rect = new Rect2(hit.Rect.Position + offset, hit.Rect.Size);
 				hit.ContentCenter += offset;
+				if (restrictHitRectsToVisible && !visible.Intersects(hit.Rect, true))
+					continue;
 				AddHitRect(hit);
 				stats.RebuiltHitRects++;
 			}
@@ -1049,11 +1310,28 @@ public partial class EmueraContent
 			{
 				if (!hitRectBuckets.TryGetValue(bucket, out var indexes))
 				{
-					indexes = new List<int>();
+					indexes = GetPooledHitRectBucket();
 					hitRectBuckets[bucket] = indexes;
 				}
 				indexes.Add(index);
 			}
+		}
+
+		void ClearHitRects()
+		{
+			hitRects.Clear();
+			foreach (var indexes in hitRectBuckets.Values)
+			{
+				indexes.Clear();
+				if (hitRectBucketPool.Count < MaxPooledHitRectBucketLists)
+					hitRectBucketPool.Push(indexes);
+			}
+			hitRectBuckets.Clear();
+		}
+
+		List<int> GetPooledHitRectBucket()
+		{
+			return hitRectBucketPool.Count > 0 ? hitRectBucketPool.Pop() : new List<int>();
 		}
 
 		static int GetHitBucket(float y)
@@ -1112,7 +1390,7 @@ public partial class EmueraContent
 			}
 			if (part is ConsoleImagePart image)
 			{
-				DrawImagePart(image, lineY, relX);
+				DrawImagePart(image, lineY, relX, isSelecting);
 				return;
 			}
 			if (part is ConsoleDivPart)
@@ -1131,9 +1409,21 @@ public partial class EmueraContent
 			}
 			if (part is ConsoleErrorShapePart errShape)
 			{
-				DrawText(errShape.AltText ?? errShape.Str ?? "", Config.ForeColor.ToGodotColor(), Config.Font, false,
+				DrawText(GetTextRenderPlan(errShape, errShape.AltText ?? errShape.Str ?? ""), Config.ForeColor.ToGodotColor(), Config.Font, false,
 					part.PointX - relX, lineY, Mathf.Max(part.Width, owner.EffectiveLineHeight));
 			}
+		}
+
+		ConsoleTextRenderPlan GetTextRenderPlan(AConsoleDisplayPart part, string source)
+		{
+			if (part == null)
+				return new ConsoleTextRenderPlan(source ?? string.Empty);
+			if (!textRenderPlans.TryGetValue(part, out var entry))
+			{
+				entry = new ConsoleTextRenderPlanEntry();
+				textRenderPlans.Add(part, entry);
+			}
+			return entry.Get(source);
 		}
 
 		void DrawStyledString(ConsoleStyledString css, float lineY, int relX, bool isSelecting, bool isBackLog)
@@ -1164,26 +1454,26 @@ public partial class EmueraContent
 			}
 			else if (isBackLog && !css.pColorChanged)
 				color = Config.LogColor;
-			DrawText(css.Str, color.ToGodotColor(), css.Font, css.Font?.Bold == true, x, lineY, width);
+			DrawText(GetTextRenderPlan(css, css.Str), color.ToGodotColor(), css.Font, css.Font?.Bold == true, x, lineY, width, css.VerticalAlign);
 		}
 
-		void DrawText(string text, Color color, EmuFont emuFont, bool bold, float x, float lineY, float width)
+		void DrawText(ConsoleTextRenderPlan plan, Color color, EmuFont emuFont, bool bold, float x, float lineY, float width, FontVerticalAlign? verticalAlign = null)
 		{
 			Font font = owner.ResolveConsoleFont(emuFont);
-			if (font == null || string.IsNullOrEmpty(text))
+			if (font == null || plan == null || string.IsNullOrEmpty(plan.Text))
 				return;
-			text = uEmuera.Utils.StripZeroWidth(text) ?? "";
-			if (string.IsNullOrEmpty(text))
-				return;
-			float fontHeight = font.GetHeight(owner.FontSize);
-			float baseline = GetTextBaseline(font, owner.FontSize, owner.EffectiveLineHeight, fontHeight);
-			if (!ShouldUseGridDrawing(text))
+			string text = plan.Text;
+			int actualFontSize = emuFont != null ? Math.Max(1, Mathf.RoundToInt(emuFont.Size)) : owner.FontSize;
+			var fontMetrics = GetConsoleFontMetrics(font, actualFontSize);
+			float fontHeight = fontMetrics.Height;
+			float baseline = GetTextBaseline(font, actualFontSize, owner.EffectiveLineHeight, fontHeight, verticalAlign);
+			if (!plan.UsesGridDrawing)
 			{
 				DrawString(font, new Vector2(x, lineY + baseline), text, HorizontalAlignment.Left,
-					Mathf.Max(1.0f, width), owner.FontSize, color);
+					Mathf.Max(1.0f, width), actualFontSize, color);
 				if (bold)
 					DrawString(font, new Vector2(x + 1.0f, lineY + baseline), text, HorizontalAlignment.Left,
-						Mathf.Max(1.0f, width - 1.0f), owner.FontSize, color);
+						Mathf.Max(1.0f, width - 1.0f), actualFontSize, color);
 				return;
 			}
 
@@ -1192,37 +1482,38 @@ public partial class EmueraContent
 			for (int i = 0; i < text.Length; i++)
 			{
 				bool half = uEmuera.Utils.CheckHalfSize(text[i]);
-				float nextExactX = exactX + (half ? owner.FontSize / 2.0f : owner.FontSize);
+				float nextExactX = exactX + (half ? actualFontSize / 2.0f : actualFontSize);
 				float nextDrawX = x + (int)nextExactX;
 				float cellWidth = nextDrawX - drawX;
 				// 逐字符绘制只负责保持 emuera 的半角/全角格点起点，裁剪仍由整段宽度决定。
 				// 若按单元格宽度裁剪，Godot 字体 fallback 下的箱线/空白敏感字符会出现缺笔或整字丢失。
-				float drawWidth = Mathf.Max(cellWidth, x + width - drawX);
-				DrawGridChar(font, text[i], drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight);
+				float drawWidth = IsBlockElementChar(text[i])
+					? cellWidth
+					: Mathf.Max(cellWidth, x + width - drawX);
+				DrawGridChar(font, text[i], plan.GetGlyph(i), drawX, lineY, lineY + baseline, drawWidth, color, bold, fontHeight, actualFontSize);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
 		}
 
-		void DrawGridChar(Font font, char value, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight)
+		void DrawGridChar(Font font, char value, string glyph, float x, float lineTop, float baseline, float cellWidth, Color color, bool bold, float fontHeight, int fontSize)
 		{
 			if (TryGetSolidBlockElementRect(value, cellWidth, owner.EffectiveLineHeight, fontHeight, out var blockRect))
 			{
 				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), color);
 				return;
 			}
-			string glyph = value.ToString();
 			float drawWidth = Mathf.Max(1.0f, cellWidth);
-			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, owner.FontSize, color);
+			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, fontSize, color);
 			if (bold)
-				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), owner.FontSize, color);
+				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, Mathf.Max(1.0f, drawWidth - 1.0f), fontSize, color);
 		}
 
-		void DrawImagePart(ConsoleImagePart image, float lineY, int relX)
+		void DrawImagePart(ConsoleImagePart image, float lineY, int relX, bool isSelecting)
 		{
 			if (owner.NeedsCanvasImageOverlay(image))
 				return;
-			if (!owner.TryResolveCanvasImage(image, relX, out var info))
+			if (!owner.TryResolveCanvasImage(image, relX, isSelecting, out var info))
 				return;
 			var drawSize = info.DrawSize.X > 0 && info.DrawSize.Y > 0 ? info.DrawSize : info.Size;
 			var destRect = new Rect2(info.Position + new Vector2(0, lineY) + info.DrawOffset, drawSize);
@@ -1243,34 +1534,22 @@ public partial class EmueraContent
 				DrawSetTransform(Vector2.Zero, 0, Vector2.One);
 		}
 
-		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f)
+		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f, FontVerticalAlign? verticalAlign = null)
 		{
+			var metrics = GetConsoleFontMetrics(font, fontSize);
 			if (fontHeight < 0.0f)
-				fontHeight = font.GetHeight(fontSize);
-			float ascent = font.GetAscent(fontSize);
-			return Mathf.Round((height - fontHeight) * 0.5f + ascent);
-		}
-
-		static bool ShouldUseGridDrawing(string value)
-		{
-			for (int i = 0; i < value.Length; i++)
+				fontHeight = metrics.Height;
+			float freeSpace = height - fontHeight;
+			float alignmentOffset = verticalAlign switch
 			{
-				char c = value[i];
-				if (uEmuera.Utils.CheckZeroWidth(c))
-					continue;
-				if (char.IsWhiteSpace(c) || IsGridSensitiveChar(c))
-					return true;
-			}
-			return false;
+				FontVerticalAlign.Top => 0.0f,
+				FontVerticalAlign.Middle => freeSpace * 0.5f,
+				FontVerticalAlign.Bottom => freeSpace,
+				_ => freeSpace * 0.5f,
+			};
+			float ascent = metrics.Ascent;
+			return Mathf.Round(alignmentOffset + ascent);
 		}
 
-		static bool IsGridSensitiveChar(char c)
-		{
-			return (c >= '\u2500' && c <= '\u257F')
-				|| (c >= '\u2580' && c <= '\u259F')
-				|| (c >= '\u25A0' && c <= '\u25FF')
-				|| (c >= '\u2800' && c <= '\u28FF')
-				|| c == '\u3000';
-		}
 	}
 }

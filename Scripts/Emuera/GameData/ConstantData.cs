@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
+using System.Threading.Tasks;
 using MinorShift.Emuera.Sub;
 using MinorShift.Emuera.GameView;
 using MinorShift.Emuera.GameData.Variable;
@@ -242,7 +243,7 @@ namespace MinorShift.Emuera.GameData
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					changeVariableSizeData(st.Substring(), position);
+					changeVariableSizeData(st, position);
 				}
 				position = new ScriptPosition(eReader.Filename, -1);
 			}
@@ -263,15 +264,18 @@ namespace MinorShift.Emuera.GameData
 		}
 
 
-		private void changeVariableSizeData(string line, ScriptPosition position)
+		private void changeVariableSizeData(StringStream st, ScriptPosition position)
 		{
-			int tokenCount = ReadCsvHeadFields5(line, out string token0, out string token1, out string token2, out string token3, out string token4);
+			string source = st.RowString;
+			int startOffset = st.CurrentPosition;
+			Span<CsvFieldRange> fields = stackalloc CsvFieldRange[5];
+			int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 			if (tokenCount < 2)
 			{
 				ParserMediator.Warn("\",\"が必要です", position, 1);
 				return;
 			}
-			string idtoken = token0.Trim();
+			string idtoken = GetTrimmedFieldString(source, fields[0]);
 			VariableIdentifier id = VariableIdentifier.GetVariableId(idtoken);
 			if (id == null)
 			{
@@ -290,7 +294,7 @@ namespace MinorShift.Emuera.GameData
 			}
             int length2 = 0;
             int length3 = 0;
-			if (!int.TryParse(token1, out int length))
+			if (!int.TryParse(source.AsSpan(fields[1].Start, fields[1].Length), out int length))
 			{
 				ParserMediator.Warn("二つ目の値を整数値として認識できません", position, 1);
 				return;
@@ -308,7 +312,7 @@ namespace MinorShift.Emuera.GameData
 					ParserMediator.Warn("使用禁止にできない変数に対して負の配列長が指定されています", position, 2);
 					return;
 				}
-                if (tokenCount > 2 && StartsWithDigitAfterTrim(token2))
+                if (tokenCount > 2 && StartsWithDigitAfterTrim(source, fields[2]))
                 {
                     ParserMediator.Warn("一次元配列のサイズ指定に不必要なデータは無視されます", position, 0);
                 }
@@ -317,7 +321,7 @@ namespace MinorShift.Emuera.GameData
 			}
 			if (id.IsArray1D)
 			{
-                if (tokenCount > 2 && StartsWithDigitAfterTrim(token2))
+                if (tokenCount > 2 && StartsWithDigitAfterTrim(source, fields[2]))
                 {
                     ParserMediator.Warn("一次元配列のサイズ指定に不必要なデータは無視されます", position, 0);
                 }
@@ -344,11 +348,11 @@ namespace MinorShift.Emuera.GameData
 					ParserMediator.Warn("二次元配列のサイズ指定には2つの数値が必要です", position, 1);
 					return;
 				}
-                if (tokenCount > 3 && StartsWithDigitAfterTrim(token3))
+                if (tokenCount > 3 && StartsWithDigitAfterTrim(source, fields[3]))
                 {
                     ParserMediator.Warn("二次元配列のサイズ指定に不必要なデータは無視されます", position, 0);
                 }
-                if (!int.TryParse(token2, out length2))
+                if (!int.TryParse(source.AsSpan(fields[2].Start, fields[2].Length), out length2))
 				{
 					ParserMediator.Warn("三つ目の値を整数値として認識できません", position, 1);
 					return;
@@ -376,16 +380,16 @@ namespace MinorShift.Emuera.GameData
 					ParserMediator.Warn("三次元配列のサイズ指定には3つの数値が必要です", position, 1);
 					return;
 				}
-                if (tokenCount > 4 && StartsWithDigitAfterTrim(token4))
+                if (tokenCount > 4 && StartsWithDigitAfterTrim(source, fields[4]))
                 {
                     ParserMediator.Warn("三次元配列のサイズ指定に不必要なデータは無視されます", position, 0);
                 }
-                if (!int.TryParse(token2, out length2))
+                if (!int.TryParse(source.AsSpan(fields[2].Start, fields[2].Length), out length2))
 				{
 					ParserMediator.Warn("三つ目の値を整数値として認識できません", position, 1);
 					return;
 				}
-				if (!int.TryParse(token3, out length3))
+				if (!int.TryParse(source.AsSpan(fields[3].Start, fields[3].Length), out length3))
 				{
 					ParserMediator.Warn("四つ目の値を整数値として認識できません", position, 1);
 					return;
@@ -445,6 +449,9 @@ check1break:
 				case VariableCode.STRNAME:
 				case VariableCode.GLOBALNAME:
 				case VariableCode.GLOBALSNAME:
+				case VariableCode.DAYNAME:
+				case VariableCode.TIMENAME:
+				case VariableCode.MONEYNAME:
 					MaxDataList[(int)(id.Code & VariableCode.__LOWERCASE__)] = length;
 					break;
 				default:
@@ -633,36 +640,9 @@ check1break:
 				aliases[i] = null;
 			}
 			ItemPrice = new Int64[MaxDataList[itemIndex]];
-			loadDataWithAliases(csvDir, "ABL", ablIndex, null, disp);
-			loadDataWithAliases(csvDir, "EXP", expIndex, null, disp);
-			loadDataWithAliases(csvDir, "TALENT", talentIndex, null, disp);
-			loadDataWithAliases(csvDir, "PALAM", paramIndex, null, disp);
-			loadDataWithAliases(csvDir, "TRAIN", trainIndex, null, disp);
-			loadDataWithAliases(csvDir, "MARK", markIndex, null, disp);
-			loadDataWithAliases(csvDir, "ITEM", itemIndex, ItemPrice, disp);
-			loadDataWithAliases(csvDir, "BASE", baseIndex, null, disp);
-			loadDataWithAliases(csvDir, "SOURCE", sourceIndex, null, disp);
-			loadDataWithAliases(csvDir, "EX", exIndex, null, disp);
-			loadDataWithAliases(csvDir, "STR", strIndex, null, disp);
-			loadDataWithAliases(csvDir, "EQUIP", equipIndex, null, disp);
-			loadDataWithAliases(csvDir, "TEQUIP", tequipIndex, null, disp);
-			loadDataWithAliases(csvDir, "FLAG", flagIndex, null, disp);
-			loadDataWithAliases(csvDir, "TFLAG", tflagIndex, null, disp);
-			loadDataWithAliases(csvDir, "CFLAG", cflagIndex, null, disp);
-			loadDataWithAliases(csvDir, "TCVAR", tcvarIndex, null, disp);
-			loadDataWithAliases(csvDir, "CSTR", cstrIndex, null, disp);
-			loadDataWithAliases(csvDir, "STAIN", stainIndex, null, disp);
-			loadDataWithAliases(csvDir, "CDFLAG1", cdflag1Index, null, disp);
-			loadDataWithAliases(csvDir, "CDFLAG2", cdflag2Index, null, disp);
-			
-			loadDataWithAliases(csvDir, "STRNAME", strnameIndex, null, disp);
-			loadDataWithAliases(csvDir, "TSTR", tstrnameIndex, null, disp);
-			loadDataWithAliases(csvDir, "SAVESTR", savestrnameIndex, null, disp);
-			loadDataWithAliases(csvDir, "GLOBAL", globalIndex, null, disp);
-			loadDataWithAliases(csvDir, "GLOBALS", globalsIndex, null, disp);
-			loadDataWithAliases(csvDir, "DAY", dayIndex, null, disp);
-			loadDataWithAliases(csvDir, "TIME", timeIndex, null, disp);
-			loadDataWithAliases(csvDir, "MONEY", moneyIndex, null, disp);
+			//N5: 名称/别名 CSV 每文件状态完全独立（各自的 names[i]/aliases[i]/ItemPrice），改为并行解析。
+			//警告/控制台输出等副作用按原文件顺序捕获，解析完成后统一串行重放，顺序语义与串行完全一致。
+			loadNameCsvsInParallel(csvDir, disp);
 			//逆引き辞書を作成
 			for (int i = 0; i < names.Length; i++)
 			{
@@ -686,6 +666,10 @@ check1break:
 			//if (!Program.AnalysisMode)
 			loadCharacterData(csvDir, disp);
 			loadGlobalVarExSetting(csvDir, disp);
+			//M8: CSV/ALS 解析已全部完成（VariableSize/名称 CSV/ALS/CHARA/VarExt），
+			//释放 Preload 中整会话驻留的 CSV/ALS 解码文本；后续任何再读都会回退到直接磁盘读取。
+			Preload.RemoveByExtension(".csv");
+			Preload.RemoveByExtension(".als");
 
 			//逆引き辞書を作成2 (RELATION)
 			relationDic.EnsureCapacity(CharacterTmplList.Count * 3);
@@ -699,6 +683,62 @@ check1break:
 				if (!string.IsNullOrEmpty(tmpl.Nickname))
                     relationDic.TryAdd(tmpl.Nickname, (int)tmpl.No);
 			}
+		}
+
+		private static ParallelOptions GetCsvParallelOptions()
+		{
+			// 移动端压低并发（与 Preload 预读同一策略），桌面限制在 4 以内避免启动期争抢。
+			int degree = global::Godot.OS.HasFeature("mobile") ? 2 : Math.Max(1, Math.Min(Environment.ProcessorCount, 4));
+			return new ParallelOptions { MaxDegreeOfParallelism = degree };
+		}
+
+		/// <summary>
+		/// N5: 名称 CSV 与别名 ALS 的并行解析。每文件状态独立（各自的 names[i]/aliases[i]/ItemPrice），
+		/// 警告/打印等副作用捕获到 CsvLoadContext，全部完成后按原文件顺序重放。
+		/// </summary>
+		private void loadNameCsvsInParallel(string csvDir, bool disp)
+		{
+			var csvList = new (string BaseName, int TargetIndex, Int64[] TargetI)[]
+			{
+				("ABL", ablIndex, null),
+				("EXP", expIndex, null),
+				("TALENT", talentIndex, null),
+				("PALAM", paramIndex, null),
+				("TRAIN", trainIndex, null),
+				("MARK", markIndex, null),
+				("ITEM", itemIndex, ItemPrice),
+				("BASE", baseIndex, null),
+				("SOURCE", sourceIndex, null),
+				("EX", exIndex, null),
+				("STR", strIndex, null),
+				("EQUIP", equipIndex, null),
+				("TEQUIP", tequipIndex, null),
+				("FLAG", flagIndex, null),
+				("TFLAG", tflagIndex, null),
+				("CFLAG", cflagIndex, null),
+				("TCVAR", tcvarIndex, null),
+				("CSTR", cstrIndex, null),
+				("STAIN", stainIndex, null),
+				("CDFLAG1", cdflag1Index, null),
+				("CDFLAG2", cdflag2Index, null),
+				("STRNAME", strnameIndex, null),
+				("TSTR", tstrnameIndex, null),
+				("SAVESTR", savestrnameIndex, null),
+				("GLOBAL", globalIndex, null),
+				("GLOBALS", globalsIndex, null),
+				("DAY", dayIndex, null),
+				("TIME", timeIndex, null),
+				("MONEY", moneyIndex, null),
+			};
+			CsvLoadContext[] contexts = new CsvLoadContext[csvList.Length];
+			Parallel.For(0, csvList.Length, GetCsvParallelOptions(), i =>
+			{
+				CsvLoadContext ctx = new CsvLoadContext();
+				contexts[i] = ctx;
+				loadDataWithAliases(csvDir, csvList[i].BaseName, csvList[i].TargetIndex, csvList[i].TargetI, disp, ctx);
+			});
+			for (int i = 0; i < contexts.Length; i++)
+				contexts[i].Replay(output);
 		}
 
 		private void loadGlobalVarExSetting(string csvDir, bool disp)
@@ -721,8 +761,23 @@ check1break:
 			List<string> csvPaths = uEmuera.Utils.GetFilePaths(csvDir, "VarExt*.csv", SearchOption.AllDirectories);
 			if (Config.SortWithFilename)
 				csvPaths.Sort(StringComparer.OrdinalIgnoreCase);
-			for (int i = 0; i < csvPaths.Count; i++)
-				loadGlobalVarExSettingFile(csvPaths[i], getRelativeVarExtPath(csvDir, csvPaths[i]), disp);
+			//N5: VarExt*.csv 每文件独立解析，名字记录与副作用按原文件顺序串行回填/重放。
+			int fileCount = csvPaths.Count;
+			var nameRecords = new List<KeyValuePair<HashSet<string>, string>>[fileCount];
+			var contexts = new CsvLoadContext[fileCount];
+			Parallel.For(0, fileCount, GetCsvParallelOptions(), i =>
+			{
+				CsvLoadContext ctx = new CsvLoadContext();
+				contexts[i] = ctx;
+				nameRecords[i] = loadGlobalVarExSettingFile(csvPaths[i], getRelativeVarExtPath(csvDir, csvPaths[i]), disp, ctx);
+			});
+			for (int i = 0; i < fileCount; i++)
+			{
+				List<KeyValuePair<HashSet<string>, string>> records = nameRecords[i];
+				for (int j = 0; j < records.Count; j++)
+					records[j].Key.Add(records[j].Value);
+				contexts[i].Replay(output);
+			}
 		}
 
 		private static string getRelativeVarExtPath(string rootDir, string fullPath)
@@ -738,86 +793,136 @@ check1break:
 			return Path.GetFileName(fullPath);
 		}
 
-		private void loadGlobalVarExSettingFile(string csvPath, string csvName, bool disp)
+		private List<KeyValuePair<HashSet<string>, string>> loadGlobalVarExSettingFile(string csvPath, string csvName, bool disp, CsvLoadContext ctx)
 		{
+			List<KeyValuePair<HashSet<string>, string>> records = new List<KeyValuePair<HashSet<string>, string>>();
 			EraStreamReader eReader = new EraStreamReader(false);
 			if (!eReader.OpenOnCache(csvPath, csvName))
 			{
-				output.PrintError(eReader.Filename + "のオープンに失敗しました");
-				return;
+				ctx.PrintError(eReader.Filename + "のオープンに失敗しました");
+				return records;
 			}
 			ScriptPosition position = null;
 			if (disp)
-				output.PrintSystemLine(eReader.Filename + "読み込み中・・・");
+				ctx.Print(eReader.Filename + "読み込み中・・・");
 			try
 			{
 				StringStream st = null;
+				//stackalloc をループ外へ退避（CA2014）。各イテレーションで上書きするため再利用は安全。
+				Span<CsvFieldRange> fields = stackalloc CsvFieldRange[1];
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					string line = st.Substring();
-					int tokenCount = ReadCsvHeadFields(line, out string token0, out _, out _);
+					string source = st.RowString;
+					int startOffset = st.CurrentPosition;
+					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
-						ParserMediator.Warn("\",\"が必要です", position, 1);
+						ctx.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-					if (token0.Length == 0)
+					CsvFieldRange f0 = fields[0];
+					if (f0.Length == 0)
 					{
-						ParserMediator.Warn("\",\"で始まっています", position, 1);
+						ctx.Warn("\",\"で始まっています", position, 1);
 						continue;
 					}
 
-					string key = token0.Trim();
-					if (key.Equals("GLOBAL_MAPS", Config.SCVariable))
-						addVarExtNames(GlobalSaveMaps, line);
-					else if (key.Equals("SAVE_MAPS", Config.SCVariable))
-						addVarExtNames(SaveMaps, line);
-					else if (key.Equals("GLOBAL_XMLS", Config.SCVariable))
-						addVarExtNames(GlobalSaveXmls, line);
-					else if (key.Equals("SAVE_XMLS", Config.SCVariable))
-						addVarExtNames(SaveXmls, line);
-					else if (key.Equals("GLOBAL_DTS", Config.SCVariable))
-						addVarExtNames(GlobalSaveDTs, line);
-					else if (key.Equals("SAVE_DTS", Config.SCVariable))
-						addVarExtNames(SaveDTs, line);
-					else if (key.Equals("STATIC_MAPS", Config.SCVariable))
-						addVarExtNames(StaticMaps, line);
-					else if (key.Equals("STATIC_XMLS", Config.SCVariable))
-						addVarExtNames(StaticXmls, line);
-					else if (key.Equals("STATIC_DTS", Config.SCVariable))
-						addVarExtNames(StaticDTs, line);
+					// key = token0.Trim() 的 span 比较（零分配，不创建 key 字符串）
+					int keyStart = f0.Start;
+					int keyEnd = f0.Start + f0.Length;
+					while (keyStart < keyEnd && char.IsWhiteSpace(source[keyStart]))
+						keyStart++;
+					while (keyEnd > keyStart && char.IsWhiteSpace(source[keyEnd - 1]))
+						keyEnd--;
+					if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "GLOBAL_MAPS", Config.SCVariable))
+						addVarExtNamesCollect(GlobalSaveMaps, source, startOffset, records);
+					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "SAVE_MAPS", Config.SCVariable))
+						addVarExtNamesCollect(SaveMaps, source, startOffset, records);
+					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "GLOBAL_XMLS", Config.SCVariable))
+						addVarExtNamesCollect(GlobalSaveXmls, source, startOffset, records);
+					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "SAVE_XMLS", Config.SCVariable))
+						addVarExtNamesCollect(SaveXmls, source, startOffset, records);
+					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "GLOBAL_DTS", Config.SCVariable))
+						addVarExtNamesCollect(GlobalSaveDTs, source, startOffset, records);
+					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "SAVE_DTS", Config.SCVariable))
+						addVarExtNamesCollect(SaveDTs, source, startOffset, records);
+					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "STATIC_MAPS", Config.SCVariable))
+						addVarExtNamesCollect(StaticMaps, source, startOffset, records);
+					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "STATIC_XMLS", Config.SCVariable))
+						addVarExtNamesCollect(StaticXmls, source, startOffset, records);
+					else if (FieldEqualsRange(source, keyStart, keyEnd - keyStart, "STATIC_DTS", Config.SCVariable))
+						addVarExtNamesCollect(StaticDTs, source, startOffset, records);
 				}
 			}
 			catch
 			{
-				uEmuera.Media.SystemSounds.Hand.Play();
+				ctx.PlayHandSound();
 				if (position != null)
-					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+					ctx.Warn("予期しないエラーが発生しました", position, 3);
 				else
-					output.PrintError("予期しないエラーが発生しました");
+					ctx.PrintError("予期しないエラーが発生しました");
 			}
 			finally
 			{
 				eReader.Close();
 			}
+			return records;
 		}
 
-		private static void addVarExtNames(HashSet<string> target, string line)
+		/// <summary>
+		/// 与 addVarExtNames 完全相同的逐字段扫描语义，但把 (目标 HashSet, 名字) 记录收集到列表，
+		/// 由调用方在并行阶段结束后按原文件顺序串行回填，避免并行写共享 HashSet。
+		/// </summary>
+		private static void addVarExtNamesCollect(HashSet<string> target, string source, int startOffset, List<KeyValuePair<HashSet<string>, string>> records)
 		{
-			if (line == null)
-				line = "";
+			if (source == null)
+				source = "";
+			int fieldIndex = 0;
+			int start = startOffset;
+			for (int i = startOffset; i <= source.Length; i++)
+			{
+				if (i < source.Length && source[i] != ',')
+					continue;
+				if (fieldIndex > 0)
+				{
+					int s = start;
+					int e = i;
+					while (s < e && char.IsWhiteSpace(source[s]))
+						s++;
+					while (e > s && char.IsWhiteSpace(source[e - 1]))
+						e--;
+					records.Add(new KeyValuePair<HashSet<string>, string>(target, source.Substring(s, e - s)));
+				}
+				fieldIndex++;
+				start = i + 1;
+			}
+		}
+
+		private static void addVarExtNames(HashSet<string> target, string source, int startOffset)
+		{
+			if (source == null)
+				source = "";
 
 			// VarExt*.csv 允许一行声明多个保存域。原核心用裸逗号 Split，
 			// 这里逐字段扫描并保留空字段语义，避免为每行创建完整 string[]。
+			// 只在真正需要（字段0 之后的字段会存入 HashSet）时创建字段字符串，且先 Trim 再 materialize 少一次分配。
 			int fieldIndex = 0;
-			int start = 0;
-			for (int i = 0; i <= line.Length; i++)
+			int start = startOffset;
+			for (int i = startOffset; i <= source.Length; i++)
 			{
-				if (i < line.Length && line[i] != ',')
+				if (i < source.Length && source[i] != ',')
 					continue;
 				if (fieldIndex > 0)
-					target.Add((i == start ? "" : line.Substring(start, i - start)).Trim());
+				{
+					int s = start;
+					int e = i;
+					while (s < e && char.IsWhiteSpace(source[s]))
+						s++;
+					while (e > s && char.IsWhiteSpace(source[e - 1]))
+						e--;
+					target.Add(source.Substring(s, e - s));
+				}
 				fieldIndex++;
 				start = i + 1;
 			}
@@ -1353,15 +1458,16 @@ check1break:
 
 		public CharacterTemplate GetCharacterTemplateFromCsvNo(Int64 index)
 		{
-            //foreach (CharacterTemplate chara in CharacterTmplList)
-            //{
-            //	if (chara.csvNo != index)
-            //		continue;
-            //	return chara;
-            //}
-            //return null;
-            return GetCharacterTemplate(index);
-
+            // 按 CSV 文件编号（csvNo）查找，而不是内部模板 No。
+            // 与 snake 参考实现一致：chara*.csv 的文件名数字可能与其 NO 字段不同，
+            // 用 No 二分查找会解析到错误的模板或静默回退到伪角色。
+            foreach (CharacterTemplate chara in CharacterTmplList)
+            {
+                if (chara.csvNo != index)
+                    continue;
+                return chara;
+            }
+            return null;
         }
 
 		public Int64 GetCsvNoByCharacterStr(CharacterStrData type, string name)
@@ -1414,22 +1520,31 @@ check1break:
 			}
 			List<KeyValuePair<string, string>> csvPaths = Config.GetFiles(csvDir, "CHARA*.CSV");
 			EnsureCharacterTemplateListCapacity(csvPaths.Count);
-			for (int i = 0; i < csvPaths.Count; i++)
-				loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
 #if(UNITY_ANDROID || UNITY_IOS) && !UNITY_EDITOR
-            csvPaths = Config.GetFiles(csvDir, "Chara*.CSV");
+            csvPaths.AddRange(Config.GetFiles(csvDir, "Chara*.CSV"));
             EnsureCharacterTemplateListCapacity(csvPaths.Count);
-            for(int i = 0; i < csvPaths.Count; i++)
-                loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
-            csvPaths = Config.GetFiles(csvDir, "CHARA*.csv");
+            csvPaths.AddRange(Config.GetFiles(csvDir, "CHARA*.csv"));
             EnsureCharacterTemplateListCapacity(csvPaths.Count);
-            for(int i = 0; i < csvPaths.Count; i++)
-                loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
-            csvPaths = Config.GetFiles(csvDir, "Chara*.csv");
+            csvPaths.AddRange(Config.GetFiles(csvDir, "Chara*.csv"));
             EnsureCharacterTemplateListCapacity(csvPaths.Count);
-            for(int i = 0; i < csvPaths.Count; i++)
-                loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp);
 #endif
+            //N5: 角色 CSV 每文件独立解析（各自产出 CharacterTemplate 与副作用记录），
+            //并行完成后按原文件顺序合并进 CharacterTmplList 并按原顺序重放警告/打印，
+            //CharacterTmplList 顺序（含 SortCharacterTmplList 的输入）与串行完全一致。
+            int fileCount = csvPaths.Count;
+            var templateLists = new List<CharacterTemplate>[fileCount];
+            var contexts = new CsvLoadContext[fileCount];
+            Parallel.For(0, fileCount, GetCsvParallelOptions(), i =>
+            {
+                CsvLoadContext ctx = new CsvLoadContext();
+                contexts[i] = ctx;
+                templateLists[i] = loadCharacterDataFile(csvPaths[i].Value, csvPaths[i].Key, disp, ctx);
+            });
+            for (int i = 0; i < fileCount; i++)
+            {
+                CharacterTmplList.AddRange(templateLists[i]);
+                contexts[i].Replay(output);
+            }
             SortCharacterTmplList();
 
             var count = CharacterTmplList.Count;
@@ -1448,6 +1563,9 @@ check1break:
                 tmpl = CharacterTmplList[i];
                 tmpl.SetSpFlag();
             }
+			//M3: テンプレートを疎 Dictionary から密配列へ折り畳む（CharacterData 生成を Array.Copy 直コピー化）
+			for (int i = 0; i < count; ++i)
+				CharacterTmplList[i].FoldArrays();
 			Dictionary<Int64, CharacterTemplate> nList = new Dictionary<Int64, CharacterTemplate>(count);
 			Dictionary<Int64, CharacterTemplate> spList = new Dictionary<Int64, CharacterTemplate>(Config.CompatiSPChara ? count : 0);
             for(int i = 0; i < count; ++i)
@@ -1480,48 +1598,54 @@ check1break:
 				CharacterTmplList.Capacity = target;
 		}
 
-		private void loadCharacterDataFile(string csvPath, string csvName, bool disp)
+		private List<CharacterTemplate> loadCharacterDataFile(string csvPath, string csvName, bool disp, CsvLoadContext ctx)
 		{
+			List<CharacterTemplate> templates = new List<CharacterTemplate>();
 			CharacterTemplate tmpl = null;
 			EraStreamReader eReader = new EraStreamReader(false);
 			if (!eReader.OpenOnCache(csvPath, csvName))
 			{
-				output.PrintError(eReader.Filename + "のオープンに失敗しました");
-				return;
+				ctx.PrintError(eReader.Filename + "のオープンに失敗しました");
+				return templates;
 			}
 			ScriptPosition position = null;
 			if (disp)
-				output.PrintSystemLine(eReader.Filename + "読み込み中・・・");
+				ctx.Print(eReader.Filename + "読み込み中・・・");
 			try
 			{
 				Int64 index = -1;
 				StringStream st = null;
+				//stackalloc をループ外へ退避（CA2014）。各イテレーションで上書きするため再利用は安全。
+				Span<CsvFieldRange> fields = stackalloc CsvFieldRange[3];
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					string line = st.Substring();
-					int tokenCount = ReadCsvHeadFields(line, out string token0, out string token1, out string token2);
+					string source = st.RowString;
+					int startOffset = st.CurrentPosition;
+					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
-						ParserMediator.Warn("\",\"が必要です", position, 1);
+						ctx.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-					if (token0.Length == 0)
+					CsvFieldRange f0 = fields[0];
+					if (f0.Length == 0)
 					{
-						ParserMediator.Warn("\",\"で始まっています", position, 1);
+						ctx.Warn("\",\"で始まっています", position, 1);
 						continue;
 					}
-					if ((token0.Equals("NO", Config.SCVariable))
-						|| (token0.Equals("番号", Config.SCVariable)))
+					if ((FieldEquals(source, f0, "NO", Config.SCVariable))
+						|| (FieldEquals(source, f0, "番号", Config.SCVariable)))
 					{
 						if (tmpl != null)
 						{
-							ParserMediator.Warn("番号が二重に定義されました", position, 1);
+							ctx.Warn("番号が二重に定義されました", position, 1);
 							continue;
 						}
-						if (!Int64.TryParse(token1.TrimEnd(), out index))
+						int noTrimEnd = TrimEndLength(source, fields[1]);
+						if (!Int64.TryParse(source.AsSpan(fields[1].Start, noTrimEnd), out index))
 						{
-							ParserMediator.Warn(token1 + "を整数値に変換できません", position, 1);
+							ctx.Warn(GetFieldString(source, fields[1]) + "を整数値に変換できません", position, 1);
 							continue;
 						}
 						tmpl = new CharacterTemplate(index, this);
@@ -1539,72 +1663,65 @@ check1break:
 						else
 							tmpl.csvNo = 0;
 							//tmpl.csvNo = index;
-						CharacterTmplList.Add(tmpl);
+						templates.Add(tmpl);
 						continue;
 					}
 					if (tmpl == null)
 					{
-						ParserMediator.Warn("番号が定義される前に他のデータが始まりました", position, 1);
+						ctx.Warn("番号が定義される前に他のデータが始まりました", position, 1);
 						continue;
 					}
-					toCharacterTemplate(position, tmpl, token0, token1, token2, tokenCount);
+					toCharacterTemplate(position, tmpl, source, fields, tokenCount, ctx);
 				}
 			}
 			catch
 			{
-				uEmuera.Media.SystemSounds.Hand.Play();
+				ctx.PlayHandSound();
 				if (position != null)
-					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+					ctx.Warn("予期しないエラーが発生しました", position, 3);
 				else
-					output.PrintError("予期しないエラーが発生しました");
-				return;
+					ctx.PrintError("予期しないエラーが発生しました");
+				return templates;
 			}
 			finally
 			{
 				eReader.Dispose();
 			}
+			return templates;
 		}
 
-		private static int ReadCsvHeadFields(string line, out string token0, out string token1, out string token2)
+		/// <summary>CSV 字段在源字符串中的 (start,len) 切片。零分配：只在真正需要时 materialize 成 string。</summary>
+		private readonly struct CsvFieldRange
 		{
-			return ReadCsvHeadFields5(line, out token0, out token1, out token2, out _, out _);
+			public readonly int Start;
+			public readonly int Length;
+			public CsvFieldRange(int start, int length)
+			{
+				Start = start;
+				Length = length;
+			}
 		}
 
-		private static int ReadCsvHeadFields5(string line, out string token0, out string token1, out string token2, out string token3, out string token4)
+		/// <summary>
+		/// 直接从 StringStream 底层 source 按 (start,len) 切片解析 CSV 头部字段，不复制整行，也不为未使用的字段分配字符串。
+		/// 语义与原版裸逗号 Split 完全一致：分隔符 ','、无引号处理、空字段 → 空串、不做任何 Trim。
+		/// 返回字段总数（逗号数+1），与源行的字段数一致。
+		/// </summary>
+		private static int ReadCsvHeadFields(string source, int startOffset, Span<CsvFieldRange> fields)
 		{
-			token0 = "";
-			token1 = "";
-			token2 = "";
-			token3 = "";
-			token4 = "";
-			if (line == null)
-				line = "";
-
-			// CSV 热路径只会读取前几个字段。这里保留原版裸逗号 Split 语义，
-			// 但不为整行分配 string[]，避免上千个 CHARA*.CSV 启动加载时产生大量短命对象。
+			if (source == null)
+				source = "";
 			int count = 1;
 			int fieldIndex = 0;
-			int start = 0;
-			for (int i = 0; i <= line.Length; i++)
+			int start = startOffset;
+			for (int i = startOffset; i <= source.Length; i++)
 			{
-				if (i < line.Length && line[i] != ',')
+				if (i < source.Length && source[i] != ',')
 					continue;
-				if (fieldIndex < 5)
-				{
-					string value = i == start ? "" : line.Substring(start, i - start);
-					if (fieldIndex == 0)
-						token0 = value;
-					else if (fieldIndex == 1)
-						token1 = value;
-					else if (fieldIndex == 2)
-						token2 = value;
-					else if (fieldIndex == 3)
-						token3 = value;
-					else if (fieldIndex == 4)
-						token4 = value;
-				}
+				if (fieldIndex < fields.Length)
+					fields[fieldIndex] = new CsvFieldRange(start, i - start);
 				fieldIndex++;
-				if (i >= line.Length)
+				if (i >= source.Length)
 					break;
 				count++;
 				start = i + 1;
@@ -1612,14 +1729,69 @@ check1break:
 			return count;
 		}
 
-		private static bool StartsWithDigitAfterTrim(string value)
+		private static string GetFieldString(string source, CsvFieldRange f)
 		{
-			if (string.IsNullOrEmpty(value))
+			return source.Substring(f.Start, f.Length);
+		}
+
+		/// <summary>等价于 token.Trim()：去掉首尾 char.IsWhiteSpace 后再 materialize。</summary>
+		private static string GetTrimmedFieldString(string source, CsvFieldRange f)
+		{
+			int start = f.Start;
+			int end = f.Start + f.Length;
+			while (start < end && char.IsWhiteSpace(source[start]))
+				start++;
+			while (end > start && char.IsWhiteSpace(source[end - 1]))
+				end--;
+			return source.Substring(start, end - start);
+		}
+
+		/// <summary>返回去掉尾随空白后的字段长度（等价于 token.TrimEnd().Length）。</summary>
+		private static int TrimEndLength(string source, CsvFieldRange f)
+		{
+			int end = f.Start + f.Length;
+			while (end > f.Start && char.IsWhiteSpace(source[end - 1]))
+				end--;
+			return end - f.Start;
+		}
+
+		/// <summary>零分配字段比较：source[Start..Start+Length] 与 word 按 comp 比较。</summary>
+		private static bool FieldEquals(string source, CsvFieldRange f, string word, StringComparison comp)
+		{
+			return source.AsSpan(f.Start, f.Length).Equals(word.AsSpan(), comp);
+		}
+
+		private static bool FieldEqualsRange(string source, int start, int length, string word, StringComparison comp)
+		{
+			return source.AsSpan(start, length).Equals(word.AsSpan(), comp);
+		}
+
+		/// <summary>
+		/// varname 判断：把字段与 ASCII 大写/日文常量逐字符比较，'a'-'z' 视为大写。
+		/// 与 token0.ToUpper() 的 switch 结果等价：所有可能命中的常量只含 ASCII 大写字母与无大小写的日文。
+		/// 零分配（相对原 token0.ToUpper() 每行分配一个字符串）。
+		/// </summary>
+		private static bool FieldMatchesUpper(string source, CsvFieldRange f, string upperWord)
+		{
+			if (f.Length != upperWord.Length)
 				return false;
-			for (int i = 0; i < value.Length; i++)
+			for (int i = 0; i < f.Length; i++)
 			{
-				if (!char.IsWhiteSpace(value[i]))
-					return char.IsDigit(value[i]);
+				char c = source[f.Start + i];
+				if (c >= 'a' && c <= 'z')
+					c = (char)(c - 32);
+				if (c != upperWord[i])
+					return false;
+			}
+			return true;
+		}
+
+		private static bool StartsWithDigitAfterTrim(string source, CsvFieldRange f)
+		{
+			for (int i = f.Start; i < f.Start + f.Length; i++)
+			{
+				if (!char.IsWhiteSpace(source[i]))
+					return char.IsDigit(source[i]);
 			}
 			return false;
 		}
@@ -1654,24 +1826,43 @@ check1break:
 			}
         }
 
+		private static readonly IList<char> hexadecimalDigits = new char[] { 'a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F' };
+
 		private bool tryToInt64(string str, out Int64 p)
 		{
-			p = -1;
 			if (string.IsNullOrEmpty(str))
+			{
+				p = -1;
 				return false;
-			StringStream st = new StringStream(str);
+			}
+			return tryToInt64(str, 0, str.Length, out p);
+		}
+
+		/// <summary>
+		/// (source, start, length) 版本：不再为每次解析 new StringStream，避免每行 2 次短命对象分配。
+		/// 语义与旧 tryToInt64 完全一致（含 0x/0b 前缀与 p/e 指数、char.IsDigit 全角数字、Convert.ToInt64 异常捕获）。
+		/// </summary>
+		private bool tryToInt64(string source, int start, int length, out Int64 p)
+		{
+			p = -1;
+			if (length <= 0)
+				return false;
+			int i = start;
+			int end = start + length;
 			int sign = 1;
-			if (st.Current == '+')
-				st.ShiftNext();
-			else if (st.Current == '-')
+			if (source[i] == '+')
+				i++;
+			else if (source[i] == '-')
 			{
 				sign = -1;
-				st.ShiftNext();
+				i++;
 			}
 			//1803beta005 char.IsDigitは全角数字とかまでひろってしまうので･･･
 			//if (!char.IsDigit(st.Current))
 			// return false;
-			switch (st.Current)
+			if (i >= end)
+				return false;
+			switch (source[i])
 			{
 				case '0':
 				case '1':
@@ -1689,7 +1880,7 @@ check1break:
 			}
 			try
 			{
-				p = LexicalAnalyzer.ReadInt64(st, false);
+				p = readInt64Range(source, i, end);
 				p *= sign;
 			}
 			catch
@@ -1699,12 +1890,123 @@ check1break:
 			return true;
 		}
 
-		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string[] tokens)
+		/// <summary>LexicalAnalyzer.ReadInt64(st, false) 的 (source,pos,end) 等价实现（从已确认是数字首字符的位置开始）。</summary>
+		private static Int64 readInt64Range(string source, int pos, int end)
 		{
-			toCharacterTemplate(position, chara, tokens[0], tokens[1], tokens.Length >= 3 ? tokens[2] : "", tokens.Length);
+			Int64 significand;
+			int expBase = 0;
+			int exponent = 0;
+			int fromBase = 10;
+			if (pos < end && source[pos] == '0')
+			{
+				if (pos + 1 < end)
+				{
+					char c = source[pos + 1];
+					if ((c == 'x') || (c == 'X'))
+					{
+						fromBase = 16;
+						pos += 2;
+					}
+					else if ((c == 'b') || (c == 'B'))
+					{
+						fromBase = 2;
+						pos += 2;
+					}
+				}
+				//8進法は互換性の問題から採用しない。
+			}
+			significand = readDigitsRange(source, ref pos, end, fromBase);
+			if (pos < end && ((source[pos] == 'p') || (source[pos] == 'P')))
+				expBase = 2;
+			else if (pos < end && ((source[pos] == 'e') || (source[pos] == 'E')))
+				expBase = 10;
+			if (expBase != 0)
+			{
+				pos++;
+				unchecked { exponent = (int)readDigitsRange(source, ref pos, end, fromBase); }
+			}
+			if ((expBase != 0) && (exponent != 0))
+			{
+				double d = significand * Math.Pow(expBase, exponent);
+				if ((double.IsNaN(d)) || (double.IsInfinity(d)) || (d > Int64.MaxValue) || (d < Int64.MinValue))
+					throw new CodeEE("64ビット符号付整数の範囲を超えています");
+				significand = (Int64)d;
+			}
+			return significand;
 		}
 
-		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string token0, string token1, string token2, int tokenCount)
+		/// <summary>LexicalAnalyzer.readDigits 的 (source,ref pos,end) 等价实现。</summary>
+		private static Int64 readDigitsRange(string source, ref int pos, int end, int fromBase)
+		{
+			int start = pos;
+			char c = (pos < end) ? source[pos] : '\0';
+			if ((c == '-') || (c == '+'))
+			{
+				pos++;
+			}
+			if (fromBase == 10)
+			{
+				while (pos < end)
+				{
+					c = source[pos];
+					if (char.IsDigit(c))
+					{
+						pos++;
+						continue;
+					}
+					break;
+				}
+			}
+			else if (fromBase == 16)
+			{
+				while (pos < end)
+				{
+					c = source[pos];
+					if (char.IsDigit(c) || hexadecimalDigits.Contains(c))
+					{
+						pos++;
+						continue;
+					}
+					break;
+				}
+			}
+			else if (fromBase == 2)
+			{
+				while (pos < end)
+				{
+					c = source[pos];
+					if (char.IsDigit(c))
+					{
+						if ((c != '0') && (c != '1'))
+							throw new CodeEE("二進法表記の中で使用できない文字が使われています");
+						pos++;
+						continue;
+					}
+					break;
+				}
+			}
+			string strInt = source.Substring(start, pos - start);
+			try
+			{
+				return Convert.ToInt64(strInt, fromBase);
+			}
+			catch (FormatException)
+			{
+				throw new CodeEE("\"" + strInt + "\"は整数値に変換できません");
+			}
+			catch (OverflowException)
+			{
+				throw new CodeEE("\"" + strInt + "\"は64ビット符号付き整数の範囲を超えています");
+			}
+			catch (ArgumentOutOfRangeException)
+			{
+				if (string.IsNullOrEmpty(strInt))
+					throw new CodeEE("数値として認識できる文字が必要です");
+				throw new CodeEE("文字列\"" + strInt + "\"は数値として認識できません");
+			}
+		}
+
+		private void toCharacterTemplate(ScriptPosition position, CharacterTemplate chara, string source, Span<CsvFieldRange> fields, int tokenCount, CsvLoadContext ctx)
 		{
 			if (chara == null)
 				return;
@@ -1714,125 +2016,134 @@ check1break:
 			Dictionary<string, int> namearray;
 
 			string errPos = null;
-			string varname = token0.ToUpper();
-			switch (varname)
+			CsvFieldRange f0 = fields[0];
+			// varname 判断：直接按 (start,len) 与 ASCII 大写/日文常量逐字符比较（零分配），
+			// 结果与 token0.ToUpper() 的 switch 等价。警告信息用到的 varname 在错误路径才 materialize。
+			if (FieldMatchesUpper(source, f0, "NAME") || FieldMatchesUpper(source, f0, "名前"))
 			{
-				case "NAME":
-				case "名前":
-					chara.Name = token1;
-					return;
-				case "CALLNAME":
-				case "呼び名":
-					chara.Callname = token1;
-					return;
-				case "NICKNAME":
-				case "あだ名":
-					chara.Nickname = token1;
-					return;
-				case "MASTERNAME":
-				case "主人の呼び方":
-					chara.Mastername = token1;
-					return;
-				case "MARK":
-				case "刻印":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.MARK)];
-					intArray = chara.Mark;
-					namearray = nameToIntDics[markIndex];
-					errPos = "mark.csv";
-					break;
-				case "EXP":
-				case "経験":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.EXP)];
-					intArray = chara.Exp;
-					namearray = nameToIntDics[expIndex];//ExpName;
-					errPos = "exp.csv";
-					break;
-				case "ABL":
-				case "能力":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ABL)];
-					intArray = chara.Abl;
-					namearray = nameToIntDics[ablIndex];//AblName;
-					errPos = "abl.csv";
-					break;
-				case "BASE":
-				case "基礎":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.MAXBASE)];
-					intArray = chara.Maxbase;
-					namearray = nameToIntDics[baseIndex];//BaseName;
-					errPos = "base.csv";
-					break;
-				case "TALENT":
-				case "素質":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.TALENT)];
-					intArray = chara.Talent;
-					namearray = nameToIntDics[talentIndex];//TalentName;
-					errPos = "talent.csv";
-					break;
-				case "RELATION":
-				case "相性":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.RELATION)];
-					intArray = chara.Relation;
-					namearray = null;
-					break;
-				case "CFLAG":
-				case "フラグ":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.CFLAG)];
-					intArray = chara.CFlag;
-					namearray = nameToIntDics[cflagIndex];//CFlagName;
-					errPos = "cflag.csv";
-					break;
-				case "EQUIP":
-				case "装着物":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.EQUIP)];
-					intArray = chara.Equip;
-					namearray = nameToIntDics[equipIndex];//EquipName;
-					errPos = "equip.csv";
-					break;
-				case "JUEL":
-				case "珠":
-					length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.JUEL)];
-					intArray = chara.Juel;
-					namearray = nameToIntDics[paramIndex];//ParamName;
-					errPos = "palam.csv";
-					break;
-				case "CSTR":
-					length = CharacterStrArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.CSTR)];
-					strArray = chara.CStr;
-					namearray = nameToIntDics[cstrIndex];//CStrName;
-					errPos = "cstr.csv";
-					break;
-				default:
-					ParserMediator.Warn("\"" + token0 + "\"は解釈できない識別子です", position, 1);
-					return;
+				chara.Name = GetFieldString(source, fields[1]);
+				return;
+			}
+			if (FieldMatchesUpper(source, f0, "CALLNAME") || FieldMatchesUpper(source, f0, "呼び名"))
+			{
+				chara.Callname = GetFieldString(source, fields[1]);
+				return;
+			}
+			if (FieldMatchesUpper(source, f0, "NICKNAME") || FieldMatchesUpper(source, f0, "あだ名"))
+			{
+				chara.Nickname = GetFieldString(source, fields[1]);
+				return;
+			}
+			if (FieldMatchesUpper(source, f0, "MASTERNAME") || FieldMatchesUpper(source, f0, "主人の呼び方"))
+			{
+				chara.Mastername = GetFieldString(source, fields[1]);
+				return;
+			}
+			if (FieldMatchesUpper(source, f0, "MARK") || FieldMatchesUpper(source, f0, "刻印"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.MARK)];
+				intArray = chara.Mark;
+				namearray = nameToIntDics[markIndex];
+				errPos = "mark.csv";
+			}
+			else if (FieldMatchesUpper(source, f0, "EXP") || FieldMatchesUpper(source, f0, "経験"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.EXP)];
+				intArray = chara.Exp;
+				namearray = nameToIntDics[expIndex];//ExpName;
+				errPos = "exp.csv";
+			}
+			else if (FieldMatchesUpper(source, f0, "ABL") || FieldMatchesUpper(source, f0, "能力"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.ABL)];
+				intArray = chara.Abl;
+				namearray = nameToIntDics[ablIndex];//AblName;
+				errPos = "abl.csv";
+			}
+			else if (FieldMatchesUpper(source, f0, "BASE") || FieldMatchesUpper(source, f0, "基礎"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.MAXBASE)];
+				intArray = chara.Maxbase;
+				namearray = nameToIntDics[baseIndex];//BaseName;
+				errPos = "base.csv";
+			}
+			else if (FieldMatchesUpper(source, f0, "TALENT") || FieldMatchesUpper(source, f0, "素質"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.TALENT)];
+				intArray = chara.Talent;
+				namearray = nameToIntDics[talentIndex];//TalentName;
+				errPos = "talent.csv";
+			}
+			else if (FieldMatchesUpper(source, f0, "RELATION") || FieldMatchesUpper(source, f0, "相性"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.RELATION)];
+				intArray = chara.Relation;
+				namearray = null;
+			}
+			else if (FieldMatchesUpper(source, f0, "CFLAG") || FieldMatchesUpper(source, f0, "フラグ"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.CFLAG)];
+				intArray = chara.CFlag;
+				namearray = nameToIntDics[cflagIndex];//CFlagName;
+				errPos = "cflag.csv";
+			}
+			else if (FieldMatchesUpper(source, f0, "EQUIP") || FieldMatchesUpper(source, f0, "装着物"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.EQUIP)];
+				intArray = chara.Equip;
+				namearray = nameToIntDics[equipIndex];//EquipName;
+				errPos = "equip.csv";
+			}
+			else if (FieldMatchesUpper(source, f0, "JUEL") || FieldMatchesUpper(source, f0, "珠"))
+			{
+				length = CharacterIntArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.JUEL)];
+				intArray = chara.Juel;
+				namearray = nameToIntDics[paramIndex];//ParamName;
+				errPos = "palam.csv";
+			}
+			else if (FieldMatchesUpper(source, f0, "CSTR"))
+			{
+				length = CharacterStrArrayLength[(int)(VariableCode.__LOWERCASE__ & VariableCode.CSTR)];
+				strArray = chara.CStr;
+				namearray = nameToIntDics[cstrIndex];//CStrName;
+				errPos = "cstr.csv";
+			}
+			else
+			{
+				ctx.Warn("\"" + GetFieldString(source, f0) + "\"は解釈できない識別子です", position, 1);
+				return;
 			}
 			if (length < 0)
 			{
-				ParserMediator.Warn("プログラムミス", position, 3);
+				ctx.Warn("プログラムミス", position, 3);
 				return;
 			}
 			if (length == 0)
 			{
-				ParserMediator.Warn(varname + "は禁止設定された変数です", position, 2);
+				ctx.Warn(GetFieldString(source, f0).ToUpper() + "は禁止設定された変数です", position, 2);
 				return;
 			}
-			bool p1isNumeric = tryToInt64(token1.TrimEnd(), out long p1);
+			CsvFieldRange f1 = fields[1];
+			bool p1isNumeric = tryToInt64(source, f1.Start, TrimEndLength(source, f1), out long p1);
 			if (p1isNumeric && ((p1 < 0) || (p1 >= length)))
 			{
-				ParserMediator.Warn(p1.ToString() + "は配列の範囲外です", position, 1);
+				ctx.Warn(p1.ToString() + "は配列の範囲外です", position, 1);
 				return;
 			}
 			int index = (int)p1;
+			string token1 = null;
 			if ((!p1isNumeric) && (namearray != null))
 			{
+				token1 = GetFieldString(source, f1);
 				if (!namearray.TryGetValue(token1, out index))
 				{
-					ParserMediator.Warn(errPos + "に\"" + token1 + "\"の定義がありません", position, 1);
+					ctx.Warn(errPos + "に\"" + token1 + "\"の定義がありません", position, 1);
 					//ParserMediator.Warn("\"" + tokens[1] + "\"は解釈できない識別子です", position, 1);
 					return;
 				}
 				else if (index >= length)
 				{
-					ParserMediator.Warn("\"" + token1 + "\"は配列の範囲外です", position, 1);
+					ctx.Warn("\"" + token1 + "\"は配列の範囲外です", position, 1);
 					return;
 				}
 			}
@@ -1840,36 +2151,120 @@ check1break:
 			if ((index < 0) || (index >= length))
 			{
 				if (p1isNumeric)
-					ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
-				else if (token1.Length == 0)
-					ParserMediator.Warn("二つ目の識別子がありません", position, 1);
+					ctx.Warn(index.ToString() + "は配列の範囲外です", position, 1);
+				else if (f1.Length == 0)
+					ctx.Warn("二つ目の識別子がありません", position, 1);
 				else
-					ParserMediator.Warn("\"" + token1 + "\"は解釈できない識別子です", position, 1);
+				{
+					if (token1 == null)
+						token1 = GetFieldString(source, f1);
+					ctx.Warn("\"" + token1 + "\"は解釈できない識別子です", position, 1);
+				}
 				return;
 			}
 			if (strArray != null)
 			{
 				if (tokenCount < 3)
-					ParserMediator.Warn("三つ目の識別子がありません", position, 1);
+					ctx.Warn("三つ目の識別子がありません", position, 1);
 				if (strArray.ContainsKey(index))
-					ParserMediator.Warn(varname + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
-				strArray[index] = token2;
+					ctx.Warn(GetFieldString(source, f0).ToUpper() + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
+				strArray[index] = tokenCount >= 3 ? GetFieldString(source, fields[2]) : "";
 			}
 			else
 			{
-				if ((tokenCount < 3) || !tryToInt64(token2, out long p2))
+				if ((tokenCount < 3) || !tryToInt64(source, fields[2].Start, fields[2].Length, out long p2))
 					p2 = 1;
 				if (intArray.ContainsKey(index))
-					ParserMediator.Warn(varname + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
+					ctx.Warn(GetFieldString(source, f0).ToUpper() + "の" + index.ToString() + "番目の要素は既に定義されています(上書きします)", position, 1);
 				intArray[index] = p2;
 			}
 		}
 
 
-		private void loadDataWithAliases(string csvDir, string baseName, int targetIndex, Int64[] targetI, bool disp)
+		private enum CsvEffectKind : byte
 		{
-			loadDataTo(Path.Combine(csvDir, baseName + ".CSV"), targetIndex, targetI, disp);
-			loadAliases(Path.Combine(csvDir, baseName + ".ALS"), targetIndex);
+			Print,
+			PrintError,
+			Warn,
+			HandSound,
+		}
+
+		private readonly struct CsvSideEffect
+		{
+			public readonly CsvEffectKind Kind;
+			public readonly string Message;
+			public readonly ScriptPosition Position;
+			public readonly int Level;
+			public CsvSideEffect(CsvEffectKind kind, string message, ScriptPosition position, int level)
+			{
+				Kind = kind;
+				Message = message;
+				Position = position;
+				Level = level;
+			}
+		}
+
+		/// <summary>
+		/// N5: CSV 并行解析的副作用捕获器。警告/控制台输出/提示音等副作用不再于工作线程直接执行，
+		/// 而是按每文件顺序记录，全部文件解析完成后由主线程按原文件顺序统一重放。
+		/// ParserMediator.warningList 与 EmueraConsole 输出均非线程安全，因此必须串行重放。
+		/// </summary>
+		private sealed class CsvLoadContext
+		{
+			private readonly List<CsvSideEffect> effects = new List<CsvSideEffect>();
+
+			public void Print(string message)
+			{
+				effects.Add(new CsvSideEffect(CsvEffectKind.Print, message, null, 0));
+			}
+
+			public void PrintError(string message)
+			{
+				effects.Add(new CsvSideEffect(CsvEffectKind.PrintError, message, null, 0));
+			}
+
+			public void Warn(string message, ScriptPosition position, int level)
+			{
+				effects.Add(new CsvSideEffect(CsvEffectKind.Warn, message, position, level));
+			}
+
+			public void PlayHandSound()
+			{
+				effects.Add(new CsvSideEffect(CsvEffectKind.HandSound, null, null, 0));
+			}
+
+			public void Replay(EmueraConsole output)
+			{
+				for (int i = 0; i < effects.Count; i++)
+				{
+					CsvSideEffect effect = effects[i];
+					switch (effect.Kind)
+					{
+						case CsvEffectKind.Print:
+							output.PrintSystemLine(effect.Message);
+							break;
+						case CsvEffectKind.PrintError:
+							output.PrintError(effect.Message);
+							break;
+						case CsvEffectKind.Warn:
+							// 与原串行流程走完全相同的过滤与入队路径；LoadData 期间
+							// Config.DisplayWarningLevel / console.RunERBFromMemory 等状态不变，
+							// 因此延迟重放与串行即时调用结果一致。
+							ParserMediator.Warn(effect.Message, effect.Position, effect.Level);
+							break;
+						case CsvEffectKind.HandSound:
+							uEmuera.Media.SystemSounds.Hand.Play();
+							break;
+					}
+				}
+				effects.Clear();
+			}
+		}
+
+		private void loadDataWithAliases(string csvDir, string baseName, int targetIndex, Int64[] targetI, bool disp, CsvLoadContext ctx)
+		{
+			loadDataTo(Path.Combine(csvDir, baseName + ".CSV"), targetIndex, targetI, disp, ctx);
+			loadAliases(Path.Combine(csvDir, baseName + ".ALS"), targetIndex, ctx);
 		}
 
 		private void loadUserDefinedNameData(string csvPath, string[] target, bool disp)
@@ -1891,17 +2286,21 @@ check1break:
 			try
 			{
 				StringStream st = null;
+				//stackalloc をループ外へ退避（CA2014）。各イテレーションで上書きするため再利用は安全。
+				Span<CsvFieldRange> fields = stackalloc CsvFieldRange[2];
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					int tokenCount = ReadCsvHeadFields(st.Substring(), out string token0, out string token1, out _);
+					string source = st.RowString;
+					int startOffset = st.CurrentPosition;
+					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
 						ParserMediator.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
 					int index;
-					if (!Int32.TryParse(token0, out index))
+					if (!Int32.TryParse(source.AsSpan(fields[0].Start, fields[0].Length), out index))
 					{
 						ParserMediator.Warn("一つ目の値を整数値に変換できません", position, 1);
 						continue;
@@ -1911,7 +2310,7 @@ check1break:
 						ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
 						continue;
 					}
-					target[index] = token1;
+					target[index] = GetFieldString(source, fields[1]);
 				}
 			}
 			catch
@@ -1928,7 +2327,7 @@ check1break:
 			}
 		}
 
-		private void loadDataTo(string csvPath, int targetIndex, Int64[] targetI, bool disp)
+		private void loadDataTo(string csvPath, int targetIndex, Int64[] targetI, bool disp, CsvLoadContext ctx)
 		{
 
 			string resolvedCsvPath = uEmuera.Utils.ResolveExistingFilePath(csvPath);
@@ -1941,49 +2340,54 @@ check1break:
 			EraStreamReader eReader = new EraStreamReader(false);
 			if (!eReader.OpenOnCache(csvPath))
 			{
-				output.PrintError(eReader.Filename + "のオープンに失敗しました");
+				ctx.PrintError(eReader.Filename + "のオープンに失敗しました");
 				return;
 			}
 			ScriptPosition position = null;
 
 			if (disp || Program.AnalysisMode)
-				output.PrintSystemLine(eReader.Filename + "読み込み中・・・");
+				ctx.Print(eReader.Filename + "読み込み中・・・");
 			try
 			{
 				StringStream st = null;
+				//stackalloc をループ外へ退避（CA2014）。各イテレーションで上書きするため再利用は安全。
+				Span<CsvFieldRange> fields = stackalloc CsvFieldRange[3];
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					int tokenCount = ReadCsvHeadFields(st.Substring(), out string token0, out string token1, out string token2);
+					string source = st.RowString;
+					int startOffset = st.CurrentPosition;
+					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
-						ParserMediator.Warn("\",\"が必要です", position, 1);
+						ctx.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-                    if (!Int32.TryParse(token0, out int index))
+                    if (!Int32.TryParse(source.AsSpan(fields[0].Start, fields[0].Length), out int index))
                     {
-                        ParserMediator.Warn("一つ目の値を整数値に変換できません", position, 1);
+                        ctx.Warn("一つ目の値を整数値に変換できません", position, 1);
                         continue;
                     }
                     if (target.Length == 0)
 					{
-						ParserMediator.Warn("禁止設定された名前配列です", position, 2);
+						ctx.Warn("禁止設定された名前配列です", position, 2);
 						break;
 					}
 					if ((index < 0) || (target.Length <= index))
 					{
-						ParserMediator.Warn(index.ToString() + "は配列の範囲外です", position, 1);
+						ctx.Warn(index.ToString() + "は配列の範囲外です", position, 1);
 						continue;
                     }
                     if (!defined.Add(index))
-                        ParserMediator.Warn(index.ToString() + "番目の要素はすでに定義されています（新しい値で上書きします）", position, 1);
-					target[index] = token1;
+                        ctx.Warn(index.ToString() + "番目の要素はすでに定義されています（新しい値で上書きします）", position, 1);
+					target[index] = GetFieldString(source, fields[1]);
 					if ((targetI != null) && (tokenCount >= 3))
 					{
 
-                        if (!Int64.TryParse(token2.TrimEnd(), out long price))
+                        int priceTrimEnd = TrimEndLength(source, fields[2]);
+                        if (!Int64.TryParse(source.AsSpan(fields[2].Start, priceTrimEnd), out long price))
                         {
-                            ParserMediator.Warn("金額が読み取れません", position, 1);
+                            ctx.Warn("金額が読み取れません", position, 1);
                             continue;
                         }
 
@@ -1993,11 +2397,11 @@ check1break:
 			}
 			catch
 			{
-				uEmuera.Media.SystemSounds.Hand.Play();
+				ctx.PlayHandSound();
 				if (position != null)
-					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+					ctx.Warn("予期しないエラーが発生しました", position, 3);
 				else
-					output.PrintError("予期しないエラーが発生しました");
+					ctx.PrintError("予期しないエラーが発生しました");
 				return;
 			}
 			finally
@@ -2008,7 +2412,7 @@ check1break:
 
 		}
 
-		private void loadAliases(string aliasPath, int targetIndex)
+		private void loadAliases(string aliasPath, int targetIndex, CsvLoadContext ctx)
 		{
 			string resolvedAliasPath = uEmuera.Utils.ResolveExistingFilePath(aliasPath);
 			if (!string.IsNullOrEmpty(resolvedAliasPath))
@@ -2021,44 +2425,48 @@ check1break:
 			EraStreamReader eReader = new EraStreamReader(false);
 			if (!eReader.OpenOnCache(aliasPath))
 			{
-				output.PrintError(eReader.Filename + "のオープンに失敗しました");
+				ctx.PrintError(eReader.Filename + "のオープンに失敗しました");
 				return;
 			}
 			ScriptPosition position = null;
 			try
 			{
 				StringStream st = null;
+				//stackalloc をループ外へ退避（CA2014）。各イテレーションで上書きするため再利用は安全。
+				Span<CsvFieldRange> fields = stackalloc CsvFieldRange[2];
 				while ((st = eReader.ReadEnabledLine()) != null)
 				{
 					position = new ScriptPosition(eReader.Filename, eReader.LineNo);
-					int tokenCount = ReadCsvHeadFields(st.Substring(), out string token0, out string token1, out _);
+					string source = st.RowString;
+					int startOffset = st.CurrentPosition;
+					int tokenCount = ReadCsvHeadFields(source, startOffset, fields);
 					if (tokenCount < 2)
 					{
-						ParserMediator.Warn("\",\"が必要です", position, 1);
+						ctx.Warn("\",\"が必要です", position, 1);
 						continue;
 					}
-					if (!Int32.TryParse(token0, out int index))
+					if (!Int32.TryParse(source.AsSpan(fields[0].Start, fields[0].Length), out int index))
 					{
-						ParserMediator.Warn("一つ目の値を整数値に変換できません", position, 1);
+						ctx.Warn("一つ目の値を整数値に変換できません", position, 1);
 						continue;
 					}
-					string aliasName = token1.Trim();
+					string aliasName = GetTrimmedFieldString(source, fields[1]);
 					if (string.IsNullOrEmpty(aliasName))
 						continue;
 						if (!target.TryAdd(aliasName, index))
 						{
-							ParserMediator.Warn("別名\"" + aliasName + "\"は既に定義されています", position, 1);
+							ctx.Warn("別名\"" + aliasName + "\"は既に定義されています", position, 1);
 							continue;
 						}
 					}
 			}
 			catch
 			{
-				uEmuera.Media.SystemSounds.Hand.Play();
+				ctx.PlayHandSound();
 				if (position != null)
-					ParserMediator.Warn("予期しないエラーが発生しました", position, 3);
+					ctx.Warn("予期しないエラーが発生しました", position, 3);
 				else
-					output.PrintError("予期しないエラーが発生しました");
+					ctx.PrintError("予期しないエラーが発生しました");
 				return;
 			}
 			finally
@@ -2090,6 +2498,21 @@ check1break:
 		public readonly Dictionary<Int32, string> CStr = new Dictionary<Int32, string>();
 		public Int64 csvNo;
 		public bool IsSpchara { get; private set; }
+
+		//M3: CSV 読込完了後に 10 個の疎 Dictionary から折り畳まれた密配列。
+		//既定値（数値は 0、文字列は null、RELATION のみ Config.RelationDef）は折り畳み時に焼き込むため、
+		//CharacterData 生成はこれを Array.Copy で直コピーすれば旧実装の逐条辞書コピーと同結果になる。
+		//Dictionary フィールドは公開挙動維持のため残す（他モジュールが辞書として読む）。未折り畳み（擬似キャラ）は null。
+		Int64[] foldedMaxbase;
+		Int64[] foldedMark;
+		Int64[] foldedExp;
+		Int64[] foldedAbl;
+		Int64[] foldedTalent;
+		Int64[] foldedRelation;
+		Int64[] foldedCFlag;
+		Int64[] foldedEquip;
+		Int64[] foldedJuel;
+		string[] foldedCStr;
 		
 		public CharacterTemplate(Int64 index, ConstantData constant)
 		{
@@ -2144,6 +2567,67 @@ check1break:
 			//bool res;
 			if (CFlag.ContainsKey(0) && CFlag[0] != 0L)
 				IsSpchara = true;
+		}
+
+		/// <summary>CSV 読込完了後に疎 Dictionary を密配列へ折り畳む。折り畳み後は Dictionary を変更しないこと。</summary>
+		internal void FoldArrays()
+		{
+			//Maxbase は toCharacterTemplate で MAXBASE の配列長で検証済み（BASE 側と共用）。
+			foldedMaxbase = FoldIntArray(Maxbase, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.MAXBASE)]);
+			foldedMark = FoldIntArray(Mark, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.MARK)]);
+			foldedExp = FoldIntArray(Exp, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.EXP)]);
+			foldedAbl = FoldIntArray(Abl, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.ABL)]);
+			foldedTalent = FoldIntArray(Talent, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.TALENT)]);
+			//RELATION は既定値 Config.RelationDef を焼き込む（CharacterData 生成時の全域初期化と同値）。
+			foldedRelation = FoldIntArray(Relation, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.RELATION)], Config.RelationDef);
+			foldedCFlag = FoldIntArray(CFlag, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.CFLAG)]);
+			foldedEquip = FoldIntArray(Equip, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.EQUIP)]);
+			foldedJuel = FoldIntArray(Juel, arraySize[(int)(VariableCode.__LOWERCASE__ & VariableCode.JUEL)]);
+			foldedCStr = FoldStringArray(CStr, cstrSize);
+		}
+
+		static Int64[] FoldIntArray(Dictionary<int, Int64> src, int length, Int64 defaultValue = 0L)
+		{
+			Int64[] arr = new Int64[length];
+			if (defaultValue != 0L)
+				for (int i = 0; i < length; i++)
+					arr[i] = defaultValue;
+			if (src != null)
+				foreach (KeyValuePair<int, Int64> pair in src)
+					arr[pair.Key] = pair.Value;
+			return arr;
+		}
+
+		static string[] FoldStringArray(Dictionary<int, string> src, int length)
+		{
+			string[] arr = new string[length];
+			if (src != null)
+				foreach (KeyValuePair<int, string> pair in src)
+					arr[pair.Key] = pair.Value;
+			return arr;
+		}
+
+		/// <summary>折り畳まれた密配列を返す。未折り畳み（擬似キャラ等）は null。</summary>
+		internal Int64[] GetFoldedIntArray(CharacterIntData type)
+		{
+			switch (type)
+			{
+				case CharacterIntData.BASE: return foldedMaxbase;
+				case CharacterIntData.MARK: return foldedMark;
+				case CharacterIntData.ABL: return foldedAbl;
+				case CharacterIntData.EXP: return foldedExp;
+				case CharacterIntData.RELATION: return foldedRelation;
+				case CharacterIntData.TALENT: return foldedTalent;
+				case CharacterIntData.CFLAG: return foldedCFlag;
+				case CharacterIntData.EQUIP: return foldedEquip;
+				case CharacterIntData.JUEL: return foldedJuel;
+				default: return null;
+			}
+		}
+
+		internal string[] GetFoldedStrArray()
+		{
+			return foldedCStr;
 		}
 	}
 }

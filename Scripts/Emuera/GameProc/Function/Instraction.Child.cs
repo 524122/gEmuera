@@ -10,6 +10,8 @@ using MinorShift.Emuera.GameData.Variable;
 using MinorShift.Emuera.GameData;
 using MinorShift._Library;
 using MinorShift.Emuera.GameData.Function;
+using MinorShift.Emuera.Content;
+using MinorShift.Emuera.GameView;
 //using System.Drawing;
 using System.IO;
 using uEmuera.Drawing;
@@ -144,10 +146,17 @@ namespace MinorShift.Emuera.GameProc.Function
 					str = ((ExpressionArgument)func.Argument).Term.GetStrValue(exm);
 					if (isForms)
 					{
-						str = exm.CheckEscape(str);
-						StrFormWord wt = LexicalAnalyzer.AnalyseFormattedString(new StringStream(str), FormStrEndWith.EoL, false);
-						StrForm strForm = StrForm.FromWordToken(wt);
-						str = strForm.GetString(exm);
+						// 快速路径：运行时字符串不含任何格式令牌时，
+						// CheckEscape + AnalyseFormattedString + StrForm 是恒等变换，直接跳过完整管道。
+						// 判定条件与 AnalyseFormattedString 的 SubWord 触发条件一一对应，
+						// 覆盖 %、{}、\@、三连符号以及 \n/\0 的截断行为，保证输出文本完全不变。
+						if (NeedsFormattedStringProcessing(str))
+						{
+							str = exm.CheckEscape(str);
+							StrFormWord wt = LexicalAnalyzer.AnalyseFormattedString(new StringStream(str), FormStrEndWith.EoL, false);
+							StrForm strForm = StrForm.FromWordToken(wt);
+							str = strForm.GetString(exm);
+						}
 					}
 				}
 				if (func.Function.IsPrintKFunction())
@@ -159,6 +168,44 @@ namespace MinorShift.Emuera.GameProc.Function
 				else
 					exm.OutputToConsole(str, func.Function, isLineEnd);
 				exm.Console.UseSetColorStyle = true;
+			}
+
+			// 判断运行时格式串是否需要进入 CheckEscape + AnalyseFormattedString 管道。
+			// 返回 false 表示管道是恒等变换（输出 == 输入）。必须与 LexicalAnalyzer
+			// AnalyseFormattedString 的 SubWord 触发条件逐条对应，任何漏判都会改变输出。
+			static bool NeedsFormattedStringProcessing(string str)
+			{
+				if (string.IsNullOrEmpty(str))
+					return false;
+				// '%' 与 '{' 无条件触发 PercentSubWord / CurlyBraceSubWord。
+				if (str.IndexOf('%') >= 0 || str.IndexOf('{') >= 0)
+					return true;
+				// '\' 触发 CheckEscape 转义；与字面换行组合时 AnalyseFormattedString
+				// 会截断剩余文本，因此命中 '\' 也必须走完整管道。
+				if (str.IndexOf('\\') >= 0)
+					return true;
+				// '\n' 与 '\0' 在 FormStrEndWith.EoL 下会提前结束解析（截断），必须走完整管道。
+				if (str.IndexOf('\n') >= 0 || str.IndexOf('\0') >= 0)
+					return true;
+				// 三连符号（***/+++/===///$$$）在未禁用时触发 TripleSymbolSubWord。
+				if (!Config.SystemIgnoreTripleSymbol && ContainsTripleSymbol(str))
+					return true;
+				return false;
+			}
+
+			static bool ContainsTripleSymbol(string str)
+			{
+				int len = str.Length;
+				for (int i = 0; i + 2 < len; i++)
+				{
+					char c = str[i];
+					if (c == '*' || c == '+' || c == '=' || c == '/' || c == '$')
+					{
+						if (str[i + 1] == c && str[i + 2] == c)
+							return true;
+					}
+				}
+				return false;
 			}
 		}
 
@@ -314,19 +361,28 @@ namespace MinorShift.Emuera.GameProc.Function
 			public PRINT_IMG_Instruction()
 			{
 				flag = EXTENDED | METHOD_SAFE;
-				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.STR_EXPRESSION);
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_PRINT_IMG);
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
                 if (GlobalStatic.Process.SkipPrint)
                     return;
-                string str;
-				if (func.Argument.IsConst)
-					str = func.Argument.ConstStr;
-				else
-					str = ((ExpressionArgument)func.Argument).Term.GetStrValue(exm);
-				exm.Console.PrintImg(str);
+				SpPrintImgArgument arg = (SpPrintImgArgument)func.Argument;
+				string name = arg.Name.GetStrValue(exm);
+				string buttonName = arg.ButtonName?.GetStrValue(exm);
+				string mappingName = arg.MappingName?.GetStrValue(exm);
+				if (string.IsNullOrEmpty(buttonName))
+					buttonName = null;
+				if (string.IsNullOrEmpty(mappingName))
+					mappingName = null;
+				exm.Console.PrintImg(
+					name,
+					buttonName,
+					mappingName,
+					getMixedNum(arg.Parameters, exm, 1),
+					getMixedNum(arg.Parameters, exm, 0),
+					getMixedNum(arg.Parameters, exm, 2));
 			}
 		}
 
@@ -335,19 +391,15 @@ namespace MinorShift.Emuera.GameProc.Function
 			public PRINT_RECT_Instruction()
 			{
 				flag = EXTENDED | METHOD_SAFE;
-				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_ANY);
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_PRINT_RECT);
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
                 if (GlobalStatic.Process.SkipPrint)
                     return;
-                ExpressionArrayArgument intExpArg = (ExpressionArrayArgument)func.Argument;
-				int[] param = new int[intExpArg.TermList.Length];
-				for (int i = 0; i < intExpArg.TermList.Length; i++)
-					param[i] = FunctionIdentifier.toUInt32inArg(intExpArg.TermList[i].GetIntValue(exm), "PRINT_RECT", i + 1);
-
-				exm.Console.PrintShape("rect", param);
+				SpPrintShapeArgument arg = (SpPrintShapeArgument)func.Argument;
+				exm.Console.PrintShape("rect", getMixedNums(arg.Parameters, exm));
 			}
 		}
 
@@ -356,20 +408,15 @@ namespace MinorShift.Emuera.GameProc.Function
 			public PRINT_SPACE_Instruction()
 			{
 				flag = EXTENDED | METHOD_SAFE;
-				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION);
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_PRINT_SPACE);
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
                 if (GlobalStatic.Process.SkipPrint)
                     return;
-                Int64 param;
-				if (func.Argument.IsConst)
-					param = func.Argument.ConstInt;
-				else
-					param = ((ExpressionArgument)func.Argument).Term.GetIntValue(exm);
-				int param32 = FunctionIdentifier.toUInt32inArg(param, "PRINT_SPACE", 1);
-				exm.Console.PrintShape("space", new int[] { param32 });
+				SpPrintShapeArgument arg = (SpPrintShapeArgument)func.Argument;
+				exm.Console.PrintShape("space", getMixedNums(arg.Parameters, exm));
 			}
 		}
 
@@ -746,6 +793,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				ExpressionArgument arg = (ExpressionArgument)func.Argument;
 				InputRequest req = new InputRequest();
 				req.InputType = InputType.StrValue;
+				req.EnablePointerInputMetadata = arg.EnablePointerInputMetadata;
 				if (arg.Term != null)
 				{
 					string def;
@@ -809,6 +857,7 @@ namespace MinorShift.Emuera.GameProc.Function
 				InputRequest req = new InputRequest();
 				req.InputType = InputType.StrValue;
 				req.OneInput = true;
+				req.EnablePointerInputMetadata = arg.EnablePointerInputMetadata;
 				if (arg.Term != null)
 				{
 					string def;
@@ -1002,11 +1051,22 @@ namespace MinorShift.Emuera.GameProc.Function
 					if (y >= 10)
 						y = y / (long)(Math.Pow(10.0, Math.Log10((double)y)));
 				}
+				if (tinputarg.Mouse != null)
+					req.MouseInput = tinputarg.Mouse.GetIntValue(exm) == 1;
 				Int64 z = (tinputarg.Disp != null) ? tinputarg.Disp.GetIntValue(exm) : 1;
 				req.Timelimit = x;
 				req.DefIntValue = y;
 				req.DisplayTime = z != 0;
 				req.TimeUpMes = (tinputarg.Timeout != null) ? tinputarg.Timeout.GetStrValue(exm) : Config.TimeupLabel;
+				// EE_INPUT 機能拡張：消息跳过且指定了 CanSkip 时不阻塞，直接写 RESULT。
+				if (tinputarg.CanSkip != null && exm.Console.MesSkip)
+				{
+					if (tinputarg.Mouse == null || tinputarg.Mouse.GetIntValue(exm) == 0)
+						GlobalStatic.VEvaluator.RESULT = y;
+					else
+						GlobalStatic.VEvaluator.RESULT_ARRAY[1] = y;
+					return;
+				}
 				exm.Console.WaitInput(req);
 			}
 		}
@@ -1034,11 +1094,22 @@ namespace MinorShift.Emuera.GameProc.Function
 				string strs = tinputarg.Def.GetStrValue(exm);
 				if (isOne && strs.Length > 1)
 					strs = strs.Remove(1);
+				if (tinputarg.Mouse != null)
+					req.MouseInput = tinputarg.Mouse.GetIntValue(exm) == 1;
 				Int64 z = (tinputarg.Disp != null) ? tinputarg.Disp.GetIntValue(exm) : 1;
 				req.Timelimit = x;
 				req.DefStrValue = strs;
 				req.DisplayTime = z != 0;
 				req.TimeUpMes = (tinputarg.Timeout != null) ? tinputarg.Timeout.GetStrValue(exm) : Config.TimeupLabel;
+				// EE_INPUT 機能拡張：消息跳过且指定了 CanSkip 时不阻塞，直接写 RESULTS。
+				if (tinputarg.CanSkip != null && exm.Console.MesSkip)
+				{
+					if (tinputarg.Mouse == null || tinputarg.Mouse.GetIntValue(exm) == 0)
+						GlobalStatic.VEvaluator.RESULTS = strs;
+					else
+						GlobalStatic.VEvaluator.RESULTS_ARRAY[1] = strs;
+					return;
+				}
 				exm.Console.WaitInput(req);
 			}
 		}
@@ -1800,21 +1871,68 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private sealed class SNAKE_SETIMAGELAYER_ArgumentBuilder : ArgumentBuilder
+		{
+			public static readonly SNAKE_SETIMAGELAYER_ArgumentBuilder Instance = new SNAKE_SETIMAGELAYER_ArgumentBuilder();
+
+			private SNAKE_SETIMAGELAYER_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[]
+				{
+					EraType.String, EraType.Integer, EraType.Integer, EraType.Integer,
+					EraType.Integer, EraType.Integer, EraType.Integer, EraType.Void, EraType.Integer,
+				};
+				minArg = 2;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				StringStream stream = line.PopArgumentPrimitive();
+				WordCollection words = LexicalAnalyzer.Analyse(stream, LexEndWith.EoL, LexAnalyzeFlag.None);
+				IOperandTerm[] terms = ExpressionParser.ReduceArguments(words, ArgsEndWith.EoL, false);
+				var list = new List<IOperandTerm>(terms.Length);
+				for (int i = 0; i < terms.Length; i++)
+					list.Add(terms[i]?.Restructure(exm));
+				return new ExpressionArrayArgument(list);
+			}
+		}
+
+		private sealed class SNAKE_SKIA_ArgumentBuilder : ArgumentBuilder
+		{
+			public static readonly SNAKE_SKIA_ArgumentBuilder Instance = new SNAKE_SKIA_ArgumentBuilder();
+
+			private SNAKE_SKIA_ArgumentBuilder()
+			{
+				argumentTypeArray = new EraType[] { EraType.Integer };
+				minArg = 0;
+				argAny = true;
+			}
+
+			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
+			{
+				StringStream stream = line.PopArgumentPrimitive();
+				WordCollection words = LexicalAnalyzer.Analyse(stream, LexEndWith.EoL, LexAnalyzeFlag.None);
+				IOperandTerm[] terms = ExpressionParser.ReduceArguments(words, ArgsEndWith.EoL, false);
+				var list = new List<IOperandTerm>(terms.Length);
+				for (int i = 0; i < terms.Length; i++)
+					list.Add(terms[i]?.Restructure(exm));
+				return new ExpressionArrayArgument(list);
+			}
+		}
+
 		private sealed class SNAKE_TEXT_BGC_ON_Instruction : AbstractInstruction
 		{
 			public SNAKE_TEXT_BGC_ON_Instruction()
 			{
-				ArgBuilder = SNAKE_ARGS_ArgumentBuilder.Instance;
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_COLOR_ALPHA);
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
 			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
 			{
-				ExpressionArrayArgument arg = (ExpressionArrayArgument)func.Argument;
-				if (arg.TermList.Length == 0 || arg.TermList[0] == null)
-					return;
-				long rgb = arg.TermList[0].GetIntValue(exm);
-				long alphaPercent = arg.TermList.Length > 1 && arg.TermList[1] != null ? arg.TermList[1].GetIntValue(exm) : 100;
+				SpColorAlphaArgument arg = (SpColorAlphaArgument)func.Argument;
+				long rgb = arg.RGB.GetIntValue(exm);
+				long alphaPercent = arg.Alpha.GetIntValue(exm);
 				if (rgb < 0 || rgb > 0xFFFFFF)
 					throw new CodeEE("TEXT_BGC_ONの第１引数が色を表す整数の範囲外です");
 				if (alphaPercent < 0 || alphaPercent > 100)
@@ -1844,7 +1962,9 @@ namespace MinorShift.Emuera.GameProc.Function
 
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
 			{
-				IOperandTerm[] terms = popTerms(line);
+				StringStream st = line.PopArgumentPrimitive();
+				WordCollection wc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.AnalyzePrintV);
+				IOperandTerm[] terms = ExpressionParser.ReduceArguments(wc, ArgsEndWith.EoL, false);
 				if (terms.Length < 1 || terms.Length > 2)
 				{
 					warn(terms.Length < 1 ? "引数が足りません" : "引数が多すぎます", line, 2, false);
@@ -2018,6 +2138,28 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private sealed class V24_SETBGIMAGE_Instruction : AbstractInstruction
+		{
+			public V24_SETBGIMAGE_Instruction()
+			{
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.FORM_STR_ANY);
+				flag = METHOD_SAFE | EXTENDED;
+			}
+
+			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
+			{
+				ExpressionArrayArgument arg = (ExpressionArrayArgument)func.Argument;
+				string name = arg.TermList[0].GetStrValue(exm);
+				long depth = arg.TermList.Length >= 2
+					? long.Parse(arg.TermList[1].GetStrValue(exm))
+					: 0;
+				float opacity = arg.TermList.Length >= 3
+					? long.Parse(arg.TermList[2].GetStrValue(exm)) / 255.0f
+					: 1.0f;
+				exm.Console.AddBackgroundImage(name, depth, opacity);
+			}
+		}
+
 		private sealed class SNAKE_CLEARBGIMAGE_Instruction : AbstractInstruction
 		{
 			public SNAKE_CLEARBGIMAGE_Instruction()
@@ -2053,7 +2195,7 @@ namespace MinorShift.Emuera.GameProc.Function
 		{
 			public SETIMAGELAYER_Instruction()
 			{
-				ArgBuilder = SNAKE_ARGS_ArgumentBuilder.Instance;
+				ArgBuilder = SNAKE_SETIMAGELAYER_ArgumentBuilder.Instance;
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
@@ -2072,6 +2214,45 @@ namespace MinorShift.Emuera.GameProc.Function
 				float[][] colorMatrix = readOptionalColorMatrix(arg, exm, 7);
 				bool followScroll = getOptionalInt(arg, exm, 8, 0) != 0;
 				exm.Console.SetImageLayer(name, depth, x, y, width, height, opacity, colorMatrix, followScroll);
+			}
+		}
+
+		private sealed class SETIMAGELAYERL_Instruction : AbstractInstruction
+		{
+			public SETIMAGELAYERL_Instruction()
+			{
+				ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_SETIMAGELAYERL);
+				flag = METHOD_SAFE | EXTENDED;
+			}
+
+			public override void DoInstruction(ExpressionMediator exm, InstructionLine func, ProcessState state)
+			{
+				SpSetImageLayerArgument arg = (SpSetImageLayerArgument)func.Argument;
+				string spriteName = arg.SpriteName.GetStrValue(exm);
+				long depth = arg.Depth.GetIntValue(exm);
+
+				int xpos = arg.X != null ? (int)arg.X.GetIntValue(exm) : 0;
+				int ypos = arg.Y != null ? (int)arg.Y.GetIntValue(exm) : 0;
+				int width = arg.Width != null ? (int)arg.Width.GetIntValue(exm) : 0;
+				int height = arg.Height != null ? (int)arg.Height.GetIntValue(exm) : 0;
+				int opacity = arg.Opacity != null ? (int)arg.Opacity.GetIntValue(exm) : 255;
+				float[][] colorMatrix = arg.CMArray != null ? readOptionalColorMatrix(arg.CMArray, exm) : null;
+
+				int lineNo = exm.Console.GetLineNo;
+				int imageHeight = height;
+				if (imageHeight <= 0)
+				{
+					var sprite = AppContents.GetSprite(spriteName);
+					if (sprite != null && sprite.IsCreated)
+						imageHeight = sprite.DestBaseSize.Height;
+				}
+
+				int lineHeight = Config.LineHeight;
+				int pointY = exm.Console.GetLinePointY(lineNo);
+				int x = Config.DrawingParam_ShapePositionShift + xpos;
+				int y = pointY + lineHeight - exm.Console.ClientHeight + (imageHeight - lineHeight) + ypos;
+
+				exm.Console.SetImageLayer(spriteName, depth, x, y, width, height, opacity, colorMatrix, true);
 			}
 		}
 
@@ -2330,7 +2511,7 @@ namespace MinorShift.Emuera.GameProc.Function
 			public SNAKE_UI_SETTING_Instruction(FunctionCode code)
 			{
 				this.code = code;
-				ArgBuilder = code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_ARGS_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION);
+				ArgBuilder = code == FunctionCode.SET_SKIA_QUALITY ? SNAKE_SKIA_ArgumentBuilder.Instance : ArgumentParser.GetArgumentBuilder(FunctionArgType.INT_EXPRESSION);
 				flag = METHOD_SAFE | EXTENDED;
 			}
 
@@ -2589,11 +2770,40 @@ namespace MinorShift.Emuera.GameProc.Function
 			}
 		}
 
+		private static MixedNum getMixedNum(MixedIntegerExprTerm[] parameters, ExpressionMediator exm, int index)
+		{
+			if (parameters == null || index < 0 || index >= parameters.Length)
+				return 0;
+			MixedIntegerExprTerm parameter = parameters[index];
+			return new MixedNum
+			{
+				num = (int)parameter.Num.GetIntValue(exm),
+				isPx = parameter.IsPx,
+			};
+		}
+
+		private static MixedNum[] getMixedNums(MixedIntegerExprTerm[] parameters, ExpressionMediator exm)
+		{
+			if (parameters == null || parameters.Length == 0)
+				return Array.Empty<MixedNum>();
+			var result = new MixedNum[parameters.Length];
+			for (int index = 0; index < parameters.Length; index++)
+				result[index] = getMixedNum(parameters, exm, index);
+			return result;
+		}
+
 		private static int getOptionalInt(ExpressionArrayArgument arg, ExpressionMediator exm, int index, int defaultValue)
 		{
 			if (arg.TermList.Length <= index || arg.TermList[index] == null)
 				return defaultValue;
 			return (int)arg.TermList[index].GetIntValue(exm);
+		}
+
+		private static float[][] readOptionalColorMatrix(IOperandTerm term, ExpressionMediator exm)
+		{
+			if (term == null)
+				return null;
+			return readOptionalColorMatrix(new ExpressionArrayArgument(new List<IOperandTerm> { term }), exm, 0);
 		}
 
 		private static float[][] readOptionalColorMatrix(ExpressionArrayArgument arg, ExpressionMediator exm, int index)
@@ -2963,11 +3173,16 @@ namespace MinorShift.Emuera.GameProc.Function
 		private sealed class REPEAT_Instruction : AbstractInstruction
 		{
 			public REPEAT_Instruction(bool fornext)
+				: this(fornext, null)
+			{
+			}
+
+			public REPEAT_Instruction(bool fornext, ArgumentBuilder forNextArgumentBuilder)
 			{
 				flag = METHOD_SAFE | FLOW_CONTROL | PARTIAL;
 				if (fornext)
 				{
-					ArgBuilder = ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_FOR_NEXT);
+					ArgBuilder = forNextArgumentBuilder ?? ArgumentParser.GetArgumentBuilder(FunctionArgType.SP_FOR_NEXT);
 					flag |= EXTENDED;
 				}
 				else

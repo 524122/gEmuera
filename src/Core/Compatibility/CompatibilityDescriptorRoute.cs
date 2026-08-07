@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 
 namespace GEmuera.Core.Compatibility;
 
@@ -29,7 +29,10 @@ public sealed class CompatibilityDescriptorRoute<TInstruction, TFunction>
         ArgumentNullException.ThrowIfNull(legacyInstructions);
         ArgumentNullException.ThrowIfNull(legacyFunctions);
 
-        var instructions = new Dictionary<string, TInstruction>(StringComparer.Ordinal);
+        // Keep the comparer of the legacy handler registry so mixed-case
+        // instruction spellings resolve exactly as the upstream engine does.
+        var instructions = new Dictionary<string, TInstruction>(
+            GetLegacyComparer(legacyInstructions));
         foreach (var descriptor in plan.Dialect.Instructions.Values)
         {
             if (!legacyInstructions.TryGetValue(descriptor.Name, out var handler))
@@ -40,7 +43,8 @@ public sealed class CompatibilityDescriptorRoute<TInstruction, TFunction>
             instructions.Add(descriptor.Name, handler);
         }
 
-        var functions = new Dictionary<string, TFunction>(StringComparer.Ordinal);
+        var functions = new Dictionary<string, TFunction>(
+            GetLegacyComparer(legacyFunctions));
         foreach (var descriptor in plan.Dialect.Functions.Values)
         {
             if (!legacyFunctions.TryGetValue(descriptor.Name, out var handler))
@@ -54,5 +58,12 @@ public sealed class CompatibilityDescriptorRoute<TInstruction, TFunction>
         return new CompatibilityDescriptorRoute<TInstruction, TFunction>(
             new ReadOnlyDictionary<string, TInstruction>(instructions),
             new ReadOnlyDictionary<string, TFunction>(functions));
+    }
+
+    private static IEqualityComparer<string> GetLegacyComparer<TValue>(IReadOnlyDictionary<string, TValue> registry)
+    {
+        return registry is Dictionary<string, TValue> dictionary
+            ? dictionary.Comparer
+            : StringComparer.Ordinal;
     }
 }

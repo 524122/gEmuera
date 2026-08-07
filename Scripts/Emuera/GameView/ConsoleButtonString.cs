@@ -243,5 +243,15 @@ namespace MinorShift.Emuera.GameView
 			return str;
 		}
 
+		public string ToLogString()
+		{
+			if (strArray == null)
+				return "";
+			StringBuilder builder = new StringBuilder();
+			for (int i = 0; i < strArray.Length; ++i)
+				builder.Append(strArray[i]?.ToLogString());
+			return builder.ToString();
+		}
+
 	}
 }

@@ -132,21 +132,30 @@ gemuera-c#/
 │   ├── EmueraMain.cs          # Godot エントリポイント、GPU レンダリング
 │   ├── EmueraThread.cs        # バックグラウンドスレッドラッパー
 │   ├── EmueraContent.cs       # UI レンダラー（行レイアウト、ノード管理）
-│   ├── EmueraImage.cs         # テクスチャ描画コントロール
-│   ├── ColorMatrixGPU.cs      # GPU ColorMatrix shader 管理
-│   ├── SpriteManager.cs       # テクスチャキャッシュ（フレーム制限付き読み込み）
 │   ├── GenericUtils.cs        # エンジン↔UI ブリッジ
 │   ├── FirstWindow.cs         # ランチャー（ゲームスキャン）
 │   ├── Emuera/                # コア Emuera エンジン
 │   │   ├── Config/            # 設定システム
-│   │   ├── Content/           # 画像/リソース管理（ネイティブ BlendRect）
+│   │   ├── Content/           # 画像/リソース管理
 │   │   ├── GameData/          # データモデル、式、変数
 │   │   ├── GameProc/          # スクリプト実行エンジン
-│   │   └── GameView/          # コンソールエミュレーションとレンダリング
+│   │   ├── GameView/          # コンソールエミュレーションとレンダリング
+│   │   └── LegacyRunner/      # レガシー表示/入力リプレイ診断
+│   ├── GodotHost/             # Godot ライフサイクル/プラットフォームブリッジ
 │   ├── Shaders/
 │   │   └── color_matrix.gdshader
 │   └── uEmuera/               # System.Drawing/Forms 互換レイヤー
-├── Fonts/                     # 内蔵フォント (MS Gothic)
+├── assets/                    # Godot 実行時アセット（一元管理・再利用）
+│   ├── fonts/                 # フォント（MS Gothic / Microsoft YaHei、単一コピー）
+│   ├── icons/                 # UI アイコン（SVG）
+│   ├── lang/                  # 多言語テキスト（default/en_us/jp/zh_cn）
+│   ├── scenes/                # パネルシーン（*.tscn）
+│   ├── text/                  # emuera_config テンプレート
+│   └── theme/                 # グローバルテーマ（gemuera_theme.tres）
+├── src/Core/                  # 純 C# コア契約（GEmuera.Core、独立ビルド）
+├── tools/                     # PowerShell ツール（governance/core-contracts 等）
+├── Fixtures/                  # テストフィクスチャ
+├── test/                      # テスト
 └── addons/                    # Godot エディタプラグイン
 ```
 

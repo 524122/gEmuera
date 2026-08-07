@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -14,7 +14,15 @@
          fast test without pulling Godot into Core. -->
     <Compile Include="..\..\Scripts\GodotHost\LegacySessionLaunchRegistry.cs"
              Link="GodotHost\LegacySessionLaunchRegistry.cs" />
+    <Compile Include="..\..\Scripts\GodotHost\GameContentProbe.cs"
+             Link="GodotHost\GameContentProbe.cs" />
     <Compile Include="..\..\Scripts\GodotHost\LegacyThreadQuiescence.cs"
              Link="GodotHost\LegacyThreadQuiescence.cs" />
+    <!-- This immutable legacy projection is deliberately dependency-free.
+         Link it here so profile/module closure is tested without loading Godot. -->
+    <Compile Include="..\..\Scripts\Emuera\Compatibility\LegacyCompatibilityProfile.cs"
+             Link="Emuera\Compatibility\LegacyCompatibilityProfile.cs" />
+    <Compile Include="..\..\Scripts\Emuera\Compatibility\LegacyCompatibilityModules.cs"
+             Link="Emuera\Compatibility\LegacyCompatibilityModules.cs" />
   </ItemGroup>
 </Project>

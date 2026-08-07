@@ -1,76 +1,76 @@
 {
-  "schemaVersion": "1.0.0",
-  "catalogId": "gemuera.m0.dialect-name-lookup-contract",
-  "catalogVersion": "1.0.0",
-  "sourceWorkPackage": "M0-DIA-08",
-  "sourceInventoryWorkPackage": "M0-DIA-01",
-  "sourceOwnershipWorkPackage": "M0-DIA-07",
-  "sourceFiles": [
-    {
-      "id": "ExpressionParser",
-      "path": "Scripts/Emuera/GameData/Expression/ExpressionParser.cs",
-      "sha256": "87fd1573fea118705789b461d47c0fe2f0a8ffc1cc5c1b40472f0ef8697d08a9"
-    },
-    {
-      "id": "FunctionMethodCreator",
-      "path": "Scripts/Emuera/GameData/Function/Creator.cs",
-      "sha256": "b76a7e638fb4269c00830a544877e2190ee1c41e52ffd62cfc459a8abc2bf381"
-    },
-    {
-      "id": "IdentifierDictionary",
-      "path": "Scripts/Emuera/GameData/IdentifierDictionary.cs",
-      "sha256": "28c6065f32e69ef634338b177a566e53c9cde748e068e0fc86f42b690e22161c"
-    },
-    {
-      "id": "ParserMediator",
-      "path": "Scripts/Emuera/GameData/ParserMediator.cs",
-      "sha256": "65be6988406824dca27d37c95398d59ebbbca99e870a462b792f84aa3f9067e9"
-    },
-    {
-      "id": "FunctionIdentifier",
-      "path": "Scripts/Emuera/GameProc/Function/FunctionIdentifier.cs",
-      "sha256": "0674dd19c63f07a72328f986c862ec197afd59fd5ec423ef7264c51b16a93629"
-    },
-    {
-      "id": "LogicalLineParser",
-      "path": "Scripts/Emuera/GameProc/LogicalLineParser.cs",
-      "sha256": "2d0b95ec214943f77078634caddb76909ae73e1239e47c24f567ed6bb8135131"
-    },
-    {
-      "id": "EraStreamReader",
-      "path": "Scripts/Emuera/Sub/EraStreamReader.cs",
-      "sha256": "c3eeb4ce869e7ebde8fc11bcb124af6a7720db47283b4678cac290b89e9948a1"
-    },
-    {
-      "id": "LexicalAnalyzer",
-      "path": "Scripts/Emuera/Sub/LexicalAnalyzer.cs",
-      "sha256": "1cd6b9f16e270e99b51062c747f886a23c109ce06c3e5bf0a8a2cd3acee4a068"
-    }
-  ],
-  "expectedInstructionRegistrationCount": 326,
-  "expectedExpressionRegistrationCount": 360,
-  "expectedInstructionLookupSurfaceCount": 677,
-  "expectedCollisionKeys": [
-    "BITMAP_CACHE_ENABLE",
-    "ENCODETOUNI",
-    "GETTIME",
-    "OUTPUTLOG",
-    "POWER",
-    "PRINTCPERLINE",
-    "SAVENOS",
-    "SETANIMETIMER",
-    "VARSIZE"
-  ],
-  "contracts": {
-    "instructionComparerSelector": "Config.ICVariable",
-    "instructionComparerWhenTrue": "OrdinalIgnoreCase",
-    "instructionComparerWhenFalse": "Ordinal",
-    "instructionNormalizer": "Identity",
-    "expressionComparer": "Ordinal",
-    "expressionNormalizerSelector": "Config.ICFunction",
-    "expressionNormalizerWhenTrue": "CurrentCultureToUpper",
-    "expressionNormalizerWhenFalse": "Identity",
-    "projectionCollisionPolicy": "ExistingInstructionWins",
-    "renameClassification": "SourceTextRewrite"
-  }
+    "schemaVersion":  "1.0.0",
+    "catalogId":  "gemuera.m0.dialect-name-lookup-contract",
+    "catalogVersion":  "1.0.0",
+    "sourceWorkPackage":  "M0-DIA-08",
+    "sourceInventoryWorkPackage":  "M0-DIA-01",
+    "sourceOwnershipWorkPackage":  "M0-DIA-07",
+    "sourceFiles":  [
+                        {
+                            "id":  "ExpressionParser",
+                            "path":  "Scripts/Emuera/GameData/Expression/ExpressionParser.cs",
+                            "sha256":  "61ed594b798329fb45b5051b7b3e78fd6b580536ce47a421eb833411ff03b9c1"
+                        },
+                        {
+                            "id":  "FunctionMethodCreator",
+                            "path":  "Scripts/Emuera/GameData/Function/Creator.cs",
+                            "sha256":  "4b34218719ec72ea097765e41059729d26169aafd22df85a5b51f63602f11001"
+                        },
+                        {
+                            "id":  "IdentifierDictionary",
+                            "path":  "Scripts/Emuera/GameData/IdentifierDictionary.cs",
+                            "sha256":  "6117bbb072b2db36ebcfc4bdc91d7af8bd56c00d9d3ed71d17bce30fee04e583"
+                        },
+                        {
+                            "id":  "ParserMediator",
+                            "path":  "Scripts/Emuera/GameData/ParserMediator.cs",
+                            "sha256":  "77ee5b6822bc00ec4b6c1af20d3c1aea22a7ef7e5d5abb4a2dfd1dfbba0f7379"
+                        },
+                        {
+                            "id":  "FunctionIdentifier",
+                            "path":  "Scripts/Emuera/GameProc/Function/FunctionIdentifier.cs",
+                            "sha256":  "b11063503a316fc27ebb0167c56cac08907c10901f58c58083280e699062d1db"
+                        },
+                        {
+                            "id":  "LogicalLineParser",
+                            "path":  "Scripts/Emuera/GameProc/LogicalLineParser.cs",
+                            "sha256":  "8d48e9a145782efd2b757fae8a1462bbad1c6ee4bc59298826ae3ab08aa913a2"
+                        },
+                        {
+                            "id":  "EraStreamReader",
+                            "path":  "Scripts/Emuera/Sub/EraStreamReader.cs",
+                            "sha256":  "c3eeb4ce869e7ebde8fc11bcb124af6a7720db47283b4678cac290b89e9948a1"
+                        },
+                        {
+                            "id":  "LexicalAnalyzer",
+                            "path":  "Scripts/Emuera/Sub/LexicalAnalyzer.cs",
+                            "sha256":  "e82ab64dfe514f9223149edba6039f18b0b098b8e44ad41ced20da93a2a21365"
+                        }
+                    ],
+    "expectedInstructionRegistrationCount":  327,
+    "expectedExpressionRegistrationCount":  362,
+    "expectedInstructionLookupSurfaceCount":  680,
+    "expectedCollisionKeys":  [
+                                  "BITMAP_CACHE_ENABLE",
+                                  "ENCODETOUNI",
+                                  "GETTIME",
+                                  "OUTPUTLOG",
+                                  "POWER",
+                                  "PRINTCPERLINE",
+                                  "SAVENOS",
+                                  "SETANIMETIMER",
+                                  "VARSIZE"
+                              ],
+    "contracts":  {
+                      "instructionComparerSelector":  "Config.ICVariable",
+                      "instructionComparerWhenTrue":  "OrdinalIgnoreCase",
+                      "instructionComparerWhenFalse":  "Ordinal",
+                      "instructionNormalizer":  "Identity",
+                      "expressionComparer":  "Ordinal",
+                      "expressionNormalizerSelector":  "Config.ICFunction",
+                      "expressionNormalizerWhenTrue":  "CurrentCultureToUpper",
+                      "expressionNormalizerWhenFalse":  "Identity",
+                      "projectionCollisionPolicy":  "ExistingInstructionWins",
+                      "renameClassification":  "SourceTextRewrite"
+                  }
 }

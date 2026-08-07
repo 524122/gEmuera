@@ -46,10 +46,15 @@ namespace MinorShift.Emuera.GameProc
 		public bool NoFocus = false;
 		public bool StopMesskip = false;
 		public bool IsSystemInput = false;
+		// eraFL 的 INPUTS ,1：真实指针提交时同时提供 RESULTS:0/1，并隐藏内部按钮值回显。
+		public bool EnablePointerInputMetadata = false;
 
 		public bool HasDefValue = false;
 		public long DefIntValue;
 		public string DefStrValue;
+
+		// EE_INPUT 機能拡張：TINPUT 第5参数（鼠标输入开关）。
+		public bool MouseInput = false;
 
 		public long Timelimit = -1;
 		public bool DisplayTime;

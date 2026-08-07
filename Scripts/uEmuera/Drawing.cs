@@ -591,7 +591,7 @@ namespace uEmuera.Drawing
 		public static Color FromArgb(int argb)
 		{
 			return FromArgb(
-					(argb >> 24),
+					((argb >> 24) & 0xFF),
 					((argb >> 16) & 0xFF),
 					((argb >> 8) & 0xFF),
 					(argb & 0xFF));

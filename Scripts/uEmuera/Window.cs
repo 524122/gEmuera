@@ -1,34 +1,290 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.IO;
 using uEmuera.Forms;
 using uEmuera.Drawing;
+using MinorShift.Emuera;
 using MinorShift.Emuera.GameProc;
 using MinorShift.Emuera.GameView;
+using MinorShift.Emuera.GameData.Expression;
+using MinorShift.Emuera.Sub;
 using MinorShift._Library;
 using System.Threading;
+using gEmuera.GodotHost;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace uEmuera.Window
 {
+    /// <summary>
+    /// Emuera DEBUG 模式调试窗口的引擎侧门面（参考 v24 DebugDialog 移植）。
+    /// 本对象全部生命周期运行在 Emuera worker 线程（OpenDebugDialog / @DEBUG 指令）：
+    /// - 引擎态访问（DebugConsoleLog、GetDebugTraceLog、watch 表达式求值、DebugCommand）
+    ///   一律在 worker 侧完成，通过 EmueraDebugSnapshot 推送给主线程面板；
+    /// - 主线程面板只能调用 EnqueueCommand / EnqueueWatchList / EnqueueCloseRequest
+    ///   （纯队列投递，由 worker 定时器在引擎空闲边界消费）。
+    /// 打开时注册 worker 侧定时器（uEmuera.Forms.Timer，由 EmueraThread 空闲循环驱动），
+    /// 每 200ms 在引擎 INPUT/WAIT 边界做一次命令执行 + watch 求值 + 快照推送。
+    /// 关闭时保存 debug\watchlist.csv 与 debug\console.log 到 Program.DebugDir。
+    /// </summary>
     public class DebugDialog : IDisposable
     {
-        public void Dispose()
-        { }
+        const int RefreshIntervalMilliseconds = 200;
+        const string WatchListFileName = "watchlist.csv";
+        const string ConsoleLogFileName = "console.log";
+
+        EmueraConsole console;
+        Process emuera;
+        volatile bool created;
+        readonly List<string> watchExpressions = new List<string>();
+        readonly ConcurrentQueue<string> pendingCommands = new ConcurrentQueue<string>();
+        readonly ConcurrentQueue<string[]> pendingWatchList = new ConcurrentQueue<string[]>();
+        readonly ConcurrentQueue<bool> pendingCloseRequests = new ConcurrentQueue<bool>();
+        uEmuera.Forms.Timer refreshTimer;
+
+        string WatchFilePath { get { return Program.DebugDir + WatchListFileName; } }
+        string ConsoleFilePath { get { return Program.DebugDir + ConsoleLogFileName; } }
+
+        public bool Created { get { return created; } }
 
         internal void SetParent(EmueraConsole emueraConsole, Process emuera)
         {
-            //throw new NotImplementedException();
+            console = emueraConsole;
+            this.emuera = emuera;
         }
 
         internal void Show()
         {
-            //throw new NotImplementedException();
+            if (created)
+                return;
+            created = true;
+            LoadWatchListFromDisk();
+            refreshTimer = new uEmuera.Forms.Timer
+            {
+                Interval = RefreshIntervalMilliseconds,
+                Enabled = true,
+            };
+            refreshTimer.Tick += OnRefreshTick;
+            EmueraDebugDialogPanel.ShowPanel(console, this);
         }
 
         internal void Focus()
         {
-            //throw new NotImplementedException();
+            if (!created)
+                return;
+            EmueraDebugDialogPanel.FocusPanel();
         }
 
-        public bool Created { get { return true; } }
+        public void Close()
+        {
+            Dispose();
+        }
+
+        public void Dispose()
+        {
+            if (!created)
+                return;
+            created = false;
+            if (refreshTimer != null)
+            {
+                refreshTimer.Enabled = false;
+                refreshTimer.Tick -= OnRefreshTick;
+                refreshTimer.Dispose();
+                refreshTimer = null;
+            }
+            // 面板在主线程可能已投递 watch 列表更新（✕ 关闭时），先消费再落盘。
+            while (pendingWatchList.TryDequeue(out string[] list))
+                ApplyWatchList(list);
+            SaveWatchListToDisk();
+            SaveConsoleLogToDisk();
+            EmueraDebugDialogPanel.HidePanel();
+        }
+
+        /// <summary>主线程面板 → worker：调试控制台命令（回车触发）。</summary>
+        public void EnqueueCommand(string text)
+        {
+            if (!string.IsNullOrEmpty(text))
+                pendingCommands.Enqueue(text);
+        }
+
+        /// <summary>主线程面板 → worker：watch 表达式整表替换。</summary>
+        public void EnqueueWatchList(string[] expressions)
+        {
+            if (expressions == null)
+                return;
+            pendingWatchList.Enqueue(expressions);
+        }
+
+        /// <summary>主线程面板 → worker：请求关闭（✕ 按钮，Dispose 仅在 worker 线程执行）。</summary>
+        public void EnqueueCloseRequest()
+        {
+            pendingCloseRequests.Enqueue(true);
+        }
+
+        void OnRefreshTick(object sender, EventArgs e)
+        {
+            if (!created || console == null)
+                return;
+            // 会话边界自愈：console 已随 GlobalStatic.Reset 解绑或 DEBUG 模式已关闭时
+            // 自行释放，避免定时器泄漏到下一个会话。
+            if (!Program.DebugMode || !ReferenceEquals(GlobalStatic.Console, console))
+            {
+                Dispose();
+                return;
+            }
+
+            while (pendingCloseRequests.TryDequeue(out _))
+            {
+                Dispose();
+                return;
+            }
+            while (pendingCommands.TryDequeue(out string command))
+                ExecuteDebugCommand(command);
+            while (pendingWatchList.TryDequeue(out string[] list))
+                ApplyWatchList(list);
+
+            EmueraDebugDialogPanel.PushSnapshot(BuildSnapshot());
+        }
+
+        void ExecuteDebugCommand(string command)
+        {
+            if (console == null || console.IsInProcess)
+                return; // 参考实现要求引擎空闲才执行；定时器仅在 INPUT/WAIT 边界触发
+            console.DebugPrint(command);
+            console.DebugNewLine();
+            console.DebugCommand(command, false, true);
+        }
+
+        void ApplyWatchList(string[] expressions)
+        {
+            watchExpressions.Clear();
+            for (int i = 0; i < expressions.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(expressions[i]))
+                    watchExpressions.Add(expressions[i]);
+            }
+        }
+
+        EmueraDebugSnapshot BuildSnapshot()
+        {
+            string consoleLog = console.DebugConsoleLog;
+            string traceLog = console.GetDebugTraceLog(false) ?? "";
+            string[] expressions = watchExpressions.ToArray();
+            string[] values = new string[expressions.Length];
+            if (expressions.Length > 0)
+                EvaluateWatches(expressions, values);
+            return new EmueraDebugSnapshot(consoleLog, traceLog, expressions, values);
+        }
+
+        // 参考 v24 DebugDialog.updateVarWatch + getValueString 移植：
+        // saveCurrentState(false) → 逐项 LexicalAnalyzer.Analyse +
+        // ExpressionParser.ReduceExpressionTerm + term.GetValue(EMediator)
+        // （RunERBFromMemory=true 包裹）→ finally clearMethodStack()+loadPrevState()。
+        // 只读求值；改值请走调试控制台命令框（@SET）。
+        void EvaluateWatches(string[] expressions, string[] values)
+        {
+            if (emuera == null || GlobalStatic.EMediator == null)
+                return;
+            GlobalStatic.Process.saveCurrentState(false);
+            try
+            {
+                for (int i = 0; i < expressions.Length; i++)
+                    values[i] = GetValueString(expressions[i]);
+            }
+            finally
+            {
+                GlobalStatic.Process.clearMethodStack();
+                GlobalStatic.Process.loadPrevState();
+            }
+        }
+
+        string GetValueString(string str)
+        {
+            if ((emuera == null) || (GlobalStatic.EMediator == null))
+                return "";
+            if (string.IsNullOrEmpty(str))
+                return "";
+            console.RunERBFromMemory = true;
+            try
+            {
+                StringStream st = new StringStream(str);
+                WordCollection wc = LexicalAnalyzer.Analyse(st, LexEndWith.EoL, LexAnalyzeFlag.None);
+                IOperandTerm term = ExpressionParser.ReduceExpressionTerm(wc, TermEndWith.EoL);
+                if (term == null)
+                    return "";
+                SingleTerm value = term.GetValue(GlobalStatic.EMediator);
+                return value.ToString();
+            }
+            catch (CodeEE e)
+            {
+                return e.Message;
+            }
+            catch (Exception e)
+            {
+                return e.GetType().ToString() + ":" + e.Message;
+            }
+            finally
+            {
+                console.RunERBFromMemory = false;
+            }
+        }
+
+        void LoadWatchListFromDisk()
+        {
+            try
+            {
+                if (!File.Exists(WatchFilePath))
+                    return;
+                var lines = new List<string>();
+                using (StreamReader reader = new StreamReader(WatchFilePath, Config.Encode))
+                {
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        if (!string.IsNullOrEmpty(line))
+                            lines.Add(line);
+                    }
+                }
+                watchExpressions.Clear();
+                watchExpressions.AddRange(lines);
+            }
+            catch
+            {
+                // 参考实现加载失败仅提示；这里静默（debug 工具不阻塞会话）。
+            }
+        }
+
+        void SaveWatchListToDisk()
+        {
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(WatchFilePath, false, Config.Encode))
+                {
+                    for (int i = 0; i < watchExpressions.Count; i++)
+                    {
+                        if (!string.IsNullOrEmpty(watchExpressions[i]))
+                            writer.WriteLine(watchExpressions[i]);
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        void SaveConsoleLogToDisk()
+        {
+            if (console == null)
+                return;
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(ConsoleFilePath, false, Config.Encode))
+                    writer.Write(console.DebugConsoleLog);
+            }
+            catch
+            {
+            }
+        }
     }
 
     public class MainWindow : IDisposable
@@ -123,12 +379,18 @@ namespace uEmuera.Window
 
             GenericUtils.SetBackgroundColor(console_.bgColor);
 
-            var displayLines = console_.GetDisplayLinesSnapshotForuEmuera();
-            var console_count = displayLines.Length;
+            int prev = GenericUtils.GetTextMaxLineNo();
+            int min_lineno = GenericUtils.GetTextMinLineNo();
+            bool sampleDisplayBridge = GenericUtils.IsPerformanceSamplingEnabled;
+            long snapshotStartTimestamp = sampleDisplayBridge ? Stopwatch.GetTimestamp() : 0;
+            var displayLines = console_.GetDisplayLinesSnapshotForuEmuera(
+                min_lineno, out int console_count, out _);
+            int snapshotCount = displayLines.Length;
+            double snapshotElapsedMs = sampleDisplayBridge
+                ? GetElapsedMilliseconds(snapshotStartTimestamp)
+                : 0.0;
             if(console_count == 0)
             {
-                dynamicMapViewActive = false;
-                dynamicMapViewBaseLineNo = -1;
                 if(console_.IsInProcess)
                 {
                     dirty_ = true;
@@ -145,23 +407,7 @@ namespace uEmuera.Window
             int removeBottomCount = 0;
             System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd = null;
             System.Collections.Generic.List<ConsoleDisplayLine> linesToRefreshData = null;
-            int prev = GenericUtils.GetTextMaxLineNo();
-            int min_lineno = GenericUtils.GetTextMinLineNo();
-            int displayStartIndex = 0;
-            if(TryFindDynamicMapWindowStart(displayLines, out int dynamicMapStartIndex))
-            {
-                int mapBaseLineNo = displayLines[dynamicMapStartIndex].LineNo;
-                // 这里只保留动态地图上下文标记，不再裁剪 Godot 显示视图。
-                // 历史内容继续参与行级 diff，进入地图后仍可向上查看前文；
-                // 动态地图内完全停用“把视口拉回选项区”的补偿，避免查看历史时被刷新拉回底部。
-                dynamicMapViewActive = true;
-                dynamicMapViewBaseLineNo = mapBaseLineNo;
-            }
-            else if(dynamicMapViewActive)
-            {
-                dynamicMapViewActive = false;
-                dynamicMapViewBaseLineNo = -1;
-            }
+            long diffStartTimestamp = sampleDisplayBridge ? Stopwatch.GetTimestamp() : 0;
             int newMaxLineNo = GetSnapshotMaxLineNo(displayLines);
             bool fullReset = prev >= 0 && min_lineno >= 0 && newMaxLineNo >= 0 && newMaxLineNo < min_lineno;
 
@@ -179,7 +425,7 @@ namespace uEmuera.Window
                 }
             }
 
-            for(int i = displayStartIndex; i < console_count; i++)
+            for(int i = 0; i < snapshotCount; i++)
             {
                 var line = displayLines[i];
                 if(line == null)
@@ -212,59 +458,48 @@ namespace uEmuera.Window
                 linesToAdd.Add((line, isUpdate));
             }
 
-            bool hasDynamicMapFunctionDelta = GenericUtils.ContainsDynamicMapFunctionScope(linesToAdd);
             EmueraDisplayScrollMode scrollMode = DecideScrollModeForDisplayDelta(prev, removeBottomCount, need_update_flag,
-                linesToAdd, dynamicMapViewActive, hasDynamicMapFunctionDelta);
-            bool scrollToBottom = scrollMode == EmueraDisplayScrollMode.FollowBottom;
-
-            if (GenericUtils.IsDynamicMapLineSnapshotTraceEnabled)
-            {
-                bool hasBitmapContext = GenericUtils.ContainsDynamicMapBitmapContext(linesToAdd)
-                    || GenericUtils.ContainsDynamicMapBitmapContextTail(displayLines);
-                if (GenericUtils.ShouldTraceDynamicMap(hasBitmapContext))
-                {
-                    GenericUtils.DynamicMapTrace("DYNAMIC_MAP.BRIDGE.SUBMIT",
-                        () => "dynamic map bridge display diff",
-                        () => "console_count=" + console_count
-                            + " remove_bottom=" + removeBottomCount
-                            + " add=" + (linesToAdd?.Count ?? 0)
-                            + " data_only=" + (linesToRefreshData?.Count ?? 0)
-                            + " view_start=" + displayStartIndex
-                            + " map_view=" + dynamicMapViewActive
-                            + " map_base=" + dynamicMapViewBaseLineNo
-                            + " map_delta=" + hasDynamicMapFunctionDelta
-                            + " update=" + need_update_flag
-                            + " scroll_mode=" + scrollMode
-                            + " auto_scroll=" + scrollToBottom
-                            + " prev_max=" + prev
-                            + " last_button_generation=" + console_.LastButtonGeneration
-                            + " has_bitmap_context=" + hasBitmapContext
-                            + " tail=" + GenericUtils.BuildDynamicMapLineTailSummary(displayLines)
-                            + " incoming=" + GenericUtils.BuildDynamicMapDeltaLineSummary(linesToAdd));
-                }
-            }
+                linesToAdd, linesToRefreshData);
 
             GenericUtils.ApplyTextChanges(removeBottomCount, linesToAdd, need_update_flag, console_.LastButtonGeneration, scrollMode, linesToRefreshData);
+            double diffElapsedMs = sampleDisplayBridge
+                ? GetElapsedMilliseconds(diffStartTimestamp)
+                : 0.0;
 
             GenericUtils.ShowIsInProcess(false);
-            GenericUtils.RefreshCBG(console_);
-            console_.NeedSetTimer();
+            bool cbgSubmitted = GenericUtils.RefreshCBG(console_);
+            if (sampleDisplayBridge)
+            {
+                GenericUtils.SampleDisplayBridge(snapshotElapsedMs, diffElapsedMs, snapshotCount, removeBottomCount,
+                    linesToAdd?.Count ?? 0, linesToRefreshData?.Count ?? 0, cbgSubmitted);
+            }
+            if (console_.NeedSetTimer())
+                EmueraThread.instance.WakeForTimerSchedule();
             last_process_tic = 0;
             Volatile.Write(ref processedRefreshGeneration, Volatile.Read(ref refreshRequestGeneration));
         }
 
-        static EmueraDisplayScrollMode DecideScrollModeForDisplayDelta(int previousMaxLineNo, int removeBottomCount, bool update,
-            System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd, bool dynamicMapViewActive,
-            bool hasDynamicMapFunctionDelta)
+        static double GetElapsedMilliseconds(long startTimestamp)
         {
-            // 动态地图、状态面板一类内容通常通过删除底部旧行再重画当前屏幕来刷新。
+            if (startTimestamp <= 0)
+                return 0.0;
+            return (Stopwatch.GetTimestamp() - startTimestamp) * 1000.0 / Stopwatch.Frequency;
+        }
+
+        static EmueraDisplayScrollMode DecideScrollModeForDisplayDelta(int previousMaxLineNo, int removeBottomCount, bool update,
+            System.Collections.Generic.List<(ConsoleDisplayLine Line, bool Update)> linesToAdd,
+            System.Collections.Generic.List<ConsoleDisplayLine> dataOnlyLines)
+        {
+            // 状态面板等页面通常通过删除底部旧行再重画当前屏幕来刷新。
             // 这不是“追加新文本”，因此不能触发 ScrollContainer 自动滚到底；否则 Android 会在重绘时把视口拖走。
-            // 但第一次进入地图或普通新文本追加仍应允许追到底部，否则会出现需要手动滑到底的问题。
-            if (linesToAdd == null || linesToAdd.Count == 0)
+            // 只有确实新增了显示行时才追底，避免把内容类型识别重新耦合回滚动策略。
+            if ((linesToAdd == null || linesToAdd.Count == 0)
+                && (dataOnlyLines == null || dataOnlyLines.Count == 0))
                 return EmueraDisplayScrollMode.PreserveViewport;
 
             bool hasAppendAfterPreviousMax = false;
-            for (int i = 0; i < linesToAdd.Count; i++)
+            int linesToAddCount = linesToAdd?.Count ?? 0;
+            for (int i = 0; i < linesToAddCount; i++)
             {
                 var item = linesToAdd[i];
                 if (item.Line == null)
@@ -276,11 +511,8 @@ namespace uEmuera.Window
                 }
             }
 
-            if ((dynamicMapViewActive || hasDynamicMapFunctionDelta) && (removeBottomCount > 0 || update))
-                return EmueraDisplayScrollMode.PreserveViewport;
-
             // 普通会话/泡茶等输出可能在追加新文本的同时刷新旧行元数据。
-            // 只要不是动态地图重绘，并且确实出现了新行，就按普通 Emuera 输出追到底部。
+            // 只要确实出现了新行，就按普通 Emuera 输出追到底部。
             if (hasAppendAfterPreviousMax)
                 return EmueraDisplayScrollMode.FollowBottom;
 
@@ -288,94 +520,6 @@ namespace uEmuera.Window
                 return EmueraDisplayScrollMode.PreserveViewport;
 
             return EmueraDisplayScrollMode.PreserveViewport;
-        }
-
-        static bool TryFindDynamicMapWindowStart(ConsoleDisplayLine[] lines, out int startIndex)
-        {
-            startIndex = -1;
-            if(lines == null || lines.Length == 0)
-                return false;
-
-            int lastBitmapIndex = -1;
-            int searchStart = Math.Max(0, lines.Length - DynamicMapTailSearchLineCount);
-            for(int i = lines.Length - 1; i >= searchStart; i--)
-            {
-                if(GenericUtils.LineHasDynamicMapBitmapContext(lines[i]))
-                {
-                    lastBitmapIndex = i;
-                    break;
-                }
-            }
-            if(lastBitmapIndex < 0)
-                return false;
-
-            int firstBitmapIndex = lastBitmapIndex;
-            while(firstBitmapIndex > 0 && GenericUtils.LineHasDynamicMapBitmapContext(lines[firstBitmapIndex - 1]))
-                firstBitmapIndex--;
-
-            int bitmapLineCount = lastBitmapIndex - firstBitmapIndex + 1;
-            if(bitmapLineCount < 6)
-                return false;
-
-            if(!LooksLikeMapWindow(lines, firstBitmapIndex, lastBitmapIndex, bitmapLineCount))
-                return false;
-
-            startIndex = firstBitmapIndex;
-            return true;
-        }
-
-        static bool LooksLikeMapWindow(ConsoleDisplayLine[] lines, int firstBitmapIndex, int lastBitmapIndex, int bitmapLineCount)
-        {
-            int commandCount = 0;
-            for(int i = firstBitmapIndex; i <= lastBitmapIndex; i++)
-                commandCount += CountCommandButtons(lines[i], 0);
-
-            if(bitmapLineCount >= 12 && commandCount >= 2)
-                return true;
-
-            int start = Math.Max(0, firstBitmapIndex - 3);
-            int end = Math.Min(lines.Length - 1, lastBitmapIndex + 8);
-            for(int i = start; i <= end; i++)
-            {
-                string text = lines[i]?.ToString() ?? "";
-                if(text.IndexOf("地图", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("地圖", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("地図", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("所在地", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("当前位置", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("現在地", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("察觉", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("察覺", StringComparison.Ordinal) >= 0
-                    || text.IndexOf("察知", StringComparison.Ordinal) >= 0)
-                    return commandCount > 0 || bitmapLineCount >= 8;
-            }
-            return false;
-        }
-
-        static int CountCommandButtons(ConsoleDisplayLine line, int depth)
-        {
-            if(line?.Buttons == null || depth > 4)
-                return 0;
-            int count = 0;
-            for(int i = 0; i < line.Buttons.Length; i++)
-            {
-                var button = line.Buttons[i];
-                if(button == null)
-                    continue;
-                if(button.IsButton)
-                    count++;
-                if(button.StrArray == null)
-                    continue;
-                for(int j = 0; j < button.StrArray.Length; j++)
-                {
-                    if(button.StrArray[j] is ConsoleDivPart div && div.Children != null)
-                    {
-                        for(int k = 0; k < div.Children.Length; k++)
-                            count += CountCommandButtons(div.Children[k], depth + 1);
-                    }
-                }
-            }
-            return count;
         }
 
         static int GetSnapshotMaxLineNo(ConsoleDisplayLine[] lines)
@@ -437,8 +581,6 @@ namespace uEmuera.Window
                 || current.IsLogicalLine != next.IsLogicalLine
                 || current.IsTemporary != next.IsTemporary
                 || current.IsLineEnd != next.IsLineEnd
-                || current.BitmapCacheEnabled != next.BitmapCacheEnabled
-                || current.DynamicMapFunctionScoped != next.DynamicMapFunctionScoped
                 || current.Align != next.Align
                 || current.TextBackgroundColor != next.TextBackgroundColor)
                 return false;
@@ -506,7 +648,12 @@ namespace uEmuera.Window
                 return false;
 
             if(current is ConsoleStyledString currentText && next is ConsoleStyledString nextText)
-                return currentText.StringStyle == nextText.StringStyle;
+                return currentText.StringStyle == nextText.StringStyle
+                    && currentText.FontSize == nextText.FontSize
+                    && currentText.VerticalAlign == nextText.VerticalAlign
+                    && string.Equals(currentText.RenderMode ?? "", nextText.RenderMode ?? "", StringComparison.Ordinal)
+                    && string.Equals(currentText.FontEdging ?? "", nextText.FontEdging ?? "", StringComparison.Ordinal)
+                    && string.Equals(currentText.FontHinting ?? "", nextText.FontHinting ?? "", StringComparison.Ordinal);
 
             if(current is ConsoleImagePart currentImage && next is ConsoleImagePart nextImage)
             {
@@ -564,10 +711,6 @@ namespace uEmuera.Window
         private volatile bool dirty_ = false;
         private int refreshRequestGeneration = 0;
         private int processedRefreshGeneration = 0;
-        private bool dynamicMapViewActive = false;
-        private int dynamicMapViewBaseLineNo = -1;
-        private const int DynamicMapTailSearchLineCount = 32;
-
         public int RefreshRequestGeneration
         {
             get { return Volatile.Read(ref refreshRequestGeneration); }

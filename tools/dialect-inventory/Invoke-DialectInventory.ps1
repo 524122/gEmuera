@@ -12,7 +12,7 @@ if ([string]::IsNullOrWhiteSpace($ClassificationPath)) {
     $ClassificationPath = Join-Path $scriptRoot 'dialect-classification.json'
 }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path ([IO.Path]::GetFullPath($ProjectRoot)) 'NewFrameworkDesign\generated\dialect-inventory.json'
+    $OutputPath = Join-Path ([IO.Path]::GetFullPath($ProjectRoot)) 'docs\NewFrameworkDesign\generated\dialect-inventory.json'
 }
 
 try {

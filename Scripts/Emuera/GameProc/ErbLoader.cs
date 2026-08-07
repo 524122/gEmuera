@@ -24,7 +24,8 @@ namespace MinorShift.Emuera.GameProc
 		readonly Process parentProcess;
 		readonly ExpressionMediator exm;
 		readonly EmueraConsole output;
-        readonly List<string> ignoredFNFWarningFileList = new List<string>();
+        // snake 参考实现：用 OrdinalIgnoreCase HashSet 替换 List+ToUpper，O(1) 判重且避免每次 ToUpper 分配。
+        readonly HashSet<string> ignoredFNFWarningFileList = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 		int ignoredFNFWarningCount = 0;
 
 		int enabledLineCount = 0;
@@ -77,22 +78,28 @@ namespace MinorShift.Emuera.GameProc
 				{
 					parentProcess.ResetLazyLoadingState();
 				}
-				for (int i = 0; i < erbFiles.Count; i++)
+				//N5: 全量加载改为单个 Task.Run 内的 foreach，消除逐文件 await 的线程跳跃。
+				//文件内顺序、警告顺序、首个异常传播行为与原逐文件 await 完全一致
+				//（loadErb 本身及其内部 output.PrintXxx 原本就已在 Task.Run 线程池线程上执行）。
+				await Task.Run(() =>
 				{
-					string filename = erbFiles[i].Key;
-					string file = erbFiles[i].Value;
-					if (useLazyLoading && parentProcess.IsLazyLoadingFile(file))
-						continue;
+					for (int i = 0; i < erbFiles.Count; i++)
+					{
+						string filename = erbFiles[i].Key;
+						string file = erbFiles[i].Value;
+						if (useLazyLoading && parentProcess.IsLazyLoadingFile(file))
+							continue;
 #if UEMUERA_DEBUG
-					if (displayReport)
-						output.PrintSystemLine("経過時間:" + (WinmmTimer.TickCount - starttime).ToString("D4") + "ms:" + filename + "読み込み中・・・");
+						if (displayReport)
+							output.PrintSystemLine("経過時間:" + (WinmmTimer.TickCount - starttime).ToString("D4") + "ms:" + filename + "読み込み中・・・");
 #else
-					if (displayReport)
-						output.PrintSystemLine(filename + "読み込み中・・・");
+						if (displayReport)
+							output.PrintSystemLine(filename + "読み込み中・・・");
 #endif
-					//System.Windows.Forms.//Application.DoEvents();
-					await Task.Run(() => loadErb(file, filename, isOnlyEvent));
-				}
+						//System.Windows.Forms.//Application.DoEvents();
+						loadErb(file, filename, isOnlyEvent);
+					}
+				});
 				ParserMediator.FlushWarningList();
 #if UEMUERA_DEBUG
 				output.PrintSystemLine("経過時間:" + (WinmmTimer.TickCount - starttime).ToString("D4") + "ms:");
@@ -102,6 +109,11 @@ namespace MinorShift.Emuera.GameProc
 				await Task.Run(() => setLabelsArg());
 				ParserMediator.FlushWarningList();
 				labelDic.Initialized = true;
+				//M8: 全量加载完成。LazyLoading 关闭时 ERB 解码文本不再被任何路径重读，
+				//释放 Preload 中整会话驻留的 ERB 条目（开启时保留，供懒加载命中后重读）。
+				//后续任何再读（ReloadErb 等）都会回退到直接磁盘读取，语义不变。
+				if (!useLazyLoading)
+					Preload.RemoveByExtension(".erb");
 #if UEMUERA_DEBUG
 				output.PrintSystemLine("経過時間:" + (WinmmTimer.TickCount - starttime).ToString("D4") + "ms:");
 #endif
@@ -210,6 +222,12 @@ namespace MinorShift.Emuera.GameProc
 
 		private void TryPreRegisterSnakeDynamicVariable(LogicalLine line)
 		{
+			if (!Program.Compatibility.Snake.AllowsScopedVariablePreRegistration
+				|| !Program.Compatibility.ScopedVariableInstructionsEnabled)
+			{
+				return;
+			}
+
 			InstructionLine instruction = line as InstructionLine;
 			if (instruction == null || instruction.ParentLabelLine == null)
 				return;
@@ -687,7 +705,7 @@ namespace MinorShift.Emuera.GameProc
                         {
 							// TODO: Snake compatibility fallback — relax subscript requirement for PRIVATE arguments.
 							// Remove once snake scripts are updated to declare subscripts explicitly.
-							bool allowSnakePrivateArgument = Program.IsSnakeProfile && vTerm.Identifier.IsPrivate;
+							bool allowSnakePrivateArgument = Program.Compatibility.Snake.AllowsPrivateArguments && vTerm.Identifier.IsPrivate;
                             if (vTerm is VariableNoArgTerm && !allowSnakePrivateArgument)
                             { errMes = "関数定義の参照型でない引数\"" + vTerm.Identifier.Name + "\"に添え字が指定されていません"; goto err; }
                             if (!vTerm.isAllConst && !allowSnakePrivateArgument)
@@ -1008,7 +1026,7 @@ namespace MinorShift.Emuera.GameProc
 			else if (warnFlag == DisplayWarningFlag.ONCE)
 			{
 
-				string filename = line.Position.Filename.ToUpper();
+				string filename = line.Position.Filename;
 				if (!string.IsNullOrEmpty(filename))
 				{
 					if (ignoredFNFWarningFileList.Contains(filename))

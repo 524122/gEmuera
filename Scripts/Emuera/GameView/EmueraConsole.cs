@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.IO;
+using System.Threading;
 using Godot;
 using MinorShift._Library;
 using MinorShift.Emuera.Sub;
@@ -121,6 +122,10 @@ namespace MinorShift.Emuera.GameView
 
 	internal sealed partial class EmueraConsole :IDisposable
 	{
+		StreamWriter debuglog = null;
+		// 调试日志订阅句柄：闭包捕获的是字段，Dispose 置空 debuglog 前必须退订，
+		// 否则 displayLineList.Add 再触发 Changed 时会在 handler 内抛 NullReferenceException。
+		EventHandler<ChangedEventArgs> debugLoggingHandler = null;
 		public EmueraConsole(MainWindow parent)
 		{
 			window = parent;
@@ -132,26 +137,27 @@ namespace MinorShift.Emuera.GameView
 			if (Config.FPS > 0)
 			{
 				int effectiveFps = Config.FPS;
-				if (Program.IsSnakeProfile && effectiveFps < 60)
+				if (Program.Compatibility.Snake.UsesFastDisplayRefresh && effectiveFps < 60)
 					effectiveFps = 60;
 				msPerFrame = 1000 / (uint)effectiveFps;
 			}
 			//displayLineList = new List<ConsoleDisplayLine>();
             displayLineList = new DisplayLineList();
-            //if (Program.DebugMode)
-            //{
-            //    debuglog = new StreamWriter(Program.DebugDir + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log", true, Encoding.UTF8)
-            //    {
-            //        AutoFlush = true,
-            //    };
+            //DEBUG模式:全描画ログをdebugフォルダに出力する
+            if (Program.DebugMode)
+            {
+                debuglog = new StreamWriter(Program.DebugDir + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log", true, Encoding.UTF8)
+                {
+                    AutoFlush = true,
+                };
 
-            //    void logging(object sender, ChangedEventArgs e)
-            //    {
-            //        var s = e.ConsoleDisplayLine.ToString();
-            //        debuglog.WriteLine(s);
-            //    }
-            //    displayLineList.Changed += logging;
-            //}
+                debugLoggingHandler = (sender, e) =>
+                {
+                    var s = e.ConsoleDisplayLine.ToString();
+                    debuglog.WriteLine(s);
+                };
+                displayLineList.Changed += debugLoggingHandler;
+            }
 
 			printBuffer = new PrintStringBuffer(this);
 
@@ -170,6 +176,9 @@ namespace MinorShift.Emuera.GameView
 		private readonly object displayLineLock = new object();
 		private readonly object cbgLock = new object();
 		private readonly List<ClientBackGroundImage> cbgList = new List<ClientBackGroundImage>();
+		// CBG 列表变化与 GraphicsImage 像素变化都可能要求 Godot 重提背景层。
+		// 该 revision 只描述展示快照，不参与 ERB 可见状态，避免普通文本刷新重复提交静态背景。
+		private int cbgPresentationRevision;
 		private GraphicsImage cbgButtonMap = null;
 		private int selectingCBGButtonInt = -1;
 		private int lastSelectingCBGButtonInt = -1;
@@ -200,6 +209,8 @@ namespace MinorShift.Emuera.GameView
 			public bool isButton = false;
 			public int buttonValue;
 			public string tooltipString = null;
+			internal long ObservedImageDisplayRevision = long.MinValue;
+			internal long ObservedButtonImageDisplayRevision = long.MinValue;
 			public int CompareTo(ClientBackGroundImage other)
 			{
 				if (other == null)
@@ -305,6 +316,61 @@ namespace MinorShift.Emuera.GameView
 				return new List<ClientBackGroundImage>(cbgList);
 		}
 
+		/// <summary>
+		/// 仅在 CBG 结构、GraphicsImage 像素或逐帧 SpriteAnime 发生变化时复制图层列表。
+		/// Window.Update 会随地图文本高频调用本入口；静态背景不能因此在 Android 每帧重新 pin 纹理并失效 CanvasItem。
+		/// </summary>
+		public bool TryGetCBGListSnapshot(int knownRevision, out int revision, out List<ClientBackGroundImage> snapshot)
+		{
+			lock (cbgLock)
+			{
+				if (HasCbgDisplayContentChangedLocked())
+					Interlocked.Increment(ref cbgPresentationRevision);
+
+				revision = Volatile.Read(ref cbgPresentationRevision);
+				if (revision == knownRevision)
+				{
+					snapshot = null;
+					return false;
+				}
+
+				snapshot = new List<ClientBackGroundImage>(cbgList);
+				return true;
+			}
+		}
+
+		bool HasCbgDisplayContentChangedLocked()
+		{
+			bool changed = false;
+			for (int i = 0; i < cbgList.Count; i++)
+			{
+				var layer = cbgList[i];
+				if (layer == null)
+					continue;
+
+				// SpriteAnime 的当前帧由绘制时钟决定，无法只依赖列表结构 revision。
+				// 保持每次已有显示刷新都可提交新帧，不能因为去重而冻结动画。
+				if (layer.Img is SpriteAnime || layer.ImgB is SpriteAnime)
+					return true;
+
+				changed |= UpdateObservedCbgGraphicsRevision(layer.Img, ref layer.ObservedImageDisplayRevision);
+				changed |= UpdateObservedCbgGraphicsRevision(layer.ImgB, ref layer.ObservedButtonImageDisplayRevision);
+			}
+			return changed;
+		}
+
+		static bool UpdateObservedCbgGraphicsRevision(ASprite sprite, ref long observedRevision)
+		{
+			if (sprite is not ASpriteSingle single || single.BaseImage is not GraphicsImage graphics)
+				return false;
+
+			long revision = graphics.DisplayRevision;
+			if (observedRevision == revision)
+				return false;
+			observedRevision = revision;
+			return true;
+		}
+
 		private bool ClearCbgButtonMapState()
 		{
 			bool changed = cbgButtonMap != null || selectingCBGButtonInt != -1 || lastSelectingCBGButtonInt != -1;
@@ -318,6 +384,7 @@ namespace MinorShift.Emuera.GameView
 		{
 			// CBG/SETIMAGELAYER 只改背景列表时可能没有文本输出触发刷新。
 			// 这里只唤醒 uEmuera 窗口，实际 Godot 节点重建仍由 Window.Update 合并到下一帧执行。
+			Interlocked.Increment(ref cbgPresentationRevision);
 			window?.Refresh();
 		}
 
@@ -620,6 +687,19 @@ namespace MinorShift.Emuera.GameView
 		}
 		public int ClientWidth { get { return Config.WindowX; } }
 		public int ClientHeight { get { return Config.WindowY; } }
+		public int GetLinePointY(int lineNo)
+		{
+			int pointY = ClientHeight - Config.LineHeight;
+			int bottomLineNo = window.ScrollBar.Value - 1;
+			lock (displayLineLock)
+			{
+				if (displayLineList.Count - 1 < bottomLineNo)
+					bottomLineNo = displayLineList.Count - 1;
+			}
+			pointY -= (bottomLineNo - lineNo) * Config.LineHeight;
+			return pointY;
+		}
+
 #endregion
 
 		const string ErrorButtonsText = "__openFileWithDebug__";
@@ -735,6 +815,18 @@ namespace MinorShift.Emuera.GameView
 				if (IsWaitInputState)
 					return (inputReq.InputType == InputType.PrimitiveMouseKey);
 				return false;
+			}
+		}
+
+		internal bool IsWaitingDefaultableIntValue
+		{
+			get
+			{
+				return IsWaitInputState
+					&& inputReq != null
+					&& inputReq.InputType == InputType.IntValue
+					&& inputReq.HasDefValue
+					&& !IsRunningTimer;
 			}
 		}
 		
@@ -1007,15 +1099,10 @@ namespace MinorShift.Emuera.GameView
 		}
 
 		/// <summary>
-		/// ToolTip表示したフラグ
-		/// </summary>
-		bool tooltipUsed = false;
-		/// <summary>
 		/// マウスの直下にあるテキスト。ボタンであってもよい。
 		/// ToolTip表示用。世代無視、履歴中も表示
 		/// </summary>
 		ConsoleButtonString pointingString = null;
-		ConsoleButtonString lastPointingString = null;
 		#endregion
 
 		#region Input & Timer系
@@ -1033,8 +1120,9 @@ namespace MinorShift.Emuera.GameView
 				return;
 			}
 			uint awaitStart = WinmmTimer.TickCount;
-			int refreshWaitMs = Program.IsSnakeProfile ? 4 : 40;
-			int frameWaitMs = Program.IsSnakeProfile ? (time > 0 ? Math.Min(8, time) : 0) : 20;
+			bool usesFastDisplayRefresh = Program.Compatibility.Snake.UsesFastDisplayRefresh;
+			int refreshWaitMs = usesFastDisplayRefresh ? 4 : 40;
+			int frameWaitMs = usesFastDisplayRefresh ? (time > 0 ? Math.Min(8, time) : 0) : 20;
 			int uiFrame = global::GenericUtils.UiFrameGeneration;
 			RefreshStrings(true);
 			int refreshGeneration = window.RefreshRequestGeneration;
@@ -1048,7 +1136,7 @@ namespace MinorShift.Emuera.GameView
 
 			if (time > 0)
 			{
-				if (Program.IsSnakeProfile)
+				if (usesFastDisplayRefresh)
 				{
 					int elapsed = (int)(WinmmTimer.TickCount - awaitStart);
 					int remaining = time - elapsed;
@@ -1062,7 +1150,7 @@ namespace MinorShift.Emuera.GameView
 					System.Threading.Thread.Sleep(time);
 				}
 			}
-			else if (Program.IsSnakeProfile)
+			else if (usesFastDisplayRefresh)
 				System.Threading.Thread.Yield();
 
 			////DoEvents()の間にウインドウが閉じられたらおしまい。
@@ -1075,13 +1163,30 @@ namespace MinorShift.Emuera.GameView
 			state = ConsoleState.Running;
 		}
 
+		private void SimulateSequenceInput(InputRequest req)
+		{
+			string raw = emuera.SequenceInputValue ?? string.Empty;
+			emuera.HasSequenceInput = false;
+			emuera.SequenceInputValue = null;
+			inputReq = req;
+			state = ConsoleState.WaitInput;
+			PressEnterKey(false, raw, false);
+		}
+
 		public void WaitInput(InputRequest req)
 		{
+			// SEQUENCEINPUT schedules a synthetic input on the next wait; consume it once.
+			if (emuera != null && emuera.HasSequenceInput)
+			{
+				SimulateSequenceInput(req);
+				return;
+			}
+
 			state = req.NoFocus ? ConsoleState.WaitInputNoFocus : ConsoleState.WaitInput;
 			inputReq = req;
-			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			if (global::gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
 			{
-				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+				global::gEmuera.LegacyRunner.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
 					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
 			}
 			bool flushDeferredRewrite = ConsumeDisplayRewriteRefresh();
@@ -1113,9 +1218,9 @@ namespace MinorShift.Emuera.GameView
 			req.StopMesskip = stopMesskip;
 			inputReq = req;
 			state = ConsoleState.WaitInput;
-			if (global::gEmuera.M0.LegacyTrace.IsEnabled)
+			if (global::gEmuera.LegacyRunner.LegacyTrace.IsEnabled)
 			{
-				global::gEmuera.M0.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
+				global::gEmuera.LegacyRunner.LegacyTrace.TryRecordWait("request_pending", req.ID, req.InputType.ToString(),
 					req.NeedValue, req.OneInput, req.NoFocus, req.Timelimit, NewButtonGeneration);
 			}
 			emuera.NeedWaitToEventComEnd = false;
@@ -1131,14 +1236,16 @@ namespace MinorShift.Emuera.GameView
 
 		private void tickRedrawTimer(object sender, EventArgs e)
 		{
-			if (!redrawTimer.Enabled)
-				return;
-			//INPUT待ちでないとき、又はタイマー付きINPUT状態の場合はこれ以外の処理に任せる
-			if (!IsWaitInputState || timer.Enabled)
-			{
-				return;
-			}
-			window.Refresh();//OnPaint発行
+			// Godot 管线中本定时器为 no-op：SETANIMETIMER 期间的动画重绘已由 Godot 侧
+			// 每帧自驱动（RefreshCanvasImageAnimations / EmueraImage._Process 推进
+			// SpriteAnime / AnimatedWebp 帧并 QueueRedraw），不再需要 window.Refresh()
+			// 置 dirty 触发 MainWindow.Update() 的全量显示快照+diff（INPUT 等待时每帧
+			// 扫描全部显示行是纯开销）。定时器状态机（setRedrawTimer / AnimeTimer /
+			// GETANIMETIMER）语义保持原样：Enable/Interval 照常维护。
+			// 原实现（Windows 版）：
+			//   if (!redrawTimer.Enabled) return;
+			//   if (!IsWaitInputState || timer.Enabled) return;
+			//   window.Refresh();//OnPaint発行
 		}
 
 		/// <summary>
@@ -1203,13 +1310,15 @@ namespace MinorShift.Emuera.GameView
 			timer_nextDisplayTime = timer_startTime + 100;
 
 		}
-        public void NeedSetTimer()
+        public bool NeedSetTimer()
         {
             if(need_settimer)
             {
                 need_settimer = false;
                 setTimer();
+                return true;
             }
+            return false;
         }
 
 		//汎用
@@ -1301,20 +1410,20 @@ namespace MinorShift.Emuera.GameView
 		/// スクリプト実行。RefreshStringsはしないので呼び出し側がすること
 		/// </summary>
 		/// <param name="str"></param>
-		private void callEmueraProgram(string str)
+		private void callEmueraProgram(string str, bool changedByMouse = false)
 		{
 			//入力文字列の表示処理を行わない場合はstr == null
 			if (str != null)
 			{
 				//INPUT文字列をPRINTする処理など
-				if (!doInputToEmueraProgram(str))
+				if (!doInputToEmueraProgram(str, changedByMouse))
 					return;
 				if (state == ConsoleState.Error)
 					return;
 			}
-			if (global::gEmuera.M0.LegacyTrace.IsEnabled && inputReq != null)
+			if (global::gEmuera.LegacyRunner.LegacyTrace.IsEnabled && inputReq != null)
 			{
-				global::gEmuera.M0.LegacyTrace.TryRecordWait("completion_consumed", inputReq.ID,
+				global::gEmuera.LegacyRunner.LegacyTrace.TryRecordWait("completion_consumed", inputReq.ID,
 					inputReq.InputType.ToString(), inputReq.NeedValue, inputReq.OneInput, inputReq.NoFocus,
 					inputReq.Timelimit, NewButtonGeneration);
 			}
@@ -1333,8 +1442,9 @@ namespace MinorShift.Emuera.GameView
 			newGeneration();
 		}
 
-		private bool doInputToEmueraProgram(string str)
+		private bool doInputToEmueraProgram(string str, bool changedByMouse)
 		{
+			bool suppressInputEcho = false;
 			if (IsWaitInputState)
 			{
 				Int64 inputValue;
@@ -1375,7 +1485,14 @@ namespace MinorShift.Emuera.GameView
 						//空入力と時間切れ
 						if (str == null)
 							str = "";
-						emuera.InputString(str);
+						if (changedByMouse && inputReq.EnablePointerInputMetadata)
+						{
+							// INPUTS ,1 的指针值是脚本内部协议，不是要显示给玩家的输入正文。
+							emuera.InputStringWithPointerMetadata(str);
+							suppressInputEcho = true;
+						}
+						else
+							emuera.InputString(str);
 						break;
 					case InputType.StrButton:
 						if (string.IsNullOrEmpty(str) && inputReq.HasDefValue && !IsRunningTimer)
@@ -1404,7 +1521,8 @@ namespace MinorShift.Emuera.GameView
 				}
 				stopTimer();
 			}
-			Print(str);
+			if (!suppressInputEcho)
+				Print(str);
 			PrintFlush(false);
 			return true;
 		}
@@ -1514,11 +1632,12 @@ namespace MinorShift.Emuera.GameView
 			try
 			{
 				string[] text;
-				if(changedByMouse)//1823 マウスによって入力されたならマクロ解析を行わない
+				bool inputMacroEnabled = emuera == null || emuera.InputMacroEnabled;
+				if (changedByMouse || !inputMacroEnabled) // Snake/EE can feed the sequence literally.
 				{ text = new string[] { str }; }
 				else
 				{
-					if (str.StartsWith("@") && !inputReq.OneInput)
+					if (str.Length > 1 && str.StartsWith("@") && !inputReq.OneInput)
 					{
 						doSystemCommand(str);
 						return;
@@ -1529,12 +1648,18 @@ namespace MinorShift.Emuera.GameView
 						(inputReq.InputType == InputType.AnyKey || inputReq.InputType == InputType.EnterKey))
 						stopTimer();
 					//if((inputReq.InputType == InputType.IntValue || inputReq.InputType == InputType.StrValue)
-					if (str.Contains("("))
+					if (str.Contains("(") && inputMacroEnabled)
 						str = parseInput(new StringStream(str), false);
 					text = str.Split(spliter, StringSplitOptions.None);
 				}
 				
 				inProcess = true;
+				if (!inputMacroEnabled)
+				{
+					callEmueraProgram(str, changedByMouse);
+					RefreshStrings(false);
+					goto endMacro;
+				}
 				for (int i = 0; i < text.Length; i++)
 				{
 					string inputs = text[i];
@@ -1553,7 +1678,7 @@ namespace MinorShift.Emuera.GameView
 						i--;
 						inputs = "";
 					}
-					callEmueraProgram(inputs);
+					callEmueraProgram(inputs, changedByMouse);
 					RefreshStrings(false);
 					while (MesSkip && IsWaitInputState)
 					{
@@ -2050,18 +2175,12 @@ namespace MinorShift.Emuera.GameView
         }
 
 		public uEmuera.Drawing.Color? TextBackgroundColor { get; set; }
-		internal bool IsDynamicMapOutputScopeActive
-		{
-			get { return emuera?.State?.IsInDynamicMapFunctionScope() == true; }
-		}
-
-		bool bitmapCacheEnabledForNextLine = false;
 		public bool BitmapCacheEnabledForNextLine
 		{
-			get { return bitmapCacheEnabledForNextLine; }
 			set
 			{
-				bitmapCacheEnabledForNextLine = value;
+				// ERB 兼容入口必须保留，否则现有游戏会因未知指令中断。
+				// 这里只把成对的 BITMAP_CACHE_ENABLE 当作整帧重写提示，不保存任何缓存状态。
 				if (value)
 					MarkDisplayRewriteInProgress();
 			}
@@ -2701,6 +2820,16 @@ namespace MinorShift.Emuera.GameView
 
 		public void Dispose()
 		{
+			if(debugLoggingHandler != null)
+			{
+				displayLineList.Changed -= debugLoggingHandler;
+				debugLoggingHandler = null;
+			}
+			if(debuglog != null)
+			{
+				debuglog.Dispose();
+				debuglog = null;
+			}
 			if(timer != null)
 				timer.Dispose();
 			//timer = null;

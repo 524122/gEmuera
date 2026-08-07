@@ -8,7 +8,7 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Invoke-DialectInventory.ps1 -ProjectRoot .
 ```
 
-默认输出到 `NewFrameworkDesign/generated/dialect-inventory.json`。报告固定为 `executionStatus=InProgress`、`gateStatus=Blocked`、`blockerCode=EvidenceMissing`、`result=Partial`；静态库存不能升级为行为兼容结论。
+默认输出到 `docs/NewFrameworkDesign/generated/dialect-inventory.json`。报告固定为 `executionStatus=InProgress`、`gateStatus=Blocked`、`blockerCode=EvidenceMissing`、`result=Partial`；静态库存不能升级为行为兼容结论。
 
 ## 失败语义
 
@@ -41,7 +41,34 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Test
 
 snapshot hash 只包含已选择 module 和规范化注册描述，不包含 available-but-unselected module、生成时间、绝对路径或 provenance warning 文本。加入但不选择 `game.snake` 时 v24 hash 必须不变；选择集合内重复公开键必须失败。
 
-报告会同时写出两个不同结论：`testProjectionInvariant=Passed` 只证明测试构建器的元属性；`currentRuntimeIsolation=Failed` 明确记录旧静态构造仍无条件调用 v24/Snake。它不是 D1 `CompatibilityPlan`，也没有把 D2 frozen registry 接入 Parser/VM。
+报告会同时写出两个不同结论：`testProjectionInvariant=Passed` 只证明测试构建器的元属性；`currentRuntimeIsolation=Passed` 表示 legacy parser 与表达式 lookup 已在解析前绑定到不可变的 `LegacyCompatibilityProfile` surface。它不证明 Core 已接管 legacy VM，也不替代真实游戏、lazy-load 或设备行为证据。
+
+
+## 双上游接口差异报告
+
+`powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Invoke-LegacyDialectUpstreamDiff.ps1 -ProjectRoot . -V24ProjectRoot 'E:\MyCode\Era\emuera.em-master' -SnakeProjectRoot 'E:\MyCode\Era\emuera_lazyloading_selfmodified_version-main-skiasharp'
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Test-LegacyDialectUpstreamDiff.ps1 -ProjectRoot . -V24ProjectRoot 'E:\MyCode\Era\emuera.em-master' -SnakeProjectRoot 'E:\MyCode\Era\emuera_lazyloading_selfmodified_version-main-skiasharp'
+`
+
+- 公钥集合、profile 可见性声明、参数/返回类型与运行时执行四类门禁全部通过时报告 esult=Passed。
+- 参数/返回类型门禁的权威来源是运行时反射差异证据（docs/NewFrameworkDesign/generated/legacy-dialect-reflection-diff.json），它在实际程序集上比较 v24/Snake 上游与当前工程的 ArgumentBuilder 形状、函数声明与行为矩阵；静态源码文本公式只作为诊断保留，不再单独判定语义差异。
+- 先运行 LegacyDialectReflectionDiff 再生成该报告；若反射证据缺失或存在差异，报告 fail-fast。
+
+## 移动端验证边界
+
+- Android 调试 APK 通过 Godot 4.7 mono 导出并签名（arm64-v8a，v2/v3 签名方案验证通过），产物位于 ndroid/build/gemuera-debug.apk。
+- 仓库内的接口证据链（运行时 smoke、反射差异、上游差异报告）证明 v24/Snake 的指令/函数参数与返回类型一致；untimeExecution=Passed 表示反射行为矩阵执行完成。
+- 真机/设备上的 FPS、内存占用与耗电性能报告需要连接 Android 设备后补充；没有设备日志前不把 APK 导出声明为性能完成证据。
+## Legacy 运行时查表与解析 smoke
+
+```powershell
+dotnet run --project tools\dialect-inventory\LegacyDialectRuntimeSmoke\LegacyDialectRuntimeSmoke.csproj -c Release --no-restore
+```
+
+该 smoke 加载主程序集并验证 profile 运行时的实际注册表和 `LogicalLineParser`：v24/Snake 的指令、表达式函数及表达式函数投影的 `METHOD` 指令遵循各自可见面；未选择 profile 的名称不会经 `METHOD` 路径泄漏。它还锁定浮点插件参数保持 `double` 类型和值。
+
+该 smoke 不加载真实游戏数据，因而不替代 `CalledFunction` 的 lazy-load、handler 执行语义、存档、渲染或 Android APK/真机验证。
 
 ## 签名与完成模式库存
 
@@ -64,7 +91,7 @@ completion/effect 字段一律带 `Candidate`，例如发现 `WaitInput` 只写 
 
 - `SNAKE_*`/`Snake*` handler 只作为 provenance 警告；类型名不能代替行为 fixture。
 - `legacy.*.unresolved` 和 `game.snake.candidate` 表示尚未完成模块归属裁决。
-- D1 会话 plan 不在本工具范围内；M0-DIA-02 只覆盖测试投影的未选择模块不变性，D2 运行时冻结注册表切换仍未实现。
+- D1 Core 会话 plan 不在本工具范围内；M0-DIA-02 只覆盖测试投影。legacy runtime 注册表选择已由 `LegacyCompatibilityProfile` 和 runtime smoke 验证，但完整会话隔离与行为 fixture 仍需独立证据。
 - M0-DIA-03 的 signature/completion/effect 是静态候选；正式 descriptor 必须等待 module ownership、构造参数求值和两侧行为 fixture。
 - `E:\MyCode\Era` 等游戏库不会被扫描或写入。
 
@@ -108,7 +135,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Invo
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Test-DialectOwnershipEvidence.ps1 -ProjectRoot . -UpstreamProjectRoot E:\path\to\XEmuera
 ```
 
-`M0-DIA-07` 读取 DIA-01～06 的版本化输出，并按 `dialect-ownership-evidence.json` 固定的相对源码后缀、SHA-256 和预期键数，只读扫描显式绑定的上游源码。默认输出为 `NewFrameworkDesign/generated/dialect-ownership-evidence.json`。上游目录缺失、源码 hash/键数漂移、重复上游公开键、DIA-01～06 hash 链不一致都会 exit 1。
+`M0-DIA-07` 读取 DIA-01～06 的版本化输出，并按 `dialect-ownership-evidence.json` 固定的相对源码后缀、SHA-256 和预期键数，只读扫描显式绑定的上游源码。默认输出为 `docs/NewFrameworkDesign/generated/dialect-ownership-evidence.json`。上游目录缺失、源码 hash/键数漂移、重复上游公开键、DIA-01～06 hash 链不一致都会 exit 1。
 
 当前报告覆盖 326 个指令和 360 个表达式函数：284/243 项分别得到 `UpstreamNameMatch`，28 个指令得到 `ExplicitCurrentModuleCandidate`，14 个指令与 117 个函数仍为 `Unresolved`。8 项 `CurrentTargetDiffersFromUpstreamCandidate` 是需要后续裁决的证据冲突，不是自动 replacement。catalog SHA-256 为 `efd15e50e42efcbc8cff9563b3c184a5e16ed114f1d13e04446b32ee9009c87c`，当前 evidence set SHA-256 为 `a665945d7910e704de9d13e71c812bc7bc32af6781a3ba6e61ad880ee9a8e749`。
 
@@ -127,7 +154,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Invo
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Test-DialectNameLookupContract.ps1 -ProjectRoot .
 ```
 
-`M0-DIA-08` 读取 DIA-01 与最终 DIA-07 报告，按 catalog 锁定 8 个 lookup 源文件的路径和 SHA-256，默认生成 `NewFrameworkDesign/generated/dialect-name-lookup-contract.json`。报告固定 326 个指令注册、360 个表达式函数、9 个跨表碰撞；表达式函数向指令表投影 351 项，9 个同名项按旧 `ContainsKey` 行为由已有指令优先，形成 677 项旧指令 lookup surface。326+360 共 686 个公开键的 lookup contract 均有静态证据，key domain 为 684 个 ASCII uppercase 与 2 个非 ASCII 或 mixed-case key。
+`M0-DIA-08` 读取 DIA-01 与最终 DIA-07 报告，按 catalog 锁定 8 个 lookup 源文件的路径和 SHA-256，默认生成 `docs/NewFrameworkDesign/generated/dialect-name-lookup-contract.json`。报告固定 326 个指令注册、360 个表达式函数、9 个跨表碰撞；表达式函数向指令表投影 351 项，9 个同名项按旧 `ContainsKey` 行为由已有指令优先，形成 677 项旧指令 lookup surface。326+360 共 686 个公开键的 lookup contract 均有静态证据，key domain 为 684 个 ASCII uppercase 与 2 个非 ASCII 或 mixed-case key。
 
 旧指令字典的 comparer 在静态初始化时按 `Config.ICVariable` 捕获为 `OrdinalIgnoreCase` 或 `Ordinal`，之后切换配置不会重建 comparer。旧表达式字典本身使用 `Ordinal`，但 `Config.ICFunction=true` 时调用方先执行 current-culture `ToUpper`；报告将其标为 `CurrentCultureDependent` 风险，而不是批准未来 D2 沿用该策略。`_Rename.csv` 的 `[[name]]` 替换发生在 `EraStreamReader`、词法分析之前，分类为 `SourceTextRewrite`，不能伪装成 registry `AliasOf` 或 `ReplacementDeclaration`。
 
@@ -140,7 +167,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Invo
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Test-DialectModuleVisibility.ps1 -ProjectRoot .
 ```
 
-`M0-DIA-09` 只读取 DIA-02 的 v24/Snake 测试投影、DIA-07 的归属证据和 DIA-08 的 lookup contract，默认生成 `NewFrameworkDesign/generated/dialect-module-visibility.json`。它对 DIA-07 的 131 项 `Unresolved` 做机械的 projection-membership 分区：123 项在 v24 与 Snake 投影中都可见，8 项只在 Snake 投影中可见（指令为 8/6，表达式函数为 115/2）；所有未决 key 均必须存在于 Snake 投影，缺失或重复 key、hash 链不一致、枚举顺序影响 canonical hash 都会失败。
+`M0-DIA-09` 只读取 DIA-02 的 v24/Snake 测试投影、DIA-07 的归属证据和 DIA-08 的 lookup contract，默认生成 `docs/NewFrameworkDesign/generated/dialect-module-visibility.json`。它对 DIA-07 的 131 项 `Unresolved` 做机械的 projection-membership 分区：123 项在 v24 与 Snake 投影中都可见，8 项只在 Snake 投影中可见（指令为 8/6，表达式函数为 115/2）；所有未决 key 均必须存在于 Snake 投影，缺失或重复 key、hash 链不一致、枚举顺序影响 canonical hash 都会失败。
 
 `V24VisibleCandidate` 只表示该公开键存在于 v24 测试投影，`SnakeOnlyCandidate` 只表示该键缺席 v24 而存在于 Snake 投影。两者不是 module owner、`AliasOf`、`ReplacementDeclaration` 或行为兼容结论：例如候选的当前贡献来源仍可能是 legacy common/v24 method，必须保留在报告中供后续 fixture 裁决。catalog SHA-256 为 `4fffa2541a39b5f4d62ec3f5aa04dfab6f8a2b04e8af5a63b7019d08c6d9574e`，当前 visibility set SHA-256 为 `bc2b54704d2c4252f4d910eca253f9ec5613bc16105266383ad0c901e278bfdf`；静态报告继续保持 `currentRuntimeIsolation=Failed`、`parserVmConsumption=NotConsumed` 与 ownership=`Unresolved`。独立 descriptor presence/ownership guard 不消费该报告，也不创建 D1 plan、D2 frozen registry、handler 或 typed policy。
 
@@ -240,4 +267,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\dialect-inventory\Test
 
 `M0-DIA-17` 只消费 DIA-13 declaration vocabulary 与 DIA-15 policy surface。它为每个已命名的 `BehaviorKey` 锁定同一个 source fixture ID、`v24pure`/`snake` 双侧 profile、`baseline`/`extension`/`undeclared` 三种证据情形，以及 input、observable-result、error、completion、effect 五个 trace facet。它不写任何 expected policy value；未来 fixture 必须记录“无 completion/effect”而不是省略对应字段。
 
-catalog 对每项强制 `Planned` / `Uncovered` / `NotImplemented` / `BlockedByFixture`。未知或重复行为键、DIA-13/15 的 fixture/source hash 漂移、提前将 fixture 写成 Captured、或附带 policy value、method/DTO 等运行时载荷都会失败。生成报告 `NewFrameworkDesign/generated/dialect-behavior-fixture-contracts.json` 只是一份实现前的 evidence gate：它不运行游戏，不创建 C# interface、policy manager、resolver、`CompatibilityPlan`、frozen registry 或 Parser/VM 输入。
+catalog 对每项强制 `Planned` / `Uncovered` / `NotImplemented` / `BlockedByFixture`。未知或重复行为键、DIA-13/15 的 fixture/source hash 漂移、提前将 fixture 写成 Captured、或附带 policy value、method/DTO 等运行时载荷都会失败。生成报告 `docs/NewFrameworkDesign/generated/dialect-behavior-fixture-contracts.json` 只是一份实现前的 evidence gate：它不运行游戏，不创建 C# interface、policy manager、resolver、`CompatibilityPlan`、frozen registry 或 Parser/VM 输入。

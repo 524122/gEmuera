@@ -139,21 +139,30 @@ gemuera-c#/
 │   ├── EmueraMain.cs          # Godot entry point, GPU rendering pipeline
 │   ├── EmueraThread.cs        # Background thread wrapper
 │   ├── EmueraContent.cs       # UI renderer (line layout, node management)
-│   ├── EmueraImage.cs         # Texture drawing control
-│   ├── ColorMatrixGPU.cs      # GPU ColorMatrix shader management
-│   ├── SpriteManager.cs       # Texture cache (rate-limited loading)
 │   ├── GenericUtils.cs        # Engine↔UI bridge
 │   ├── FirstWindow.cs         # Launcher (game scanning)
 │   ├── Emuera/                # Core Emuera engine
 │   │   ├── Config/            # Configuration system
-│   │   ├── Content/           # Image/resource management (native BlendRect)
+│   │   ├── Content/           # Image/resource management
 │   │   ├── GameData/          # Data models, expressions, variables
 │   │   ├── GameProc/          # Script execution engine
-│   │   └── GameView/          # Console emulation and rendering
+│   │   ├── GameView/          # Console emulation and rendering
+│   │   └── LegacyRunner/      # Legacy display/input-replay diagnostics
+│   ├── GodotHost/             # Godot lifecycle/platform bridge
 │   ├── Shaders/
 │   │   └── color_matrix.gdshader
 │   └── uEmuera/               # System.Drawing/Forms compatibility layer
-├── Fonts/                     # Embedded fonts (MS Gothic)
+├── assets/                    # All Godot runtime assets (unified, reused)
+│   ├── fonts/                 # Fonts (MS Gothic / Microsoft YaHei, single copy)
+│   ├── icons/                 # UI icons (SVG)
+│   ├── lang/                  # i18n text (default/en_us/jp/zh_cn)
+│   ├── scenes/                # Panel scenes (*.tscn)
+│   ├── text/                  # emuera_config templates
+│   └── theme/                 # Global Theme (gemuera_theme.tres)
+├── src/Core/                  # Pure C# core contracts (GEmuera.Core, built separately)
+├── tools/                     # PowerShell tooling (governance/core-contracts, etc.)
+├── Fixtures/                  # Test fixtures
+├── test/                      # Tests
 └── addons/                    # Godot editor plugins
 ```
 

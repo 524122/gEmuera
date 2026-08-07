@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $toolRoot = Join-Path $ProjectRoot 'tools\dialect-inventory'
-$generatedRoot = Join-Path $ProjectRoot 'NewFrameworkDesign\generated'
+$generatedRoot = Join-Path $ProjectRoot 'docs\NewFrameworkDesign\generated'
 $modulePath = Join-Path $toolRoot 'DialectCompatibilityPack.psm1'
 $catalogPath = Join-Path $toolRoot 'dialect-compatibility-pack.json'
 $reportSchemaPath = Join-Path $toolRoot 'dialect-compatibility-pack.schema.json'

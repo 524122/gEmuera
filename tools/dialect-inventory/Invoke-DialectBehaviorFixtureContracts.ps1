@@ -11,9 +11,9 @@ try {
     $resolvedRoot = [IO.Path]::GetFullPath($ProjectRoot)
     $modulePath = Join-Path $resolvedRoot 'tools\dialect-inventory\DialectBehaviorFixtureContracts.psm1'
     $catalogPath = Join-Path $resolvedRoot 'tools\dialect-inventory\dialect-behavior-fixture-contract-catalog.json'
-    $vocabularyPath = Join-Path $resolvedRoot 'NewFrameworkDesign\generated\dialect-declaration-vocabulary.json'
-    $surfacePath = Join-Path $resolvedRoot 'NewFrameworkDesign\generated\dialect-policy-surface.json'
-    if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $resolvedRoot 'NewFrameworkDesign\generated\dialect-behavior-fixture-contracts.json' }
+    $vocabularyPath = Join-Path $resolvedRoot 'docs\NewFrameworkDesign\generated\dialect-declaration-vocabulary.json'
+    $surfacePath = Join-Path $resolvedRoot 'docs\NewFrameworkDesign\generated\dialect-policy-surface.json'
+    if ([string]::IsNullOrWhiteSpace($OutputPath)) { $OutputPath = Join-Path $resolvedRoot 'docs\NewFrameworkDesign\generated\dialect-behavior-fixture-contracts.json' }
     foreach ($path in @($modulePath, $catalogPath, $vocabularyPath, $surfacePath)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required M0-DIA-17 input is missing: $path" }
     }

@@ -34,6 +34,7 @@ public partial class EmueraContent : Control
 	// Overlay and tool UI. These are Canvas/Control overlays above the console and
 	// should not own emuera state directly.
 	HBoxContainer menuBar;
+	SafeAreaApplicator menuSafeArea;
 	Inputpad inputpad;
 	QuickButtons quickButtons;
 	Scalepad scalepad;
@@ -53,6 +54,39 @@ public partial class EmueraContent : Control
 	bool bgmPausedBeforeApplicationPause = false;
 	List<bool> soundPausedBeforeApplicationPause = new List<bool>();
 
+	// ---- AudioStream LRU 缓存（N2）----
+	// LoadAudioStream 原本每次 PLAYSOUND/PLAYBGM 都主线程同步读盘+解码；这里按
+	// (path, loop) 键缓存（BGM 与 SFX 共用），带字节预算与周期清扫，参照
+	// graphicsImageTextureCache 的 LRU 模式。语义不变：同 path 不同 loop 分条目，
+	// 播放行为不受影响；正在播放的流不淘汰（播放器持有引用，淘汰只影响后续重载）。
+	readonly struct AudioStreamCacheKey : IEquatable<AudioStreamCacheKey>
+	{
+		public readonly string Path;
+		public readonly bool Loop;
+		public AudioStreamCacheKey(string path, bool loop) { Path = path; Loop = loop; }
+		public bool Equals(AudioStreamCacheKey other) => Loop == other.Loop && string.Equals(Path, other.Path, StringComparison.Ordinal);
+		public override bool Equals(object obj) => obj is AudioStreamCacheKey other && Equals(other);
+		public override int GetHashCode() => (Path != null ? Path.GetHashCode() : 0) ^ (Loop ? 1 : 0);
+	}
+	sealed class AudioStreamCacheEntry
+	{
+		public AudioStream Stream;
+		public ulong LastUsedMs;
+		public long EstimatedBytes;
+	}
+	readonly Dictionary<AudioStreamCacheKey, AudioStreamCacheEntry> audioStreamCache = new Dictionary<AudioStreamCacheKey, AudioStreamCacheEntry>();
+	const ulong AudioStreamCacheCleanupIntervalMs = 5000;
+	const long MobileAudioStreamCacheBudgetBytes = 32L * 1024L * 1024L;
+	const long DesktopAudioStreamCacheBudgetBytes = 96L * 1024L * 1024L;
+	const int MaxAudioStreamCacheEntries = 32;
+	ulong lastAudioStreamCacheCleanupMs = 0;
+
+	// BGM 后台加载状态（M3）。PlayBgmFile 只发起 ResourceLoader 后台加载请求，
+	// _Process 轮询 LoadThreadedGetStatus，加载完成且仍是最新请求时才接上播放器；
+	// 期间的新请求（含 StopBgm）会令旧请求失效（pendingBgmPath 置空即取消）。
+	// 所有状态变更都在主线程串行发生（PlayBgmFile/StopBgm 经 EnqueueUI 到达）。
+	string pendingBgmPath;
+
 	// Rendered line indexes. The dictionaries let update/remove operations target
 	// a line by emuera LineNo without scanning the Godot child list on every call.
 	// lineSizes/lineNumbers 记录当前保留行；Canvas 额外维护一份 prefix 布局快照，
@@ -62,8 +96,13 @@ public partial class EmueraContent : Control
 	Dictionary<int, ConsoleButtonHit[]> canvasLineButtonHits = new Dictionary<int, ConsoleButtonHit[]>();
 	Dictionary<int, List<CanvasImageOverlay>> canvasImageOverlayNodes = new Dictionary<int, List<CanvasImageOverlay>>();
 	Dictionary<int, List<CanvasDivOverlay>> canvasDivOverlayNodes = new Dictionary<int, List<CanvasDivOverlay>>();
+	Dictionary<int, Vector2> lineVisualExtents = new Dictionary<int, Vector2>();
+	Dictionary<int, long> lineMaxButtonGeneration = new Dictionary<int, long>();
+	Dictionary<int, List<long>> lineButtonGenerations = new Dictionary<int, List<long>>();
+	Dictionary<long, SortedSet<int>> buttonGenerationLineNumbers = new Dictionary<long, SortedSet<int>>();
 	HashSet<int> canvasRowsWithPositionedNodes = new HashSet<int>();
 	HashSet<int> canvasRowsWithEscapedOverlays = new HashSet<int>();
+	HashSet<int> viewportAnchoredRelativeDivLineNos = new HashSet<int>();
 	HashSet<int> canvasLastVisibilityRows = new HashSet<int>();
 	List<int> canvasVisibilityTargetRows = new List<int>();
 	HashSet<int> canvasVisibilityTargetRowSet = new HashSet<int>();
@@ -108,6 +147,12 @@ public partial class EmueraContent : Control
 	Dictionary<int, int> lineLayoutIndexByLineNo = new Dictionary<int, int>();
 	bool lineLayoutDirty = false;
 	bool canvasOverlayRowsDirty = false;
+	const string ViewportAnchoredRelativeDivMeta = "viewport_anchor_relative_div";
+	const string ViewportAnchoredRelativeDivRowMeta = "viewport_anchor_relative_div_row";
+	const string ViewportAnchoredRelativeDivXMeta = "viewport_anchor_relative_div_x";
+	const string ViewportAnchoredRelativeDivYMeta = "viewport_anchor_relative_div_y";
+	const string ViewportAnchoredRelativeDivHeightMeta = "viewport_anchor_relative_div_height";
+	const string InlineLineBackgroundDivMeta = "inline_line_background_div";
 	// Texture pins mirror presentation lifetime: console rows own line pins and
 	// CBG owns background pins. activeTexturePinCollector is scoped to the current
 	// render pass so GetSpriteTexture can remain a pure conversion helper.
@@ -117,6 +162,27 @@ public partial class EmueraContent : Control
 	List<SpriteManager.TextureInfo> activeTexturePinCollector;
 	readonly Dictionary<string, Font> consoleFontCache = new Dictionary<string, Font>(StringComparer.OrdinalIgnoreCase);
 	readonly HashSet<string> missingConsoleFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	// #2 字体度量缓存：GetHeight/GetAscent 按 (font, size) 只做一次 native 查询，
+	// 滚动热路径每行×每 part 不再重复调用。度量在字体加载后是常量，缓存安全。
+	sealed class ConsoleFontMetricsEntry
+	{
+		public float Height;
+		public float Ascent;
+	}
+	static readonly Dictionary<(Font, int), ConsoleFontMetricsEntry> consoleFontMetricsCache = new Dictionary<(Font, int), ConsoleFontMetricsEntry>();
+	static (float Height, float Ascent) GetConsoleFontMetrics(Font font, int size)
+	{
+		var key = (font, size);
+		if (consoleFontMetricsCache.TryGetValue(key, out var cached))
+			return (cached.Height, cached.Ascent);
+		var entry = new ConsoleFontMetricsEntry
+		{
+			Height = font.GetHeight(size),
+			Ascent = font.GetAscent(size),
+		};
+		consoleFontMetricsCache[key] = entry;
+		return (entry.Height, entry.Ascent);
+	}
 	HashSet<int> asyncTexturePendingLineNos = new HashSet<int>();
 	Dictionary<int, ConsoleDisplayLine> pendingAsyncLineUpdates = new Dictionary<int, ConsoleDisplayLine>();
 	struct PureImageFallbackLine
@@ -140,6 +206,12 @@ public partial class EmueraContent : Control
 	HashSet<string> failedTextureSearches = new HashSet<string>();
 	Dictionary<string, string> resolvedTextureSearchPaths = new Dictionary<string, string>();
 	ulong lastCanvasAnimationRefreshMs = 0;
+
+	// #6 动画帧解析缓存：按 (sprite, 当前帧标识) 缓存已解析的纹理与帧布局。
+	// 帧未推进（baseImage/srcRect/offset/GraphicsImage revision 均不变）时跳过
+	// GetSpriteTexture 全链；缓存命中不持有 pin，仍由调用方按原逻辑重新 TrackTexturePin，
+	// 保证 TrackTexturePin/ReleaseTexturePin 配对与直接解析完全一致。
+	readonly Dictionary<ASprite, AnimatedSpriteFrameCacheEntry> animatedSpriteFrameCache = new Dictionary<ASprite, AnimatedSpriteFrameCacheEntry>();
 	const int MaxPureImageFallbackLines = 64;
 	const ulong PureImageFallbackTtlMs = 2000;
 	static readonly string[] CanvasImageFallbackExtensions = { ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tga" };
@@ -150,18 +222,45 @@ public partial class EmueraContent : Control
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> renderedCbgLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage> lastCbgSourceLayers = new List<MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage>();
 	ConsoleDisplayLine[] lastHtmlIslandLines = null;
-	struct GraphicsImageTextureCacheEntry
+	sealed class GraphicsImageTextureCacheEntry
 	{
+		// Owner 记录创建该条目的 GraphicsImage 实例。清扫时只读 entry.Owner.IsCreated，
+		// 不能回查 AppContents.GetGraphics(id)：那会从 Godot 主线程无锁访问 ERB 脚本线程
+		// 维护的 gList 字典，构成并发读写竞态。IsCreated 与现有 RefreshCBG 的读取方式一致。
+		public GraphicsImage Owner;
 		public long Revision;
 		public Texture2D Texture;
+		// 最近一次被显示层命中（LastUsedMs）与估算字节，供字节预算 LRU 淘汰使用。
+		public ulong LastUsedMs;
+		public long EstimatedBytes;
 	}
 	Dictionary<int, GraphicsImageTextureCacheEntry> graphicsImageTextureCache = new Dictionary<int, GraphicsImageTextureCacheEntry>();
 	const ulong GraphicsImageDisplayStableDelayMs = 24;
+
+	// H4：graphicsImageTextureCache 原来按 GraphicsImage.ID 把死纹理保留到会话结束。
+	// 这里增加三件事：(a) 渲染作用域 pin（与 activeTexturePinCollector 平行），保证
+	// 正在显示的纹理不被淘汰；(b) 周期清扫 GDISPOSE/GCREATE 后不 created 的条目；
+	// (c) 字节预算 LRU 淘汰最久未用且未在显示的条目。语义上仍保持：动态图形稳定窗口
+	// 内继续返回旧纹理、GraphicsImage 重建后新 revision 触发重新上传。
+	const ulong GraphicsImageCacheCleanupIntervalMs = 3000;
+	const long MobileGraphicsImageBudgetBytes = 128L * 1024L * 1024L;
+	const long DesktopGraphicsImageBudgetBytes = 512L * 1024L * 1024L;
+	ulong lastGraphicsImageCacheCleanupMs = 0;
+	// 渲染作用域收集器：与 activeTexturePinCollector 同生命周期，作用域结束统一解除 pin。
+	List<Texture2D> activeGraphicsImagePinCollector;
+	// GraphicsImage 纹理的显示 pin 计数（按纹理对象）。displayed 纹理 pin 数 > 0。
+	Dictionary<Texture2D, int> graphicsImagePinCounts = new Dictionary<Texture2D, int>();
+	// 已从缓存退役（失效/被替换）但仍可能被显示节点持有一段窗口的纹理；pin 归零后释放。
+	HashSet<Texture2D> retiredGraphicsImageTextures = new HashSet<Texture2D>();
+	Dictionary<int, List<Texture2D>> lineGraphicsImagePins = new Dictionary<int, List<Texture2D>>();
+	List<Texture2D> cbgGraphicsImagePins = new List<Texture2D>();
+	List<Texture2D> htmlIslandGraphicsImagePins = new List<Texture2D>();
 
 	struct CbgRenderEntry
 	{
 		public MinorShift.Emuera.GameView.EmueraConsole.ClientBackGroundImage Layer;
 		public Texture2D SourceTexture;
+		public string AnimatedWebpPath;
 		public Rect2 SourceRegion;
 		public Vector2 Position;
 		public Vector2 Size;
@@ -172,11 +271,32 @@ public partial class EmueraContent : Control
 		public Color Modulate;
 	}
 
+	struct SpriteAnimeFrameLayoutInfo
+	{
+		public bool IsValid;
+		public int OffsetX;
+		public int OffsetY;
+		public int SourceWidth;
+		public int SourceHeight;
+	}
+
+	sealed class AnimatedSpriteFrameCacheEntry
+	{
+		public AbstractImage BaseImage;
+		public uEmuera.Drawing.Rectangle SrcRect;
+		public uEmuera.Drawing.Point Offset;
+		public long GraphicsRevision;
+		public Texture2D Texture;
+		public SpriteAnimeFrameLayoutInfo Layout;
+	}
+
 	// Batched display updates defer expensive follow-up work until a group of
 	// lines has been applied.
 	bool batchingDisplayLines = false;
 	float totalLineHeight = 0;
 	float widestLineWidth = 0;
+	float widestVisualLineWidth = 0;
+	float visualLayoutContentHeight = 0;
 
 	// Visible line cap. Android memory pressure is the main constraint here, so
 	// old Controls are trimmed in batches instead of letting the scene tree grow
@@ -189,6 +309,7 @@ public partial class EmueraContent : Control
 	public const int MaxMaxVisibleLines = 3000;
 	static int MaxVisibleLines => ConfiguredMaxVisibleLines;
 	static int LineTrimBatch => System.Math.Max(40, System.Math.Min(200, MaxVisibleLines / 6));
+	const int ButtonGenerationScanMaxDepth = 8;
 
 	// Button generation and quick-button cache state. emuera reuses button text
 	// across waits, so generation guards prevent an old visible button from
@@ -207,6 +328,7 @@ public partial class EmueraContent : Control
 	long quickInputGateGeneration = -1;
 	int quickInputGateRevision = -1;
 	ulong quickInputGateTick = 0;
+	long maxRenderedButtonGeneration = long.MinValue;
 	int lastCbgScrollVertical = int.MinValue;
 	uint lastClickTick = 0;
 
@@ -224,11 +346,11 @@ public partial class EmueraContent : Control
 	string contentDragButtonInput;
 	long contentDragButtonGeneration;
 	bool contentDragButtonContentCenterValid = false;
-	Vector2 contentDragButtonContentCenter = Vector2.Zero;
 	ulong contentLastDragTick = 0;
 	bool contentInertiaActive = false;
 	float contentInertiaDeceleration = 900.0f;
 	int contentScrollInteractionSerial = 0;
+	internal int ContentScrollInteractionSerial => contentScrollInteractionSerial;
 	string canvasVisualButtonInput;
 	long canvasVisualButtonGeneration = long.MinValue;
 
@@ -305,8 +427,7 @@ public partial class EmueraContent : Control
 	const string MaxVisibleLinesKey = "MaxVisibleLines";
 	const string ContentPinchZoomEnabledKey = "ContentPinchZoomEnabled";
 	const string ConsoleRenderBackendKey = "ConsoleRenderBackend";
-	// M0 runner-only override. It is set only by the explicit legacy runner scene,
-	// never saved to user://settings.cfg, and therefore cannot change normal launches.
+	// Legacy runner 专用的显示后端覆盖值，不写入用户设置，避免影响正常启动。
 	static string m0RunnerDisplayBackendOverride;
 	const ulong QuickInputGateFallbackMs = 500;
 	static float contentDragSensitivity = -1.0f;
@@ -343,6 +464,16 @@ public partial class EmueraContent : Control
 	ulong lastAutoClickSkipTick = 0;
 	static readonly Color ActiveSystemButtonColor = new Color(1.0f, 0.86f, 0.15f, 1.0f);
 	static readonly Color NormalSystemButtonColor = new Color(1, 1, 1, 1);
+
+	// Tool overlay panels are componentized as standalone .tscn scene assets so
+	// the same panel can be reused/mounted from any scene. Preloaded once and
+	// instantiated in _Ready, which replaces the previous `new X()` construction
+	// while keeping the exact same AddChild order and initialization contract.
+	static readonly PackedScene InputpadScene = GD.Load<PackedScene>("res://assets/scenes/Inputpad.tscn");
+	static readonly PackedScene ScalepadScene = GD.Load<PackedScene>("res://assets/scenes/Scalepad.tscn");
+	static readonly PackedScene QuickButtonsScene = GD.Load<PackedScene>("res://assets/scenes/QuickButtons.tscn");
+	static readonly PackedScene OptionWindowScene = GD.Load<PackedScene>("res://assets/scenes/OptionWindow.tscn");
+	static readonly PackedScene VirtualCursorScene = GD.Load<PackedScene>("res://assets/scenes/VirtualCursor.tscn");
 
 	public static int ContentWidth { get; private set; }
 	public static int ContentHeight { get; private set; }
@@ -387,8 +518,8 @@ public partial class EmueraContent : Control
 	static int GetDefaultMaxVisibleLines()
 	{
 		if (OS.HasFeature("mobile"))
-			return IsSnakeDisplayProfile() ? DefaultSnakeMobileMaxVisibleLines : DefaultMobileMaxVisibleLines;
-		if (IsSnakeDisplayProfile())
+			return IsExtendedDisplayProfile() ? DefaultSnakeMobileMaxVisibleLines : DefaultMobileMaxVisibleLines;
+		if (IsExtendedDisplayProfile())
 			return DefaultSnakeDesktopMaxVisibleLines;
 		return DefaultMaxVisibleLines;
 	}
@@ -397,7 +528,7 @@ public partial class EmueraContent : Control
 	{
 		// TW/Snake 就寝后会一次输出大量角色信息。旧默认会直接裁掉上方内容，
 		// 因此把旧默认视为未显式调过；Android 只做保守提升，避免手机端内存压力过大。
-		if (!IsSnakeDisplayProfile())
+		if (!IsExtendedDisplayProfile())
 			return value;
 		if (OS.HasFeature("mobile") && value == DefaultMobileMaxVisibleLines)
 			return DefaultSnakeMobileMaxVisibleLines;
@@ -406,11 +537,9 @@ public partial class EmueraContent : Control
 		return value;
 	}
 
-	static bool IsSnakeDisplayProfile()
+	static bool IsExtendedDisplayProfile()
 	{
-		if (Program.IsSnakeProfile)
-			return true;
-		return string.Equals(FirstWindow.SelectedCoreProfileName, FirstWindow.CoreProfileSnake, StringComparison.OrdinalIgnoreCase);
+		return Program.Compatibility.UsesExtendedDisplayHistory;
 	}
 
 	// emuera still exposes the console viewport through Config.WindowY. Keeping
@@ -509,7 +638,7 @@ public partial class EmueraContent : Control
 
 		ApplySafeRect(rootContent, safeRect);
 		ApplySafeRect(cbgContainer, safeRect);
-		ApplySystemMenuSafeArea(safeRect);
+		menuSafeArea?.Apply();
 		inputpad?.RefreshSafeAreaLayout();
 		scalepad?.RefreshSafeAreaLayout();
 		quickButtons?.RefreshSafeAreaLayout();
@@ -518,18 +647,6 @@ public partial class EmueraContent : Control
 		if (safeChanged || widthChanged)
 			QueueScaleBoundsUpdate();
 		return safeChanged || widthChanged;
-	}
-
-	void ApplySystemMenuSafeArea(Rect2 safeRect)
-	{
-		if (menuRoot == null)
-			return;
-
-		Vector2 viewportSize = GetViewportRect().Size;
-		float rightInset = Mathf.Max(0, viewportSize.X - (safeRect.Position.X + safeRect.Size.X));
-		float topInset = Mathf.Max(0, safeRect.Position.Y);
-		menuRoot.OffsetRight = -4 - rightInset;
-		menuRoot.OffsetTop = 4 + topInset;
 	}
 
 	bool ApplyAndroidDynamicWindowWidth(bool requestRefresh)
@@ -618,7 +735,7 @@ public partial class EmueraContent : Control
 		contentPinchZoomEnabledLoaded = true;
 	}
 
-	public static bool ConfigureM0RunnerDisplayBackend(string value, out string errorMessage)
+	public static bool ConfigureLegacyRunnerDisplayBackend(string value, out string errorMessage)
 	{
 		errorMessage = "";
 		if (!string.Equals(value, "controls", StringComparison.OrdinalIgnoreCase)
@@ -649,9 +766,9 @@ public partial class EmueraContent : Control
 
 	bool UseCanvasRenderBackend => consoleRenderBackend == ConsoleRenderBackend.Canvas;
 
-	public gEmuera.M0.LegacyDisplayObservation CaptureM0LegacyDisplayObservation(string requestedBackend)
+	public gEmuera.LegacyRunner.LegacyDisplayObservation CaptureLegacyDisplayObservation(string requestedBackend)
 	{
-		return BuildM0LegacyDisplayObservation(requestedBackend);
+		return BuildLegacyDisplayObservation(requestedBackend);
 	}
 
 	// Build the UI tree entirely in code because the emulator surface is dynamic:
@@ -662,6 +779,9 @@ public partial class EmueraContent : Control
 		instance = this;
 		RefreshViewportMetrics();
 		GetViewport().SizeChanged += OnViewportSizeChanged;
+
+		// 统一深色主题：Theme 资源提供基线，交互控件用代码 overrides。
+		Theme = GEmueraTheme.LoadTheme();
 
 		mainFont = LoadConfiguredFont();
 		consoleRenderBackend = LoadConsoleRenderBackend();
@@ -680,6 +800,12 @@ public partial class EmueraContent : Control
 		rootContent.AnchorTop = 0;
 		rootContent.AnchorRight = 1;
 		rootContent.AnchorBottom = 1;
+		// CBG 背景层（cbgContainer，ZIndex=10）必须位于控制台前景之下：eraTW 系列把
+		// 立绘/文字/行内图片放在 rootContent 内（累计 z=0），若低于背景层会被半透明
+		// 背景图蒙罩（"低亮/无衬底"模式下背景带 alpha，立绘看起来跟着变透明）。
+		// 这里把整个内容层抬到 20（>10），保持内部相对顺序不变，与 Snake 语义一致：
+		// 背景色 → CBG 背景图 → 前景文字/图片。
+		rootContent.ZIndex = 20;
 		AddChild(rootContent);
 
 		// Menu bar on a separate CanvasLayer so it doesn't block click-to-advance.
@@ -704,12 +830,14 @@ public partial class EmueraContent : Control
 		// Placed BEFORE the toggle in the HBox so it sits on the toggle's left.
 		var menuPanel = new PanelContainer();
 		menuPanel.MouseFilter = MouseFilterEnum.Stop;
-		var menuPanelStyle = new StyleBoxFlat();
-		menuPanelStyle.BgColor = new Color(0.1f, 0.1f, 0.1f, 0.85f);
-		menuPanelStyle.CornerRadiusTopLeft = menuPanelStyle.CornerRadiusBottomLeft = 4;
-		menuPanelStyle.CornerRadiusTopRight = menuPanelStyle.CornerRadiusBottomRight = 4;
-		menuPanelStyle.ContentMarginLeft = menuPanelStyle.ContentMarginRight = 4;
-		menuPanelStyle.ContentMarginTop = menuPanelStyle.ContentMarginBottom = 2;
+		var menuPanelStyle = GEmueraTheme.SurfaceStyle(
+			GEmueraTheme.SurfaceRaised,
+			GEmueraTheme.Border,
+			GEmueraTheme.SmallRadius,
+			1,
+			6,
+			new Vector2(0, 3),
+			4, 4, 2, 2);
 		menuPanel.AddThemeStyleboxOverride("panel", menuPanelStyle);
 		menuPanel.Visible = false;
 		menuRoot.AddChild(menuPanel);
@@ -719,43 +847,60 @@ public partial class EmueraContent : Control
 		menuPanel.AddChild(menuExpandedBar);
 
 		menuBar = menuExpandedBar;
-		AddIconButton("res://Icons/fenxiang.svg", OnBackPressed);
-		AddIconButton("res://Icons/restart.svg", OnRestartPressed);
-		AddIconButton("res://Icons/options.svg", OnOptionsPressed);
-		inputMenuButton = AddIconButton("res://Icons/io-input.svg", OnInputTogglePressed);
-		quickMenuButton = AddIconButton("res://Icons/quick.svg", OnQuickTogglePressed);
-		autoSkipMenuButton = AddIconButton("res://Icons/autoskip.svg", OnAutoSkipTogglePressed);
-		AddIconButton("res://Icons/menu_save_log.svg", OnSaveLogPressed);
-		AddIconButton("res://Icons/Title.svg", OnGotoTitlePressed);
-		AddIconButton("res://Icons/exit.svg", OnExitPressed);
-		scaleMenuButton = AddIconButton("res://Icons/Scale.svg", OnScaleTogglePressed);
-		mouseMenuButton = AddIconButton("res://Icons/mouse.svg", OnVirtualCursorTogglePressed);
+		AddIconButton("res://assets/icons/fenxiang.svg", OnBackPressed);
+		AddIconButton("res://assets/icons/restart.svg", OnRestartPressed);
+		AddIconButton("res://assets/icons/options.svg", OnOptionsPressed);
+		inputMenuButton = AddIconButton("res://assets/icons/io-input.svg", OnInputTogglePressed);
+		quickMenuButton = AddIconButton("res://assets/icons/quick.svg", OnQuickTogglePressed);
+		autoSkipMenuButton = AddIconButton("res://assets/icons/autoskip.svg", OnAutoSkipTogglePressed);
+		AddIconButton("res://assets/icons/menu_save_log.svg", OnSaveLogPressed);
+		AddIconButton("res://assets/icons/Title.svg", OnGotoTitlePressed);
+		AddIconButton("res://assets/icons/exit.svg", OnExitPressed);
+		scaleMenuButton = AddIconButton("res://assets/icons/Scale.svg", OnScaleTogglePressed);
+		mouseMenuButton = AddIconButton("res://assets/icons/mouse.svg", OnVirtualCursorTogglePressed);
 
 		// Toggle at the right edge (last child = rightmost in HBox).
 		var menuToggleBtn = new TextureButton();
 		menuToggleBtn.CustomMinimumSize = new Vector2(SystemButtonTouchSize, SystemButtonTouchSize);
 		menuToggleBtn.StretchMode = TextureButton.StretchModeEnum.KeepAspectCentered;
 		menuToggleBtn.MouseFilter = MouseFilterEnum.Stop;
-		if (ResourceLoader.Exists("res://Icons/menu.svg"))
-			menuToggleBtn.TextureNormal = ResourceLoader.Load<Texture2D>("res://Icons/menu.svg");
+		if (ResourceLoader.Exists("res://assets/icons/menu.svg"))
+			menuToggleBtn.TextureNormal = ResourceLoader.Load<Texture2D>("res://assets/icons/menu.svg");
 		WireSystemButton(menuToggleBtn, OnMenuTogglePressed);
 		menuRoot.AddChild(menuToggleBtn);
 
+		// 系统菜单贴右上角：只应用上/右两条安全区 inset，基值 4 与创建时的
+		// OffsetTop/OffsetRight 一致。由 ApplySafeAreaLayout 显式驱动
+		// （AutoRefresh=false），时机与旧的 ApplySystemMenuSafeArea 完全一致。
+		menuSafeArea = new SafeAreaApplicator
+		{
+			Target = menuRoot,
+			Mode = SafeAreaApplicator.ApplyMode.OffsetOverrides,
+			ApplyLeft = false,
+			ApplyTop = true,
+			ApplyRight = true,
+			ApplyBottom = false,
+			BaseTop = 4,
+			BaseRight = 4,
+			AutoRefresh = false,
+		};
+		AddChild(menuSafeArea);
+
 		// Tool overlays are siblings of the console so their CanvasLayer/z-order
 		// and input capture are independent from the scrollable console content.
-		quickButtons = new QuickButtons();
+		quickButtons = (QuickButtons)QuickButtonsScene.Instantiate();
 		AddChild(quickButtons);
 
-		virtualCursor = new VirtualCursor();
+		virtualCursor = (VirtualCursor)VirtualCursorScene.Instantiate();
 		AddChild(virtualCursor);
 
-		inputpad = new Inputpad();
+		inputpad = (Inputpad)InputpadScene.Instantiate();
 		AddChild(inputpad);
 
-		scalepad = new Scalepad();
+		scalepad = (Scalepad)ScalepadScene.Instantiate();
 		AddChild(scalepad);
 
-		optionWindow = new OptionWindow();
+		optionWindow = (OptionWindow)OptionWindowScene.Instantiate();
 		AddChild(optionWindow);
 
 		// Main console viewport. Horizontal scrolling is enabled only while the
@@ -832,6 +977,7 @@ public partial class EmueraContent : Control
 		// Message box popup
 		msgBox = new PopupPanel();
 		msgBox.Size = new Vector2I(400, 220);
+		GEmueraTheme.ApplyPopup(msgBox);
 		AddChild(msgBox);
 
 		var msgVBox = new VBoxContainer();
@@ -890,6 +1036,24 @@ public partial class EmueraContent : Control
 		AddChild(cbgContainer);
 
 		ApplySafeAreaLayout(true);
+
+		// Keep one-time MultiLanguage texts (msgBox buttons, in-process banner,
+		// input/scalepad buttons) in sync with the selected language.
+		MultiLanguage.LanguageChanged += RefreshUiTexts;
+	}
+
+	// Re-read every cached UI text driven by MultiLanguage.Get. Idempotent: safe
+	// to call repeatedly and on every language change.
+	void RefreshUiTexts()
+	{
+		if (inProcessLabel != null)
+			inProcessLabel.Text = MultiLanguage.Get("EmueraContent.InProcess", "Processing...");
+		if (msgBoxConfirmBtn != null)
+			msgBoxConfirmBtn.Text = MultiLanguage.Get("MsgBox.Confirm", "OK");
+		if (msgBoxCancelBtn != null)
+			msgBoxCancelBtn.Text = MultiLanguage.Get("MsgBox.Cancel", "Cancel");
+		inputpad?.RefreshUiTexts();
+		scalepad?.RefreshUiTexts();
 	}
 
 	// Clear all generated console state. This is used for title changes/reloads
@@ -898,6 +1062,7 @@ public partial class EmueraContent : Control
 	{
 		GenericUtils.ClearPointingButton();
 		ClearCanvasVisualButton();
+		DisposeAndroidSpriteAnimeFrameTextures();
 		if (lineContainer != null)
 		{
 			foreach(var child in lineContainer.GetChildren())
@@ -920,9 +1085,7 @@ public partial class EmueraContent : Control
 			quickButtons.Clear();
 	}
 
-	// This is intentionally narrower than normal UI reload behavior. The M1
-	// canary invokes it only after the legacy worker has stopped, so every
-	// session-owned Godot reference is released before a different game binds.
+	// 仅供已停止 legacy worker 的 Legacy 会话切换调用，释放会话级 Godot 资源而不改变普通重载语义。
 	internal void ClearForCanarySessionTransition()
 	{
 		Clear();
@@ -931,13 +1094,17 @@ public partial class EmueraContent : Control
 		ClearSessionAudioState();
 		ClearGraphicsImageTextureCache();
 		ClearSessionFontCache();
+		// 会话切换时释放动画帧缓存持有的旧纹理引用，避免跨会话悬垂。
+		animatedSpriteFrameCache.Clear();
 	}
 
 	public override void _ExitTree()
 	{
+		MultiLanguage.LanguageChanged -= RefreshUiTexts;
 		GetViewport().SizeChanged -= OnViewportSizeChanged;
 		ResetLineTexturePins();
 		ReleaseCbgTexturePins();
+		DisposeAndroidSpriteAnimeFrameTextures();
 		if (instance == this)
 			instance = null;
 	}
@@ -971,14 +1138,22 @@ public partial class EmueraContent : Control
 
 	// Render a text fragment in emuera's fixed half/full-width grid. Godot Label
 	// uses real glyph advance, which makes CJK/box-drawing maps drift on Android.
-	Control CreateTextPart(string text, EmuColor color, EmuFont font, float width)
+	Control CreateTextPart(string text, EmuColor color, EmuFont font, float width, EmuColor? selectedColor = null, FontVerticalAlign? verticalAlign = null)
 	{
-		var textPart = new ConsoleTextPart(ResolveConsoleFont(font), FontSize, color.ToGodotColor(), font?.Bold == true, text);
+		int actualFontSize = font != null ? Math.Max(1, Mathf.RoundToInt(font.Size)) : FontSize;
+		var textPart = new ConsoleTextPart(
+			ResolveConsoleFont(font),
+			actualFontSize,
+			color.ToGodotColor(),
+			(selectedColor ?? color).ToGodotColor(),
+			font?.Bold == true,
+			text,
+			verticalAlign);
 		SetFixedControlSize(textPart, new Vector2(width, EffectiveLineHeight));
 		return textPart;
 	}
 
-	const string BundledConsoleFontPath = "res://Fonts/MS Gothic.ttf";
+	const string BundledConsoleFontPath = "res://assets/fonts/MS Gothic.ttf";
 
 	// Prefer the bundled console font on Android to avoid missing glyphs and
 	// device-specific font metric differences in exported APKs.
@@ -1293,8 +1468,11 @@ public partial class EmueraContent : Control
 		return right;
 	}
 
-	// Transparent styles keep emuera buttons visually driven by their child text
-	// and image parts while still providing a Godot input target.
+	// Transparent styles keep emuera console buttons visually driven by their child
+	// text and image parts while still providing a Godot input target. This is the
+	// panel used by BuildConsoleButton (era buttons) — it MUST stay transparent so
+	// ERB-driven content (incl. hover srcb switching) renders exactly as the game
+	// defines it. Only the system-button path (StyleButton) uses the dark theme.
 	static StyleBoxFlat _btnNormalStyle;
 	static StyleBoxFlat _btnHoverStyle;
 
@@ -1319,14 +1497,17 @@ public partial class EmueraContent : Control
 		_btnHoverStyle.ContentMarginTop = _btnHoverStyle.ContentMarginBottom = 0;
 	}
 
+	/// <summary>
+	/// In-game system buttons (msgbox OK/Cancel, Inputpad OK/Repeat, Scalepad 1:1/Fit,
+	/// OptionWindow Close, VirtualCursor M). Re-themed to the dark design system:
+	/// surface fill + border + hover/pressed states + press-down tween. Hit rect stays
+	/// byte-identical (content margins remain zero) and signals are untouched.
+	/// </summary>
 	internal static void StyleButton(Button btn)
 	{
 		EnsureButtonStyles();
-		btn.AddThemeStyleboxOverride("normal", _btnNormalStyle);
-		btn.AddThemeStyleboxOverride("hover", _btnHoverStyle);
-		btn.AddThemeStyleboxOverride("pressed", _btnHoverStyle);
-		btn.AddThemeStyleboxOverride("focus", _btnHoverStyle);
-		btn.AddThemeColorOverride("font_color", new Color(1, 1, 1, 1));
+		GEmueraTheme.ApplySystemButton(btn);
+		// 保留游戏配置的 focus 色作为 hover/press 强调，避免改动行为语义。
 		var focusColor = Config.FocusColor.ToGodotColor();
 		btn.AddThemeColorOverride("font_hover_color", focusColor);
 		btn.AddThemeColorOverride("font_pressed_color", focusColor);
@@ -1416,13 +1597,17 @@ public partial class EmueraContent : Control
 		// committed only after the row is inserted, which keeps replacement/update
 		// flows balanced even when rendering throws before registration.
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		int previousRenderLineNo = activeRenderLineNo;
 		var newTexturePins = new List<SpriteManager.TextureInfo>();
+		var newGraphicsImagePins = new List<Texture2D>();
 		activeTexturePinCollector = newTexturePins;
+		activeGraphicsImagePinCollector = newGraphicsImagePins;
 		activeRenderLineNo = line.LineNo;
 		try
 		{
 			AddLineBackground(line, lineControl, lineHeight);
+			maxLineRight = System.Math.Max(maxLineRight, AddInlineLineBackgroundDivs(line, lineControl, 0));
 			foreach(var button in line.Buttons)
 			{
 				if(button.IsButton)
@@ -1456,12 +1641,14 @@ public partial class EmueraContent : Control
 		{
 			SafeQueueFree(lineControl);
 			ReleaseTexturePinList(newTexturePins);
+			UnpinGraphicsImageTextures(newGraphicsImagePins);
 			asyncTexturePendingLineNos.Remove(line.LineNo);
 			throw;
 		}
 		finally
 		{
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 			activeRenderLineNo = previousRenderLineNo;
 		}
 
@@ -1476,6 +1663,7 @@ public partial class EmueraContent : Control
 		{
 			SafeQueueFree(lineControl);
 			ReleaseTexturePinList(newTexturePins);
+			UnpinGraphicsImageTextures(newGraphicsImagePins);
 			return;
 		}
 
@@ -1500,6 +1688,8 @@ public partial class EmueraContent : Control
 		lineControl.SetMeta("line_no", line.LineNo);
 		RegisterLine(line.LineNo, line, lineControl, lineSize);
 		RegisterLineTexturePins(line.LineNo, newTexturePins);
+		RegisterLineGraphicsImagePins(line.LineNo, newGraphicsImagePins);
+		GenericUtils.RecordDisplayFallbackLineBuild(hasExistingLine);
 		if (asyncTexturePendingDuringRender)
 			asyncTexturePendingLineNos.Add(line.LineNo);
 		else
@@ -1530,6 +1720,11 @@ public partial class EmueraContent : Control
 		// 动态地图独立刷新时，底部选项的视觉内容通常不变，只是按钮 generation 前进。
 		// 这里只替换行数据和命中信息，不重建 Control/Canvas 节点，避免选项闪烁。
 		lineObjects[line.LineNo] = line;
+		if (lineSizes.TryGetValue(line.LineNo, out var existingSize))
+		{
+			if (UpdateLineDerivedCaches(line.LineNo, line, existingSize))
+				MarkLineLayoutDirty();
+		}
 		if (UseCanvasRenderBackend)
 		{
 			var hits = BuildCanvasLineButtonHits(line);
@@ -1771,8 +1966,8 @@ public partial class EmueraContent : Control
 		string inputs = button.Inputs;
 		long generation = button.Generation;
 		btn.GuiInput += inputEvent => OnContentButtonGuiInput(inputEvent, btn, GetRenderedButtonInput(btn), GetRenderedButtonGeneration(btn));
-		btn.MouseEntered += () => GenericUtils.SetPointingButton(GetRenderedButtonInput(btn), GetRenderedButtonGeneration(btn));
-		btn.MouseExited += () => GenericUtils.ClearPointingButton(GetRenderedButtonGeneration(btn));
+		btn.MouseEntered += () => SetRenderedButtonHover(btn, true);
+		btn.MouseExited += () => SetRenderedButtonHover(btn, false);
 		btn.SetMeta("button_input", inputs);
 		btn.SetMeta("generation", generation);
 
@@ -1824,6 +2019,40 @@ public partial class EmueraContent : Control
 		{
 			return 0;
 		}
+	}
+
+	void SetRenderedButtonHover(Control button, bool selected)
+	{
+		if (button == null || !GodotObject.IsInstanceValid(button))
+			return;
+
+		string input = GetRenderedButtonInput(button);
+		long generation = GetRenderedButtonGeneration(button);
+		SetControlButtonSelected(button, selected);
+		if (selected)
+		{
+			SetCanvasVisualButton(input, generation);
+			GenericUtils.SetPointingButton(input, generation);
+		}
+		else
+		{
+			ClearCanvasVisualButtonIfMatches(input, generation);
+			GenericUtils.ClearPointingButton(generation);
+		}
+	}
+
+	static void SetControlButtonSelected(Node node, bool selected)
+	{
+		if (node == null || !GodotObject.IsInstanceValid(node))
+			return;
+		if (node is ConsoleTextPart textPart)
+			textPart.SetSelected(selected);
+		else if (node is ConsoleColorRectPart colorRectPart)
+			colorRectPart.SetSelected(selected);
+		else if (node is EmueraImage imagePart)
+			imagePart.SetSelected(selected);
+		foreach (var child in node.GetChildren())
+			SetControlButtonSelected(child, selected);
 	}
 
 	Rect2 GetButtonVisualBounds(ConsoleButtonString button, int buttonTop, int buttonHeight, int renderRelX, int renderOriginX)
@@ -2186,33 +2415,10 @@ public partial class EmueraContent : Control
 	internal void ApplyTextChanges(int removeBottomCount, IReadOnlyList<(ConsoleDisplayLine Line, bool Update)> lines,
 		bool update, int lastButtonGeneration, EmueraDisplayScrollMode scrollMode, IReadOnlyList<ConsoleDisplayLine> dataOnlyLines = null)
 	{
+		bool sampleDisplayBridge = GenericUtils.IsPerformanceSamplingEnabled;
+		ulong applyStartUsec = sampleDisplayBridge ? Time.GetTicksUsec() : 0;
 		bool scrollToBottom = scrollMode == EmueraDisplayScrollMode.FollowBottom;
 		bool changed = false;
-		bool traceDynamicMap = false;
-		bool dynamicMapBitmapContext = false;
-		if (GenericUtils.IsDynamicMapLineSnapshotTraceEnabled)
-		{
-			dynamicMapBitmapContext = GenericUtils.ContainsDynamicMapBitmapContext(lines);
-			traceDynamicMap = GenericUtils.ShouldTraceDynamicMap(dynamicMapBitmapContext);
-			if (traceDynamicMap)
-			{
-				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.APPLY",
-					() => "dynamic map ui apply start",
-					() => "remove_bottom=" + removeBottomCount
-						+ " add=" + (lines?.Count ?? 0)
-						+ " data_only=" + (dataOnlyLines?.Count ?? 0)
-						+ " update=" + update
-						+ " scroll_mode=" + scrollMode
-						+ " auto_scroll=" + scrollToBottom
-						+ " last_button_generation=" + lastButtonGeneration
-						+ " before_min=" + GetMinLineNo()
-						+ " before_max=" + GetMaxLineNo()
-						+ " before_count=" + GetRetainedLineCount()
-						+ " before_scroll=" + BuildDynamicMapScrollState()
-						+ " has_bitmap_context=" + dynamicMapBitmapContext
-						+ " incoming=" + GenericUtils.BuildDynamicMapDeltaLineSummary(lines));
-			}
-		}
 		batchingDisplayLines = true;
 		try
 		{
@@ -2237,7 +2443,7 @@ public partial class EmueraContent : Control
 			if (dataOnlyLines != null && dataOnlyLines.Count > 0)
 			{
 				for (int i = 0; i < dataOnlyLines.Count; i++)
-					RefreshRenderedLineDataOnly(dataOnlyLines[i]);
+					changed |= RefreshRenderedLineDataOnly(dataOnlyLines[i]);
 			}
 		}
 		finally
@@ -2256,37 +2462,14 @@ public partial class EmueraContent : Control
 		{
 			FlushCanvasOverlayRowsIfNeeded();
 			RefreshQuickInputGate();
-			if (traceDynamicMap && GenericUtils.IsDynamicMapScrollTraceEnabled)
-			{
-				GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.FOLLOW_UP",
-					() => "dynamic map display follow-up queued",
-					() => "changed=" + changed
-						+ " update=" + update
-						+ " scroll_mode=" + scrollMode
-						+ " auto_scroll=" + scrollToBottom
-						+ " scroll_before_request=" + BuildDynamicMapScrollState());
-			}
 			QueueDisplayFollowUp(scrollMode);
 		}
 
 		if (GenericUtils.IsScrollTraceActive)
 			TraceScroll("apply_text_changes", () => $"removeBottom={removeBottomCount} add={lines?.Count ?? 0} dataOnly={dataOnlyLines?.Count ?? 0} changed={changed} update={update} scrollMode={scrollMode} autoScroll={scrollToBottom} lastGen={lastButtonGeneration} maxLine={GetMaxLineNo()}");
 		SetLastButtonGeneration(lastButtonGeneration);
-		if (traceDynamicMap)
-		{
-			GenericUtils.DynamicMapTrace("DYNAMIC_MAP.UI.APPLIED",
-				() => "dynamic map ui apply end",
-				() => "changed=" + changed
-					+ " update=" + update
-					+ " scroll_mode=" + scrollMode
-					+ " auto_scroll=" + scrollToBottom
-					+ " data_only=" + (dataOnlyLines?.Count ?? 0)
-					+ " after_min=" + GetMinLineNo()
-					+ " after_max=" + GetMaxLineNo()
-					+ " after_count=" + GetRetainedLineCount()
-					+ " display_revision=" + displayRevision
-					+ " scroll=" + BuildDynamicMapScrollState());
-		}
+		if (sampleDisplayBridge)
+			GenericUtils.RecordDisplayApplyBatch((Time.GetTicksUsec() - applyStartUsec) / 1000.0);
 	}
 
 	void QueueDisplayFollowUp(bool scrollToBottom = true)
@@ -2326,6 +2509,35 @@ public partial class EmueraContent : Control
 		lineControl.AddChild(bg);
 	}
 
+	int AddInlineLineBackgroundDivs(ConsoleDisplayLine line, Control lineControl, int relX)
+	{
+		if (line?.Buttons == null || lineControl == null)
+			return 0;
+
+		int right = 0;
+		foreach (var button in line.Buttons)
+		{
+			if (button?.StrArray == null)
+				continue;
+			foreach (var part in button.StrArray)
+			{
+				if (part is not ConsoleDivPart div || !IsInlineLineBackgroundDiv(div))
+					continue;
+
+				var wrapper = BuildDivControl(div, relX);
+				// eraTW/snake 的角色列表在行尾输出负 xpos 的空 div 作为条纹背景。
+				// 这类背景必须先作为本行底图加入，再绘制文字/按钮；不能依赖负 ZIndex，
+				// 否则在 Godot 的 Control/Panel 层级中可能被父节点或兄弟节点压到不可见。
+				wrapper.ZIndex = 0;
+				wrapper.MouseFilter = MouseFilterEnum.Ignore;
+				wrapper.SetMeta(InlineLineBackgroundDivMeta, true);
+				lineControl.AddChild(wrapper);
+				right = System.Math.Max(right, Mathf.CeilToInt(wrapper.Position.X + wrapper.Size.X));
+			}
+		}
+		return right;
+	}
+
 	internal void SetHtmlIsland(ConsoleDisplayLine[] lines)
 	{
 		if (htmlIslandContainer == null || lines == null)
@@ -2337,9 +2549,12 @@ public partial class EmueraContent : Control
 		pendingHtmlIslandAsyncTextureRefresh = false;
 
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		var newHtmlIslandTexturePins = new List<SpriteManager.TextureInfo>();
+		var newHtmlIslandGraphicsImagePins = new List<Texture2D>();
 		var newControls = new List<Control>();
 		activeTexturePinCollector = newHtmlIslandTexturePins;
+		activeGraphicsImagePinCollector = newHtmlIslandGraphicsImagePins;
 		bool previousHtmlIslandRender = renderingHtmlIslandTextures;
 		renderingHtmlIslandTextures = true;
 		try
@@ -2353,6 +2568,7 @@ public partial class EmueraContent : Control
 				lineControl.MouseFilter = MouseFilterEnum.Pass;
 				lineControl.ClipContents = false;
 				AddLineBackground(line, lineControl, lineHeight);
+				AddInlineLineBackgroundDivs(line, lineControl, 0);
 				foreach (var button in line.Buttons)
 				{
 					if (button.IsButton)
@@ -2380,12 +2596,14 @@ public partial class EmueraContent : Control
 		{
 			ReleaseControlList(newControls);
 			ReleaseTexturePinList(newHtmlIslandTexturePins);
+			UnpinGraphicsImageTextures(newHtmlIslandGraphicsImagePins);
 			throw;
 		}
 		finally
 		{
 			renderingHtmlIslandTextures = previousHtmlIslandRender;
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 		}
 
 		if (pendingHtmlIslandAsyncTextureRefresh)
@@ -2394,6 +2612,7 @@ public partial class EmueraContent : Control
 			// 没有旧 island 时也不提交透明占位，等纹理完成后一次性替换，避免白块闪烁。
 			ReleaseControlList(newControls);
 			ReleaseTexturePinList(newHtmlIslandTexturePins);
+			UnpinGraphicsImageTextures(newHtmlIslandGraphicsImagePins);
 			return;
 		}
 
@@ -2402,6 +2621,7 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < newControls.Count; i++)
 			htmlIslandContainer.AddChild(newControls[i]);
 		htmlIslandTexturePins = newHtmlIslandTexturePins;
+		htmlIslandGraphicsImagePins = newHtmlIslandGraphicsImagePins;
 		displayRevision++;
 		RefreshQuickInputGate();
 		QueueScaleBoundsUpdate();
@@ -2428,7 +2648,7 @@ public partial class EmueraContent : Control
 		renderedCbgLayers.Clear();
 		lastCbgSourceLayers.Clear();
 		pendingCbgAsyncTextureRefresh = false;
-		lastCbgScrollVertical = 0;
+		lastCbgScrollVertical = int.MinValue;
 		TrimCbgNodes(0);
 	}
 
@@ -2441,6 +2661,16 @@ public partial class EmueraContent : Control
 				entry.Texture.Dispose();
 		}
 		graphicsImageTextureCache.Clear();
+		graphicsImagePinCounts.Clear();
+		foreach (var texture in retiredGraphicsImageTextures)
+		{
+			if (texture != null)
+				texture.Dispose();
+		}
+		retiredGraphicsImageTextures.Clear();
+		ResetLineGraphicsImagePins();
+		UnpinGraphicsImageTextures(cbgGraphicsImagePins);
+		UnpinGraphicsImageTextures(htmlIslandGraphicsImagePins);
 	}
 
 	void ClearSessionFontCache()
@@ -2459,6 +2689,10 @@ public partial class EmueraContent : Control
 		applicationPauseActive = false;
 		bgmPausedBeforeApplicationPause = false;
 		soundPausedBeforeApplicationPause.Clear();
+		// M3/N2：取消未完成的 BGM 后台加载并清空音频流缓存，避免跨会话残留播放/引用。
+		pendingBgmPath = null;
+		audioStreamCache.Clear();
+		lastAudioStreamCacheCleanupMs = 0;
 		if (bgmPlayer != null)
 		{
 			bgmPlayer.Stop();
@@ -2516,11 +2750,13 @@ public partial class EmueraContent : Control
 		{
 			canvasLineButtonHits.Remove(lineNo);
 		}
+		UpdateViewportAnchoredRelativeDivLineIndex(lineNo, control);
 		lineSizes[lineNo] = size;
 		lineNumbers.Add(lineNo);
 		totalLineHeight += size.Y;
 		if (size.X > widestLineWidth)
 			widestLineWidth = size.X;
+		UpdateLineDerivedCaches(lineNo, line, size);
 		UpdateCanvasPositionedNodeIndexForLine(lineNo);
 		MarkLineLayoutDirty();
 	}
@@ -2528,6 +2764,132 @@ public partial class EmueraContent : Control
 	int GetRetainedLineCount()
 	{
 		return lineNumbers.Count;
+	}
+
+	bool UpdateLineDerivedCaches(int lineNo, ConsoleDisplayLine line, Vector2 size)
+	{
+		bool hadOldVisual = lineVisualExtents.TryGetValue(lineNo, out var oldVisual);
+		bool oldVisualWasMax = false;
+		if (hadOldVisual)
+			oldVisualWasMax = oldVisual.X >= widestVisualLineWidth;
+
+		RemoveLineButtonGenerationIndex(lineNo);
+
+		var visualExtents = ComputeLineVisualExtents(line, size);
+		lineVisualExtents[lineNo] = visualExtents;
+		if (visualExtents.X > widestVisualLineWidth)
+			widestVisualLineWidth = visualExtents.X;
+
+		UpdateLineButtonGenerationIndex(lineNo, line);
+
+		if (oldVisualWasMax && visualExtents.X < widestVisualLineWidth)
+			RecalculateVisualLineMetrics();
+		return !hadOldVisual
+			|| System.Math.Abs(oldVisual.X - visualExtents.X) > 0.5f
+			|| System.Math.Abs(oldVisual.Y - visualExtents.Y) > 0.5f;
+	}
+
+	Vector2 ComputeLineVisualExtents(ConsoleDisplayLine line, Vector2 fallbackSize)
+	{
+		float right = fallbackSize.X;
+		float bottom = fallbackSize.Y;
+		if (line?.Buttons == null)
+			return new Vector2(right, bottom);
+		foreach (var button in line.Buttons)
+		{
+			if (button == null)
+				continue;
+			right = Mathf.Max(right, GetButtonVisualRight(button));
+			bottom = Mathf.Max(bottom, GetButtonVisualBottom(button));
+		}
+		return new Vector2(right, bottom);
+	}
+
+	void UpdateLineButtonGenerationIndex(int lineNo, ConsoleDisplayLine line)
+	{
+		var generations = new List<long>();
+		CollectLineButtonGenerations(line, generations, 0);
+		if (generations.Count == 0)
+		{
+			lineMaxButtonGeneration[lineNo] = long.MinValue;
+			return;
+		}
+
+		long lineMax = long.MinValue;
+		for (int i = 0; i < generations.Count; i++)
+		{
+			long generation = generations[i];
+			lineMax = System.Math.Max(lineMax, generation);
+			if (!buttonGenerationLineNumbers.TryGetValue(generation, out var rows))
+			{
+				rows = new SortedSet<int>();
+				buttonGenerationLineNumbers[generation] = rows;
+			}
+			rows.Add(lineNo);
+		}
+		lineButtonGenerations[lineNo] = generations;
+		lineMaxButtonGeneration[lineNo] = lineMax;
+		if (lineMax > maxRenderedButtonGeneration)
+			maxRenderedButtonGeneration = lineMax;
+	}
+
+	void RemoveLineButtonGenerationIndex(int lineNo)
+	{
+		if (!lineButtonGenerations.TryGetValue(lineNo, out var generations))
+		{
+			lineMaxButtonGeneration.Remove(lineNo);
+			return;
+		}
+
+		bool removedMax = false;
+		for (int i = 0; i < generations.Count; i++)
+		{
+			long generation = generations[i];
+			if (generation >= maxRenderedButtonGeneration)
+				removedMax = true;
+			if (!buttonGenerationLineNumbers.TryGetValue(generation, out var rows))
+				continue;
+			rows.Remove(lineNo);
+			if (rows.Count == 0)
+				buttonGenerationLineNumbers.Remove(generation);
+		}
+		lineButtonGenerations.Remove(lineNo);
+		lineMaxButtonGeneration.Remove(lineNo);
+		if (removedMax)
+			RecalculateMaxRenderedButtonGeneration();
+	}
+
+	void RecalculateMaxRenderedButtonGeneration()
+	{
+		maxRenderedButtonGeneration = long.MinValue;
+		foreach (long generation in buttonGenerationLineNumbers.Keys)
+		{
+			if (generation > maxRenderedButtonGeneration)
+				maxRenderedButtonGeneration = generation;
+		}
+	}
+
+	void CollectLineButtonGenerations(ConsoleDisplayLine line, List<long> output, int depth)
+	{
+		if (line?.Buttons == null || output == null || depth > ButtonGenerationScanMaxDepth)
+			return;
+		foreach (var button in line.Buttons)
+		{
+			if (button == null)
+				continue;
+			if (button.IsButton && !output.Contains(button.Generation))
+				output.Add(button.Generation);
+			if (button.StrArray == null)
+				continue;
+			foreach (var part in button.StrArray)
+			{
+				if (part is ConsoleDivPart div && div.Children != null)
+				{
+					foreach (var childLine in div.Children)
+						CollectLineButtonGenerations(childLine, output, depth + 1);
+				}
+			}
+		}
 	}
 
 	// Remove one row from lookup tables and subtract its cached contribution from
@@ -2543,10 +2905,18 @@ public partial class EmueraContent : Control
 		lineObjects.Remove(lineNo);
 		lineControls.Remove(lineNo);
 		canvasLineButtonHits.Remove(lineNo);
+		viewportAnchoredRelativeDivLineNos.Remove(lineNo);
 		canvasRowsWithPositionedNodes.Remove(lineNo);
+		bool removedVisualWidest = false;
+		if (lineVisualExtents.TryGetValue(lineNo, out var visualExtents))
+			removedVisualWidest = visualExtents.X >= widestVisualLineWidth;
+		lineVisualExtents.Remove(lineNo);
+		RemoveLineButtonGenerationIndex(lineNo);
 		bool removedNumber = lineNumbers.Remove(lineNo);
 		if (!lineSizes.TryGetValue(lineNo, out var size))
 		{
+			if (removedVisualWidest)
+				RecalculateVisualLineMetrics();
 			if (removedNumber)
 				MarkLineLayoutDirty();
 			return;
@@ -2555,6 +2925,8 @@ public partial class EmueraContent : Control
 		totalLineHeight = System.Math.Max(0, totalLineHeight - size.Y);
 		if (size.X >= widestLineWidth)
 			RecalculateWidestLineWidth();
+		if (removedVisualWidest)
+			RecalculateVisualLineMetrics();
 		MarkLineLayoutDirty();
 	}
 
@@ -2570,7 +2942,12 @@ public partial class EmueraContent : Control
 		pendingAsyncLineUpdates.Clear();
 		recentPureImageFallbackLines.Clear();
 		canvasLineButtonHits.Clear();
+		viewportAnchoredRelativeDivLineNos.Clear();
 		canvasRowsWithPositionedNodes.Clear();
+		lineVisualExtents.Clear();
+		lineMaxButtonGeneration.Clear();
+		lineButtonGenerations.Clear();
+		buttonGenerationLineNumbers.Clear();
 		lineSizes.Clear();
 		lineNumbers.Clear();
 		lineLayoutEntries.Clear();
@@ -2579,6 +2956,9 @@ public partial class EmueraContent : Control
 		canvasOverlayRowsDirty = false;
 		totalLineHeight = 0;
 		widestLineWidth = 0;
+		widestVisualLineWidth = 0;
+		visualLayoutContentHeight = 0;
+		maxRenderedButtonGeneration = long.MinValue;
 	}
 
 	void RegisterCanvasImageOverlays(int lineNo, List<CanvasImageOverlay> nodes)
@@ -2639,6 +3019,14 @@ public partial class EmueraContent : Control
 			canvasRowsWithPositionedNodes.Add(lineNo);
 		else
 			canvasRowsWithPositionedNodes.Remove(lineNo);
+	}
+
+	void UpdateViewportAnchoredRelativeDivLineIndex(int lineNo, Control control)
+	{
+		if (control != null && control.HasMeta(ViewportAnchoredRelativeDivRowMeta))
+			viewportAnchoredRelativeDivLineNos.Add(lineNo);
+		else
+			viewportAnchoredRelativeDivLineNos.Remove(lineNo);
 	}
 
 	bool HasCanvasPositionedNodesForLine(int lineNo)
@@ -2762,10 +3150,12 @@ public partial class EmueraContent : Control
 	{
 		// Release is tied to row removal, not cache pressure. SpriteManager decides
 		// later whether the now-unpinned texture is old enough to evict.
-		if (!lineTexturePins.TryGetValue(lineNo, out var pins))
-			return;
-		ReleaseTexturePinList(pins);
-		lineTexturePins.Remove(lineNo);
+		if (lineTexturePins.TryGetValue(lineNo, out var pins))
+		{
+			ReleaseTexturePinList(pins);
+			lineTexturePins.Remove(lineNo);
+		}
+		ReleaseLineGraphicsImagePins(lineNo);
 	}
 
 	void ResetLineTexturePins()
@@ -2773,6 +3163,7 @@ public partial class EmueraContent : Control
 		foreach (var pins in lineTexturePins.Values)
 			ReleaseTexturePinList(pins);
 		lineTexturePins.Clear();
+		ResetLineGraphicsImagePins();
 	}
 
 	void MarkLineLayoutDirty()
@@ -2791,6 +3182,7 @@ public partial class EmueraContent : Control
 		lineLayoutEntries.Clear();
 		lineLayoutIndexByLineNo.Clear();
 		float y = 0;
+		float visualBottom = 0;
 		foreach (int lineNo in lineNumbers)
 		{
 			if (!lineSizes.TryGetValue(lineNo, out var size))
@@ -2803,8 +3195,15 @@ public partial class EmueraContent : Control
 				Size = size,
 			});
 			lineLayoutIndexByLineNo[lineNo] = index;
+			if (lineVisualExtents.TryGetValue(lineNo, out var visualExtents))
+				visualBottom = Mathf.Max(visualBottom, y + visualExtents.Y);
+			else
+				visualBottom = Mathf.Max(visualBottom, y + size.Y);
 			y += size.Y;
 		}
+		// 可视溢出必须按真实行顶点计算。仅用 totalLineHeight + maxOverflow 会把靠前地图行
+		// 的大 div 高度叠到整段历史输出末尾，造成滚到底部后一大片黑屏。
+		visualLayoutContentHeight = Mathf.Max(y, visualBottom);
 		lineLayoutDirty = false;
 	}
 
@@ -2870,6 +3269,21 @@ public partial class EmueraContent : Control
 		RefreshCanvasOverlayRows();
 	}
 
+	void RefreshViewportAnchoredRelativeDivRows()
+	{
+		if (viewportAnchoredRelativeDivLineNos.Count == 0)
+			return;
+		EnsureLineLayout();
+		foreach (int lineNo in viewportAnchoredRelativeDivLineNos)
+		{
+			if (!lineControls.TryGetValue(lineNo, out var control)
+				|| control == null
+				|| !GodotObject.IsInstanceValid(control))
+				continue;
+			RefreshViewportAnchoredRelativeDivs(control, GetLineTopByLayout(lineNo));
+		}
+	}
+
 	void ReleaseCbgTexturePins()
 	{
 		// CBG is refreshed as a whole layer set, so all previous background pins are
@@ -2877,6 +3291,8 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < cbgTexturePins.Count; i++)
 			SpriteManager.UnpinTextureInfo(cbgTexturePins[i]);
 		cbgTexturePins.Clear();
+		// GraphicsImage 纹理 pin 与 TextureInfo pin 同生命周期：CBG 层整体释放。
+		UnpinGraphicsImageTextures(cbgGraphicsImagePins);
 	}
 
 	void ReleaseHtmlIslandTexturePins()
@@ -2884,6 +3300,7 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < htmlIslandTexturePins.Count; i++)
 			SpriteManager.UnpinTextureInfo(htmlIslandTexturePins[i]);
 		htmlIslandTexturePins.Clear();
+		UnpinGraphicsImageTextures(htmlIslandGraphicsImagePins);
 	}
 
 	// Width is only rescanned when the removed row may have been the widest one.
@@ -2894,6 +3311,22 @@ public partial class EmueraContent : Control
 		{
 			if (size.X > widestLineWidth)
 				widestLineWidth = size.X;
+		}
+	}
+
+	void RecalculateWidestVisualLineWidth()
+	{
+		RecalculateVisualLineMetrics();
+	}
+
+	void RecalculateVisualLineMetrics()
+	{
+		widestVisualLineWidth = 0;
+		foreach (var kvp in lineVisualExtents)
+		{
+			var visualExtents = kvp.Value;
+			if (visualExtents.X > widestVisualLineWidth)
+				widestVisualLineWidth = visualExtents.X;
 		}
 	}
 
@@ -3441,20 +3874,11 @@ public partial class EmueraContent : Control
 	// Fast layout size calculation from cached line metrics.
 	Vector2 CalculateLineContentSize()
 	{
-		float width = Mathf.Max(Config.DrawableWidth, widestLineWidth);
-		float height = totalLineHeight;
+		// 动态地图会保留历史输出，不能在每次打开地图/缩放/滚动时重新扫描全部行。
+		// 行注册与 data-only 刷新时缓存可视边界；布局 dirty 时只重建一次 prefix 快照。
 		EnsureLineLayout();
-		for (int i = 0; i < lineLayoutEntries.Count; i++)
-		{
-			var entry = lineLayoutEntries[i];
-			if (lineObjects.TryGetValue(entry.LineNo, out var line))
-			{
-				// eraFL 的右侧信息窗、日志窗等使用相对 div 伸出普通文本宽度。
-				// 宽度也必须按可视右边界兜底，否则窄屏/Android 安全区会把右侧 UI 裁掉。
-				width = Mathf.Max(width, GetLineVisualRight(line));
-				height = Mathf.Max(height, entry.Top + GetLineVisualBottom(line));
-			}
-		}
+		float width = Mathf.Max(Config.DrawableWidth, Mathf.Max(widestLineWidth, widestVisualLineWidth));
+		float height = Mathf.Max(totalLineHeight, visualLayoutContentHeight);
 		int visibleRows = lineNumbers.Count;
 		if (!UseCanvasRenderBackend && visibleRows > 1 && lineContainer is VBoxContainer rows)
 			height += (visibleRows - 1) * rows.GetThemeConstant("separation");
@@ -3470,6 +3894,8 @@ public partial class EmueraContent : Control
 	// relX is used for button/div-local coordinates.
 	int AddPartToContainer(AConsoleDisplayPart part, Control container, int relX, bool allowEscapedPartZ = true)
 	{
+		if (part is ConsoleDivPart inlineBackgroundDiv && IsInlineLineBackgroundDiv(inlineBackgroundDiv))
+			return EffectiveLineHeight;
 		if(part is ConsoleStyledString css)
 		{
 			if (string.IsNullOrEmpty(css.Str))
@@ -3486,7 +3912,7 @@ public partial class EmueraContent : Control
 			{
 				w = css.Width > 0 ? css.Width : 9999;
 			}
-			var text = CreateTextPart(css.Str, css.pColor, css.Font, w);
+			var text = CreateTextPart(css.Str, css.pColor, css.Font, w, css.pButtonColor, css.VerticalAlign);
 			text.Position = new Vector2(posX, 0);
 			container.AddChild(text);
 
@@ -3507,8 +3933,13 @@ public partial class EmueraContent : Control
 				sprite = AppContents.GetSprite(cip.ResourceName);
 			}
 
-			var texture = GetSpriteTexture(sprite);
-			if (texture == null && ShouldUseRawImageResourceFallback(cip.ResourceName, sprite))
+			string animatedWebpPath = GetAnimatedWebpSourcePath(sprite);
+			// 行内 <img> 与 CBG 是两条独立渲染链。动画 WebP 不能等待 Godot
+			// 的静态 WebP 解码结果，否则 GetSpriteTexture 返回空时会退化成 spacer，
+			// 导致图片节点和 Control 内的逐帧贴图路径都不会被创建。
+			SpriteAnimeFrameLayoutInfo animeFrameLayout = default;
+			var texture = animatedWebpPath == null ? GetSpriteTexture(sprite, out animeFrameLayout) : null;
+			if (texture == null && animatedWebpPath == null && ShouldUseRawImageResourceFallback(cip.ResourceName, sprite))
 			{
 				string resName = cip.ResourceName;
 				var tryPaths = new List<string>
@@ -3573,8 +4004,14 @@ public partial class EmueraContent : Control
 					GenericUtils.Info(EmueraLogCategory.Sprite, () => $"[IMG] All fallback paths failed for \"{resName}\"");
 				}
 			}
-			if (texture != null)
+			if (texture != null || animatedWebpPath != null)
 			{
+				int sourceWidth = texture?.GetWidth() ?? sprite?.DestBaseSize.Width ?? 1;
+				int sourceHeight = texture?.GetHeight() ?? sprite?.DestBaseSize.Height ?? 1;
+				if (sourceWidth <= 0)
+					sourceWidth = 1;
+				if (sourceHeight <= 0)
+					sourceHeight = 1;
 				int w, imgH;
 				if (cip.dest_rect.Width > 0 && cip.dest_rect.Height > 0)
 				{
@@ -3586,19 +4023,19 @@ public partial class EmueraContent : Control
 				{
 					// Width specified, compute height from aspect ratio
 					w = cip.dest_rect.Width;
-					imgH = texture.GetHeight() > 0 ? texture.GetHeight() * w / texture.GetWidth() : w;
+					imgH = sourceHeight * w / sourceWidth;
 				}
-				else if (cip.dest_rect.Height > 0 && texture.GetHeight() > 0)
+				else if (cip.dest_rect.Height > 0)
 				{
 					// Height specified, compute width from aspect ratio (matches constructor logic)
 					imgH = cip.dest_rect.Height;
-					w = texture.GetWidth() * imgH / texture.GetHeight();
+					w = sourceWidth * imgH / sourceHeight;
 				}
 				else
 				{
 					// No dimensions specified, use natural size
-					w = texture.GetWidth() > 0 ? texture.GetWidth() : 32;
-					imgH = texture.GetHeight() > 0 ? texture.GetHeight() : 32;
+					w = sourceWidth;
+					imgH = sourceHeight;
 				}
 				// Ensure rendered width matches layout-allocated width to prevent gaps/overlaps
 				if (cip.Width > 0 && cip.Width != w)
@@ -3620,13 +4057,33 @@ public partial class EmueraContent : Control
 				{
 					emuImg.SourceTexture = texture;
 				}
-				emuImg.DrawOffset = GetSpriteHtmlDrawOffset(sprite, cip.ResourceName, w, imgH);
-				emuImg.DrawSize = GetSpriteHtmlDrawSize(sprite, cip.ResourceName, w, imgH);
+				emuImg.DrawOffset = GetSpriteHtmlDrawOffset(sprite, cip.ResourceName, w, imgH, animeFrameLayout);
+				emuImg.DrawSize = GetSpriteHtmlDrawSize(sprite, cip.ResourceName, w, imgH, animeFrameLayout);
 				emuImg.Position = GetHtmlImagePosition(cip, relX);
 				emuImg.Size = new Vector2(w, imgH);
 				emuImg.FlipX = cip.FlipX;
 				emuImg.FlipY = cip.FlipY;
 				emuImg.SetColorMatrix(cip.ColorMatrix);
+				var normalSource = new EmueraImage.ImageSourceState(
+					emuImg.SourceTexture,
+					emuImg.SourceRegion,
+					animatedWebpPath,
+					emuImg.DrawOffset,
+					emuImg.DrawSize);
+				EmueraImage.ImageSourceState selectedSource = default;
+				CanvasImageRenderInfo selectedInfo = default;
+				bool hasSelectedSource = !string.IsNullOrEmpty(cip.ButtonResourceName)
+					&& TryResolveCanvasImage(cip, relX, true, out selectedInfo);
+				if (hasSelectedSource)
+				{
+					selectedSource = new EmueraImage.ImageSourceState(
+						selectedInfo.SourceTexture,
+						selectedInfo.SourceRegion,
+						selectedInfo.AnimatedWebpPath,
+						selectedInfo.DrawOffset,
+						selectedInfo.DrawSize);
+				}
+				emuImg.ConfigureButtonSources(normalSource, selectedSource, hasSelectedSource);
 				if (allowEscapedPartZ && ImageEscapesLine(cip))
 					emuImg.ZIndex = EscapedConsolePartZIndex;
 				// Inline images are absolutely positioned inside a fixed-height Emuera line.
@@ -3657,11 +4114,8 @@ public partial class EmueraContent : Control
 			{
 				if (!rectShape.HasRenderableRect)
 					return rectShape.Bottom;
-				var colorRect = new ColorRect();
-				colorRect.MouseFilter = MouseFilterEnum.Ignore;
+				var colorRect = new ConsoleColorRectPart(rectShape.pColor.ToGodotColor(), rectShape.pButtonColor.ToGodotColor());
 				SetFixedControlSize(colorRect, new Vector2(rectShape.RenderWidth, rectShape.RenderHeight));
-				var sc = rectShape.pColor;
-				colorRect.Color = sc.ToGodotColor();
 				colorRect.Position = new Vector2(rectShape.PointX - relX + rectShape.RenderX, rectShape.RenderY);
 				container.AddChild(colorRect);
 				return rectShape.Bottom;
@@ -3695,6 +4149,8 @@ public partial class EmueraContent : Control
 	int AddDivPartToContainer(ConsoleDivPart div, Control container, int relX)
 	{
 		var wrapper = BuildDivControl(div, relX);
+		if (wrapper.HasMeta(ViewportAnchoredRelativeDivMeta))
+			container.SetMeta(ViewportAnchoredRelativeDivRowMeta, true);
 		container.AddChild(wrapper);
 		return EffectiveLineHeight;
 	}
@@ -3710,7 +4166,9 @@ public partial class EmueraContent : Control
 		wrapper.Position = GetHtmlDivPosition(div, relX);
 		wrapper.Size = new Vector2(div.DivWidth, div.DivHeight);
 		wrapper.CustomMinimumSize = new Vector2(div.DivWidth, div.DivHeight);
-		wrapper.ZIndex = GetGodotZIndexForHtmlDepth(div.Depth);
+		wrapper.ZIndex = GetGodotZIndexForHtmlDiv(div);
+		if (ShouldAnchorRelativeDivToViewport(div))
+			MarkViewportAnchoredRelativeDiv(wrapper, div);
 
 		int[] margin = div.StyledBox?.Margin;
 		int[] padding = div.StyledBox?.Padding;
@@ -3771,6 +4229,41 @@ public partial class EmueraContent : Control
 		return wrapper;
 	}
 
+	void MarkViewportAnchoredRelativeDiv(Control wrapper, ConsoleDivPart div)
+	{
+		if (wrapper == null || div == null)
+			return;
+		wrapper.SetMeta(ViewportAnchoredRelativeDivMeta, true);
+		wrapper.SetMeta(ViewportAnchoredRelativeDivXMeta, div.X);
+		wrapper.SetMeta(ViewportAnchoredRelativeDivYMeta, div.Y);
+		wrapper.SetMeta(ViewportAnchoredRelativeDivHeightMeta, div.DivHeight);
+	}
+
+	void RefreshViewportAnchoredRelativeDivs(Control root, float lineY)
+	{
+		if (root == null || !GodotObject.IsInstanceValid(root))
+			return;
+		RefreshViewportAnchoredRelativeDiv(root, lineY);
+		foreach (var child in root.GetChildren())
+		{
+			if (child is Control childControl)
+				RefreshViewportAnchoredRelativeDivs(childControl, lineY);
+		}
+	}
+
+	void RefreshViewportAnchoredRelativeDiv(Control control, float lineY)
+	{
+		if (control == null || !control.HasMeta(ViewportAnchoredRelativeDivMeta))
+			return;
+		int x = (int)control.GetMeta(ViewportAnchoredRelativeDivXMeta).AsInt64();
+		int y = (int)control.GetMeta(ViewportAnchoredRelativeDivYMeta).AsInt64();
+		int height = (int)control.GetMeta(ViewportAnchoredRelativeDivHeightMeta).AsInt64();
+		// eraTW/snake 泡茶菜单把 MOUSEY()-DIV_HEIGHT 写成普通 relative div。
+		// fallback Control 行本身已经按历史输出 lineY 放置，因此这里必须减掉 lineY，
+		// 否则浮层会继续跟着原输出行走，而不是贴到当前可视窗口里的鼠标上方。
+		control.Position = GetViewportAnchoredRelativeDivPosition(x, y, height) - new Vector2(0, lineY);
+	}
+
 	// Render a child ConsoleDisplayLine into an existing container at yOffset.
 	// Used by nested divs and island output.
 	int AddDisplayLineToContainer(ConsoleDisplayLine line, Control container, int yOffset, int rowHeight = -1)
@@ -3783,6 +4276,8 @@ public partial class EmueraContent : Control
 		row.MouseFilter = MouseFilterEnum.Pass;
 		row.ClipContents = false;
 		row.Position = new Vector2(0, yOffset);
+
+		AddInlineLineBackgroundDivs(line, row, 0);
 
 		foreach (var button in line.Buttons)
 		{
@@ -3831,7 +4326,7 @@ public partial class EmueraContent : Control
 	{
 		if (border == null || boxW <= 0 || boxH <= 0)
 			return;
-		int defaultColor = Config.ForeColor.ToArgb() & 0xFFFFFF;
+		int defaultColor = Config.ForeColor.ToArgb();
 		AddBorderRect(wrapper, boxX, boxY, boxW, BoxValue(border, BoxDirection.Top), ColorValue(borderColor, BoxDirection.Top, defaultColor));
 		AddBorderRect(wrapper, boxX + boxW - BoxValue(border, BoxDirection.Right), boxY, BoxValue(border, BoxDirection.Right), boxH, ColorValue(borderColor, BoxDirection.Right, defaultColor));
 		AddBorderRect(wrapper, boxX, boxY + boxH - BoxValue(border, BoxDirection.Bottom), boxW, BoxValue(border, BoxDirection.Bottom), ColorValue(borderColor, BoxDirection.Bottom, defaultColor));
@@ -3841,11 +4336,12 @@ public partial class EmueraContent : Control
 	// Add one border rectangle if the side has positive thickness.
 	void AddBorderRect(Control wrapper, float x, float y, float w, float h, int color)
 	{
-		if (w <= 0 || h <= 0 || color < 0)
+		if (w <= 0 || h <= 0)
 			return;
 		var rect = new ColorRect();
 		rect.MouseFilter = MouseFilterEnum.Ignore;
-		rect.Color = new Godot.Color(((color >> 16) & 0xFF) / 255f, ((color >> 8) & 0xFF) / 255f, (color & 0xFF) / 255f, 1f);
+		uint argb = unchecked((uint)color);
+		rect.Color = new Godot.Color(((argb >> 16) & 0xFF) / 255f, ((argb >> 8) & 0xFF) / 255f, (argb & 0xFF) / 255f, ((argb >> 24) & 0xFF) / 255f);
 		rect.Position = new Vector2(x, y);
 		rect.Size = new Vector2(w, h);
 		wrapper.AddChild(rect);
@@ -3860,7 +4356,7 @@ public partial class EmueraContent : Control
 	}
 
 	// Safe border-color lookup with transparent fallback.
-	static int ColorValue(int[] values, int index, int fallback = -1)
+	static int ColorValue(int[] values, int index, int fallback)
 	{
 		if (values == null || index < 0 || index >= values.Length)
 			return fallback;
@@ -3874,7 +4370,7 @@ public partial class EmueraContent : Control
 		{
 			case DisplayMode.Absolute:
 			case DisplayMode.AbsoluteLeftBottom:
-				return new Vector2(div.X, GetContentViewportHeight() - div.Y - div.DivHeight);
+				return new Vector2(div.X, ResolveBottomOriginHtmlY(div.Y, div.DivHeight));
 			case DisplayMode.AbsoluteLeftTop:
 				return new Vector2(div.X, div.Y);
 			default:
@@ -3882,11 +4378,77 @@ public partial class EmueraContent : Control
 		}
 	}
 
+	float ResolveBottomOriginHtmlY(int y, int height)
+	{
+		// Emuera 的 MOUSEY/CLIENTHEIGHT 坐标是底边为 0、向上为负。
+		// v24/snake 的浮层会直接把这个负数作为 div 的上边缘；正数 left-bottom
+		// 旧用法仍按“距底部高度”处理，避免破坏已有资源。
+		if (y < 0)
+			return GetContentViewportHeight() + y;
+		return GetContentViewportHeight() - y - height;
+	}
+
+	bool ShouldAnchorRelativeDivToViewport(ConsoleDivPart div)
+	{
+		if (div == null || div.Display != DisplayMode.Relative || !div.IsRelative)
+			return false;
+		// eraTW/snake 的泡茶子菜单没有显式 display='absolute'，但脚本用
+		// MOUSEY()-DIV_HEIGHT 得到的是 Emuera 底边原点坐标。它的下边缘仍为负数，
+		// 且 depth=-1；普通行内 relative div 不满足这个形态约束，继续按 lineY 相对定位。
+		return div.Depth < 0 && div.Y < 0 && div.Y + div.DivHeight < 0;
+	}
+
+	Vector2 GetViewportAnchoredRelativeDivPosition(ConsoleDivPart div)
+	{
+		if (div == null)
+			return Vector2.Zero;
+		return GetViewportAnchoredRelativeDivPosition(div.X, div.Y, div.DivHeight);
+	}
+
+	Vector2 GetViewportAnchoredRelativeDivPosition(int x, int y, int height)
+	{
+		var viewportPosition = new Vector2(x, ResolveBottomOriginHtmlY(y, height));
+		if (scrollContainer == null)
+			return viewportPosition;
+		var scroll = new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
+		if (contentScale > 0.001f)
+			scroll /= contentScale;
+		return scroll + viewportPosition;
+	}
+
 	// HTML 的 depth 数值越大越靠后；Godot 的 ZIndex 需要整体抬到 Canvas 绘制面之上。
 	// eraFL 的房间框使用 depth=1，若直接映射为负数会被 Canvas 背景盖住，只剩无 depth 的局部遮罩可见。
 	static int GetGodotZIndexForHtmlDepth(int depth)
 	{
 		return System.Math.Max(1, HtmlDivZIndexBase - depth);
+	}
+
+	int GetGodotZIndexForHtmlDiv(ConsoleDivPart div)
+	{
+		// eraTW/snake 的角色列表会在每一行文本之后追加一个 depth=1 的空 div 作为条纹背景。
+		// 这类 div 必须压在本行文字和 PRINT_RECT 槽条后面；否则 Godot 的子节点绘制顺序会让背景盖住整行数据。
+		// 大尺寸/带子内容/带盒模型的状态栏与浮层 div 仍走正向基准，保留 2026-07-07 修复的跨行覆盖语义。
+		if (IsInlineLineBackgroundDiv(div))
+			return -1;
+		return GetGodotZIndexForHtmlDepth(div?.Depth ?? 0);
+	}
+
+	bool IsInlineLineBackgroundDiv(ConsoleDivPart div)
+	{
+		if (div == null
+			|| !div.IsRelative
+			|| div.Display != DisplayMode.Relative
+			|| div.Depth <= 0
+			|| !div.BackgroundColor.HasValue
+			|| div.StyledBox != null
+			|| div.Y != 0
+			|| div.DivHeight <= 0)
+			return false;
+		if (div.Children != null && div.Children.Length > 0)
+			return false;
+
+		int inlineHeightLimit = System.Math.Max(EffectiveLineHeight, Config.FontSize) + 2;
+		return div.DivHeight <= inlineHeightLimit;
 	}
 
 	// Resolve absolute/relative image placement for HTML-style output.
@@ -3938,12 +4500,24 @@ public partial class EmueraContent : Control
 		return TryGetSpriteHtmlBasePosition(single, resourceName, out _);
 	}
 
-	static Vector2 GetSpriteHtmlDrawOffset(ASprite sprite, string resourceName, int width, int height)
+	static Vector2 GetSpriteHtmlDrawOffset(ASprite sprite, string resourceName, int width, int height,
+		SpriteAnimeFrameLayoutInfo animeFrameLayout)
 	{
 		if (width == 0 || height == 0)
 			return Vector2.Zero;
 		if (sprite == null)
 			return Vector2.Zero;
+
+		if (sprite is SpriteAnime && animeFrameLayout.IsValid)
+		{
+			if (sprite.DestBaseSize.Width == 0 || sprite.DestBaseSize.Height == 0)
+				return Vector2.Zero;
+			// SpriteAnime 的帧偏移是相对动画基准画布的位置。必须与动画自身的
+			// DestBasePosition 合并后缩放，才能保持原生 GraphicsDraw 的布局语义。
+			return new Vector2(
+				(sprite.DestBasePosition.X + animeFrameLayout.OffsetX) * width / (float)sprite.DestBaseSize.Width,
+				(sprite.DestBasePosition.Y + animeFrameLayout.OffsetY) * height / (float)sprite.DestBaseSize.Height);
+		}
 
 		if (!TryGetSpriteHtmlBasePosition(sprite, resourceName, out var basePosition))
 			return Vector2.Zero;
@@ -3964,10 +4538,19 @@ public partial class EmueraContent : Control
 			basePosition.Y * height / (float)sprite.DestBaseSize.Height);
 	}
 
-	static Vector2 GetSpriteHtmlDrawSize(ASprite sprite, string resourceName, int width, int height)
+	static Vector2 GetSpriteHtmlDrawSize(ASprite sprite, string resourceName, int width, int height,
+		SpriteAnimeFrameLayoutInfo animeFrameLayout)
 	{
 		if (width == 0 || height == 0)
 			return new Vector2(width, height);
+		if (sprite is SpriteAnime && animeFrameLayout.IsValid
+			&& sprite.DestBaseSize.Width > 0 && sprite.DestBaseSize.Height > 0
+			&& animeFrameLayout.SourceWidth > 0 && animeFrameLayout.SourceHeight > 0)
+		{
+			return new Vector2(
+				animeFrameLayout.SourceWidth * width / (float)sprite.DestBaseSize.Width,
+				animeFrameLayout.SourceHeight * height / (float)sprite.DestBaseSize.Height);
+		}
 		if (sprite is ASpriteSingle single
 			&& ShouldUseSpriteHtmlCanvas(single, resourceName))
 		{
@@ -4000,10 +4583,65 @@ public partial class EmueraContent : Control
 	// backed outputs are tracked for the active render scope before returning so
 	// cache cleanup cannot dispose a texture still assigned to a visible Control.
 	// AtlasTexture is used when a frame only references a source rectangle.
-	Texture2D GetSpriteTexture(ASprite sprite)
+	Texture2D GetSpriteTexture(ASprite sprite, out SpriteAnimeFrameLayoutInfo animeFrameLayout)
 	{
+		animeFrameLayout = default;
 		if (sprite == null)
 			return null;
+
+		// SpriteAnime.Bitmap 返回当前帧所属的整张源图集。动画必须先解析当前帧，
+		// 否则下方 BitmapTexture 快速路径会直接返回整张图集并跳过 srcRect 裁剪。
+		if (sprite is SpriteAnime anime)
+		{
+			AbstractImage baseImage;
+			uEmuera.Drawing.Rectangle srcRect;
+			uEmuera.Drawing.Point offset;
+			if (anime.GetCurrentFrameInfo(out baseImage, out srcRect, out offset))
+			{
+				// 同一次渲染只读取一次当前帧，避免后台计时推进时纹理裁剪、偏移和尺寸跨帧。
+				animeFrameLayout = new SpriteAnimeFrameLayoutInfo
+				{
+					IsValid = true,
+					OffsetX = offset.X,
+					OffsetY = offset.Y,
+					SourceWidth = srcRect.Width,
+					SourceHeight = srcRect.Height,
+				};
+				if (baseImage is GraphicsImage gImg && gImg.godotImage != null)
+				{
+					var texture = GetGraphicsImageDisplayTexture(gImg);
+					if (texture == null)
+						return null;
+					if (srcRect.X == 0 && srcRect.Y == 0 &&
+						srcRect.Width == texture.GetWidth() &&
+						srcRect.Height == texture.GetHeight())
+					{
+						return texture;
+					}
+					return CreateAtlasTextureForDisplay(sprite, texture, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
+				}
+				if (baseImage?.Bitmap is uEmuera.Drawing.BitmapTexture androidBitmap
+					&& UseAndroidCroppedAtlasTexture)
+				{
+					// Android 只上传当前小帧。不能在这里读取 ti.texture，否则会先创建整张
+					// 8000px 图集的 ImageTexture，再由 AtlasTexture 裁剪，仍会触发实机限制。
+					return GetAndroidSpriteAnimeFrameTexture(anime, androidBitmap, srcRect);
+				}
+				if (baseImage?.Bitmap != null)
+				{
+					var bmp = baseImage.Bitmap;
+					var ti = GetDisplayTextureInfoForBitmap(bmp);
+					if (ti != null && !ti.IsPlaceholder && ti.texture != null)
+					{
+						TrackTexturePin(ti);
+						return ti.GetAtlasTexture(
+							BuildAtlasCacheKey(sprite, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height),
+							new Rect2(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height));
+					}
+				}
+			}
+			return null;
+		}
 
 		if (sprite.Bitmap is uEmuera.Drawing.BitmapTexture bt)
 		{
@@ -4021,6 +4659,14 @@ public partial class EmueraContent : Control
 				else if (renderingCbgTextures)
 					cbgTextureUnavailableDuringRender = true;
 				return null;
+			}
+			if (sprite is ASpriteSingle androidStaticSprite
+				&& TryGetAndroidStaticAtlasRegionTexture(androidStaticSprite, bt,
+					androidStaticSprite.SrcRectangle, out var croppedAtlasTexture))
+			{
+				// Android 大图集的 CSV 坐标基于原始尺寸；不能先缩小整图再交给 AtlasTexture。
+				// 命中时直接返回 CPU 裁出的图块，SourceRegion 保持默认值即可完整显示该小纹理。
+				return croppedAtlasTexture;
 			}
 			if (ti.texture == null)
 			{
@@ -4079,53 +4725,134 @@ public partial class EmueraContent : Control
 			}
 		}
 
-		if (sprite is SpriteAnime anime)
+		return null;
+	}
+
+	// #6 动画帧解析缓存入口：SpriteAnime 按当前帧标识命中时直接复用纹理与布局，
+	// 跳过 GetCurrentFrameInfo 之外的纹理链；静态 sprite 与未就绪结果保持原解析行为。
+	// 帧推进时序（SpriteAnime 按时间推进）、pin 生命周期（命中仍重新 TrackTexturePin）、
+	// 异步解码挂起（未就绪不缓存）均与直接解析一致。
+	Texture2D GetCachedAnimatedSpriteTexture(ASprite sprite, out SpriteAnimeFrameLayoutInfo layout)
+	{
+		layout = default;
+		if (sprite is not SpriteAnime anime)
+			return GetSpriteTexture(sprite, out layout);
+
+		// GetCurrentFrameInfo 只是轻量时间计算；真正的开销在纹理链，帧未变时应跳过。
+		if (!anime.GetCurrentFrameInfo(out var baseImage, out var srcRect, out var offset))
+			return GetSpriteTexture(sprite, out layout);
+
+		// 注意：baseImage 是 GraphicsImage 的动态帧不走本缓存。GraphicsImage 的 DisplayRevision
+		// 在后台线程持续递增，而 GetGraphicsImageDisplayTexture 在稳定窗口（24ms）内会返回旧纹理
+		// 并标记 retrySoon——若缓存条目记下"旧纹理+新 revision"，图像稳定后命中会永远返回旧帧。
+		// GraphicsImage 路径本就由 graphicsImageTextureCache 按 revision 承担缓存，无需再包一层。
+		bool useFrameCache = baseImage is not GraphicsImage;
+		long revision = baseImage is GraphicsImage g && g.godotImage != null ? g.DisplayRevision : 0L;
+		if (useFrameCache
+			&& animatedSpriteFrameCache.TryGetValue(sprite, out var cached)
+			&& cached.Texture != null
+			&& GodotObject.IsInstanceValid(cached.Texture)
+			&& ReferenceEquals(cached.BaseImage, baseImage)
+			&& cached.SrcRect.X == srcRect.X && cached.SrcRect.Y == srcRect.Y
+			&& cached.SrcRect.Width == srcRect.Width && cached.SrcRect.Height == srcRect.Height
+			&& cached.Offset.X == offset.X && cached.Offset.Y == offset.Y
+			&& cached.GraphicsRevision == revision)
 		{
-			AbstractImage baseImage;
-			uEmuera.Drawing.Rectangle srcRect;
-			uEmuera.Drawing.Point offset;
-			if (anime.GetCurrentFrameInfo(out baseImage, out srcRect, out offset))
-			{
-				if (baseImage is GraphicsImage gImg && gImg.godotImage != null)
-				{
-					var texture = GetGraphicsImageDisplayTexture(gImg);
-					if (texture == null)
-						return null;
-					if (srcRect.X == 0 && srcRect.Y == 0 &&
-						srcRect.Width == texture.GetWidth() &&
-						srcRect.Height == texture.GetHeight())
-					{
-						return texture;
-					}
-					return CreateAtlasTextureForDisplay(sprite, texture, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height);
-				}
-				if (baseImage?.Bitmap != null)
-				{
-					var bmp = baseImage.Bitmap;
-					var ti = GetDisplayTextureInfoForBitmap(bmp);
-					if (ti != null && !ti.IsPlaceholder && ti.texture != null)
-					{
-						TrackTexturePin(ti);
-						return ti.GetAtlasTexture(
-							BuildAtlasCacheKey(sprite, srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height),
-							new Rect2(srcRect.X, srcRect.Y, srcRect.Width, srcRect.Height));
-					}
-				}
-			}
+			layout = cached.Layout;
+			ReTrackAnimatedSpritePinForCacheHit(baseImage);
+			TouchAndroidCroppedAtlasIfCached(sprite);
+			return cached.Texture;
 		}
 
-		return null;
+		Texture2D texture = GetSpriteTexture(sprite, out layout);
+		if (texture == null)
+			return null; // 不缓存未就绪结果，异步解码完成后下一轮再尝试。
+		if (!useFrameCache)
+			return texture;
+
+		// 解析期间后台计时可能已推进帧；只在与解析读取到的帧一致时才缓存，
+		// 避免把旧帧标识映射到新帧纹理。
+		if (!anime.GetCurrentFrameInfo(out var afterBase, out var afterRect, out var afterOffset)
+			|| !ReferenceEquals(afterBase, baseImage)
+			|| afterRect.X != srcRect.X || afterRect.Y != srcRect.Y
+			|| afterRect.Width != srcRect.Width || afterRect.Height != srcRect.Height
+			|| afterOffset.X != offset.X || afterOffset.Y != offset.Y)
+		{
+			return texture;
+		}
+
+		long afterRevision = afterBase is GraphicsImage ag && ag.godotImage != null ? ag.DisplayRevision : 0L;
+		animatedSpriteFrameCache[sprite] = new AnimatedSpriteFrameCacheEntry
+		{
+			BaseImage = afterBase,
+			SrcRect = afterRect,
+			Offset = afterOffset,
+			GraphicsRevision = afterRevision,
+			Texture = texture,
+			Layout = layout,
+		};
+		return texture;
+	}
+
+	// 缓存命中时重新获取与 GetSpriteTexture 相同的 TextureInfo pin，保持 pin 生命周期。
+	// GraphicsImage 常规路径由 graphicsImageTextureCache 管理，无 pin；Bitmap 路径与
+	// Android 裁剪路径都来自 frame.Bitmap 的 CachedTextureInfo。
+	void ReTrackAnimatedSpritePinForCacheHit(AbstractImage baseImage)
+	{
+		if (baseImage == null || activeTexturePinCollector == null)
+			return;
+		if (baseImage is GraphicsImage graphics && graphics.godotImage != null)
+			return;
+		if (baseImage.Bitmap is uEmuera.Drawing.BitmapTexture bt)
+		{
+			var ti = bt.CachedTextureInfo;
+			if (ti != null && !ti.IsPlaceholder)
+				TrackTexturePin(ti);
+		}
+		else if (baseImage.Bitmap != null)
+		{
+			var ti = GetDisplayTextureInfoForBitmap(baseImage.Bitmap);
+			if (ti != null)
+				TrackTexturePin(ti);
+		}
+	}
+
+	// 命中跳过解析时，Android 裁剪小纹理会失去 LastUsedMs 刷新，可能被闲置清理提前回收。
+	// 命中时主动触达，保证与直接解析相同的存活窗口。
+	void TouchAndroidCroppedAtlasIfCached(ASprite sprite)
+	{
+		if (UseAndroidCroppedAtlasTexture
+			&& androidCroppedAtlasTextures.TryGetValue(sprite, out var entry)
+			&& entry != null)
+		{
+			entry.LastUsedMs = Time.GetTicksMsec();
+		}
+	}
+
+	// CSV 的普通 .webp 资源通常仍按静态图片处理。只有完整引用、带 ANIM chunk 的
+	// 文件才交给 EmueraImage 的逐帧贴图路径，避免裁剪 sprite 或普通 WebP 改变原有显示语义。
+	static string GetAnimatedWebpSourcePath(ASprite sprite)
+	{
+		if (sprite is not ASpriteSingle single
+			|| single.Bitmap is not uEmuera.Drawing.BitmapTexture bitmap
+			|| single.SrcRectangle.X != 0 || single.SrcRectangle.Y != 0
+			|| single.SrcRectangle.Width != bitmap.Width || single.SrcRectangle.Height != bitmap.Height)
+			return null;
+		return AnimatedWebpSpriteFrames.IsAnimatedWebp(bitmap.path) ? bitmap.path : null;
 	}
 
 	Texture2D GetGraphicsImageDisplayTexture(GraphicsImage image)
 	{
 		if (image == null)
 			return null;
+		ulong nowMs = Time.GetTicksMsec();
 		long revision = image.DisplayRevision;
 		if (graphicsImageTextureCache.TryGetValue(image.ID, out var cached)
 			&& cached.Revision == revision
 			&& cached.Texture != null)
 		{
+			cached.LastUsedMs = nowMs;
+			PinGraphicsImageTextureForDisplay(cached.Texture);
 			return cached.Texture;
 		}
 
@@ -4137,22 +4864,176 @@ public partial class EmueraContent : Control
 				TrackAsyncTextureRequestForCurrentRender();
 			if (renderingCbgTextures)
 				cbgTextureUnavailableDuringRender = true;
-			return cached.Texture;
+			// cached 是 class（H4 改造后）：TryGetValue 失败时为空，必须判空再取。
+			// 稳定窗口内返回旧纹理时仍需 pin，避免字节预算 LRU 淘汰仍在显示的纹理。
+			if (cached != null && cached.Texture != null)
+			{
+				PinGraphicsImageTextureForDisplay(cached.Texture);
+				return cached.Texture;
+			}
+			return null;
 		}
 
 		try
 		{
 			var texture = Godot.ImageTexture.CreateFromImage(snapshot);
-			graphicsImageTextureCache[image.ID] = new GraphicsImageTextureCacheEntry
+			var entry = new GraphicsImageTextureCacheEntry
 			{
+				Owner = image,
 				Revision = revision,
 				Texture = texture,
+				LastUsedMs = nowMs,
+				EstimatedBytes = (long)System.Math.Max(1, snapshot.GetWidth()) * System.Math.Max(1, snapshot.GetHeight()) * 4L,
 			};
+			// GCREATE/GDRAW 推进 revision 后旧纹理将被覆盖：未在显示的旧纹理立即释放，
+			// 仍在显示的（CBG/HTML/行内节点持有）退役等待 pin 归零，避免 GPU 泄漏。
+			if (cached != null && cached.Texture != null && !object.ReferenceEquals(cached.Texture, texture))
+				RetireGraphicsImageTexture(cached.Texture);
+			graphicsImageTextureCache[image.ID] = entry;
+			PinGraphicsImageTextureForDisplay(texture);
 			return texture;
 		}
 		finally
 		{
 			snapshot?.Dispose();
+		}
+	}
+
+	// 渲染作用域内把即将赋给显示节点的 GraphicsImage 纹理记入 pin，作用域结束统一解除。
+	// 与 activeTexturePinCollector 平行：作用域外（非显示）的命中不 pin。
+	void PinGraphicsImageTextureForDisplay(Texture2D texture)
+	{
+		if (texture == null || activeGraphicsImagePinCollector == null)
+			return;
+		for (int i = 0; i < activeGraphicsImagePinCollector.Count; i++)
+		{
+			if (object.ReferenceEquals(activeGraphicsImagePinCollector[i], texture))
+				return;
+		}
+		activeGraphicsImagePinCollector.Add(texture);
+		graphicsImagePinCounts.TryGetValue(texture, out int count);
+		graphicsImagePinCounts[texture] = count + 1;
+	}
+
+	void UnpinGraphicsImageTexture(Texture2D texture)
+	{
+		if (texture == null)
+			return;
+		if (!graphicsImagePinCounts.TryGetValue(texture, out int count) || count <= 0)
+			return;
+		count--;
+		if (count == 0)
+		{
+			graphicsImagePinCounts.Remove(texture);
+			if (retiredGraphicsImageTextures.Contains(texture))
+			{
+				retiredGraphicsImageTextures.Remove(texture);
+				texture.Dispose();
+			}
+		}
+		else
+			graphicsImagePinCounts[texture] = count;
+	}
+
+	void UnpinGraphicsImageTextures(List<Texture2D> pins)
+	{
+		if (pins == null)
+			return;
+		for (int i = 0; i < pins.Count; i++)
+			UnpinGraphicsImageTexture(pins[i]);
+		pins.Clear();
+	}
+
+	// 失效条目：正在显示的纹理退役（pin 归零后释放），否则立即释放。
+	void RetireGraphicsImageTexture(Texture2D texture)
+	{
+		if (texture == null)
+			return;
+		if (graphicsImagePinCounts.TryGetValue(texture, out int count) && count > 0)
+			retiredGraphicsImageTextures.Add(texture);
+		else
+			texture.Dispose();
+	}
+
+	void RegisterLineGraphicsImagePins(int lineNo, List<Texture2D> pins)
+	{
+		if (pins == null || pins.Count == 0)
+			return;
+		lineGraphicsImagePins[lineNo] = pins;
+	}
+
+	void ReleaseLineGraphicsImagePins(int lineNo)
+	{
+		if (!lineGraphicsImagePins.TryGetValue(lineNo, out var pins))
+			return;
+		UnpinGraphicsImageTextures(pins);
+		lineGraphicsImagePins.Remove(lineNo);
+	}
+
+	void ResetLineGraphicsImagePins()
+	{
+		foreach (var pins in lineGraphicsImagePins.Values)
+			UnpinGraphicsImageTextures(pins);
+		lineGraphicsImagePins.Clear();
+	}
+
+	// 主线程周期清扫：GDISPOSE/GCREATE 后不再 created 的死纹理退役 + 字节预算 LRU 淘汰。
+	// GDISPOSE 由 ERB 后台线程触发，EmueraContent 无法直接挂钩，改为按条目 Owner 轮询
+	// IsCreated 判定失效（与 v24 的 IsCreated 语义一致）。不能回查 AppContents.GetGraphics(id)：
+	// 那会从主线程无锁访问脚本线程维护的 gList 字典。
+	void ProcessGraphicsImageCacheCleanup()
+	{
+		if (graphicsImageTextureCache.Count == 0)
+			return;
+		ulong nowMs = Time.GetTicksMsec();
+		if (nowMs - lastGraphicsImageCacheCleanupMs < GraphicsImageCacheCleanupIntervalMs)
+			return;
+		lastGraphicsImageCacheCleanupMs = nowMs;
+
+		var retireIds = new List<int>();
+		foreach (var pair in graphicsImageTextureCache)
+		{
+			// 用条目创建时的 Owner 判断是否仍 created。GDISPOSE 会置 is_created=false，
+			// GCREATE 复用同一 ID 时同对象再置 true 并推进 revision——这里只负责在
+			// 非 created 时把死纹理退役；重建后的新 revision 由 GetGraphicsImageDisplayTexture
+			// 触发重新上传，语义与 v24 的 IsCreated 一致。
+			var owner = pair.Value.Owner;
+			if (owner == null || !owner.IsCreated)
+				retireIds.Add(pair.Key);
+		}
+
+		long budget = OS.HasFeature("mobile") ? MobileGraphicsImageBudgetBytes : DesktopGraphicsImageBudgetBytes;
+		long totalBytes = 0;
+		var entries = new List<KeyValuePair<int, GraphicsImageTextureCacheEntry>>(graphicsImageTextureCache);
+		for (int i = 0; i < entries.Count; i++)
+			totalBytes += entries[i].Value.EstimatedBytes;
+		if (totalBytes > budget)
+			entries.Sort((a, b) => a.Value.LastUsedMs.CompareTo(b.Value.LastUsedMs));
+
+		var retireSet = new HashSet<int>(retireIds);
+		if (totalBytes > budget)
+		{
+			for (int i = 0; i < entries.Count && totalBytes > budget; i++)
+			{
+				int id = entries[i].Key;
+				if (retireSet.Contains(id))
+					continue;
+				var texture = entries[i].Value.Texture;
+				if (texture != null && graphicsImagePinCounts.TryGetValue(texture, out int pins) && pins > 0)
+					continue; // 正在显示的纹理不能被淘汰
+				retireSet.Add(id);
+				totalBytes -= entries[i].Value.EstimatedBytes;
+			}
+		}
+
+		if (retireSet.Count == 0)
+			return;
+		foreach (int id in retireSet)
+		{
+			if (!graphicsImageTextureCache.TryGetValue(id, out var entry))
+				continue;
+			graphicsImageTextureCache.Remove(id);
+			RetireGraphicsImageTexture(entry.Texture);
 		}
 	}
 
@@ -4488,7 +5369,10 @@ public partial class EmueraContent : Control
 
 		if (list == null || list.Count == 0)
 		{
-			ClearCbgSessionState();
+			ReleaseCbgTexturePins();
+			lastCbgSourceLayers.Clear();
+			pendingCbgAsyncTextureRefresh = false;
+			TrimCbgNodes(0);
 			return;
 		}
 
@@ -4499,9 +5383,12 @@ public partial class EmueraContent : Control
 		// into this temporary collector, then the collector becomes cbgTexturePins
 		// only after all visible layers have been rebuilt.
 		var previousTexturePinCollector = activeTexturePinCollector;
+		var previousGraphicsImagePinCollector = activeGraphicsImagePinCollector;
 		var newCbgTexturePins = new List<SpriteManager.TextureInfo>();
+		var newCbgGraphicsImagePins = new List<Texture2D>();
 		var entries = new List<CbgRenderEntry>();
 		activeTexturePinCollector = newCbgTexturePins;
+		activeGraphicsImagePinCollector = newCbgGraphicsImagePins;
 		bool previousCbgRender = renderingCbgTextures;
 		bool previousCbgUnavailable = cbgTextureUnavailableDuringRender;
 		renderingCbgTextures = true;
@@ -4515,8 +5402,14 @@ public partial class EmueraContent : Control
 				if (cbg.Img == null || !cbg.Img.IsCreated)
 					continue;
 
-				var texture = GetSpriteTexture(cbg.Img);
-				if (texture == null)
+				string animatedWebpPath = GetAnimatedWebpSourcePath(cbg.Img);
+				// 动画 WebP 由后台解码器提供帧纹理，并由 EmueraImage 逐帧替换自身贴图。不能先等待
+				// Image.LoadWebpFromBuffer 的静态首帧，否则 Godot 不支持该文件时会在
+				// 此处提前跳过整层，导致动画样例只剩右侧的静态对照图。
+				SpriteAnimeFrameLayoutInfo animeFrameLayout = default;
+				// SpriteAnime 帧未推进时直接复用上次解析结果，避免每轮刷新重复走纹理链。
+				var texture = animatedWebpPath == null ? GetCachedAnimatedSpriteTexture(cbg.Img, out animeFrameLayout) : null;
+				if (texture == null && animatedWebpPath == null)
 					continue;
 
 				var entry = new CbgRenderEntry
@@ -4535,10 +5428,13 @@ public partial class EmueraContent : Control
 				}
 				bool flipX = cbg.width < 0;
 				bool flipY = cbg.height < 0;
-				int w = cbg.width != 0 ? System.Math.Abs(cbg.width) : (cbg.Img.DestBaseSize.Width > 0 ? cbg.Img.DestBaseSize.Width : texture.GetWidth());
-				int h = cbg.height != 0 ? System.Math.Abs(cbg.height) : (cbg.Img.DestBaseSize.Height > 0 ? cbg.Img.DestBaseSize.Height : texture.GetHeight());
-				entry.DrawOffset = GetSpriteHtmlDrawOffset(cbg.Img, cbg.Img.Name, w, h);
-				entry.DrawSize = GetSpriteHtmlDrawSize(cbg.Img, cbg.Img.Name, w, h);
+				int sourceWidth = cbg.Img.DestBaseSize.Width > 0 ? cbg.Img.DestBaseSize.Width : texture?.GetWidth() ?? 1;
+				int sourceHeight = cbg.Img.DestBaseSize.Height > 0 ? cbg.Img.DestBaseSize.Height : texture?.GetHeight() ?? 1;
+				int w = cbg.width != 0 ? System.Math.Abs(cbg.width) : sourceWidth;
+				int h = cbg.height != 0 ? System.Math.Abs(cbg.height) : sourceHeight;
+				entry.DrawOffset = GetSpriteHtmlDrawOffset(cbg.Img, cbg.Img.Name, w, h, animeFrameLayout);
+				entry.DrawSize = GetSpriteHtmlDrawSize(cbg.Img, cbg.Img.Name, w, h, animeFrameLayout);
+				entry.AnimatedWebpPath = animatedWebpPath;
 				entry.Position = GetCbgLayerPosition(cbg, currentScrollY);
 				entry.Size = new Vector2(w, h);
 				entry.FlipX = flipX;
@@ -4551,12 +5447,14 @@ public partial class EmueraContent : Control
 		{
 			cbgTextureUnavailableDuringRender = previousCbgUnavailable;
 			ReleaseTexturePinList(newCbgTexturePins);
+			UnpinGraphicsImageTextures(newCbgGraphicsImagePins);
 			throw;
 		}
 		finally
 		{
 			renderingCbgTextures = previousCbgRender;
 			activeTexturePinCollector = previousTexturePinCollector;
+			activeGraphicsImagePinCollector = previousGraphicsImagePinCollector;
 		}
 
 		bool preservePreviousCbgForUnavailableTexture = cbgTextureUnavailableDuringRender;
@@ -4566,6 +5464,7 @@ public partial class EmueraContent : Control
 			// 刷新背景层时如果新纹理还没就绪，保留旧 CBG 节点和旧 pin。
 			// 初次显示时也不提交半成品图层，等异步完成后再一次性提交，避免标题/差分图白块闪烁。
 			ReleaseTexturePinList(newCbgTexturePins);
+			UnpinGraphicsImageTextures(newCbgGraphicsImagePins);
 			return;
 		}
 
@@ -4575,22 +5474,43 @@ public partial class EmueraContent : Control
 		{
 			var entry = entries[i];
 			var emuImg = GetOrCreateCbgNode(i);
-			emuImg.SourceTexture = entry.SourceTexture;
-			emuImg.SourceRegion = entry.SourceRegion;
-			emuImg.DrawOffset = entry.DrawOffset;
-			emuImg.DrawSize = entry.DrawSize;
-			emuImg.Position = entry.Position;
-			emuImg.Size = entry.Size;
-			emuImg.FlipX = entry.FlipX;
-			emuImg.FlipY = entry.FlipY;
-			emuImg.Modulate = entry.Modulate;
-			emuImg.SetColorMatrix(entry.Layer.colorMatrix);
-			emuImg.Visible = true;
+			ApplyCbgRenderEntry(emuImg, entry);
 			renderedCbgLayers.Add(entry.Layer);
 		}
 		cbgTexturePins = newCbgTexturePins;
+		cbgGraphicsImagePins = newCbgGraphicsImagePins;
 		lastCbgScrollVertical = currentScrollY;
 		TrimCbgNodes(entries.Count);
+	}
+
+	// CBG 的节点按索引复用。即使动态图层要求重新检查纹理，也不要给属性未变的节点
+	// 重复写入相同值，否则每个 setter 都会让 Godot 重新标记 CanvasItem 并放大地图刷新成本。
+	static void ApplyCbgRenderEntry(EmueraImage image, CbgRenderEntry entry)
+	{
+		if (image == null)
+			return;
+		if (image.SourceTexture != entry.SourceTexture)
+			image.SourceTexture = entry.SourceTexture;
+		if (image.SourceRegion != entry.SourceRegion)
+			image.SourceRegion = entry.SourceRegion;
+		if (image.DrawOffset != entry.DrawOffset)
+			image.DrawOffset = entry.DrawOffset;
+		if (image.DrawSize != entry.DrawSize)
+			image.DrawSize = entry.DrawSize;
+		if (image.Position != entry.Position)
+			image.Position = entry.Position;
+		if (image.Size != entry.Size)
+			image.Size = entry.Size;
+		if (image.FlipX != entry.FlipX)
+			image.FlipX = entry.FlipX;
+		if (image.FlipY != entry.FlipY)
+			image.FlipY = entry.FlipY;
+		if (image.Modulate != entry.Modulate)
+			image.Modulate = entry.Modulate;
+		image.SetColorMatrix(entry.Layer?.colorMatrix);
+		image.SetAnimatedWebpSource(entry.AnimatedWebpPath);
+		if (!image.Visible)
+			image.Visible = true;
 	}
 
 	// Convert emuera CBG z-depth rules into a Godot position. Positive z-depth
@@ -4736,14 +5656,42 @@ public partial class EmueraContent : Control
 	}
 
 	// Start BGM, replacing any existing track.
+	// M3：主线程不再同步读盘+解码（1-10MB 文件会阻塞 UI 帧）。命中缓存立即播放；
+	// 未命中则发起 ResourceLoader.LoadThreadedRequest 后台加载，由
+	// ProcessPendingBgmLoad 在 _Process 里轮询完成并接线播放。语义不变：
+	// 播放/切换行为与原来一致，播放开始时机允许略延迟。
 	public void PlayBgmFile(string path)
 	{
-		var stream = LoadAudioStream(path, true);
-		if (stream == null)
+		string resolved = string.IsNullOrEmpty(path) ? null : uEmuera.Utils.ResolveExistingFilePath(path);
+		if (string.IsNullOrEmpty(resolved) || !uEmuera.Utils.FileExists(resolved))
 		{
 			GenericUtils.NotifyBgmPlaybackFailed(path);
 			return;
 		}
+		var cacheKey = new AudioStreamCacheKey(resolved, true);
+		if (audioStreamCache.TryGetValue(cacheKey, out var cached) && cached != null && cached.Stream != null)
+		{
+			cached.LastUsedMs = Time.GetTicksMsec();
+			StartBgmStream(cached.Stream, path);
+			return;
+		}
+		// 只有最新请求生效；旧请求完成时发现路径已被替换/清除则丢弃。
+		pendingBgmPath = resolved;
+		Error startError = ResourceLoader.LoadThreadedRequest(resolved);
+		if (startError == Error.Ok)
+			return;
+		// 该路径不被 ResourceLoader 支持（无对应格式加载器）——回退同步加载保持行为。
+		pendingBgmPath = null;
+		var fallback = LoadAudioStream(resolved, true);
+		if (fallback == null)
+			GenericUtils.NotifyBgmPlaybackFailed(path);
+		else
+			StartBgmStream(fallback, path);
+	}
+
+	// Wire a loaded stream onto the BGM player (replaces the old track).
+	void StartBgmStream(AudioStream stream, string path)
+	{
 		if (bgmPlayer == null)
 		{
 			bgmPlayer = new AudioStreamPlayer();
@@ -4758,9 +5706,60 @@ public partial class EmueraContent : Control
 		GenericUtils.NotifyBgmPlaybackStarted(path, GetAudioStreamLengthMs(stream));
 	}
 
-	// Stop the active BGM track.
+	// Main-thread poll for the pending background BGM load.
+	void ProcessPendingBgmLoad()
+	{
+		if (pendingBgmPath == null)
+			return;
+		string path = pendingBgmPath;
+		ResourceLoader.ThreadLoadStatus status;
+		try
+		{
+			status = ResourceLoader.LoadThreadedGetStatus(path);
+		}
+		catch
+		{
+			status = ResourceLoader.ThreadLoadStatus.Failed;
+		}
+		if (status == ResourceLoader.ThreadLoadStatus.InProgress)
+			return;
+		pendingBgmPath = null;
+		if (status != ResourceLoader.ThreadLoadStatus.Loaded)
+		{
+			GenericUtils.NotifyBgmPlaybackFailed(path);
+			return;
+		}
+		Resource loaded = null;
+		try
+		{
+			loaded = ResourceLoader.LoadThreadedGet(path);
+		}
+		catch
+		{
+			// 加载结果不可用时按失败处理。
+		}
+		if (loaded is not AudioStream stream)
+		{
+			GenericUtils.NotifyBgmPlaybackFailed(path);
+			return;
+		}
+		// 与同步路径一致：BGM 恒为 loop=true。
+		ApplyAudioStreamLoop(stream, true);
+		// 并入 N2 缓存，后续同 path 播放（BGM/SFX）直接命中。
+		audioStreamCache[new AudioStreamCacheKey(path, true)] = new AudioStreamCacheEntry
+		{
+			Stream = stream,
+			LastUsedMs = Time.GetTicksMsec(),
+			EstimatedBytes = EstimateAudioStreamBytes(path, stream)
+		};
+		StartBgmStream(stream, path);
+	}
+
+	// Stop the active BGM track and cancel any pending background load.
 	public void StopBgm()
 	{
+		// M3：取消未完成的异步加载请求，防止加载完成后又把停掉的 BGM 播起来。
+		pendingBgmPath = null;
 		bgmPlayer?.Stop();
 	}
 
@@ -4838,6 +5837,8 @@ public partial class EmueraContent : Control
 	// Load a Godot AudioStream from an emuera file path. This stays synchronous
 	// because sound commands expect immediate playback, so callers should avoid
 	// using very large audio files in hot loops on mobile.
+	// N2：按 (path, loop) LRU 缓存复用已加载的 AudioStream，重复 PLAYSOUND/PLAYBGM
+	// 不再反复读盘+解码；MB 预算 + 周期清扫防止大文件占满（参照纹理 LRU 模式）。
 	AudioStream LoadAudioStream(string path, bool loop)
 	{
 		if (string.IsNullOrEmpty(path))
@@ -4848,6 +5849,37 @@ public partial class EmueraContent : Control
 			GenericUtils.Warn(EmueraLogCategory.Audio, () => $"[AUDIO] File not found: {path}");
 			return null;
 		}
+		var cacheKey = new AudioStreamCacheKey(path, loop);
+		ulong nowMs = Time.GetTicksMsec();
+		if (audioStreamCache.TryGetValue(cacheKey, out var cached)
+			&& cached != null && cached.Stream != null)
+		{
+			cached.LastUsedMs = nowMs;
+			return cached.Stream;
+		}
+		var stream = LoadAudioStreamFromFile(path, loop);
+		if (stream == null)
+			return null;
+		long estimatedBytes = EstimateAudioStreamBytes(path, stream);
+		long budget = OS.HasFeature("mobile") ? MobileAudioStreamCacheBudgetBytes : DesktopAudioStreamCacheBudgetBytes;
+		if (estimatedBytes > budget)
+		{
+			// 单文件超过整个预算时不入缓存，避免大文件占满缓存。
+			return stream;
+		}
+		EvictAudioStreamCacheEntries(nowMs, estimatedBytes);
+		audioStreamCache[cacheKey] = new AudioStreamCacheEntry
+		{
+			Stream = stream,
+			LastUsedMs = nowMs,
+			EstimatedBytes = estimatedBytes
+		};
+		return stream;
+	}
+
+	// Actual per-extension file load (no cache).
+	AudioStream LoadAudioStreamFromFile(string path, bool loop)
+	{
 		string ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
 		switch (ext)
 		{
@@ -4872,6 +5904,85 @@ public partial class EmueraContent : Control
 				GenericUtils.Warn(EmueraLogCategory.Audio, () => $"[AUDIO] Unsupported audio extension \"{ext}\": {path}");
 				return null;
 		}
+	}
+
+	// Set the loop flag on a stream by its concrete type (BGM 后台加载完成后使用，
+	// 与 LoadAudioStreamFromFile 的语义一致)。
+	static void ApplyAudioStreamLoop(AudioStream stream, bool loop)
+	{
+		if (stream is AudioStreamWav wav)
+			wav.LoopMode = loop ? AudioStreamWav.LoopModeEnum.Forward : AudioStreamWav.LoopModeEnum.Disabled;
+		else if (stream is AudioStreamOggVorbis ogg)
+			ogg.Loop = loop;
+		else if (stream is AudioStreamMP3 mp3)
+			mp3.Loop = loop;
+	}
+
+	// Estimated cached memory for budget accounting. Falls back to the on-disk
+	// file size, which is a good approximation of the decoded footprint.
+	static long EstimateAudioStreamBytes(string path, AudioStream stream)
+	{
+		try
+		{
+			var info = new System.IO.FileInfo(path);
+			if (info.Exists)
+				return Math.Max(1024L, info.Length);
+		}
+		catch
+		{
+			// 文件信息不可读时按 1MB 估算，避免缓存无界增长。
+		}
+		return 1024L * 1024L;
+	}
+
+	bool IsAudioStreamInUse(AudioStream stream)
+	{
+		if (stream == null)
+			return false;
+		if (bgmPlayer != null && bgmPlayer.Stream == stream)
+			return true;
+		for (int i = 0; i < soundPlayers.Count; i++)
+		{
+			if (soundPlayers[i] != null && soundPlayers[i].Stream == stream)
+				return true;
+		}
+		return false;
+	}
+
+	// LRU 淘汰：最久未用者先出；正在播放的流保留（播放器持有引用，淘汰只会造成
+	// 后续重复加载，不会中断当前播放）。
+	void EvictAudioStreamCacheEntries(ulong nowMs, long incomingBytes)
+	{
+		long budget = OS.HasFeature("mobile") ? MobileAudioStreamCacheBudgetBytes : DesktopAudioStreamCacheBudgetBytes;
+		long totalBytes = incomingBytes;
+		foreach (var pair in audioStreamCache)
+			totalBytes += pair.Value.EstimatedBytes;
+		// 入缓存前调用时 incoming 已计入：达到条目上限（将在插入后超限）时也要先腾位。
+		if (audioStreamCache.Count < MaxAudioStreamCacheEntries && totalBytes <= budget)
+			return;
+		var entries = new List<KeyValuePair<AudioStreamCacheKey, AudioStreamCacheEntry>>(audioStreamCache);
+		entries.Sort((a, b) => a.Value.LastUsedMs.CompareTo(b.Value.LastUsedMs));
+		foreach (var pair in entries)
+		{
+			if (audioStreamCache.Count < MaxAudioStreamCacheEntries && totalBytes <= budget)
+				break;
+			if (IsAudioStreamInUse(pair.Value.Stream))
+				continue;
+			audioStreamCache.Remove(pair.Key);
+			totalBytes -= pair.Value.EstimatedBytes;
+		}
+	}
+
+	// 主线程周期清扫：与纹理缓存清理同步点执行，按预算/条目上限做 LRU 淘汰。
+	void ProcessAudioStreamCacheCleanup()
+	{
+		if (audioStreamCache.Count == 0)
+			return;
+		ulong nowMs = Time.GetTicksMsec();
+		if (nowMs - lastAudioStreamCacheCleanupMs < AudioStreamCacheCleanupIntervalMs)
+			return;
+		lastAudioStreamCacheCleanupMs = nowMs;
+		EvictAudioStreamCacheEntries(nowMs, 0);
 	}
 
 	// Convert Godot stream length to milliseconds for status callbacks.
@@ -4981,17 +6092,7 @@ public partial class EmueraContent : Control
 				return;
 			}
 
-			var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
-			foreach (var kvp in lineObjects)
-			{
-				var line = kvp.Value;
-				var lineButtons = new List<(string text, Godot.Color color, string code)>();
-				CollectQuickButtons(line, lineButtons);
-				if (lineButtons.Count > 0)
-					lineGroups.Add((kvp.Key, lineButtons));
-			}
-
-			lineGroups.Sort((a, b) => a.lineNo.CompareTo(b.lineNo));
+			var lineGroups = CollectCurrentGenerationQuickButtonGroups();
 
 			if (lineGroups.Count == 0)
 			{
@@ -5085,6 +6186,28 @@ public partial class EmueraContent : Control
 				quickButtons.EndBatch();
 			}
 		}
+	}
+
+	List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> CollectCurrentGenerationQuickButtonGroups()
+	{
+		var lineGroups = new List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)>();
+		if (lastButtonGeneration < 0 || lastButtonGeneration > maxRenderedButtonGeneration)
+			return lineGroups;
+		if (!buttonGenerationLineNumbers.TryGetValue(lastButtonGeneration, out var rows) || rows == null)
+			return lineGroups;
+
+		// 动态地图会累积大量历史行；当前等待代的按钮只可能出现在 generation 索引命中的行里。
+		// 这里避免每次打开地图/刷新快捷按钮时遍历全部 retained line。
+		foreach (int lineNo in rows)
+		{
+			if (!lineObjects.TryGetValue(lineNo, out var line))
+				continue;
+			var lineButtons = new List<(string text, Godot.Color color, string code)>();
+			CollectQuickButtons(line, lineButtons);
+			if (lineButtons.Count > 0)
+				lineGroups.Add((lineNo, lineButtons));
+		}
+		return lineGroups;
 	}
 
 	string BuildQuickButtonGroupsSignature(List<(int lineNo, List<(string text, Godot.Color color, string code)> buttons)> lineGroups)
@@ -5222,11 +6345,20 @@ public partial class EmueraContent : Control
 		return scrollContainer != null ? scrollContainer.GetGlobalRect() : new Rect2(Vector2.Zero, GetViewport().GetVisibleRect().Size);
 	}
 
+	// 虚拟光标重新显示或移动时，视觉坐标和脚本读取的 MOUSEX/MOUSEY 必须一起更新。
+	// 否则新内容会按旧指针位置计算 HTML div，造成视觉光标和游戏内浮层不一致。
+	public void VirtualCursorSynchronizePosition(Vector2 globalPosition)
+	{
+		UpdatePointerPosition(globalPosition);
+		VirtualCursorUpdateHover(globalPosition);
+	}
+
 	// 命中测试：光标当前全局坐标下是否有按钮，命中则驱动 Canvas 高亮（通道B）+
 	// 原生 hover 字段（通道A，ERB MOUSEBUTTON() 读取），未命中则清空两条通道。
 	public bool VirtualCursorUpdateHover(Vector2 globalPosition)
 	{
-		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out _, out var hoverInput, out var hoverGeneration, out _, out _))
+		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out _, out var hoverInput, out var hoverGeneration,
+			out _, out _))
 		{
 			SetCanvasVisualButton(hoverInput, hoverGeneration);
 			GenericUtils.SetPointingButton(hoverInput, hoverGeneration);
@@ -5242,10 +6374,11 @@ public partial class EmueraContent : Control
 	public void VirtualCursorCommitClick(Vector2 globalPosition, int mouseVk)
 	{
 		UpdatePointerPosition(globalPosition);
-		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out var hitButton, out var hitInput, out var hitGeneration, out var contentCenterValid, out var contentCenter))
+		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out var hitButton, out var hitInput, out var hitGeneration,
+			out var contentCenterValid, out _))
 		{
 			if (contentCenterValid)
-				UpdatePointerPositionForContentPoint(contentCenter);
+				UpdatePointerPosition(globalPosition);
 			else
 				UpdatePointerPositionForButton(hitButton, globalPosition);
 			if (quickButtons != null && quickButtons.IsShow)
@@ -5256,6 +6389,63 @@ public partial class EmueraContent : Control
 		{
 			TryAdvanceTap(true, mouseVk);
 		}
+	}
+
+	public void VirtualCursorBeginSlide(Vector2 globalPosition)
+	{
+		if (scrollContainer == null)
+			return;
+
+		StopContentInertia();
+		contentDragActive = true;
+		contentDragMoved = true;
+		contentDragStartedOnButton = false;
+		contentDragButton = null;
+		contentDragButtonInput = null;
+		contentDragButtonGeneration = 0;
+		contentDragButtonContentCenterValid = false;
+		contentDragMouseVk = 0x01;
+		contentDragStartPosition = globalPosition;
+		contentDragLastPosition = globalPosition;
+		contentScrollVelocity = Vector2.Zero;
+		contentInertiaRemainder = Vector2.Zero;
+		contentLastDragTick = Time.GetTicksMsec();
+		lastScrollTraceDragTick = contentLastDragTick;
+		contentScrollInteractionSerial++;
+		ClearCanvasVisualButton();
+		UpdatePointerPosition(globalPosition);
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("virtual_cursor_slide_begin", () => $"pos=({Mathf.RoundToInt(globalPosition.X)},{Mathf.RoundToInt(globalPosition.Y)})");
+	}
+
+	public void VirtualCursorSlideBy(Vector2 pointerDelta)
+	{
+		if (scrollContainer == null)
+			return;
+
+		if (!contentDragActive)
+			VirtualCursorBeginSlide(VirtualCursorGetContentViewportRect().GetCenter());
+
+		var rawScrollDelta = -pointerDelta;
+		var appliedDelta = ScrollContentBy(rawScrollDelta);
+		UpdateContentScrollVelocity(rawScrollDelta, appliedDelta);
+		contentDragLastPosition += pointerDelta;
+		if (GenericUtils.IsScrollTraceActive && appliedDelta.LengthSquared() > 0.01f)
+			TraceScroll("virtual_cursor_slide_move", () => $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
+	}
+
+	public void VirtualCursorEndSlide(bool startInertia)
+	{
+		if (!contentDragActive)
+			return;
+
+		if (startInertia)
+			StartContentInertia();
+		else
+			StopContentInertia();
+		ResetContentDragState();
+		if (GenericUtils.IsScrollTraceActive)
+			TraceScroll("virtual_cursor_slide_end", () => $"inertia={startInertia}");
 	}
 
 	// Hide quick buttons after one is pressed until a new button generation is
@@ -5689,6 +6879,7 @@ public partial class EmueraContent : Control
 	void OnViewportSizeChanged()
 	{
 		ApplySafeAreaLayout();
+		virtualCursor?.RefreshViewportBounds();
 		QueueScaleBoundsUpdate();
 	}
 
@@ -5777,6 +6968,7 @@ public partial class EmueraContent : Control
 	// always-on pieces are O(1) so Android frame time remains predictable.
 	public override void _Process(double delta)
 	{
+		AnimatedWebpSpriteFrames.ProcessPendingFrameUploads(OS.HasFeature("mobile"));
 		ProcessPendingContentPinchZoom();
 		ProcessContentInertia((float)delta);
 		ProcessContentScrollCorrection();
@@ -5786,6 +6978,10 @@ public partial class EmueraContent : Control
 		RefreshCbgFollowScrollPositions();
 		RefreshCbgAnimationPauseState();
 		RefreshCanvasImageAnimations();
+		CleanupAndroidSpriteAnimeFrameTextures();
+		ProcessGraphicsImageCacheCleanup();
+		ProcessPendingBgmLoad();
+		ProcessAudioStreamCacheCleanup();
 		RefreshQuickInputGate();
 		RefreshUiDiagnosticOverlay();
 		ProcessAsyncTextureRefreshes();
@@ -5828,18 +7024,19 @@ public partial class EmueraContent : Control
 		for (int i = 0; i < count; i++)
 		{
 			var sprite = renderedCbgLayers[i].Img;
+			var node = cbgNodes[i];
+			if (node == null)
+				continue;
+			var nodeRect = node.GetGlobalRect();
+			bool visible = nodeRect.Intersects(viewRect);
 			if (sprite is MinorShift.Emuera.Content.SpriteAnime anime)
 			{
-				var node = cbgNodes[i];
-				if (node == null)
-					continue;
-				var nodeRect = node.GetGlobalRect();
-				bool visible = nodeRect.Intersects(viewRect);
 				if (visible)
 					anime.ResumeAnimation();
 				else
 					anime.PauseAnimation();
 			}
+			node.SetAnimatedWebpPaused(!visible);
 		}
 	}
 
@@ -5904,8 +7101,11 @@ public partial class EmueraContent : Control
 		if (canvasVisualButtonGeneration == generation
 			&& string.Equals(canvasVisualButtonInput ?? "", input, StringComparison.Ordinal))
 			return;
+		string previousInput = canvasVisualButtonInput;
+		long previousGeneration = canvasVisualButtonGeneration;
 		canvasVisualButtonInput = input;
 		canvasVisualButtonGeneration = generation;
+		RefreshCanvasImageOverlaySelection(previousInput, previousGeneration, input, generation);
 		QueueCanvasVisualRedraw();
 	}
 
@@ -5913,9 +7113,21 @@ public partial class EmueraContent : Control
 	{
 		if (canvasVisualButtonGeneration == long.MinValue && string.IsNullOrEmpty(canvasVisualButtonInput))
 			return;
+		string previousInput = canvasVisualButtonInput;
+		long previousGeneration = canvasVisualButtonGeneration;
 		canvasVisualButtonInput = null;
 		canvasVisualButtonGeneration = long.MinValue;
+		RefreshCanvasImageOverlaySelection(previousInput, previousGeneration, null, long.MinValue);
 		QueueCanvasVisualRedraw();
+	}
+
+	void ClearCanvasVisualButtonIfMatches(string input, long generation)
+	{
+		if (canvasVisualButtonGeneration != generation)
+			return;
+		if (!string.Equals(canvasVisualButtonInput ?? "", input ?? "", StringComparison.Ordinal))
+			return;
+		ClearCanvasVisualButton();
 	}
 
 	void QueueCanvasVisualRedraw()
@@ -5944,7 +7156,8 @@ public partial class EmueraContent : Control
 
 	// Unified pointer handler for mouse, touch emulation, inline buttons, drag
 	// scrolling, inertia, and click-to-advance.
-	bool HandleContentPointerInput(InputEvent @event, bool acceptEvent, Control button = null, string input = null, long generation = 0)
+	bool HandleContentPointerInput(InputEvent @event, bool acceptEvent, Control button = null, string input = null,
+		long generation = 0)
 	{
 		if (HandleContentTouchGesture(@event, acceptEvent))
 			return true;
@@ -5966,10 +7179,7 @@ public partial class EmueraContent : Control
 
 		if (motion && !contentDragActive)
 		{
-			if (TryFindConsoleButtonAtGlobalPosition(pointerPosition, out _, out var hoverInput, out var hoverGeneration, out _, out _))
-				SetCanvasVisualButton(hoverInput, hoverGeneration);
-			else
-				ClearCanvasVisualButton();
+			UpdateCanvasHoverFromPointer(pointerPosition);
 			return false;
 		}
 
@@ -5985,8 +7195,8 @@ public partial class EmueraContent : Control
 		if (pressed)
 		{
 			bool hitContentCenterValid = false;
-			Vector2 hitContentCenter = Vector2.Zero;
-			if (button == null && TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var hitButton, out var hitInput, out var hitGeneration, out hitContentCenterValid, out hitContentCenter))
+			if (button == null && TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var hitButton, out var hitInput,
+				out var hitGeneration, out hitContentCenterValid, out _))
 			{
 				button = hitButton;
 				input = hitInput;
@@ -6007,9 +7217,11 @@ public partial class EmueraContent : Control
 			contentDragButtonInput = input;
 			contentDragButtonGeneration = generation;
 			contentDragButtonContentCenterValid = hitContentCenterValid;
-			contentDragButtonContentCenter = hitContentCenter;
 			if (contentDragStartedOnButton)
+			{
 				SetCanvasVisualButton(input, generation);
+				SetControlButtonSelected(button, true);
+			}
 			else
 				ClearCanvasVisualButton();
 			contentDragStartPosition = pointerPosition;
@@ -6045,6 +7257,7 @@ public partial class EmueraContent : Control
 			{
 				contentDragMoved = true;
 				contentScrollInteractionSerial++;
+				SetControlButtonSelected(contentDragButton, false);
 				ClearCanvasVisualButton();
 				if (GenericUtils.IsScrollTraceActive)
 					TraceScroll("drag_start", () => $"total=({Mathf.RoundToInt(totalDelta.X)},{Mathf.RoundToInt(totalDelta.Y)}) threshold={ScrollDragThreshold}");
@@ -6088,7 +7301,6 @@ public partial class EmueraContent : Control
 		int pressedButtonMouseVk = contentDragMouseVk;
 		Control pressedButtonControl = null;
 		bool pressedButtonContentCenterValid = false;
-		Vector2 pressedButtonContentCenter = Vector2.Zero;
 		bool advanceTap = false;
 		if (contentDragMoved)
 		{
@@ -6101,18 +7313,19 @@ public partial class EmueraContent : Control
 			pressedButtonGeneration = contentDragButtonGeneration;
 			pressedButtonControl = contentDragButton;
 			pressedButtonContentCenterValid = contentDragButtonContentCenterValid;
-			pressedButtonContentCenter = contentDragButtonContentCenter;
 			handled = true;
 		}
 		else if (!contentDragStartedOnButton)
 		{
 			var console = GlobalStatic.Console;
 			bool isNonLeftClick = pressedButtonMouseVk != 0x01;
-			// 左クリック: EnterKey/AnyKey 待ちのみ advance。
-			// 右/中クリック: INPUT 数値入力待ち中も advance（ゲームが RESULT:1==2 で右クリック検知）。
+			// 左クリック: 通常は EnterKey/AnyKey、eraFL では INPUTS の空白入力も advance。
+			// 右/中クリック: INPUT 待ち中も送信し、ゲーム側が RESULT:1 で用途を判定する。
 			advanceTap = console != null && (
 				console.IsWaitingEnterKey || console.IsWaitAnyKey ||
-				(isNonLeftClick && console.IsWaitingInput));
+				(isNonLeftClick && console.IsWaitingInput) ||
+				ShouldSubmitBlankLeftClickDefault(console, pressedButtonMouseVk) ||
+				ShouldSubmitEraFlBlankPointerString(console, pressedButtonMouseVk));
 			handled = advanceTap;
 			restoreQuickInputGate = advanceTap;
 		}
@@ -6128,7 +7341,7 @@ public partial class EmueraContent : Control
 		if (pressedButtonInput != null)
 		{
 			if (pressedButtonContentCenterValid)
-				UpdatePointerPositionForContentPoint(pressedButtonContentCenter);
+				UpdatePointerPosition(pointerPosition);
 			else
 				UpdatePointerPositionForButton(pressedButtonControl, pointerPosition);
 			if (quickButtons != null && quickButtons.IsShow)
@@ -6149,9 +7362,80 @@ public partial class EmueraContent : Control
 		return handled;
 	}
 
+	// ---- M2：motion hover 命中测试缓存 ----
+	// 鼠标 motion 每次进入都做全树命中测试（TryFindConsoleButtonAtGlobalPosition）。
+	// 这里缓存上一结果：指针未离开上一命中按钮矩形（或未命中时移动 < 阈值）直接
+	// 复用，避免每帧全树扫描。显示内容（displayRevision）或滚动位置变化即失效。
+	// 语义不变：hover/点击判定路径与未缓存时一致，仅减少重复命中测试。
+	const float HoverCacheMoveThresholdPx = 4.0f;
+	Rect2 lastHoverHitRect;
+	bool lastHoverHitRectValid;
+	Vector2 lastHoverPointer;
+	bool lastHoverCached;
+	bool lastHoverHit;
+	string lastHoverInput;
+	long lastHoverGeneration;
+	int lastHoverDisplayRevision = int.MinValue;
+	int lastHoverScrollY = int.MinValue;
+
+	void UpdateCanvasHoverFromPointer(Vector2 pointerPosition)
+	{
+		int revision = displayRevision;
+		int scrollY = scrollContainer != null ? scrollContainer.ScrollVertical : 0;
+		if (lastHoverCached && lastHoverDisplayRevision == revision && lastHoverScrollY == scrollY)
+		{
+			if (lastHoverHit)
+			{
+				// 上一命中按钮的矩形仍包含指针 → 复用命中结果（高亮刷新走原逻辑，
+				// SetCanvasVisualButton 内部有同值短路，开销可忽略）。
+				if (lastHoverHitRectValid && lastHoverHitRect.HasPoint(pointerPosition))
+				{
+					SetCanvasVisualButton(lastHoverInput, lastHoverGeneration);
+					return;
+				}
+			}
+			else if (pointerPosition.DistanceTo(lastHoverPointer) < HoverCacheMoveThresholdPx)
+			{
+				// 上一结果未命中且指针仅小幅移动 → 复用未命中结果。
+				ClearCanvasVisualButton();
+				return;
+			}
+		}
+		// 缓存失效或指针离开上一区域：重新命中测试并更新缓存。
+		lastHoverHit = TryHitHoverButton(pointerPosition, out var hitRect, out var input, out var generation);
+		lastHoverHitRect = hitRect;
+		lastHoverHitRectValid = lastHoverHit && hitRect.Size.X > 0 && hitRect.Size.Y > 0;
+		lastHoverInput = input;
+		lastHoverGeneration = generation;
+		lastHoverPointer = pointerPosition;
+		lastHoverDisplayRevision = revision;
+		lastHoverScrollY = scrollY;
+		lastHoverCached = true;
+		if (lastHoverHit)
+			SetCanvasVisualButton(input, generation);
+		else
+			ClearCanvasVisualButton();
+	}
+
+	// 命中测试并返回可复用的按钮矩形（canvas 命中无 Control 节点时矩形无效，
+	// 由 UpdateCanvasHoverFromPointer 回退到移动阈值复用）。
+	bool TryHitHoverButton(Vector2 pointerPosition, out Rect2 hitRect, out string input, out long generation)
+	{
+		hitRect = default;
+		input = null;
+		generation = 0;
+		if (!TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var button, out input, out generation,
+			out _, out _))
+			return false;
+		if (button != null && GodotObject.IsInstanceValid(button))
+			hitRect = button.GetGlobalRect();
+		return true;
+	}
+
 	// Android 上触摸事件有时只到达 ScrollContainer/root，绕过按钮 Panel.GuiInput。
 	// 这里按当前渲染树反向命中一次，保持主视图按钮和 quick 按钮的输入路径一致。
-	bool TryFindConsoleButtonAtGlobalPosition(Vector2 globalPosition, out Control button, out string input, out long generation, out bool contentCenterValid, out Vector2 contentCenter)
+	bool TryFindConsoleButtonAtGlobalPosition(Vector2 globalPosition, out Control button, out string input, out long generation,
+		out bool contentCenterValid, out Vector2 contentCenter)
 	{
 		button = null;
 		input = null;
@@ -6249,6 +7533,33 @@ public partial class EmueraContent : Control
 			return false;
 		}
 
+		// 系统取消的触摸（Android 手势导航/通知栏/应用中断等，Canceled=true）：
+		// 只做状态清理并吞掉事件，绝不能落入普通指针释放路径触发点击/推进，
+		// 因为用户并没有完成这次点击。
+		if (touch.Canceled)
+		{
+			bool tracked = contentTouchPositions.Remove(touch.Index);
+			if (contentTouchGestureActive)
+			{
+				if (contentTouchPositions.Count >= ContentPinchTouchCount)
+					BeginContentPinch();
+				else if (contentTouchPositions.Count == 0)
+					EndContentTouchGesture();
+				else
+				{
+					contentPinchActive = false;
+					contentPinchDirty = false;
+				}
+			}
+			else if (tracked && contentDragActive)
+			{
+				// 单指按下后被系统取消：清掉普通拖拽状态，避免泄漏到下一次触摸。
+				ResetContentDragState();
+			}
+			ConsumeContentPointerEvent(acceptEvent);
+			return true;
+		}
+
 		if (!contentTouchPositions.ContainsKey(touch.Index))
 		{
 			if (!contentTouchGestureActive)
@@ -6280,14 +7591,26 @@ public partial class EmueraContent : Control
 	{
 		if (!contentTouchPositions.ContainsKey(drag.Index))
 		{
-			if (!contentTouchGestureActive)
+			if (!contentTouchGestureActive && contentTouchPositions.Count == 0)
 				return false;
-			ConsumeContentPointerEvent(acceptEvent);
-			CaptureInputReplayEvent("screen_drag", "", drag.Position, true);
-			return true;
+			// 未知手指：它的按下事件可能被其他控件（快速按钮面板等）消费而未被
+			// 本状态机跟踪。若它已进入内容区域，补录位置并落入下方公共手势路径，
+			// 让跨面板的双指缩放仍然成立，而不是用过期位置产生漂移。
+			bool lateTracked = scrollContainer != null
+				&& scrollContainer.GetGlobalRect().HasPoint(drag.Position);
+			if (lateTracked)
+				contentTouchPositions[drag.Index] = drag.Position;
+			if (!lateTracked || contentTouchPositions.Count < ContentPinchTouchCount)
+			{
+				ConsumeContentPointerEvent(acceptEvent);
+				CaptureInputReplayEvent("screen_drag", "", drag.Position, true);
+				return true;
+			}
 		}
-
-		contentTouchPositions[drag.Index] = drag.Position;
+		else
+		{
+			contentTouchPositions[drag.Index] = drag.Position;
+		}
 		if (!contentTouchGestureActive && contentTouchPositions.Count < ContentPinchTouchCount)
 			return false;
 
@@ -6546,7 +7869,9 @@ public partial class EmueraContent : Control
 			+ ",something=" + console.IsWaitingInputSomething;
 	}
 
-	// Update the emuera pointer position in unscaled console coordinates.
+	// Update MOUSEX/MOUSEY in client coordinates, matching WinForms PointToClient.
+	// 滚动条位置不能混入这里，否则 ERB 会把“历史输出全文坐标”误当成窗口坐标，
+	// v24/snake 的鼠标浮层会触发底部溢出保护并贴到底部。
 	void UpdatePointerPosition(Vector2 globalPosition)
 	{
 		if (scrollContainer == null)
@@ -6555,12 +7880,19 @@ public partial class EmueraContent : Control
 			return;
 		}
 
+		var pointerPosition = GetViewportPointerPositionFromGlobal(globalPosition);
+		GenericUtils.SetPointerPosition(pointerPosition.X, pointerPosition.Y);
+	}
+
+	Vector2 GetViewportPointerPositionFromGlobal(Vector2 globalPosition)
+	{
+		if (scrollContainer == null)
+			return globalPosition;
 		var rect = scrollContainer.GetGlobalRect();
 		var contentPosition = globalPosition - rect.Position;
-		contentPosition += new Vector2(NormalizeContentHorizontalScroll(scrollContainer.ScrollHorizontal), scrollContainer.ScrollVertical);
 		if (contentScale > 0.001f)
 			contentPosition /= contentScale;
-		GenericUtils.SetPointerPosition(contentPosition.X, contentPosition.Y);
+		return contentPosition;
 	}
 
 	// Use the button center for command submission so the core receives a stable
@@ -6573,19 +7905,14 @@ public partial class EmueraContent : Control
 			return;
 		}
 
-		if (button.Size.X <= 0 || button.Size.Y <= 0 || scaledContentRoot == null || !GodotObject.IsInstanceValid(scaledContentRoot))
+		if (button.Size.X <= 0 || button.Size.Y <= 0)
 		{
 			UpdatePointerPosition(fallbackGlobalPosition);
 			return;
 		}
 
 		var globalCenter = button.GetGlobalTransformWithCanvas() * (button.Size * 0.5f);
-		// HTML island 和普通行不是同一个直接父容器；统一换算到 scaledContentRoot，
-		// 再除以当前缩放，才能得到 emuera 核心期望的未缩放控制台坐标。
-		var contentCenter = scaledContentRoot.GetGlobalTransformWithCanvas().AffineInverse() * globalCenter;
-		if (contentScale > 0.001f)
-			contentCenter /= contentScale;
-		GenericUtils.SetPointerPosition(contentCenter.X, contentCenter.Y);
+		UpdatePointerPosition(globalCenter);
 	}
 
 	void UpdatePointerPositionForContentPoint(Vector2 contentPoint)
@@ -6817,17 +8144,20 @@ public partial class EmueraContent : Control
 		return Mathf.CeilToInt(overflow);
 	}
 
-	// Submit an empty input when the console is waiting for enter/any key.
-	// mouseVk: 右/中键时以 from_button=true 送入，让 RESULT_ARRAY[1] 写入正确按键码。
+	// Submit an empty input for enter/any-key waits and profile-approved pointer input loops.
+	// mouseVk: 以 from_button=true 送入时由 EmueraThread 写入对应的 RESULT_ARRAY[1] 鼠标码。
 	bool TryAdvanceTap(bool acceptEvent, int mouseVk = 0x01)
 	{
 		var console = GlobalStatic.Console;
 		bool isNonLeft = mouseVk != 0x01;
-		// 左键：仅 EnterKey/AnyKey 等待时 advance。
-		// 右/中键：IsWaitingInput（含 INPUT 数值等待）也 advance，让游戏通过 RESULT:1 检测右键。
+		// 左键：通常只推进 EnterKey/AnyKey；eraFL 的 INPUTS 鼠标循环额外允许空白输入。
+		// 右/中键：INPUT 等待也送入，让游戏通过 RESULT:1 区分技能、快捷键等用途。
 		if (console == null)
 			return false;
-		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInput))
+		bool submitBlankLeftDefault = ShouldSubmitBlankLeftClickDefault(console, mouseVk);
+		bool submitEraFlBlankString = ShouldSubmitEraFlBlankPointerString(console, mouseVk);
+		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInput)
+			&& !submitBlankLeftDefault && !submitEraFlBlankString)
 			return false;
 
 		uint nowTick = MinorShift._Library.WinmmTimer.TickCount;
@@ -6840,15 +8170,34 @@ public partial class EmueraContent : Control
 		// 右键/中键を空エリアでタップした場合は from_button=true で送信。
 		// これにより EmueraThread の IsWaitingInputSomething ガードを通過し、
 		// RESULT_ARRAY[1] に正しいボタンコードが書き込まれる。
-		bool fromButton = mouseVk != 0x01;
+		bool fromButton = mouseVk != 0x01 || submitBlankLeftDefault || submitEraFlBlankString;
 		EmueraThread.instance.Input("", fromButton, skipFlag, fromButton ? mouseVk : 0);
 		lastClickTick = nowTick;
 		return true;
 	}
 
+	static bool ShouldSubmitEraFlBlankPointerString(MinorShift.Emuera.GameView.EmueraConsole console, int mouseVk)
+	{
+		return Program.Compatibility.EraFl.ShouldSubmitBlankPointerStringInput(
+			mouseVk,
+			console != null && console.IsWaitingInput
+				&& console.InputType == MinorShift.Emuera.GameProc.InputType.StrValue);
+	}
+
+	static bool ShouldSubmitBlankLeftClickDefault(MinorShift.Emuera.GameView.EmueraConsole console, int mouseVk)
+	{
+		// eraTW/snake 的泡茶展开面板用 INPUT -1 等待下一次点击。
+		// 原生空白左键会提交默认值 -1 并写入 RESULT:1=1，从而关闭浮层；
+		// 普通数值输入没有默认值时仍不吞空白点击，避免误提交。
+		return mouseVk == 0x01
+			&& console != null
+			&& console.IsWaitingDefaultableIntValue;
+	}
+
 	// Clear ordinary drag/tap tracking state.
 	void ResetContentDragState()
 	{
+		SetControlButtonSelected(contentDragButton, false);
 		contentDragActive = false;
 		contentDragMoved = false;
 		contentDragStartedOnButton = false;
@@ -6856,7 +8205,6 @@ public partial class EmueraContent : Control
 		contentDragButtonInput = null;
 		contentDragButtonGeneration = 0;
 		contentDragButtonContentCenterValid = false;
-		contentDragButtonContentCenter = Vector2.Zero;
 		contentDragMouseVk = 0x01;
 		ClearCanvasVisualButton();
 	}
@@ -7032,83 +8380,76 @@ public partial class EmueraContent : Control
 
 	static bool TryGetSolidBlockElementRect(char value, float cellWidth, float lineHeight, float fontHeight, out Rect2 rect)
 	{
+		// 不再把 U+2580-U+259F Block Elements 合成为 Godot 矩形。
+		// eraTW 的老虎机等 AA 画面依赖 MS Gothic 字形本身的细缝、抗锯齿和纵横比例；
+		// 这里如果手动画 Rect，布局虽然对齐，但会把字形变成硬边色块，和原生 Emuera 差异很大。
+		// 横向占位仍由 Utils.CheckHalfSize 决定，因此 PRINT_COLORBAR/ASCII Art 的列推进保持不变。
 		rect = default;
-		cellWidth = Mathf.Max(1.0f, cellWidth);
-		lineHeight = Mathf.Max(1.0f, lineHeight);
-		float pad = lineHeight >= 8.0f ? 1.0f : 0.0f;
-		float glyphHeight = Mathf.Clamp(fontHeight > 0.0f ? fontHeight : lineHeight, 1.0f, Mathf.Max(1.0f, lineHeight - pad * 2.0f));
-		float glyphTop = Mathf.Round((lineHeight - glyphHeight) * 0.5f);
-		float maxGlyphTop = Mathf.Max(pad, lineHeight - pad - glyphHeight);
-		glyphTop = Mathf.Clamp(glyphTop, pad, maxGlyphTop);
-		float glyphBottom = Mathf.Min(lineHeight - pad, glyphTop + glyphHeight);
-		float glyphBodyHeight = Mathf.Max(1.0f, glyphBottom - glyphTop);
-
-		// TW 的体力/气力/精力、快C/快V 等条形图用 U+2585/U+2584 这类实体块。
-		// 宽度仍由 Utils.CheckHalfSize 决定以保证横向相连；这里只把字形限制在当前行网格内，
-		// 避免 Godot 字体 fallback 把块字形画到相邻行，造成竖向黏连。
-		if (value >= '\u2581' && value <= '\u2588')
-		{
-			int eighths = value - '\u2580';
-			float height = value == '\u2588'
-				? glyphBodyHeight
-				: Mathf.Max(1.0f, glyphBodyHeight * eighths / 8.0f);
-			float y = glyphBottom - height;
-			rect = new Rect2(0, y, cellWidth, height);
-			return true;
-		}
-		if (value == '\u2580')
-		{
-			float height = Mathf.Max(1.0f, glyphBodyHeight * 0.5f);
-			rect = new Rect2(0, glyphTop, cellWidth, height);
-			return true;
-		}
-		if (value == '\u2594')
-		{
-			float height = Mathf.Max(1.0f, glyphBodyHeight / 8.0f);
-			rect = new Rect2(0, glyphTop, cellWidth, height);
-			return true;
-		}
-		if (value >= '\u2589' && value <= '\u258F')
-		{
-			int eighths = 8 - (value - '\u2588');
-			float width = Mathf.Max(1.0f, cellWidth * eighths / 8.0f);
-			rect = new Rect2(0, glyphTop, width, glyphBodyHeight);
-			return true;
-		}
-		if (value == '\u2590')
-		{
-			float width = Mathf.Max(1.0f, cellWidth * 0.5f);
-			rect = new Rect2(cellWidth - width, glyphTop, width, glyphBodyHeight);
-			return true;
-		}
-		if (value == '\u2595')
-		{
-			float width = Mathf.Max(1.0f, cellWidth / 8.0f);
-			rect = new Rect2(cellWidth - width, glyphTop, width, glyphBodyHeight);
-			return true;
-		}
-
 		return false;
+	}
+
+	static bool IsBlockElementChar(char value)
+	{
+		return value >= '\u2580' && value <= '\u259F';
+	}
+
+	sealed partial class ConsoleColorRectPart : ColorRect
+	{
+		readonly Color normalColor;
+		readonly Color selectedColor;
+		bool selected;
+
+		public ConsoleColorRectPart(Color normalColor, Color selectedColor)
+		{
+			this.normalColor = normalColor;
+			this.selectedColor = selectedColor;
+			Color = normalColor;
+			MouseFilter = MouseFilterEnum.Ignore;
+		}
+
+		public void SetSelected(bool value)
+		{
+			if (selected == value)
+				return;
+			selected = value;
+			Color = selected ? selectedColor : normalColor;
+		}
 	}
 
 	sealed partial class ConsoleTextPart : Control
 	{
+		// #9a 与 Canvas 后端同一方案：静态预填充 char 的 ToString，网格逐字符绘制不再分配。
+		static readonly string[] GridGlyphTexts = new string[char.MaxValue + 1];
+
 		readonly Font font;
 		readonly int fontSize;
+		readonly FontVerticalAlign? verticalAlign;
 		readonly Color color;
+		readonly Color selectedColor;
 		readonly bool bold;
 		readonly string text;
 		Vector2 fixedSize;
+		bool selected;
 
-		public ConsoleTextPart(Font font, int fontSize, Color color, bool bold, string text)
+		public ConsoleTextPart(Font font, int fontSize, Color color, Color selectedColor, bool bold, string text, FontVerticalAlign? verticalAlign = null)
 		{
 			this.font = font;
 			this.fontSize = fontSize > 0 ? fontSize : 18;
 			this.color = color;
+			this.selectedColor = selectedColor;
 			this.bold = bold;
+			this.verticalAlign = verticalAlign;
 			this.text = uEmuera.Utils.StripZeroWidth(text) ?? "";
 			MouseFilter = MouseFilterEnum.Ignore;
 			ClipContents = true;
+		}
+
+		public void SetSelected(bool value)
+		{
+			if (selected == value)
+				return;
+			selected = value;
+			QueueRedraw();
 		}
 
 		public void SetFixedSize(Vector2 size)
@@ -7128,11 +8469,15 @@ public partial class EmueraContent : Control
 			if (font == null || string.IsNullOrEmpty(text))
 				return;
 
-			float fontHeight = font.GetHeight(fontSize);
-			float baseline = GetTextBaseline(font, fontSize, Size.Y, fontHeight);
+			var metrics = GetConsoleFontMetrics(font, fontSize);
+			float fontHeight = metrics.Height;
+			float baseline = GetTextBaseline(font, fontSize, Size.Y, fontHeight, verticalAlign);
+			Color drawColor = selected ? selectedColor : color;
+			if (selected && Config.UseButtonFocusBackgroundColor && !string.IsNullOrWhiteSpace(text))
+				DrawRect(new Rect2(Vector2.Zero, Size), new Color(50.0f / 255.0f, 50.0f / 255.0f, 50.0f / 255.0f, 1.0f));
 			if (!ShouldUseGridDrawing(text))
 			{
-				DrawPlainText(baseline);
+				DrawPlainText(baseline, drawColor);
 				return;
 			}
 
@@ -7146,26 +8491,35 @@ public partial class EmueraContent : Control
 				float nextExactX = exactX + GetCellWidth(half);
 				float nextDrawX = (int)nextExactX;
 				float cellWidth = nextDrawX - drawX;
-				DrawGridChar(text[i], drawX, 0, baseline, cellWidth, fontHeight);
+				DrawGridChar(text[i], drawX, 0, baseline, cellWidth, fontHeight, drawColor);
 				exactX = nextExactX;
 				drawX = nextDrawX;
 			}
 		}
 
-		void DrawPlainText(float baseline)
+		void DrawPlainText(float baseline, Color drawColor)
 		{
 			float drawWidth = System.Math.Max(1.0f, Size.X);
-			DrawString(font, new Vector2(0, baseline), text, HorizontalAlignment.Left, drawWidth, fontSize, color);
+			DrawString(font, new Vector2(0, baseline), text, HorizontalAlignment.Left, drawWidth, fontSize, drawColor);
 			if (bold)
-				DrawString(font, new Vector2(1.0f, baseline), text, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, color);
+				DrawString(font, new Vector2(1.0f, baseline), text, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, drawColor);
 		}
 
-		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f)
+		static float GetTextBaseline(Font font, int fontSize, float height, float fontHeight = -1.0f, FontVerticalAlign? verticalAlign = null)
 		{
+			var metrics = GetConsoleFontMetrics(font, fontSize);
 			if (fontHeight < 0.0f)
-				fontHeight = font.GetHeight(fontSize);
-			float ascent = font.GetAscent(fontSize);
-			return Mathf.Round((height - fontHeight) * 0.5f + ascent);
+				fontHeight = metrics.Height;
+			float freeSpace = height - fontHeight;
+			float alignmentOffset = verticalAlign switch
+			{
+				FontVerticalAlign.Top => 0.0f,
+				FontVerticalAlign.Middle => freeSpace * 0.5f,
+				FontVerticalAlign.Bottom => freeSpace,
+				_ => freeSpace * 0.5f,
+			};
+			float ascent = metrics.Ascent;
+			return Mathf.Round(alignmentOffset + ascent);
 		}
 
 		float GetCellWidth(bool half)
@@ -7197,21 +8551,25 @@ public partial class EmueraContent : Control
 				|| c == '\u3000';
 		}
 
-		void DrawGridChar(char value, float x, float lineTop, float baseline, float cellWidth, float fontHeight)
+		void DrawGridChar(char value, float x, float lineTop, float baseline, float cellWidth, float fontHeight, Color drawColor)
 		{
 			if (TryGetSolidBlockElementRect(value, cellWidth, Size.Y, fontHeight, out var blockRect))
 			{
-				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), color);
+				DrawRect(new Rect2(x + blockRect.Position.X, lineTop + blockRect.Position.Y, blockRect.Size.X, blockRect.Size.Y), drawColor);
 				return;
 			}
-			// 每个字符仍按 emuera 的网格起点绘制，但不能再按单元格宽度裁剪字形。
+			// 每个字符仍按 emuera 的网格起点绘制。箱线字符不能按单元格宽度裁剪字形，
 			// Godot 字体 fallback 下，DRAWLINE/箱线字符的实际 glyph 往往宽于半角格；
 			// 若逐格裁剪会出现横线缺失。片段边界继续由本 Control 的 ClipContents 统一限制。
-			string glyph = value.ToString();
-			float drawWidth = System.Math.Max(1.0f, System.Math.Max(cellWidth, Size.X - x));
-			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, fontSize, color);
+			// 但 U+2580-U+259F 块字符在 TW 老虎机中被当作连续半角像素块使用，若也放宽到整段宽度，
+			// 一个 ▉ 会横向盖到后续 ; 背景格，所以下面仅对 Block Elements 收紧到当前格宽。
+			string glyph = GridGlyphTexts[value] ??= value.ToString();
+			float drawWidth = IsBlockElementChar(value)
+				? System.Math.Max(1.0f, cellWidth)
+				: System.Math.Max(1.0f, System.Math.Max(cellWidth, Size.X - x));
+			DrawString(font, new Vector2(x, baseline), glyph, HorizontalAlignment.Left, drawWidth, fontSize, drawColor);
 			if (bold)
-				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, color);
+				DrawString(font, new Vector2(x + 1.0f, baseline), glyph, HorizontalAlignment.Left, System.Math.Max(1.0f, drawWidth - 1.0f), fontSize, drawColor);
 		}
 	}
 

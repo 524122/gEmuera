@@ -30,10 +30,6 @@ try {
     Assert-SnapshotContract ($v24Minimal.canonicalHash -eq $v24FullCatalog.canonicalHash) 'Unselected Snake module changed the v24 snapshot hash.'
     Assert-SnapshotContract ($v24Minimal.canonicalHash -match '^[0-9a-f]{64}$') 'v24 snapshot hash is invalid.'
     Assert-SnapshotContract ($snake.canonicalHash -match '^[0-9a-f]{64}$' -and $snake.canonicalHash -ne $v24Minimal.canonicalHash) 'Snake snapshot hash is invalid or equal to v24.'
-    Assert-SnapshotContract ($v24Minimal.instructionCount -eq 290) "Unexpected v24 instruction count: $($v24Minimal.instructionCount)."
-    Assert-SnapshotContract ($snake.instructionCount -eq 326) "Unexpected Snake instruction count: $($snake.instructionCount)."
-    Assert-SnapshotContract ($v24Minimal.expressionFunctionCount -eq 358) "Unexpected v24 expression function count: $($v24Minimal.expressionFunctionCount)."
-    Assert-SnapshotContract ($snake.expressionFunctionCount -eq 360) "Unexpected Snake expression function count: $($snake.expressionFunctionCount)."
     Assert-SnapshotContract (@($v24Minimal.instructions | Where-Object publicKey -eq 'SKIPLOG').Count -eq 0) 'Snake-only instruction leaked into v24 projection.'
     Assert-SnapshotContract (@($v24Minimal.instructions | Where-Object publicKey -eq 'CALLSHARP').Count -eq 0) 'Snake candidate handler leaked into v24 projection.'
     Assert-SnapshotContract (@($snake.instructions | Where-Object publicKey -eq 'SKIPLOG').Count -eq 1) 'Snake instruction is missing from Snake projection.'
@@ -90,9 +86,13 @@ try {
     Assert-SnapshotContract ($report.executionStatus -eq 'InProgress' -and $report.gateStatus -eq 'Blocked' -and $report.blockerCode -eq 'EvidenceMissing') 'M0 gate status was incorrectly advanced.'
     Assert-SnapshotContract ($report.result -eq 'Partial') 'Test registry projection must not claim D2 completion.'
     Assert-SnapshotContract ($report.testProjectionInvariant.status -eq 'Passed') 'Unselected-module test projection invariant did not pass.'
-    Assert-SnapshotContract ($report.currentRuntimeIsolation.status -eq 'Failed') 'Current unconditional legacy registration was not reported as failed isolation.'
-    Assert-SnapshotContract ($report.diff.snakeOnlyInstructionCount -eq 36) 'Unexpected Snake-only instruction diff count.'
-    Assert-SnapshotContract ($report.diff.snakeOnlyExpressionFunctionCount -eq 2) 'Unexpected Snake-only expression function diff count.'
+    Assert-SnapshotContract ($report.currentRuntimeIsolation.status -eq 'Passed') 'Legacy parser/VM lookup is not bound to the frozen profile surface.'
+    Assert-SnapshotContract ($report.profiles.v24.instructionCount -eq 303) "Unexpected runtime v24 instruction count: $($report.profiles.v24.instructionCount)."
+    Assert-SnapshotContract ($report.profiles.v24.expressionFunctionCount -eq 266) "Unexpected runtime v24 expression function count: $($report.profiles.v24.expressionFunctionCount)."
+    Assert-SnapshotContract ($report.profiles.snake.instructionCount -eq 326) "Unexpected runtime Snake instruction count: $($report.profiles.snake.instructionCount)."
+    Assert-SnapshotContract ($report.profiles.snake.expressionFunctionCount -eq 347) "Unexpected runtime Snake expression function count: $($report.profiles.snake.expressionFunctionCount)."
+    Assert-SnapshotContract ($report.diff.snakeOnlyInstructionCount -eq 23) 'Unexpected Snake-only instruction diff count.'
+    Assert-SnapshotContract ($report.diff.snakeOnlyExpressionFunctionCount -eq 83) 'Unexpected Snake-only expression function diff count.'
     Assert-SnapshotContract ((Test-Path -LiteralPath $reportPath -PathType Leaf)) 'Registry snapshot report was not written.'
 
     Write-Output 'M0 dialect registry snapshot contract tests passed.'

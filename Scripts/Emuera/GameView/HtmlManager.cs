@@ -239,13 +239,14 @@ namespace MinorShift.Emuera.GameView
 
 		private sealed class HtmlAnalzeStateFontTag
 		{
-			public int Color = -1;
-			public int BColor = -1;
+			public int Color = int.MinValue;
+			public int BColor = int.MinValue;
 			public string FontName = null;
 			public string RenderMode = null;
 			public string FontEdging = null;
 			public string FontHinting = null;
 			public float? FontSize = null;
+			public FontVerticalAlign? VerticalAlign = null;
 			//public int PointX = 0;
 			//public bool PointXisLocked = false;
 		}
@@ -269,7 +270,7 @@ namespace MinorShift.Emuera.GameView
 			public MixedNum Width = null;
 			public MixedNum Height = null;
 			public int Depth = 0;
-			public int Color = -1;
+			public int Color = int.MinValue;
 			public StyledBoxModel StyledBox = null;
 			public bool IsRelative = true;
 			public DisplayMode Display = DisplayMode.Relative;
@@ -307,23 +308,31 @@ namespace MinorShift.Emuera.GameView
 				Color c = Config.ForeColor;
 				Color b = Config.FocusColor;
 				string fontname = null;
+				FontVerticalAlign? verticalAlign = null;
 				bool colorChanged = false;
 				if (FonttagList.Count > 0)
 				{
 					HtmlAnalzeStateFontTag font = FonttagList[FonttagList.Count - 1];
 					fontname = font.FontName;
-					if (font.Color >= 0)
+					verticalAlign = font.VerticalAlign;
+					if (font.Color != int.MinValue)
 					{
 						colorChanged = true;
-						c = Color.FromRgbInt(font.Color);
+						c = Color.FromArgb(font.Color);
 					}
-					if (font.BColor >= 0)
+					if (font.BColor != int.MinValue)
 					{
-						b = Color.FromRgbInt(font.BColor);
+						b = Color.FromArgb(font.BColor);
 					}
 				}
-				return new StringStyle(c, colorChanged, b, FontStyle, fontname);
+				return new StringStyle(c, colorChanged, b, FontStyle, fontname, verticalAlign);
 			}
+
+			public string RenderMode => FonttagList.Count > 0 ? FonttagList[FonttagList.Count - 1].RenderMode : null;
+			public string FontEdging => FonttagList.Count > 0 ? FonttagList[FonttagList.Count - 1].FontEdging : null;
+			public string FontHinting => FonttagList.Count > 0 ? FonttagList[FonttagList.Count - 1].FontHinting : null;
+			public float? FontSize => FonttagList.Count > 0 ? FonttagList[FonttagList.Count - 1].FontSize : null;
+			public FontVerticalAlign? VerticalAlign => FonttagList.Count > 0 ? FonttagList[FonttagList.Count - 1].VerticalAlign : null;
 		}
 
 		/// <summary>
@@ -397,9 +406,9 @@ namespace MinorShift.Emuera.GameView
 						if (parts[cssCounter] is ConsoleStyledString)
 						{
 							ConsoleStyledString css = parts[cssCounter] as ConsoleStyledString;
-							b.Append(getStringStyleStartingTag(css.StringStyle));
+							b.Append(getStringStyleStartingTag(css));
 							b.Append(Escape(css.Str));
-							b.Append(getClosingStyleStartingTag(css.StringStyle));
+							b.Append(getClosingStyleStartingTag(css));
 						}
 						else if (parts[cssCounter] is ConsoleImagePart)
 						{
@@ -505,7 +514,7 @@ namespace MinorShift.Emuera.GameView
 				if (found < 0)
 				{
 					string txt = Unescape(st.Substring());
-					cssList.Add(new ConsoleStyledString(txt, state.GetSS()));
+					cssList.Add(new ConsoleStyledString(txt, state.GetSS(), state.RenderMode, state.FontEdging, state.FontHinting, state.FontSize, state.VerticalAlign));
 					if (state.FlagPClosed)
 						throw new CodeEE("</p>の後にテキストがあります");
 					if (state.FlagNobrClosed)
@@ -515,7 +524,7 @@ namespace MinorShift.Emuera.GameView
 				else if (found > 0)
 				{
 					string txt = Unescape(st.Substring(st.CurrentPosition, found));
-					cssList.Add(new ConsoleStyledString(txt, state.GetSS()));
+					cssList.Add(new ConsoleStyledString(txt, state.GetSS(), state.RenderMode, state.FontEdging, state.FontHinting, state.FontSize, state.VerticalAlign));
 					state.LineHead = false;
 					st.CurrentPosition += found;
 				}
@@ -968,15 +977,23 @@ namespace MinorShift.Emuera.GameView
 
 		public static string GetColorToString(Color color)
 		{
-			StringBuilder b = new StringBuilder();
-			b.Append("#");
-			int colorValue = color.R * 0x10000 + color.G * 0x100 + color.B;
-			b.Append(colorValue.ToString("X6"));
-			return b.ToString();
+			uint argb = unchecked((uint)color.ToArgb());
+			return (argb >> 24) == 0xFF
+				? "#" + (argb & 0xFFFFFF).ToString("X6")
+				: "#" + argb.ToString("X8");
 		}
-		private static string getStringStyleStartingTag(StringStyle style)
+		private static string getStringStyleStartingTag(ConsoleStyledString css)
 		{
-			bool fontChanged = !((style.Fontname == null || style.Fontname == Config.FontName)&& !style.ColorChanged && (style.ButtonColor == Config.FocusColor));
+			if (css == null)
+				return "";
+			StringStyle style = css.StringStyle;
+			bool styleChanged = !((style.Fontname == null || style.Fontname == Config.FontName) && !style.ColorChanged && style.ButtonColor == Config.FocusColor);
+			bool sizeChanged = css.FontSize.HasValue;
+			bool valignChanged = css.VerticalAlign.HasValue;
+			bool renderChanged = !string.IsNullOrEmpty(css.RenderMode);
+			bool edgingChanged = !string.IsNullOrEmpty(css.FontEdging);
+			bool hintingChanged = !string.IsNullOrEmpty(css.FontHinting);
+			bool fontChanged = styleChanged || sizeChanged || valignChanged || renderChanged || edgingChanged || hintingChanged;
 			if (!fontChanged && style.FontStyle == FontStyle.Regular)
 				return "";
 			StringBuilder b = new StringBuilder();
@@ -986,23 +1003,33 @@ namespace MinorShift.Emuera.GameView
 				if (style.Fontname != null && style.Fontname != Config.FontName)
 				{
 					b.Append(" face='");
-					b.Append(HtmlManager.Escape(style.Fontname));
+					b.Append(Escape(style.Fontname));
 					b.Append("'");
 				}
 				if (style.ColorChanged)
 				{
-					b.Append(" color='#");
-					int colorValue = style.Color.R * 0x10000 + style.Color.G * 0x100 + style.Color.B;
-					b.Append(colorValue.ToString("X6"));
-					b.Append("'");
+					b.Append(" color='").Append(GetColorToString(style.Color)).Append("'");
 				}
 				if (style.ButtonColor != Config.FocusColor)
 				{
-					b.Append(" bcolor='#");
-					int colorValue = style.ButtonColor.R * 0x10000 + style.ButtonColor.G * 0x100 + style.ButtonColor.B;
-					b.Append(colorValue.ToString("X6"));
+					b.Append(" bcolor='").Append(GetColorToString(style.ButtonColor)).Append("'");
+				}
+				if (sizeChanged)
+				{
+					b.Append(" size='");
+					b.Append(css.FontSize.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
 					b.Append("'");
 				}
+				if (valignChanged)
+				{
+					b.Append(" valign='").Append(css.VerticalAlign.Value.ToString().ToLowerInvariant()).Append("'");
+				}
+				if (renderChanged)
+					b.Append(" render='").Append(css.RenderMode).Append("'");
+				if (edgingChanged)
+					b.Append(" edging='").Append(css.FontEdging).Append("'");
+				if (hintingChanged)
+					b.Append(" hinting='").Append(css.FontHinting).Append("'");
 				b.Append(">");
 			}
 			if (style.FontStyle != FontStyle.Regular)
@@ -1020,9 +1047,14 @@ namespace MinorShift.Emuera.GameView
 			return b.ToString();
 		}
 
-		private static string getClosingStyleStartingTag(StringStyle style)
+		private static string getClosingStyleStartingTag(ConsoleStyledString css)
 		{
-			bool fontChanged = !((style.Fontname == null || style.Fontname == Config.FontName) && !style.ColorChanged && (style.ButtonColor == Config.FocusColor));
+			if (css == null)
+				return "";
+			StringStyle style = css.StringStyle;
+			bool styleChanged = !((style.Fontname == null || style.Fontname == Config.FontName) && !style.ColorChanged && style.ButtonColor == Config.FocusColor);
+			bool fontChanged = styleChanged || css.FontSize.HasValue || css.VerticalAlign.HasValue
+				|| !string.IsNullOrEmpty(css.RenderMode) || !string.IsNullOrEmpty(css.FontEdging) || !string.IsNullOrEmpty(css.FontHinting);
 			if (!fontChanged && style.FontStyle == FontStyle.Regular)
 				return "";
 			StringBuilder b = new StringBuilder();
@@ -1041,6 +1073,7 @@ namespace MinorShift.Emuera.GameView
 				b.Append("</font>");
 			return b.ToString();
 		}
+
 
 		private static AConsoleDisplayPart tagAnalyze(HtmlAnalzeState state, StringStream st)
 		{
@@ -1346,7 +1379,7 @@ namespace MinorShift.Emuera.GameView
 							}
 							else if (word.Code.Equals("color", StringComparison.OrdinalIgnoreCase))
 							{
-								if (divTag.Color >= 0)
+								if (divTag.Color != int.MinValue)
 									throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
 								divTag.Color = stringToColorInt32(attrValue);
 							}
@@ -1382,15 +1415,13 @@ namespace MinorShift.Emuera.GameView
 						}
 						if (divTag.Width == null)
 							throw new CodeEE("<" + tag + ">タグにwidth属性が設定されていません");
-						if (divTag.Height == null)
-							throw new CodeEE("<" + tag + ">タグにheight属性が設定されていません");
-
-						// 自闭合 div 直接返回空子行的 ConsoleDivPart，不需要 ReadDivInnerHtml
+						// Height is optional; auto-size from child rows and box model.
 						if (isSelfClosing)
 						{
+							ConsoleDisplayLine[] emptyLines = new ConsoleDisplayLine[0];
 							return new ConsoleDivPart(divTag.X, divTag.Y, divTag.Width, divTag.Height,
 								divTag.Depth, divTag.Color, divTag.StyledBox, divTag.IsRelative, divTag.Display,
-								new ConsoleDisplayLine[0]);
+								emptyLines);
 						}
 
 						state.PendingDivTag = divTag;
@@ -1399,12 +1430,13 @@ namespace MinorShift.Emuera.GameView
 
 				case "shape":
 					{
-						if (wc == null)
-							throw new CodeEE("<" + tag + ">タグに属性が設定されていません");
-						int[] param = null;
-						string type = null;
-						int color = -1;
-						int bcolor = -1;
+					if (wc == null)
+						throw new CodeEE("<" + tag + ">タグに属性が設定されていません");
+					int[] param = null;
+					string logParamText = null;
+					string type = null;
+						int color = int.MinValue;
+						int bcolor = int.MinValue;
 						while (!wc.EOL)
 						{
 							word = wc.Current as IdentifierWord;
@@ -1419,12 +1451,12 @@ namespace MinorShift.Emuera.GameView
 							switch (word.Code.ToLower())
 							{
 								case "color":
-									if (color >= 0)
+									if (color != int.MinValue)
 										throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
 									color = optionalStringToColorInt32(attrValue);
 									break;
 								case "bcolor":
-									if (bcolor >= 0)
+									if (bcolor != int.MinValue)
 										throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
 									bcolor = optionalStringToColorInt32(attrValue);
 									break;
@@ -1434,10 +1466,11 @@ namespace MinorShift.Emuera.GameView
 									type = attrValue;
 									break;
 								case "param":
-									if (param != null)
-										throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
-									{
-										string[] tokens = attrValue.Split(',');
+							if (param != null)
+								throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
+							{
+								logParamText = attrValue;
+								string[] tokens = attrValue.Split(',');
 										param = new int[tokens.Length];
 										for (int i = 0; i < tokens.Length; i++)
 										{
@@ -1456,15 +1489,15 @@ namespace MinorShift.Emuera.GameView
 							throw new CodeEE("<" + tag + ">タグにtype属性が設定されていません");
 						Color c = Config.ForeColor;
 						Color b = Config.FocusColor;
-						if (color >= 0)
+						if (color != int.MinValue)
 						{
-							c = Color.FromRgbInt(color);
+							c = Color.FromArgb(color);
 						}
-						if (bcolor >= 0)
+						if (bcolor != int.MinValue)
 						{
-							b = Color.FromRgbInt(bcolor);
+							b = Color.FromArgb(bcolor);
 						}
-						return ConsoleShapePart.CreateShape(type, param, c, b, color >= 0);
+						return ConsoleShapePart.CreateShape(type, param, c, b, color != int.MinValue, logParamText);
 					}
 				case "button":
 				case "nonbutton":
@@ -1578,12 +1611,12 @@ namespace MinorShift.Emuera.GameView
 							switch (word.Code.ToLower())
 							{
 								case "color":
-									if (font.Color >= 0)
+									if (font.Color != int.MinValue)
 										throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
 									font.Color = optionalStringToColorInt32(attrValue);
 									break;
 								case "bcolor":
-									if (font.BColor >= 0)
+									if (font.BColor != int.MinValue)
 										throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
 									font.BColor = optionalStringToColorInt32(attrValue);
 									break;
@@ -1641,6 +1674,18 @@ namespace MinorShift.Emuera.GameView
 								//		font.PointXisLocked = true;
 								//		break;
 								//	}
+							case "valign":
+								if (font.VerticalAlign != null)
+									throw new CodeEE("<" + tag + ">タグに" + word.Code + "属性が2度以上指定されています");
+								if (attrValue.Equals("top", StringComparison.OrdinalIgnoreCase))
+									font.VerticalAlign = FontVerticalAlign.Top;
+								else if (attrValue.Equals("middle", StringComparison.OrdinalIgnoreCase))
+									font.VerticalAlign = FontVerticalAlign.Middle;
+								else if (attrValue.Equals("bottom", StringComparison.OrdinalIgnoreCase))
+									font.VerticalAlign = FontVerticalAlign.Bottom;
+								else
+									throw new CodeEE("<" + tag + ">タグの" + word.Code + "属性の属性値が解釈できません");
+								break;
 								default:
 								throw new CodeEE("<" + tag + ">タグの属性名" + word.Code + "は解釈できません");
 							}
@@ -1649,9 +1694,9 @@ namespace MinorShift.Emuera.GameView
 						if (state.FonttagList.Count > 0)
 						{
 							HtmlAnalzeStateFontTag oldFont = state.FonttagList[state.FonttagList.Count - 1];
-							if (font.Color < 0)
+							if (font.Color == int.MinValue)
 								font.Color = oldFont.Color;
-							if (font.BColor < 0)
+							if (font.BColor == int.MinValue)
 								font.BColor = oldFont.BColor;
 							if (font.FontName == null)
 								font.FontName = oldFont.FontName;
@@ -1663,6 +1708,8 @@ namespace MinorShift.Emuera.GameView
 								font.FontHinting = oldFont.FontHinting;
 							if (font.FontSize == null)
 								font.FontSize = oldFont.FontSize;
+							if (font.VerticalAlign == null)
+								font.VerticalAlign = oldFont.VerticalAlign;
 						}
 						state.FonttagList.Add(font);
 						return null;
@@ -1929,17 +1976,34 @@ namespace MinorShift.Emuera.GameView
 
 		private static int stringToColorInt32(string str)
 		{
-			if(str.Length == 0)
+			if (str.Length == 0)
 				throw new CodeEE("色を表す単語又は#RRGGBB値が必要です");
-			int i = 0;
+			int i;
 			if (str[0] == '#')
 			{
 				string colorvalue = str.Substring(1);
+				if (colorvalue.Length > 2 && colorvalue[0] == '0' && (colorvalue[1] == 'x' || colorvalue[1] == 'X'))
+					colorvalue = colorvalue.Substring(2);
 				try
 				{
-					i = Convert.ToInt32(colorvalue, 16);
-					if (i < 0 || i > 0xFFFFFF)
-						throw new CodeEE(colorvalue + "は適切な色指定の範囲外です");
+					if (colorvalue.Length <= 6)
+					{
+						i = Convert.ToInt32(colorvalue, 16);
+						if (i < 0 || i > 0xFFFFFF)
+							throw new CodeEE(colorvalue + "は適切な色指定の範囲外です");
+						i = unchecked((int)((uint)i | 0xFF000000));
+					}
+					else
+					{
+						long value = Convert.ToInt64(colorvalue, 16);
+						if (value < 0 || value > 0xFFFFFFFFL)
+							throw new CodeEE(colorvalue + "は適切な色指定の範囲外です");
+						i = unchecked((int)value);
+					}
+				}
+				catch (CodeEE)
+				{
+					throw;
 				}
 				catch
 				{
@@ -1949,30 +2013,28 @@ namespace MinorShift.Emuera.GameView
 			else
 			{
 				Color color = Color.FromName(str);
-				if (color.A == 0)//色名として解釈失敗 エラー確定
+				if (color.A == 0)
 				{
-					if(str.Equals("transparent", StringComparison.OrdinalIgnoreCase))
+					if (str.Equals("transparent", StringComparison.OrdinalIgnoreCase))
 						throw new CodeEE("無色透明(Transparent)は色として指定できません");
 					try
 					{
 						i = Convert.ToInt32(str, 16);
 					}
-					catch//16進数でもない
+					catch
 					{
 						throw new CodeEE("指定された色名\"" + str + "\"は無効な色名です");
 					}
-					//#RRGGBBを意図したのかもしれない
 					throw new CodeEE("指定された色名\"" + str + "\"は無効な色名です(16進数で色を指定する場合には数値の前に#が必要です)");
 				}
-				i = color.R * 0x10000 + color.G * 0x100 + color.B;
+				i = unchecked((int)((uint)(color.A << 24 | color.R << 16 | color.G << 8 | color.B)));
 			}
 			return i;
 		}
-
 		private static int optionalStringToColorInt32(string str)
 		{
 			if (string.IsNullOrWhiteSpace(str))
-				return -1;
+				return int.MinValue;
 			return stringToColorInt32(str);
 		}
 

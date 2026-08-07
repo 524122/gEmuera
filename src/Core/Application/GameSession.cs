@@ -265,12 +265,18 @@ public sealed class CoreApplicationRuntime : IAsyncDisposable
         var profiles = BuiltInDialectCatalog.CreateLegacyProfileCatalog();
         var profile = profiles.Resolve(selection.ProfileId);
         var roots = selection.RequestedModuleIds.Count == 0 ? profile.RootModuleIds : selection.RequestedModuleIds;
+        var ports = selection.Ports.Count > 0 ? selection.Ports : profile.DefaultPorts;
+        var capabilities = profile.RequiredCapabilityIds
+            .Concat(selection.CapabilityIds)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
         var plan = new CompatibilityPlanBuilder(modules).Build(
             selection.ProfileId,
             roots,
-            selection.Ports,
-            selection.CapabilityIds,
-            selection.SaveProfileId);
+            ports,
+            capabilities,
+            selection.SaveProfileId ?? profile.DefaultSaveProfileId);
         return ValueTask.FromResult(new SessionCandidate(selection, generation, plan));
     }
 

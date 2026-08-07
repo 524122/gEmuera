@@ -127,8 +127,8 @@ namespace MinorShift.Emuera
 		VariableData varData;
 		Dictionary<string, VariableToken> varTokenDic;
 		Dictionary<string, VariableLocal> localvarTokenDic;
-		Dictionary<string, FunctionIdentifier> instructionDic;
-		Dictionary<string, FunctionMethod> methodDic;
+		IReadOnlyDictionary<string, FunctionIdentifier> instructionDic;
+		IReadOnlyDictionary<string, FunctionMethod> methodDic;
 		IReadOnlyDictionary<string, FunctionIdentifier> compatibilityInstructionDic;
 		IReadOnlyDictionary<string, FunctionMethod> compatibilityMethodDic;
 		IReadOnlyList<string> legacyInstructionNames;
@@ -154,15 +154,17 @@ namespace MinorShift.Emuera
 			nameDic.Add("SAVEDATA", DefinedNameType.Reserved);
 			nameDic.Add("CHARADATA", DefinedNameType.Reserved);//CHARDATAから変更
 			nameDic.Add("REF", DefinedNameType.Reserved);
+			nameDic.Add("REFF", DefinedNameType.Reserved);
 			nameDic.Add("__DEBUG__", DefinedNameType.Reserved);
 			nameDic.Add("__SKIP__", DefinedNameType.Reserved);
 			nameDic.Add("_", DefinedNameType.Reserved);
 			nameDic.Add("VARIADIC", DefinedNameType.Reserved);
-			instructionDic = FunctionIdentifier.GetInstructionNameDic();
+			var compatibility = Program.Compatibility;
+			instructionDic = FunctionIdentifier.GetInstructionNameDic(compatibility);
 
 			varTokenDic = varData.GetVarTokenDicClone();
 			localvarTokenDic = varData.GetLocalvarTokenDic();
-			methodDic = FunctionMethodCreator.GetMethodList();
+			methodDic = FunctionMethodCreator.GetMethodList(compatibility);
 			legacyInstructionNames = new ReadOnlyCollection<string>(
 				new List<string>(instructionDic.Keys));
 			legacyFunctionNames = new ReadOnlyCollection<string>(
