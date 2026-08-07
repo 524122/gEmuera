@@ -1,6 +1,11 @@
 using System;
 using System.Text;
 using Godot;
+// 基类从 PanelContainer(Control) 改为 Window(Viewport) 后，Control 嵌套枚举不再隐式可见。
+using SizeFlags = Godot.Control.SizeFlags;
+using MouseFilterEnum = Godot.Control.MouseFilterEnum;
+using FocusModeEnum = Godot.Control.FocusModeEnum;
+using LayoutPreset = Godot.Control.LayoutPreset;
 
 namespace gEmuera.Diagnostics
 {
@@ -8,8 +13,10 @@ namespace gEmuera.Diagnostics
     /// 企业级说明：运行时诊断面板是配置编辑 UI，不承载日志路由和业务诊断逻辑。
     /// 面板只在 debug.runtime_panel.enabled=true 时实例化，避免普通 APK 游玩期增加节点和布局成本。
     /// 所有改动写入 user://config.toml，保存后可热重载轻量开关；结构性参数建议重启后生效。
+    /// 2026-08：从画布内嵌 PanelContainer 重构为原生 Window（标题栏/可拖动/可缩放，
+    /// 桌面端可为独立 OS 窗口，Android 为浮动子窗口），不再遮挡游戏内容。
     /// </summary>
-    public partial class RuntimeDiagnosticsPanel : PanelContainer
+    public partial class RuntimeDiagnosticsPanel : Window
     {
         static FloatingDiagnosticsHost _activeFloatingHost;
         static Node _floatingAttachParent;
@@ -32,19 +39,32 @@ namespace gEmuera.Diagnostics
         bool quickOptionsDirty;
         bool expertOptionsDirty;
 
+        const int MinWindowWidth = 360;
+        const int MinWindowHeight = 260;
+
         public bool FloatingMode { get; set; }
         public event Action HideRequested;
-        public event Action CloseRequested;
+        // 重命名避免遮蔽 Window 继承的 CloseRequested 信号（标题栏 ✕ 走原生信号）。
+        public event Action RequestCloseEvent;
 
         public override void _Ready()
         {
+            Title = "日志诊断";
+            MinSize = new Vector2I(MinWindowWidth, MinWindowHeight);
+            // 标题栏 ✕ → 与面板内 ✕ 同一关闭路径（宿主 QueueFree 整个悬浮窗）。
+            CloseRequested += OnNativeWindowCloseRequested;
             BuildPanel();
             RefreshResponsiveLayout();
         }
 
+        void OnNativeWindowCloseRequested()
+        {
+            RequestCloseEvent?.Invoke();
+        }
+
         public override void _Notification(int what)
         {
-            if (what == NotificationResized)
+            if (what == Control.NotificationResized)
                 RefreshResponsiveLayout();
         }
 
@@ -113,15 +133,19 @@ namespace gEmuera.Diagnostics
 
         void BuildPanel()
         {
-            AddThemeStyleboxOverride("panel", CreatePanelStyle());
-            SizeFlagsHorizontal = SizeFlags.ExpandFill;
-            SizeFlagsVertical = SizeFlags.ExpandFill;
-            MouseFilter = MouseFilterEnum.Stop;
+            // Window 不是 Control：主题/panel 样式落在根 PanelContainer 上，FullRect 填满整个窗口。
+            var rootPanel = new PanelContainer();
+            rootPanel.AddThemeStyleboxOverride("panel", CreatePanelStyle());
+            rootPanel.SetAnchorsPreset(LayoutPreset.FullRect);
+            rootPanel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            rootPanel.SizeFlagsVertical = SizeFlags.ExpandFill;
+            rootPanel.MouseFilter = MouseFilterEnum.Stop;
+            AddChild(rootPanel);
 
             panelMargin = new MarginContainer();
             panelMargin.MouseFilter = MouseFilterEnum.Pass;
             ApplyMargin(panelMargin, 12, 12);
-            AddChild(panelMargin);
+            rootPanel.AddChild(panelMargin);
 
             var root = new VBoxContainer();
             root.SizeFlagsHorizontal = SizeFlags.ExpandFill;
@@ -198,7 +222,7 @@ namespace gEmuera.Diagnostics
                 actions.AddChild(collapse);
 
                 var close = CreateActionButton("关闭", "关闭本次悬浮窗，不修改配置文件。");
-                close.Pressed += () => CloseRequested?.Invoke();
+                close.Pressed += () => RequestCloseEvent?.Invoke();
                 actions.AddChild(close);
             }
 
@@ -246,7 +270,7 @@ namespace gEmuera.Diagnostics
             if (FloatingMode && viewportSize.X > 0)
             {
                 float maxWidth = Mathf.Max(360.0f, viewportSize.X - outerMargin * 2.0f);
-                CustomMinimumSize = new Vector2(Mathf.Min(520.0f, maxWidth), 220);
+                MinSize = new Vector2I((int)Mathf.Min(520.0f, maxWidth), 220);
             }
 
             var root = panelMargin?.GetChildCount() > 0 ? panelMargin.GetChild(0) as VBoxContainer : null;
@@ -320,7 +344,7 @@ namespace gEmuera.Diagnostics
                 () => config.DebugModelZhCn.ScrollTrace,
                 value => config.DebugModelZhCn.ScrollTrace = value);
 
-            AddSection("全局日志", "控制最低等级、类别、ring buffer 和限流。");
+            AddSection("全局日志", "控制日志的详细程度（等级）、包含哪些模块（类别）、内存里留多少条、以及防刷屏（限流）。普通用户一般只动「等级」和「持续文件日志」。");
             AddChoice("[logging] level", "默认最低等级",
                 "error|warn|info|debug|trace|none（none=关闭全部，trace=全量）。debug_model 未启用时使用该值；APK 默认 error。",
                 new[] { "error", "warn", "info", "debug", "trace", "none" },
@@ -1066,6 +1090,13 @@ namespace gEmuera.Diagnostics
             addingQuickOptions = true;
             try
             {
+                AddGuideBlock(new[]
+                {
+                    "怎么用（3 步）",
+                    "① 平时不用动：preset 保持 normal 最安全。",
+                    "② 遇到问题：选一个排查场景——触摸/点击→touch_input，图片/界面→image_ui，卡顿→performance，APK 异常→apk_issue。",
+                    "③ 要留证据：开「持续文件日志」(file_sink)，再到 GDPrint 页看；需要发给别人时点「导出诊断包」。",
+                });
                 AddSection("人用简化调试", "一般手机/APK 排查只改本页。需要完全手动控制时，把 preset 设为 custom 后再改专家页。");
                 AddCheck("[quick_debug] enabled", "启用快捷层",
                     "开启后 preset 会覆盖相关专家细项；关闭后完全按专家页执行。",
@@ -1319,6 +1350,35 @@ namespace gEmuera.Diagnostics
 
             var descLabel = CreateSmallLabel(description);
             box.AddChild(descLabel);
+        }
+
+        // 面向普通用户的上手引导：说明"遇到什么问题→开哪个"，降低理解门槛。
+        void AddGuideBlock(string[] lines)
+        {
+            EnsureTabRoot();
+            var card = new PanelContainer();
+            card.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            card.MouseFilter = MouseFilterEnum.Pass;
+            card.AddThemeStyleboxOverride("panel", GEmueraTheme.SurfaceStyle(
+                GEmueraTheme.Surface, GEmueraTheme.Border, GEmueraTheme.SmallRadius, 1, 0, null, 10, 10, 8, 10));
+            optionRoot.AddChild(card);
+
+            var box = new VBoxContainer();
+            box.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            box.AddThemeConstantOverride("separation", 4);
+            box.MouseFilter = MouseFilterEnum.Pass;
+            card.AddChild(box);
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var label = CreateSmallLabel(lines[i]);
+                if (i == 0)
+                {
+                    label.AddThemeFontSizeOverride("font_size", 15);
+                    label.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
+                }
+                box.AddChild(label);
+            }
         }
 
         void AddCheck(string key, string title, string description, Func<bool> getter, Action<bool> setter)
@@ -1807,34 +1867,12 @@ namespace gEmuera.Diagnostics
     {
         const float BallSize = 64.0f;
         const float ViewportMargin = 12.0f;
-        const float ResizeHandleThickness = 28.0f;
-        const float ResizeCornerSize = 46.0f;
         const float MinPanelWidth = 360.0f;
         const float MinPanelHeight = 260.0f;
-        const ulong ResizeLongPressMs = 420;
-        const int EdgeLeft = 1;
-        const int EdgeRight = 2;
-        const int EdgeTop = 4;
-        const int EdgeBottom = 8;
-
-        readonly Control[] resizeHandles = new Control[8];
-        readonly int[] resizeMasks =
-        {
-            EdgeLeft, EdgeRight, EdgeTop, EdgeBottom,
-            EdgeLeft | EdgeTop, EdgeRight | EdgeTop, EdgeLeft | EdgeBottom, EdgeRight | EdgeBottom
-        };
 
         RuntimeDiagnosticsPanel panel;
         Button ballButton;
         bool panelVisible;
-        bool resizePending;
-        bool resizing;
-        int resizePointerIndex = int.MinValue;
-        int resizeMask;
-        ulong resizePressMs;
-        Vector2 resizeStartPointer;
-        Vector2 resizeStartPanelPosition;
-        Vector2 resizeStartPanelSize;
 
         public override void _Ready()
         {
@@ -1850,10 +1888,7 @@ namespace gEmuera.Diagnostics
 
             ClampBallToViewport();
             if (panelVisible)
-            {
                 ClampPanelToViewport();
-                UpdateResizeHandles();
-            }
         }
 
         void BuildFloatingUi()
@@ -1870,46 +1905,36 @@ namespace gEmuera.Diagnostics
             ballButton.Pressed += TogglePanel;
             AddChild(ballButton);
 
+            // 面板已重构为原生 Window：Window 自带标题栏/可拖动/可缩放，无需自定义 resize 手柄。
             panel = new RuntimeDiagnosticsPanel
             {
                 FloatingMode = true,
                 Visible = false,
-                MouseFilter = MouseFilterEnum.Stop,
-                CustomMinimumSize = new Vector2(MinPanelWidth, MinPanelHeight)
             };
             panel.HideRequested += () => SetPanelVisible(false);
-            panel.CloseRequested += QueueFree;
+            panel.RequestCloseEvent += QueueFree;
             AddChild(panel);
-
-            for (int i = 0; i < resizeHandles.Length; i++)
-            {
-                int mask = resizeMasks[i];
-                var handle = new ColorRect();
-                handle.Color = new Color(0.42f, 0.7f, 0.72f, 0.20f);
-                handle.MouseFilter = MouseFilterEnum.Stop;
-                handle.Visible = false;
-                handle.TooltipText = "长按后拖动可调整悬浮窗大小";
-                handle.GuiInput += inputEvent => HandleResizeInput(inputEvent, mask);
-                resizeHandles[i] = handle;
-                AddChild(handle);
-            }
         }
 
         void PlaceInitialFloatingControls()
         {
+            // 悬浮球是主窗口 viewport 里的 Control，用逻辑坐标（GetViewportSize）。
             Vector2 viewportSize = GetViewportSize();
             ballButton.Size = new Vector2(BallSize, BallSize);
             ballButton.Position = new Vector2(
                 Mathf.Max(ViewportMargin, viewportSize.X - BallSize - ViewportMargin),
                 Mathf.Max(ViewportMargin, viewportSize.Y * 0.5f - BallSize * 0.5f));
 
-            Vector2 initialSize = new Vector2(
-                Mathf.Min(760.0f, Mathf.Max(MinPanelWidth, viewportSize.X - ViewportMargin * 2.0f)),
-                Mathf.Min(640.0f, Mathf.Max(MinPanelHeight, viewportSize.Y - ViewportMargin * 2.0f)));
+            // panel 是嵌入 Window：Position/Size 用主窗口物理像素（GetParentWindowPixelSize），
+            // 不能用逻辑 viewport 尺寸，否则高分屏/拉伸下位置偏差、标题栏贴边。
+            Vector2I parentSize = GetParentWindowPixelSize();
+            Vector2I initialSize = new Vector2I(
+                (int)Mathf.Min(760.0f, Mathf.Max(MinPanelWidth, parentSize.X - ViewportMargin * 2.0f)),
+                (int)Mathf.Min(640.0f, Mathf.Max(MinPanelHeight, parentSize.Y - ViewportMargin * 2.0f)));
             panel.Size = initialSize;
-            panel.Position = new Vector2(
-                Mathf.Max(ViewportMargin, viewportSize.X - initialSize.X - ViewportMargin),
-                ViewportMargin);
+            panel.Position = new Vector2I(
+                (int)Mathf.Max(ViewportMargin, parentSize.X - initialSize.X - ViewportMargin),
+                (int)Mathf.Max(ViewportMargin, 0));
             SetPanelVisible(false);
         }
 
@@ -1925,7 +1950,6 @@ namespace gEmuera.Diagnostics
             ballButton.Text = visible ? "×" : "调";
             if (visible)
                 ClampPanelToViewport();
-            UpdateResizeHandles();
         }
 
         /// <summary>
@@ -1943,147 +1967,20 @@ namespace gEmuera.Diagnostics
 
         public bool IsBallVisible() => ballButton?.Visible ?? false;
 
-        void HandleResizeInput(InputEvent inputEvent, int mask)
-        {
-            if (!panelVisible)
-                return;
-
-            if (inputEvent is InputEventScreenTouch touch)
-            {
-                if (touch.Pressed)
-                    StartResize(mask, touch.Position, touch.Index);
-                else if (resizePointerIndex == touch.Index)
-                    EndResize();
-                AcceptEvent();
-                return;
-            }
-
-            if (inputEvent is InputEventScreenDrag drag)
-            {
-                if (resizePointerIndex == drag.Index)
-                    UpdateResize(drag.Position);
-                AcceptEvent();
-                return;
-            }
-
-            if (inputEvent is InputEventMouseButton mouseButton && mouseButton.ButtonIndex == MouseButton.Left)
-            {
-                if (mouseButton.Pressed)
-                    StartResize(mask, GetViewport().GetMousePosition(), -1);
-                else if (resizePointerIndex == -1)
-                    EndResize();
-                AcceptEvent();
-                return;
-            }
-
-            if (inputEvent is InputEventMouseMotion mouseMotion
-                && resizePointerIndex == -1
-                && (((int)mouseMotion.ButtonMask & (int)MouseButtonMask.Left) != 0))
-            {
-                UpdateResize(GetViewport().GetMousePosition());
-                AcceptEvent();
-            }
-        }
-
-        void StartResize(int mask, Vector2 pointerPosition, int pointerIndex)
-        {
-            resizePending = true;
-            resizing = false;
-            resizePointerIndex = pointerIndex;
-            resizeMask = mask;
-            resizePressMs = Time.GetTicksMsec();
-            resizeStartPointer = pointerPosition;
-            resizeStartPanelPosition = panel.Position;
-            resizeStartPanelSize = panel.Size;
-        }
-
-        void EndResize()
-        {
-            resizePending = false;
-            resizing = false;
-            resizePointerIndex = int.MinValue;
-        }
-
-        void UpdateResize(Vector2 pointerPosition)
-        {
-            if (!resizePending)
-                return;
-
-            // 企业级说明：边框长按后才进入 resize，避免普通点按页签、按钮或滚动时误触修改窗口大小。
-            if (!resizing)
-            {
-                if (Time.GetTicksMsec() - resizePressMs < ResizeLongPressMs)
-                    return;
-                resizing = true;
-            }
-
-            ApplyResize(pointerPosition - resizeStartPointer);
-        }
-
-        void ApplyResize(Vector2 delta)
-        {
-            Rect2 bounds = GetFloatingBounds();
-            float minWidth = Mathf.Min(MinPanelWidth, bounds.Size.X);
-            float minHeight = Mathf.Min(MinPanelHeight, bounds.Size.Y);
-
-            float left = resizeStartPanelPosition.X;
-            float top = resizeStartPanelPosition.Y;
-            float right = left + resizeStartPanelSize.X;
-            float bottom = top + resizeStartPanelSize.Y;
-
-            if ((resizeMask & EdgeLeft) != 0)
-                left += delta.X;
-            if ((resizeMask & EdgeRight) != 0)
-                right += delta.X;
-            if ((resizeMask & EdgeTop) != 0)
-                top += delta.Y;
-            if ((resizeMask & EdgeBottom) != 0)
-                bottom += delta.Y;
-
-            if (right - left < minWidth)
-            {
-                if ((resizeMask & EdgeLeft) != 0)
-                    left = right - minWidth;
-                else
-                    right = left + minWidth;
-            }
-            if (bottom - top < minHeight)
-            {
-                if ((resizeMask & EdgeTop) != 0)
-                    top = bottom - minHeight;
-                else
-                    bottom = top + minHeight;
-            }
-
-            if (left < bounds.Position.X)
-                left = bounds.Position.X;
-            if (top < bounds.Position.Y)
-                top = bounds.Position.Y;
-            if (right > bounds.Position.X + bounds.Size.X)
-                right = bounds.Position.X + bounds.Size.X;
-            if (bottom > bounds.Position.Y + bounds.Size.Y)
-                bottom = bounds.Position.Y + bounds.Size.Y;
-
-            if (right - left < minWidth)
-                right = Mathf.Min(bounds.Position.X + bounds.Size.X, left + minWidth);
-            if (bottom - top < minHeight)
-                bottom = Mathf.Min(bounds.Position.Y + bounds.Size.Y, top + minHeight);
-
-            panel.Position = new Vector2(left, top);
-            panel.Size = new Vector2(right - left, bottom - top);
-            UpdateResizeHandles();
-        }
-
         void ClampPanelToViewport()
         {
-            Rect2 bounds = GetFloatingBounds();
-            Vector2 size = panel.Size;
-            size.X = Mathf.Clamp(size.X, Mathf.Min(MinPanelWidth, bounds.Size.X), bounds.Size.X);
-            size.Y = Mathf.Clamp(size.Y, Mathf.Min(MinPanelHeight, bounds.Size.Y), bounds.Size.Y);
+            // 面板钳制在父窗口内容区内，留 margin，标题栏始终可抓取。
+            Vector2I parentSize = GetParentWindowPixelSize();
+            const int margin = 8;
+            int maxX = Math.Max(0, parentSize.X - margin * 2);
+            int maxY = Math.Max(0, parentSize.Y - margin * 2);
+            Vector2I size = panel.Size;
+            size.X = Mathf.Clamp(size.X, (int)Mathf.Min(MinPanelWidth, maxX), maxX);
+            size.Y = Mathf.Clamp(size.Y, (int)Mathf.Min(MinPanelHeight, maxY), maxY);
 
-            Vector2 pos = panel.Position;
-            pos.X = Mathf.Clamp(pos.X, bounds.Position.X, bounds.Position.X + bounds.Size.X - size.X);
-            pos.Y = Mathf.Clamp(pos.Y, bounds.Position.Y, bounds.Position.Y + bounds.Size.Y - size.Y);
+            Vector2I pos = panel.Position;
+            pos.X = Mathf.Clamp(pos.X, margin, Math.Max(margin, parentSize.X - size.X - margin));
+            pos.Y = Mathf.Clamp(pos.Y, margin, Math.Max(margin, parentSize.Y - size.Y - margin));
             panel.Position = pos;
             panel.Size = size;
         }
@@ -2102,48 +1999,15 @@ namespace gEmuera.Diagnostics
                 Mathf.Clamp(ballButton.Position.Y, ViewportMargin, max.Y));
         }
 
-        void UpdateResizeHandles()
+        Vector2I GetParentWindowPixelSize()
         {
-            if (panel == null)
-                return;
-
-            bool visible = panelVisible && panel.Visible;
-            foreach (Control handle in resizeHandles)
-                handle.Visible = visible;
-            if (!visible)
-                return;
-
-            Vector2 p = panel.Position;
-            Vector2 s = panel.Size;
-            float t = ResizeHandleThickness;
-            float c = ResizeCornerSize;
-            float half = t * 0.5f;
-
-            SetHandleRect(0, p.X - half, p.Y + c, t, Mathf.Max(0.0f, s.Y - c * 2.0f));
-            SetHandleRect(1, p.X + s.X - half, p.Y + c, t, Mathf.Max(0.0f, s.Y - c * 2.0f));
-            SetHandleRect(2, p.X + c, p.Y - half, Mathf.Max(0.0f, s.X - c * 2.0f), t);
-            SetHandleRect(3, p.X + c, p.Y + s.Y - half, Mathf.Max(0.0f, s.X - c * 2.0f), t);
-            SetHandleRect(4, p.X - half, p.Y - half, c, c);
-            SetHandleRect(5, p.X + s.X - c + half, p.Y - half, c, c);
-            SetHandleRect(6, p.X - half, p.Y + s.Y - c + half, c, c);
-            SetHandleRect(7, p.X + s.X - c + half, p.Y + s.Y - c + half, c, c);
-        }
-
-        void SetHandleRect(int index, float x, float y, float width, float height)
-        {
-            Control handle = resizeHandles[index];
-            handle.Position = new Vector2(x, y);
-            handle.Size = new Vector2(width, height);
-        }
-
-        Rect2 GetFloatingBounds()
-        {
-            Vector2 viewportSize = GetViewportSize();
-            return new Rect2(
-                new Vector2(ViewportMargin, ViewportMargin),
-                new Vector2(
-                    Mathf.Max(BallSize, viewportSize.X - ViewportMargin * 2.0f),
-                    Mathf.Max(BallSize, viewportSize.Y - ViewportMargin * 2.0f)));
+            // 嵌入 Window 的 Position/Size 用主窗口物理像素（GetTree().Root.Size）。
+            var root = GetTree()?.Root;
+            if (root != null && GodotObject.IsInstanceValid(root))
+                return root.Size;
+            return new Vector2I(
+                (int)ProjectSettings.GetSetting("display/window/size/viewport_width", 1280),
+                (int)ProjectSettings.GetSetting("display/window/size/viewport_height", 720));
         }
 
         Vector2 GetViewportSize()

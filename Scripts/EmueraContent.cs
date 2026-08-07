@@ -207,6 +207,14 @@ public partial class EmueraContent : Control
 	Dictionary<string, string> resolvedTextureSearchPaths = new Dictionary<string, string>();
 	ulong lastCanvasAnimationRefreshMs = 0;
 
+	// P0-3：限制三个无上限缓存的条目数，防止 30k 图片 + 长会话下内存无限增长。
+	// 超限清空只造成一次性的重新解析/搜索，不改变功能结果。
+	const int MaxFailedTextureSearchEntries = 512;
+	const int MaxResolvedTextureSearchPaths = 1024;
+	const int MaxAnimatedSpriteFrameCache = 256;
+	ulong lastUnboundedCacheTrimMs = 0;
+	const ulong UnboundedCacheTrimIntervalMs = 2000;
+
 	// #6 动画帧解析缓存：按 (sprite, 当前帧标识) 缓存已解析的纹理与帧布局。
 	// 帧未推进（baseImage/srcRect/offset/GraphicsImage revision 均不变）时跳过
 	// GetSpriteTexture 全链；缓存命中不持有 pin，仍由调用方按原逻辑重新 TrackTexturePin，
@@ -823,7 +831,7 @@ public partial class EmueraContent : Control
 		menuRoot.OffsetRight = -4;
 		menuRoot.OffsetTop = 4;
 		menuRoot.MouseFilter = MouseFilterEnum.Pass;
-		menuRoot.AddThemeConstantOverride("separation", 2);
+		menuRoot.AddThemeConstantOverride("separation", 4);
 		menuLayer.AddChild(menuRoot);
 
 		// Panel holding the 9 action icons (hidden until toggled).
@@ -843,7 +851,7 @@ public partial class EmueraContent : Control
 		menuRoot.AddChild(menuPanel);
 
 		menuExpandedBar = new HBoxContainer();
-		menuExpandedBar.AddThemeConstantOverride("separation", 2);
+		menuExpandedBar.AddThemeConstantOverride("separation", 6);
 		menuPanel.AddChild(menuExpandedBar);
 
 		menuBar = menuExpandedBar;
@@ -864,6 +872,7 @@ public partial class EmueraContent : Control
 		menuToggleBtn.CustomMinimumSize = new Vector2(SystemButtonTouchSize, SystemButtonTouchSize);
 		menuToggleBtn.StretchMode = TextureButton.StretchModeEnum.KeepAspectCentered;
 		menuToggleBtn.MouseFilter = MouseFilterEnum.Stop;
+		StyleSystemIconButton(menuToggleBtn);
 		if (ResourceLoader.Exists("res://assets/icons/menu.svg"))
 			menuToggleBtn.TextureNormal = ResourceLoader.Load<Texture2D>("res://assets/icons/menu.svg");
 		WireSystemButton(menuToggleBtn, OnMenuTogglePressed);
@@ -976,39 +985,61 @@ public partial class EmueraContent : Control
 
 		// Message box popup
 		msgBox = new PopupPanel();
-		msgBox.Size = new Vector2I(400, 220);
+		msgBox.Size = new Vector2I(420, 240);
 		GEmueraTheme.ApplyPopup(msgBox);
 		AddChild(msgBox);
-
+		
+		var msgMargin = new MarginContainer();
+		msgMargin.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		msgMargin.SizeFlagsVertical = SizeFlags.ExpandFill;
+		msgMargin.AddThemeConstantOverride("margin_left", 20);
+		msgMargin.AddThemeConstantOverride("margin_right", 20);
+		msgMargin.AddThemeConstantOverride("margin_top", 18);
+		msgMargin.AddThemeConstantOverride("margin_bottom", 18);
+		msgBox.AddChild(msgMargin);
+		
 		var msgVBox = new VBoxContainer();
 		msgVBox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		msgVBox.SizeFlagsVertical = SizeFlags.ExpandFill;
-		msgVBox.Alignment = BoxContainer.AlignmentMode.Center;
-		msgBox.AddChild(msgVBox);
-
+		msgVBox.AddThemeConstantOverride("separation", 12);
+		msgMargin.AddChild(msgVBox);
+		
 		msgBoxTitle = new Label();
 		msgBoxTitle.HorizontalAlignment = HorizontalAlignment.Center;
+		msgBoxTitle.AddThemeFontSizeOverride("font_size", 20);
+		msgBoxTitle.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
 		msgVBox.AddChild(msgBoxTitle);
-
+		
+		var msgSeparator = new HSeparator();
+		msgSeparator.Modulate = GEmueraTheme.BorderStrong;
+		msgVBox.AddChild(msgSeparator);
+		
 		msgBoxMessage = new Label();
 		msgBoxMessage.HorizontalAlignment = HorizontalAlignment.Center;
+		msgBoxMessage.VerticalAlignment = VerticalAlignment.Center;
 		msgBoxMessage.AutowrapMode = TextServer.AutowrapMode.Word;
 		msgBoxMessage.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		msgBoxMessage.SizeFlagsVertical = SizeFlags.ExpandFill;
+		msgBoxMessage.AddThemeFontSizeOverride("font_size", 15);
+		msgBoxMessage.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
 		msgVBox.AddChild(msgBoxMessage);
-
+		
 		var msgBtnHBox = new HBoxContainer();
 		msgBtnHBox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		msgBtnHBox.Alignment = BoxContainer.AlignmentMode.Center;
+		msgBtnHBox.AddThemeConstantOverride("separation", 12);
 		msgVBox.AddChild(msgBtnHBox);
-
+		
 		msgBoxConfirmBtn = new Button();
 		msgBoxConfirmBtn.Text = MultiLanguage.Get("MsgBox.Confirm", "OK");
+		msgBoxConfirmBtn.CustomMinimumSize = new Vector2(100, 42);
 		StyleButton(msgBoxConfirmBtn);
 		msgBoxConfirmBtn.Pressed += OnMsgConfirm;
 		msgBtnHBox.AddChild(msgBoxConfirmBtn);
-
+		
 		msgBoxCancelBtn = new Button();
 		msgBoxCancelBtn.Text = MultiLanguage.Get("MsgBox.Cancel", "Cancel");
+		msgBoxCancelBtn.CustomMinimumSize = new Vector2(100, 42);
 		StyleButton(msgBoxCancelBtn);
 		msgBoxCancelBtn.Pressed += OnMsgCancel;
 		msgBtnHBox.AddChild(msgBoxCancelBtn);
@@ -1522,6 +1553,7 @@ public partial class EmueraContent : Control
 		btn.CustomMinimumSize = new Vector2(SystemButtonTouchSize, SystemButtonTouchSize);
 		btn.StretchMode = TextureButton.StretchModeEnum.KeepAspectCentered;
 		btn.MouseFilter = MouseFilterEnum.Stop;
+		StyleSystemIconButton(btn);
 		if (!string.IsNullOrWhiteSpace(iconPath)
 			&& !string.Equals(iconPath, "res://", System.StringComparison.OrdinalIgnoreCase)
 			&& ResourceLoader.Exists(iconPath))
@@ -1534,6 +1566,32 @@ public partial class EmueraContent : Control
 		return btn;
 	}
 
+	void StyleSystemIconButton(TextureButton btn)
+	{
+		btn.AddThemeStyleboxOverride("normal", GEmueraTheme.ButtonBox(GEmueraTheme.Surface, GEmueraTheme.Border, GEmueraTheme.SmallRadius));
+		btn.AddThemeStyleboxOverride("hover", GEmueraTheme.ButtonBox(GEmueraTheme.SurfaceRaised, GEmueraTheme.BorderStrong, GEmueraTheme.SmallRadius, 3));
+		btn.AddThemeStyleboxOverride("pressed", GEmueraTheme.ButtonBox(GEmueraTheme.SurfaceRaised, GEmueraTheme.Accent, GEmueraTheme.SmallRadius, 1, pressed: true));
+		btn.AddThemeStyleboxOverride("hover_pressed", GEmueraTheme.ButtonBox(GEmueraTheme.SurfaceRaised, GEmueraTheme.Accent, GEmueraTheme.SmallRadius, 1, pressed: true));
+		btn.AddThemeStyleboxOverride("focus", GEmueraTheme.ButtonBox(GEmueraTheme.Surface, GEmueraTheme.Accent, GEmueraTheme.SmallRadius, 2));
+	}
+
+	void AnimateSystemButtonPress(TextureButton btn, float targetScale)
+	{
+		if (btn == null || !GodotObject.IsInstanceValid(btn))
+			return;
+		btn.PivotOffset = btn.Size * 0.5f;
+		var prev = btn.HasMeta("_sys_press_tween")
+			? btn.GetMeta("_sys_press_tween", default(Variant)).As<Tween>()
+			: null;
+		if (prev != null && GodotObject.IsInstanceValid(prev))
+			prev.Kill();
+		var tween = btn.CreateTween();
+		btn.SetMeta("_sys_press_tween", tween);
+		tween.BindNode(btn);
+		tween.SetTrans(Tween.TransitionType.Cubic);
+		tween.SetEase(Tween.EaseType.Out);
+		tween.TweenProperty(btn, "scale", new Vector2(targetScale, targetScale), GEmueraTheme.PressSeconds);
+	}
 	void WireSystemButton(TextureButton btn, System.Action callback)
 	{
 		bool tracking = false;
@@ -1549,6 +1607,7 @@ public partial class EmueraContent : Control
 				tracking = true;
 				moved = false;
 				start = position;
+				AnimateSystemButtonPress(btn, GEmueraTheme.PressScale);
 				GetViewport().SetInputAsHandled();
 				return;
 			}
@@ -1567,6 +1626,7 @@ public partial class EmueraContent : Control
 			if (released)
 			{
 				tracking = false;
+				AnimateSystemButtonPress(btn, 1.0f);
 				GetViewport().SetInputAsHandled();
 				if (!moved)
 					callback?.Invoke();
@@ -4668,10 +4728,11 @@ public partial class EmueraContent : Control
 				// 命中时直接返回 CPU 裁出的图块，SourceRegion 保持默认值即可完整显示该小纹理。
 				return croppedAtlasTexture;
 			}
-			if (ti.texture == null)
+			if (!ti.IsGpuTextureReady)
 			{
-				// ti 存在但 texture 为 null：ImageTexture lazy create 失败或 image 解码未完成。
+				// ti 存在但 GPU 纹理未就绪：已解码的走限量上传队列，未完成的走异步。
 				// 追踪当前行为 pending，确保 ProcessAsyncTextureRefreshes 会重试。
+				SpriteManager.EnsureGpuTextureDeferred(ti);
 				TrackAsyncTextureRequestForCurrentRender();
 				if (renderingCbgTextures)
 					cbgTextureUnavailableDuringRender = true;
@@ -5067,8 +5128,11 @@ public partial class EmueraContent : Control
 					cbgTextureUnavailableDuringRender = true;
 				return null;
 			}
-			if (ti != null && ti.texture == null)
+			if (ti != null && !ti.IsGpuTextureReady)
 			{
+				// 已解码未上传：登记限量上传，返回 null 让调用方显示占位并等待刷新。
+				SpriteManager.EnsureGpuTextureDeferred(ti);
+				TrackAsyncTextureRequestForCurrentRender();
 				if (renderingCbgTextures)
 					cbgTextureUnavailableDuringRender = true;
 				return null;
@@ -5100,8 +5164,16 @@ public partial class EmueraContent : Control
 	{
 		if (SpriteManager.TryGetTextureInfoCached(name, filename, out ti))
 		{
-			if (ti.IsPlaceholder || ti.texture == null)
+			if (ti.IsPlaceholder)
 			{
+				ti = null;
+				return false;
+			}
+			if (!ti.IsGpuTextureReady)
+			{
+				// 已解码未上传：登记限量上传，由刷新流程重试。
+				SpriteManager.EnsureGpuTextureDeferred(ti);
+				TrackAsyncTextureRequestForCurrentRender();
 				ti = null;
 				return false;
 			}
@@ -6966,8 +7038,24 @@ public partial class EmueraContent : Control
 
 	// Per-frame maintenance. The expensive parts are guarded by flags, and the
 	// always-on pieces are O(1) so Android frame time remains predictable.
+	// P0-3：每 2 秒检查三个无上限缓存的条目数，超限清空（安全：仅重算一次）。
+	void TrimUnboundedCaches()
+	{
+		ulong now = Time.GetTicksMsec();
+		if (now - lastUnboundedCacheTrimMs < UnboundedCacheTrimIntervalMs)
+			return;
+		lastUnboundedCacheTrimMs = now;
+		if (failedTextureSearches.Count > MaxFailedTextureSearchEntries)
+			failedTextureSearches.Clear();
+		if (resolvedTextureSearchPaths.Count > MaxResolvedTextureSearchPaths)
+			resolvedTextureSearchPaths.Clear();
+		if (animatedSpriteFrameCache.Count > MaxAnimatedSpriteFrameCache)
+			animatedSpriteFrameCache.Clear();
+	}
+
 	public override void _Process(double delta)
 	{
+		TrimUnboundedCaches();
 		AnimatedWebpSpriteFrames.ProcessPendingFrameUploads(OS.HasFeature("mobile"));
 		ProcessPendingContentPinchZoom();
 		ProcessContentInertia((float)delta);
