@@ -1925,6 +1925,8 @@ internal static class GenericUtils
             DiagnosticLogExporter.WriteBreadcrumb(cfg, "BREADCRUMB.WRITE", "event=shutdown");
         // WS2：退出前刷新并关闭持续文件 sink，确保 gemuera_runtime_*.log 完整落盘。
         DiagnosticLogSinks.Shutdown();
+        // 图片尺寸磁盘缓存：退出前把本次会话读取的图片头尺寸落盘，二次启动免读头。
+        uEmuera.Drawing.ImageSizeCache.Save();
     }
 
     public static void SamplePerformanceFrame(double deltaSeconds, int gpuRenderQueueCount, int textRenderQueueCount,

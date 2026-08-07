@@ -26,6 +26,11 @@ internal static class SpriteManager
 	const int DesktopCleanupDisposeBudget = 96;
 	const ulong PlaceholderRetryIntervalMs = 1000;
 
+	// 主线程 GPU 上传预算：渲染路径不得同步创建 ImageTexture（否则每张新图一次卡顿），
+	// 改为登记到 pending_gpu_uploads，由 ProcessPendingGpuUploads 每帧限量上传。
+	const int MobileGpuUploadBudget = 2;
+	const int DesktopGpuUploadBudget = 6;
+
 	// 批量加载优化：队列积压超过此阈值时自动提升并发数
 	const int BulkLoadQueueThreshold = 8;
 	// 批量加载时的最大并发数（Android 限制为 2，避免内存压力）
@@ -276,35 +281,49 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 
 		ulong placeholderRetryAfterMs = 0;
 		private ImageTexture _texture = null;
+
+		// 非触发检查：渲染路径用它判断 GPU 纹理是否已就绪，绝不触发同步 decode/resize/上传。
+		internal bool IsGpuTextureReady => _texture != null && !IsDisposed;
+
 		internal ImageTexture texture
 		{
 			get
 			{
 				if (_texture == null)
-				{
-					Image src = image;
-					if (src != null)
-					{
-						try
-						{
-							EnsureImageFitsGpu(src);
-							_texture = ImageTexture.CreateFromImage(src);
-							gpuBytes = EstimateImageBytes(src);
-							cachedWidth = src.GetWidth();
-							cachedHeight = src.GetHeight();
-							if (ShouldReleaseCpuImageAfterUpload())
-								ReleaseCpuImage();
-						}
-						catch (Exception ex)
-						{
-							GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager] Failed to create ImageTexture for {imagename}: {ex.Message}");
-							if (GenericUtils.IsImageDebugEnabled("texture"))
-								GenericUtils.ImageTrace("IMAGE.TEXTURE.CREATE_FAIL", () => "texture create failed",
-									() => $"name={imagename} failure_kind=texture_create_fail error={ex.GetType().Name}");
-						}
-					}
-				}
+					CreateGpuTextureIfNeeded();
 				return _texture;
+			}
+		}
+
+		// 首次 GPU 上传（decode 已完成的前提下：resize + ImageTexture.CreateFromImage）。
+		// 渲染路径不要直接调用它——请用 SpriteManager.EnsureGpuTextureDeferred 走每帧限量队列。
+		internal bool CreateGpuTextureIfNeeded()
+		{
+			if (_texture != null)
+				return true;
+			if (IsDisposed)
+				return false;
+			Image src = image;
+			if (src == null)
+				return false;
+			try
+			{
+				EnsureImageFitsGpu(src);
+				_texture = ImageTexture.CreateFromImage(src);
+				gpuBytes = EstimateImageBytes(src);
+				cachedWidth = src.GetWidth();
+				cachedHeight = src.GetHeight();
+				if (ShouldReleaseCpuImageAfterUpload())
+					ReleaseCpuImage();
+				return true;
+			}
+			catch (Exception ex)
+			{
+				GenericUtils.Warn(EmueraLogCategory.Sprite, () => $"[SpriteManager] Failed to create ImageTexture for {imagename}: {ex.Message}");
+				if (GenericUtils.IsImageDebugEnabled("texture"))
+					GenericUtils.ImageTrace("IMAGE.TEXTURE.CREATE_FAIL", () => "texture create failed",
+						() => $"name={imagename} failure_kind=texture_create_fail error={ex.GetType().Name}");
+				return false;
 			}
 		}
 		internal void RecreateTexture()
@@ -897,9 +916,56 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 			disposeList[i].Dispose();
 	}
 
+	// 渲染路径在需要 GPU 纹理但尚未上传时调用。返回 true 表示该纹理已就绪；
+	// false 表示已登记到每帧限量上传队列（调用方应返回占位/空并等待 texture_load_version 变化）。
+	internal static bool EnsureGpuTextureDeferred(TextureInfo ti)
+	{
+		bool readyNow(TextureInfo t) => t != null && !t.IsDisposed && !t.IsPlaceholder && t.IsGpuTextureReady;
+		if (ti == null || ti.IsDisposed || ti.IsPlaceholder || ti.IsGpuTextureReady)
+			return readyNow(ti);
+		lock (dictLock)
+		{
+			if (ti.IsDisposed || ti.IsPlaceholder || ti.IsGpuTextureReady)
+				return readyNow(ti);
+			pending_gpu_uploads.Add(ti);
+			ti.Touch();
+		}
+		return false;
+	}
+
+	// 主线程每帧调用：把已解码、待上传的纹理按预算批量创建 ImageTexture。
+	// 上传成功的纹理通过 texture_load_version 通知 UI 刷新占位。不在锁内做 GPU 操作。
+	static void ProcessPendingGpuUploads()
+	{
+		if (pending_gpu_uploads.Count == 0)
+			return;
+		int budget = OS.HasFeature("mobile") ? MobileGpuUploadBudget : DesktopGpuUploadBudget;
+		List<TextureInfo> batch = new List<TextureInfo>(budget);
+		lock (dictLock)
+		{
+			var iter = pending_gpu_uploads.GetEnumerator();
+			while (iter.MoveNext() && batch.Count < budget)
+				batch.Add(iter.Current);
+			for (int i = 0; i < batch.Count; i++)
+				pending_gpu_uploads.Remove(batch[i]);
+		}
+		bool uploadedAny = false;
+		for (int i = 0; i < batch.Count; i++)
+		{
+			var ti = batch[i];
+			if (ti == null || ti.IsDisposed || ti.IsPlaceholder)
+				continue;
+			if (ti.CreateGpuTextureIfNeeded())
+				uploadedAny = true;
+		}
+		if (uploadedAny)
+			Interlocked.Increment(ref texture_load_version);
+	}
+
 	public static void UpdateOtherThreads()
 	{
 		ProcessAsyncTextureLoadCompletions();
+		ProcessPendingGpuUploads();
 
 		TextureInfoOtherThread tiot = null;
 		lock(dictLock)
@@ -940,6 +1006,10 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 				Image img = result.Image ?? CreatePlaceholderImage();
 				var ti = new TextureInfo(result.Name, img, result.IsPlaceholder || result.Image == null, result.Filename);
 				var cached = CacheTextureInfo(result.Name, result.Filename, ti);
+				// 解码完成后立即登记待上传，GPU 上传由 ProcessPendingGpuUploads 每帧限量执行，
+				// 而不是等渲染路径首次访问 ti.texture 时同步创建。
+				if (!cached.IsPlaceholder)
+					EnsureGpuTextureDeferred(cached);
 				if(!cached.IsPlaceholder && GenericUtils.IsImageDebugEnabled("log_success"))
 					GenericUtils.ImageTrace("IMAGE.TEXTURE.ASYNC_READY", () => "async texture decoded",
 						() => $"name={result.Name} filename={GenericUtils.RedactTracePath(result.Filename)} size={cached.width}x{cached.height}");
@@ -1060,6 +1130,7 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 			Volatile.Write(ref async_texture_load_epoch, async_texture_load_epoch + 1);
 			async_loading_keys.Clear();
 			pending_async_texture_loads.Clear();
+			pending_gpu_uploads.Clear();
 			disposeList = CollectUniqueTexturesLocked();
 			texture_dict.Clear();
 		}
@@ -1151,6 +1222,9 @@ const int AsyncTextureWorkerQuiescenceTimeoutMs = 2000;
 		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 	static readonly ConcurrentQueue<AsyncTextureLoadResult> completed_async_texture_loads =
 		new ConcurrentQueue<AsyncTextureLoadResult>();
+	// 已解码但尚未上传 GPU 的 TextureInfo。渲染路径登记后由 ProcessPendingGpuUploads
+	// 每帧限量上传，避免同步 CreateFromImage 在 UI 线程造成帧尖峰。
+	static readonly HashSet<TextureInfo> pending_gpu_uploads = new HashSet<TextureInfo>();
 	static readonly object dictLock = new object();
 	static readonly ManualResetEventSlim async_texture_loads_idle = new ManualResetEventSlim(true);
 	static ulong lastCleanupMs = 0;

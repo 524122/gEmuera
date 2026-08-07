@@ -66,8 +66,21 @@ namespace MinorShift.Emuera.GameProc
             Stopwatch loadStopwatch = Stopwatch.StartNew();
             void MarkLoad(string stage)
             {
+                long ms = loadStopwatch.ElapsedMilliseconds;
                 if (Config.DisplayReport)
-                    GenericUtils.Info($"[LOADTIME] {stage}: {loadStopwatch.ElapsedMilliseconds}ms");
+                    GenericUtils.Info($"[LOADTIME] {stage}: {ms}ms");
+                // 始终落盘（Release APK 也生效）：定位 30k 图片加载耗时构成，避免盲优化。
+                try
+                {
+                    string dir = Program.DebugDir;
+                    if (!string.IsNullOrEmpty(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                        File.AppendAllText(Path.Combine(dir, "load_times.log"),
+                            $"[LOADTIME] {stage}: {ms}ms\n");
+                    }
+                }
+                catch { }
             }
 			try
 			{
@@ -243,6 +256,8 @@ namespace MinorShift.Emuera.GameProc
 			}
 			GenericUtils.Info("[LOAD] Initialization complete, starting TITLE");
 			MarkLoad("total-before-title");
+			// 图片尺寸磁盘缓存：启动期已读取的图片头尺寸落盘，二次启动免读头。
+			uEmuera.Drawing.ImageSizeCache.Save();
 			state.Begin(BeginType.TITLE);
 			GC.Collect();
             return true;

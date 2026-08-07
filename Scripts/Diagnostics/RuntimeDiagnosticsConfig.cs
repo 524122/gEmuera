@@ -66,7 +66,12 @@ namespace gEmuera.Diagnostics
         public string LoggingLevel { get; set; } = "error";
         public bool LoggingMirrorNonErrorToGodot { get; set; } = false;
         // 持续文件 sink：LoggingEnabled && FileSinkEnabled 双重门控；等级独立于全局 level（FileSinkLevel）。
+        // Debug/诊断构建默认开启，Release APK 默认关闭（避免磁盘增长）；config.toml 显式 file_sink 值优先。
+#if DEBUG || GEMUERA_DIAGNOSTIC_LOGS
+        public bool FileSinkEnabled { get; set; } = true;
+#else
         public bool FileSinkEnabled { get; set; } = false;
+#endif
         public string FileSinkLevel { get; set; } = "info";
         // 诊断面板显示：复用 RuntimePanelEnabled（等价键 debug.runtime_panel.enabled / [logging] panel_visible）。
         // false 时启动不挂载悬浮窗；运行时 GenericUtils.SetDiagnosticsPanelVisible 可即时显隐。

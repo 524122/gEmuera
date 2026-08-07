@@ -16,8 +16,8 @@ namespace MinorShift.Emuera.Content
 			gList = new Dictionary<int, GraphicsImage>();
 		}
 		static readonly Dictionary<string, AContentFile> resourceDic = new Dictionary<string, AContentFile>();
-		static readonly Dictionary<string, ASprite> imageDictionary = new Dictionary<string, ASprite>();
-		static readonly Dictionary<string, LazySpriteDefinition> lazyImageDictionary = new Dictionary<string, LazySpriteDefinition>();
+		static readonly Dictionary<string, ASprite> imageDictionary = new Dictionary<string, ASprite>(StringComparer.OrdinalIgnoreCase);
+		static readonly Dictionary<string, LazySpriteDefinition> lazyImageDictionary = new Dictionary<string, LazySpriteDefinition>(StringComparer.OrdinalIgnoreCase);
 		static readonly HashSet<string> csvSpriteNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		static readonly Dictionary<string, Point> spriteBasePositions = new Dictionary<string, Point>();
 		static readonly Dictionary<string, string> resolvedExistingResourcePathCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -59,35 +59,30 @@ namespace MinorShift.Emuera.Content
 		{
 			if (name == null)
 				return null;
-
-	            name = name.ToUpper();
-	            ASprite result = null;
-	            if (imageDictionary.TryGetValue(name, out result))
-	                return result;
-	            if (lazyImageDictionary.TryGetValue(name, out var definition))
-	            {
-	                result = RealizeLazySprite(name, definition);
-	                if (result != null)
-	                    return result;
-	            }
-	            if (name.StartsWith("CUTIN") && int.TryParse(name.Substring(5), out int graphicsId))
-	            {
-	                GraphicsImage g;
-	                if (gList.TryGetValue(graphicsId, out g) && g != null && g.IsCreated)
-	                {
-	                    result = new SpriteG(name, g, new Rectangle(0, 0, g.Width, g.Height));
-	                    imageDictionary[name] = result;
-	                }
-	            }
-	            return result;
+			ASprite result = null;
+			if (imageDictionary.TryGetValue(name, out result))
+				return result;
+			if (lazyImageDictionary.TryGetValue(name, out var definition))
+			{
+				result = RealizeLazySprite(name, definition);
+				if (result != null)
+					return result;
+			}
+			if (name.StartsWith("CUTIN", StringComparison.OrdinalIgnoreCase) && int.TryParse(name.Substring(5), out int graphicsId))
+			{
+				GraphicsImage g;
+				if (gList.TryGetValue(graphicsId, out g) && g != null && g.IsCreated)
+				{
+					result = new SpriteG(name, g, new Rectangle(0, 0, g.Width, g.Height));
+					imageDictionary[name] = result;
+				}
+			}
+			return result;
 		}
-
 		static public bool SpriteExists(string name)
 		{
 			if (name == null)
 				return false;
-
-			name = name.ToUpper();
 			if (imageDictionary.TryGetValue(name, out var existing))
 				return existing != null && existing.IsCreated;
 			if (lazyImageDictionary.TryGetValue(name, out var definition))
@@ -101,18 +96,17 @@ namespace MinorShift.Emuera.Content
 				lazyImageDictionary.Remove(name);
 				return false;
 			}
-			if (name.StartsWith("CUTIN") && int.TryParse(name.Substring(5), out int graphicsId))
+			if (name.StartsWith("CUTIN", StringComparison.OrdinalIgnoreCase) && int.TryParse(name.Substring(5), out int graphicsId))
 				return gList.TryGetValue(graphicsId, out var g) && g != null && g.IsCreated;
 			return false;
 		}
-
 		static public bool IsCsvSpriteName(string name)
 		{
 			if (string.IsNullOrWhiteSpace(name))
 				return false;
-			return csvSpriteNames.Contains(name.Trim().ToUpper());
+			// csvSpriteNames 已是 OrdinalIgnoreCase，无需 ToUpper。
+			return csvSpriteNames.Contains(name.Trim());
 		}
-
 		static void RegisterCsvSpriteName(string name)
 		{
 			if (string.IsNullOrWhiteSpace(name))
@@ -535,7 +529,11 @@ namespace MinorShift.Emuera.Content
 							currentAnime = definition;
 						}
 						else
+						{
+							// 与 eager 路径一致：同名资源重定义时提示（保留先定义者）。
+							ParserMediator.Warn("同名のリソースが既に作成されています: " + spriteName, definition.Position, 0);
 							currentAnime = existing;
+						}
 						continue;
 					}
 
@@ -553,6 +551,11 @@ namespace MinorShift.Emuera.Content
 						RegisterCsvSpriteName(spriteName);
 						if (existingSprite == null)
 							indexedCount++;
+					}
+					else
+					{
+						// 与 eager 路径一致：同名资源重定义时提示（保留先定义者）。
+						ParserMediator.Warn("同名のリソースが既に作成されています: " + spriteName, definition.Position, 0);
 					}
 				}
 			}

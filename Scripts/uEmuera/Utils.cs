@@ -156,6 +156,49 @@ namespace uEmuera
         static readonly Dictionary<string, DirListing> recursiveDirListingCache =
             new Dictionary<string, DirListing>(StringComparer.OrdinalIgnoreCase);
 
+        // 大小写不敏感路径索引：一次性复用 recursiveDirListingCache 建立 lower(normalize(rel)) -> actual(rel)，
+        // 让 Android 上 30k 张图片的首次路径解析从逐层 DirAccess 扫描降为 O(1) 字典命中。
+        // 仅覆盖 ContentDir（图片资源路径解析的主力场景）；其余目录仍走原 ResolveExistingPath 扫描。
+        static Dictionary<string, string> contentPathIndex;
+        static readonly object contentPathIndexLock = new object();
+
+        static Dictionary<string, string> GetContentPathIndex()
+        {
+            lock (contentPathIndexLock)
+            {
+                if (contentPathIndex != null)
+                    return contentPathIndex;
+                var index = new Dictionary<string, string>(StringComparer.Ordinal);
+                string root = NormalizePath(MinorShift.Emuera.Program.ContentDir ?? "");
+                if (root.Length > 0)
+                {
+                    var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    BuildContentPathIndexInto(root, "", index, visited);
+                }
+                contentPathIndex = index;
+                return contentPathIndex;
+            }
+        }
+
+        static void BuildContentPathIndexInto(string dirPath, string relPrefix, Dictionary<string, string> index, HashSet<string> visited)
+        {
+            // 与 CollectFilePathsCached 相同的键格式，直接复用已经缓存好的目录列表，无额外 I/O。
+            var listing = GetOrBuildDirListing(dirPath);
+            foreach (string file in listing.Files)
+            {
+                string rel = relPrefix + file;
+                index[NormalizePath(rel).ToLowerInvariant()] = rel;
+            }
+            foreach (string subdir in listing.Subdirs)
+            {
+                string rel = relPrefix + subdir;
+                index[NormalizePath(rel).ToLowerInvariant()] = rel;
+                string subPath = dirPath.TrimEnd('/') + "/" + subdir;
+                if (visited.Add(subPath))
+                    BuildContentPathIndexInto(subPath, rel + "/", index, visited);
+            }
+        }
+
         static bool IsCacheableDirRoot(string search)
         {
             return IsUnderDirRoot(search, MinorShift.Emuera.Program.ErbDir)
@@ -730,6 +773,18 @@ namespace uEmuera
             else if (Godot.FileAccess.FileExists(path))
             {
                 return path;
+            }
+
+            // 大小写索引查找（Android 资源路径主力场景）：命中即 O(1) 返回，跳过逐层 DirAccess 扫描。
+            if (!directory && !string.IsNullOrEmpty(MinorShift.Emuera.Program.ContentDir))
+            {
+                string contentRoot = NormalizePath(MinorShift.Emuera.Program.ContentDir).TrimEnd('/') + "/";
+                if (path.StartsWith(contentRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    string rel = path.Substring(contentRoot.Length);
+                    if (GetContentPathIndex().TryGetValue(rel.ToLowerInvariant(), out string actualRel))
+                        return contentRoot + actualRel;
+                }
             }
 
             // Try case-insensitive resolution starting from the parent directory.
