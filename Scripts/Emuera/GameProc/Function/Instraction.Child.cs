@@ -1051,11 +1051,22 @@ namespace MinorShift.Emuera.GameProc.Function
 					if (y >= 10)
 						y = y / (long)(Math.Pow(10.0, Math.Log10((double)y)));
 				}
+				if (tinputarg.Mouse != null)
+					req.MouseInput = tinputarg.Mouse.GetIntValue(exm) == 1;
 				Int64 z = (tinputarg.Disp != null) ? tinputarg.Disp.GetIntValue(exm) : 1;
 				req.Timelimit = x;
 				req.DefIntValue = y;
 				req.DisplayTime = z != 0;
 				req.TimeUpMes = (tinputarg.Timeout != null) ? tinputarg.Timeout.GetStrValue(exm) : Config.TimeupLabel;
+				// EE_INPUT 機能拡張：消息跳过且指定了 CanSkip 时不阻塞，直接写 RESULT。
+				if (tinputarg.CanSkip != null && exm.Console.MesSkip)
+				{
+					if (tinputarg.Mouse == null || tinputarg.Mouse.GetIntValue(exm) == 0)
+						GlobalStatic.VEvaluator.RESULT = y;
+					else
+						GlobalStatic.VEvaluator.RESULT_ARRAY[1] = y;
+					return;
+				}
 				exm.Console.WaitInput(req);
 			}
 		}
@@ -1083,11 +1094,22 @@ namespace MinorShift.Emuera.GameProc.Function
 				string strs = tinputarg.Def.GetStrValue(exm);
 				if (isOne && strs.Length > 1)
 					strs = strs.Remove(1);
+				if (tinputarg.Mouse != null)
+					req.MouseInput = tinputarg.Mouse.GetIntValue(exm) == 1;
 				Int64 z = (tinputarg.Disp != null) ? tinputarg.Disp.GetIntValue(exm) : 1;
 				req.Timelimit = x;
 				req.DefStrValue = strs;
 				req.DisplayTime = z != 0;
 				req.TimeUpMes = (tinputarg.Timeout != null) ? tinputarg.Timeout.GetStrValue(exm) : Config.TimeupLabel;
+				// EE_INPUT 機能拡張：消息跳过且指定了 CanSkip 时不阻塞，直接写 RESULTS。
+				if (tinputarg.CanSkip != null && exm.Console.MesSkip)
+				{
+					if (tinputarg.Mouse == null || tinputarg.Mouse.GetIntValue(exm) == 0)
+						GlobalStatic.VEvaluator.RESULTS = strs;
+					else
+						GlobalStatic.VEvaluator.RESULTS_ARRAY[1] = strs;
+					return;
+				}
 				exm.Console.WaitInput(req);
 			}
 		}

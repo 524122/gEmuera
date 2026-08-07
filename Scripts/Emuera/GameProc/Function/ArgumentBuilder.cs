@@ -1407,15 +1407,19 @@ namespace MinorShift.Emuera.GameProc.Function
             public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
             {
                 IOperandTerm[] terms = popTerms(line);
-                IOperandTerm term3 = null, term4 = null;
+                IOperandTerm term3 = null, term4 = null, term5 = null, term6 = null;
                 if (!checkArgumentType(line, exm, terms))
                     return null;
                 if (terms.Length > 2)
                     term3 = terms[2];
                 if (terms.Length > 3)
                     term4 = terms[3];
+                if (terms.Length > 4)
+                    term5 = terms[4];
+                if (terms.Length > 5)
+                    term6 = terms[5];
 
-                return new SpTInputsArgument(terms[0], terms[1], term3, term4);
+                return new SpTInputsArgument(terms[0], terms[1], term3, term4, term5, term6);
             }
         }
         
@@ -1429,14 +1433,18 @@ namespace MinorShift.Emuera.GameProc.Function
 			public override Argument CreateArgument(InstructionLine line, ExpressionMediator exm)
 			{
 				IOperandTerm[] terms = popTerms(line);
-                IOperandTerm term3 = null, term4 = null;
+                IOperandTerm term3 = null, term4 = null, term5 = null, term6 = null;
                 if (!checkArgumentType(line, exm, terms))
 					return null;
                 if (terms.Length > 2)
                     term3 = terms[2];
                 if (terms.Length > 3)
                     term4 = terms[3];
-                return new SpTInputsArgument(terms[0], terms[1], term3, term4);
+                if (terms.Length > 4)
+                    term5 = terms[4];
+                if (terms.Length > 5)
+                    term6 = terms[5];
+                return new SpTInputsArgument(terms[0], terms[1], term3, term4, term5, term6);
 			}
 		}
 

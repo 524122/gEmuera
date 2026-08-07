@@ -171,7 +171,7 @@ namespace MinorShift.Emuera.GameProc
 				TrainName = constant.GetCsvNameList(VariableCode.TRAINNAME);
 
                 Int64? m0RunnerRandomSeed = null;
-                if (global::gEmuera.M0.LegacyRunnerDeterminism.TryGetRandomSeed(out int configuredRandomSeed))
+                if (global::gEmuera.LegacyRunner.LegacyRunnerDeterminism.TryGetRandomSeed(out int configuredRandomSeed))
                     m0RunnerRandomSeed = configuredRandomSeed;
                 vEvaluator = new VariableEvaluator(gamebase, constant, m0RunnerRandomSeed);
 				GlobalStatic.VEvaluator = vEvaluator;

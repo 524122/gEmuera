@@ -179,17 +179,25 @@ namespace MinorShift.Emuera.GameProc.Function
 
 	internal sealed class SpTInputsArgument : Argument
 	{
-		public SpTInputsArgument(IOperandTerm time, IOperandTerm def, IOperandTerm disp, IOperandTerm timeout)
+		// snake 参考实现：TINPUT/TINPUTS 支持第5、6参数（Mouse、CanSkip）。
+		// gEmuera 之前声明了 6-slot 类型数组却只读取前 4 个，静默丢弃这两个参数。
+		public SpTInputsArgument(IOperandTerm time, IOperandTerm def, IOperandTerm disp, IOperandTerm timeout,
+			IOperandTerm mouse = null, IOperandTerm canSkip = null)
 		{
 			Time = time;
 			Def = def;
 			Disp = disp;
             Timeout = timeout;
+			Mouse = mouse;
+			CanSkip = canSkip;
 		}
 		readonly public IOperandTerm Time;
 		readonly public IOperandTerm Def;
 		readonly public IOperandTerm Disp;
         readonly public IOperandTerm Timeout;
+		// EE_INPUT 機能拡張：鼠标输入开关（第5参数）与消息跳过时可跳过等待（第6参数）。
+		readonly public IOperandTerm Mouse;
+		readonly public IOperandTerm CanSkip;
 	}
 
 	//難読化用属性。enum.ToString()やenum.Parse()を行うなら(Exclude=true)にすること。

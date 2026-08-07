@@ -341,7 +341,7 @@ namespace MinorShift.Emuera.GameData.Expression
 					throw new CodeEE("文字列に負の値(" + value.ToString() + ")を乗算しようとしました");
 				if (value >= 10000)
 					throw new CodeEE("文字列に10000以上の値(" + value.ToString() + ")を乗算しようとしました");
-				if ((str == "") || (value == 0))
+				if (string.IsNullOrEmpty(str) || value == 0)
 					return "";
                 StringBuilder builder = new StringBuilder
                 {

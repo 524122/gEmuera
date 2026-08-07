@@ -9,7 +9,7 @@ namespace GEmuera.Core.Experiments;
 /// </summary>
 public sealed class CooperativeVmExperimentRunner : IAsyncDisposable
 {
-    private readonly M6ExperimentDefinition _definition;
+    private readonly ExperimentDefinition _definition;
     private readonly IErbInterpreterHost _host;
     private readonly object _stateGate = new();
     private long _lastEffectSequence;
@@ -20,7 +20,7 @@ public sealed class CooperativeVmExperimentRunner : IAsyncDisposable
     private int _disposed;
 
     public CooperativeVmExperimentRunner(
-        M6ExperimentDefinition definition,
+        ExperimentDefinition definition,
         IErbInterpreterHost host)
     {
         _definition = definition ?? throw new ArgumentNullException(nameof(definition));
@@ -31,13 +31,13 @@ public sealed class CooperativeVmExperimentRunner : IAsyncDisposable
         _definition.EnsureRunnable();
     }
 
-    public M6ExperimentIdentity Identity => _definition.Identity;
+    public ExperimentIdentity Identity => _definition.Identity;
     public YieldabilityAuditInventory YieldabilityAudit => _definition.YieldabilityAudit;
     public VmExecutionState State => (VmExecutionState)Volatile.Read(ref _state);
     public VmOperationId PendingOperation => new(Volatile.Read(ref _pendingOperation));
     public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
-    public ValueTask<M6CooperativeVmStep> StepAsync(
+    public ValueTask<CooperativeVmStep> StepAsync(
         VmStepBudget budget,
         CancellationToken cancellationToken = default)
     {
@@ -47,7 +47,7 @@ public sealed class CooperativeVmExperimentRunner : IAsyncDisposable
         return ExecuteAsync(budget, cancellationToken, completion: null);
     }
 
-    public ValueTask<M6CooperativeVmStep> ResumeAsync(
+    public ValueTask<CooperativeVmStep> ResumeAsync(
         VmCompletion completion,
         VmStepBudget budget,
         CancellationToken cancellationToken = default)
@@ -74,7 +74,7 @@ public sealed class CooperativeVmExperimentRunner : IAsyncDisposable
         await _host.DisposeAsync().ConfigureAwait(false);
     }
 
-    private async ValueTask<M6CooperativeVmStep> ExecuteAsync(
+    private async ValueTask<CooperativeVmStep> ExecuteAsync(
         VmStepBudget budget,
         CancellationToken cancellationToken,
         VmCompletion? completion)
@@ -219,10 +219,10 @@ public sealed class CooperativeVmExperimentRunner : IAsyncDisposable
         Volatile.Write(ref _state, (int)result.State);
     }
 
-    private M6CooperativeVmStep CreateObservation(VmStepResult result)
+    private CooperativeVmStep CreateObservation(VmStepResult result)
     {
         var traceOrdinal = Interlocked.Increment(ref _traceOrdinal);
-        return new M6CooperativeVmStep(Identity, traceOrdinal, result);
+        return new CooperativeVmStep(Identity, traceOrdinal, result);
     }
 
     private void BeginExecution()

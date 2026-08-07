@@ -94,9 +94,43 @@ public partial class EmueraMain : Node
 		uEmuera.Logger.warn = content => GenericUtils.Warn(content);
 		uEmuera.Logger.error = content => GenericUtils.Error(content);
 
+		ApplyLauncherDebugSettings();
+		EmueraDebugDialogPanel.AttachTo(this);
+
 		CreateStartupOverlay();
 		CallDeferred(nameof(StartGameDeferred));
 	}
+
+	const string LauncherSettingsPath = "user://launcher.cfg";
+	const string LauncherSettingsSection = "launcher";
+	const string LauncherEmueraDebugModeKey = "emuera_debug_mode";
+	const string LauncherDebugShowWindowKey = "debug_show_window";
+
+	/// <summary>
+	/// 从 user://launcher.cfg [launcher] 读取 Emuera DEBUG 开关并应用到会话启动链：
+	/// emuera_debug_mode → debug 标志（与 Export 位或）；debug_show_window →
+	/// EmueraThread.DebugShowWindowOverride → Program.DebugShowWindowOverride（launcher
+	/// 覆盖 debug.config，默认 true，仅在 DEBUG 模式下生效）。
+	/// </summary>
+	void ApplyLauncherDebugSettings()
+	{
+		bool emueraDebugMode = false;
+		bool showWindow = true;
+		var config = new ConfigFile();
+		if (config.Load(LauncherSettingsPath) == Error.Ok)
+		{
+			emueraDebugMode = config.GetValue(
+				LauncherSettingsSection, LauncherEmueraDebugModeKey, false).AsBool();
+			showWindow = config.GetValue(
+				LauncherSettingsSection, LauncherDebugShowWindowKey, true).AsBool();
+		}
+		if (emueraDebugMode)
+			debug = true;
+		debugShowWindowOverride = showWindow;
+		EmueraThread.DebugShowWindowOverride = debugShowWindowOverride;
+	}
+
+	bool debugShowWindowOverride = true;
 
 	async void StartGameDeferred()
 	{
@@ -246,7 +280,7 @@ public partial class EmueraMain : Node
 	}
 
 	/// <summary>
-	/// M0 runner-only same-process restart seam. This remains internal to the
+	/// Legacy runner-only same-process restart seam. This remains internal to the
 	/// Godot host assembly: normal UI startup never calls it, and legacy Parser/
 	/// VM semantics still own the actual session behavior.
 	/// </summary>
@@ -255,7 +289,7 @@ public partial class EmueraMain : Node
 	/// node enters the tree. Normal launcher startup never supplies this map;
 	/// it therefore cannot expose a live game/profile switch UI.
 	/// </summary>
-	internal void ConfigureM0RunnerSessionLaunchRegistry(LegacySessionLaunchRegistry launchRegistry)
+	internal void ConfigureLegacyRunnerSessionLaunchRegistry(LegacySessionLaunchRegistry launchRegistry)
 	{
 		ArgumentNullException.ThrowIfNull(launchRegistry);
 		if (startupStarted || legacySessionFacade is not null || legacySessionBackend is not null)
@@ -263,28 +297,28 @@ public partial class EmueraMain : Node
 		m0RunnerSessionLaunchRegistry = launchRegistry;
 	}
 
-	internal Task<LegacySessionSwitchResult> RestartLegacySessionForM0RunnerAsync()
+	internal Task<LegacySessionSwitchResult> RestartLegacySessionForLegacyRunnerAsync()
 	{
 		var selection = legacySessionFacade?.Current?.Selection
 			?? new SessionSelection(
 				BuildLegacyGameId(Sys.ExeDir),
 				FirstWindow.SelectedCoreProfileName);
-		return SwitchLegacySessionForM0RunnerAsync(selection);
+		return SwitchLegacySessionForLegacyRunnerAsync(selection);
 	}
 
 	/// <summary>
-	/// M0 runner-only cross-configuration seam. The caller can select only a
+	/// Legacy runner-only cross-configuration seam. The caller can select only a
 	/// pre-registered host binding; Core receives the resulting opaque game id
 	/// and profile, never a filesystem path.
 	/// </summary>
-	internal Task<LegacySessionSwitchResult> SwitchLegacySessionForM0RunnerAsync(
+	internal Task<LegacySessionSwitchResult> SwitchLegacySessionForLegacyRunnerAsync(
 		LegacySessionLaunchConfiguration launch)
 	{
 		ArgumentNullException.ThrowIfNull(launch);
-		return SwitchLegacySessionForM0RunnerAsync(launch.CreateSelection());
+		return SwitchLegacySessionForLegacyRunnerAsync(launch.CreateSelection());
 	}
 
-	async Task<LegacySessionSwitchResult> SwitchLegacySessionForM0RunnerAsync(
+	async Task<LegacySessionSwitchResult> SwitchLegacySessionForLegacyRunnerAsync(
 		SessionSelection selection)
 	{
 		var facade = legacySessionFacade
@@ -319,7 +353,7 @@ public partial class EmueraMain : Node
 	{
 		// This is deliberately evaluated only when starting a session. A
 		// diagnostic-config hot reload must never swap an already running VM
-		// between the M0 baseline path and the M1 canary path.
+		// between the Legacy baseline path and the M1 canary path.
 		if (legacySessionBackend?.IsRunning == true)
 			return true;
 
@@ -505,9 +539,9 @@ public partial class EmueraMain : Node
 		}
 
 		char[] split = new char[] { '\r', '\n' };
-		var shiftjisPath = "res://Text/emuera_config_shiftjis.bytes";
-		var utf8Path = "res://Text/emuera_config_utf8.txt";
-		var utf8CnPath = "res://Text/emuera_config_utf8_zhcn.txt";
+		var shiftjisPath = "res://assets/text/emuera_config_shiftjis.bytes";
+		var utf8Path = "res://assets/text/emuera_config_utf8.txt";
+		var utf8CnPath = "res://assets/text/emuera_config_utf8_zhcn.txt";
 
 		if (!Godot.FileAccess.FileExists(shiftjisPath) ||
 			!Godot.FileAccess.FileExists(utf8Path) ||

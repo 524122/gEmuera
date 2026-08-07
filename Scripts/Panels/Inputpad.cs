@@ -110,26 +110,39 @@ public partial class Inputpad : Control
 			ApplyPanelLayout();
 	}
 
+	bool isApplyingLayout;
 	void ApplyPanelLayout()
 	{
 		// 输入栏是交互控件，必须落在系统安全区内；正文坐标仍由 EmueraContent
 		// 统一映射，避免前摄/挖孔遮住确认按钮或输入框。
 		if (panel == null)
 			return;
-
-		var safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
-		var viewportSize = safeRect.Size;
-		int keyboardHeight = GetVirtualKeyboardHeight();
-		lastKeyboardHeight = keyboardHeight;
-		Position = safeRect.Position;
-		Size = viewportSize;
-		float left = SideMargin;
-		float right = SideMargin;
-		float bottomInset = BottomMargin + keyboardHeight;
-		var width = Mathf.Max(1, viewportSize.X - left - right);
-		panel.Position = new Vector2(left, Mathf.Max(0, viewportSize.Y - bottomInset - PanelHeight));
-		panel.Size = new Vector2(width, PanelHeight);
-		panel.CustomMinimumSize = panel.Size;
+		// 防重入：下面 set_Size 会触发 NotificationResized → _Notification → 本方法，
+		// 不加守卫会在 _Ready 首帧直接无限递归（godot-master: NEVER set size in a
+		// resize notification without a re-entrancy guard）。
+		if (isApplyingLayout)
+			return;
+		isApplyingLayout = true;
+		try
+		{
+			var safeRect = EmueraContent.GetSafeViewportRect(GetViewport());
+			var viewportSize = safeRect.Size;
+			int keyboardHeight = GetVirtualKeyboardHeight();
+			lastKeyboardHeight = keyboardHeight;
+			Position = safeRect.Position;
+			Size = viewportSize;
+			float left = SideMargin;
+			float right = SideMargin;
+			float bottomInset = BottomMargin + keyboardHeight;
+			var width = Mathf.Max(1, viewportSize.X - left - right);
+			panel.Position = new Vector2(left, Mathf.Max(0, viewportSize.Y - bottomInset - PanelHeight));
+			panel.Size = new Vector2(width, PanelHeight);
+			panel.CustomMinimumSize = panel.Size;
+		}
+		finally
+		{
+			isApplyingLayout = false;
+		}
 	}
 
 	static int GetVirtualKeyboardHeight()

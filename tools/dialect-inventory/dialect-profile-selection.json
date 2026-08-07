@@ -2,8 +2,8 @@
   "schemaVersion": "1.0.0",
   "catalogId": "gemuera.m0.dialect-profile-selection",
   "catalogVersion": "1.0.0",
-  "sourceWorkPackage": "M0-DIA-11",
-  "sourcePlanPreflightWorkPackage": "M0-DIA-10",
+  "sourceWorkPackage": "LEGACY-DIA-11",
+  "sourcePlanPreflightWorkPackage": "LEGACY-DIA-10",
   "sourceFiles": [
     {
       "id": "FirstWindow",
@@ -17,7 +17,7 @@
     },
     {
       "id": "LegacyRunnerConfig",
-      "path": "Scripts/M0/LegacyRunnerConfig.cs",
+      "path": "Scripts/LegacyRunner/LegacyRunnerConfig.cs",
       "sha256": "734b405dd009641da9d5d68a73d417ba8a0e2d0755788b6a8df5d47f8cc9642b"
     }
   ],

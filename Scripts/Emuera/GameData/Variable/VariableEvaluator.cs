@@ -74,6 +74,14 @@ namespace MinorShift.Emuera.GameData.Variable
 			return rand.NextInt64(max);
 		}
 
+		// snake 参考实现：浮点 RAND（RANDF / RAND 浮点路径）使用的 [0,1) 双精度随机数。
+		public double GetNextRandDouble()
+		{
+			if (Config.UseNewRandom)
+				return newRand.NextDouble();
+			return rand.NextDouble();
+		}
+
 		public Int64 getPalamLv(Int64 pl, Int64 maxlv)
 		{
 			for (int i = 0; i < (int)maxlv; i++)
