@@ -193,13 +193,13 @@ namespace gEmuera.GodotHost
 			debugLink = link;
 			ApplyWindowGeometry();
 			while (snapshotQueue.TryDequeue(out _)) { } // 丢弃旧会话残留快照
-			Visible = true;
+			Show();
 		}
 
 		void DoFocus()
 		{
 			if (!Visible)
-				Visible = true;
+				Show();
 			// Window 不是 Control：聚焦输入框而非窗口自身。
 			if (addExpressionInput != null)
 			{
@@ -210,7 +210,7 @@ namespace gEmuera.GodotHost
 
 		void DoHide()
 		{
-			Visible = false;
+			Hide();
 			boundConsole = null;
 			debugLink = null;
 			while (snapshotQueue.TryDequeue(out _)) { }
