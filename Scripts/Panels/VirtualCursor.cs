@@ -13,6 +13,38 @@ public partial class VirtualCursor : CanvasLayer
 	const int VK_MIDDLE = 0x04;
 
 	const float CursorMoveSensitivity = 1.0f;
+
+	// 虚拟鼠标灵敏度（0.5x~3.0x 可调），持久化到 user://settings.cfg [Display]。
+	const string SettingsPath = "user://settings.cfg";
+	const string SettingsSection = "Display";
+	const string SensitivityKey = "VirtualCursorSensitivity";
+	public const float MinCursorSensitivity = 0.5f;
+	public const float MaxCursorSensitivity = 3.0f;
+	static float configuredSensitivity = -1f;
+
+	public static float ConfiguredSensitivity
+	{
+		get
+		{
+			if (configuredSensitivity < 0f)
+			{
+				var cfg = new ConfigFile();
+				cfg.Load(SettingsPath);
+				configuredSensitivity = (float)(double)cfg.GetValue(SettingsSection, SensitivityKey, CursorMoveSensitivity);
+				configuredSensitivity = Mathf.Clamp(configuredSensitivity, MinCursorSensitivity, MaxCursorSensitivity);
+			}
+			return configuredSensitivity;
+		}
+		set
+		{
+			configuredSensitivity = Mathf.Clamp(value, MinCursorSensitivity, MaxCursorSensitivity);
+			var cfg = new ConfigFile();
+			cfg.Load(SettingsPath);
+			cfg.SetValue(SettingsSection, SensitivityKey, configuredSensitivity);
+			cfg.Save(SettingsPath);
+		}
+	}
+
 	const float LongPressDuration = 0.45f;
 	const float DragThreshold = 10.0f;
 	const float MinDragDeltaSquared = 0.0001f;
@@ -234,7 +266,7 @@ public partial class VirtualCursor : CanvasLayer
 			return true;
 		}
 
-		MoveCursorBy(delta * CursorMoveSensitivity);
+		MoveCursorBy(delta * ConfiguredSensitivity);
 
 		var totalDelta = eventPosition - gestureStartGlobal;
 		if (totalDelta.Length() >= DragThreshold)

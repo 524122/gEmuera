@@ -99,3 +99,4 @@ OptionWindow.GroupDisplay=显示
 OptionWindow.GroupQuick=快捷
 OptionWindow.GroupInput=输入
 OptionWindow.GroupSystem=系统
+OptionWindow.VirtualCursorSensitivity=虚拟鼠标灵敏度

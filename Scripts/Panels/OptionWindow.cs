@@ -12,6 +12,8 @@ public partial class OptionWindow : Control
 	Label quickFontSizeLabel;
 	Slider buttonDragSensitivitySlider;
 	Label buttonDragSensitivityLabel;
+	Slider virtualCursorSensitivitySlider;
+	Label virtualCursorSensitivityValue;
 	CheckButton pinchZoomToggle;
 	Slider maxVisibleLinesSlider;
 	Label maxVisibleLinesLabel;
@@ -25,6 +27,7 @@ public partial class OptionWindow : Control
 	Label quickWidthLabel;
 	Label quickFontLabel;
 	Label sensitivityLabel;
+	Label virtualCursorSensitivityLabel;
 	Label pinchZoomLabel;
 	Label maxLinesTextLabel;
 	Label resLabel;
@@ -194,6 +197,20 @@ public partial class OptionWindow : Control
 		buttonDragSensitivityLabel.Text = buttonDragSensitivitySlider.Value.ToString("0.00") + "x";
 		sensitivityRow.AddChild(buttonDragSensitivityLabel);
 
+		var vcSensitivityRow = CreateRow(inputGroup, out virtualCursorSensitivityLabel);
+		virtualCursorSensitivitySlider = new HSlider();
+		virtualCursorSensitivitySlider.MinValue = VirtualCursor.MinCursorSensitivity;
+		virtualCursorSensitivitySlider.MaxValue = VirtualCursor.MaxCursorSensitivity;
+		virtualCursorSensitivitySlider.Step = 0.05;
+		virtualCursorSensitivitySlider.Value = VirtualCursor.ConfiguredSensitivity;
+		virtualCursorSensitivitySlider.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		virtualCursorSensitivitySlider.CustomMinimumSize = new Vector2(120, 44);
+		virtualCursorSensitivitySlider.ValueChanged += OnVirtualCursorSensitivityChanged;
+		vcSensitivityRow.AddChild(virtualCursorSensitivitySlider);
+		virtualCursorSensitivityValue = CreateValueLabel();
+		virtualCursorSensitivityValue.Text = VirtualCursor.ConfiguredSensitivity.ToString("0.00") + "x";
+		vcSensitivityRow.AddChild(virtualCursorSensitivityValue);
+
 		var pinchZoomRow = CreateRow(inputGroup, out pinchZoomLabel);
 		pinchZoomToggle = new CheckButton();
 		pinchZoomToggle.ButtonPressed = EmueraContent.ContentPinchZoomEnabled;
@@ -301,6 +318,8 @@ public partial class OptionWindow : Control
 			quickFontLabel.Text = MultiLanguage.Get("OptionWindow.QuickFontSize", "Quick Font");
 		if (sensitivityLabel != null)
 			sensitivityLabel.Text = MultiLanguage.Get("OptionWindow.ButtonDragSensitivity", "Scroll Sensitivity");
+		if (virtualCursorSensitivityLabel != null)
+			virtualCursorSensitivityLabel.Text = MultiLanguage.Get("OptionWindow.VirtualCursorSensitivity", "Cursor Sensitivity");
 		if (pinchZoomLabel != null)
 			pinchZoomLabel.Text = MultiLanguage.Get("OptionWindow.PinchZoom", "Pinch Zoom");
 		if (maxLinesTextLabel != null)
@@ -391,6 +410,14 @@ public partial class OptionWindow : Control
 		float sensitivity = (float)value;
 		buttonDragSensitivityLabel.Text = sensitivity.ToString("0.00") + "x";
 		EmueraContent.ContentDragSensitivity = sensitivity;
+	}
+
+	void OnVirtualCursorSensitivityChanged(double value)
+	{
+		float sensitivity = (float)value;
+		if (virtualCursorSensitivityValue != null)
+			virtualCursorSensitivityValue.Text = sensitivity.ToString("0.00") + "x";
+		VirtualCursor.ConfiguredSensitivity = sensitivity;
 	}
 
 	void OnPinchZoomToggled(bool enabled)
