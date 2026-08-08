@@ -125,3 +125,4 @@ OptionWindow.GroupDisplay=Display
 OptionWindow.GroupQuick=Quick
 OptionWindow.GroupInput=Input
 OptionWindow.GroupSystem=System
+OptionWindow.VirtualCursorSensitivity=Cursor Sensitivity
