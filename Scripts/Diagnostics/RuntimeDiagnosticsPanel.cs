@@ -59,6 +59,8 @@ namespace gEmuera.Diagnostics
 
         void OnNativeWindowCloseRequested()
         {
+            // 先隐藏（Godot 标准），即使后续 QueueFree 延迟/失败，视觉先关闭。
+            Hide();
             RequestCloseEvent?.Invoke();
         }
 
@@ -222,7 +224,7 @@ namespace gEmuera.Diagnostics
                 actions.AddChild(collapse);
 
                 var close = CreateActionButton("关闭", "关闭本次悬浮窗，不修改配置文件。");
-                close.Pressed += () => RequestCloseEvent?.Invoke();
+                close.Pressed += () => { Hide(); RequestCloseEvent?.Invoke(); };
                 actions.AddChild(close);
             }
 
@@ -1912,7 +1914,8 @@ namespace gEmuera.Diagnostics
                 Visible = false,
             };
             panel.HideRequested += () => SetPanelVisible(false);
-            panel.RequestCloseEvent += QueueFree;
+            // 关闭：先隐藏面板（Godot 标准），再销毁宿主（连带面板）。
+            panel.RequestCloseEvent += () => { panel.Hide(); QueueFree(); };
             AddChild(panel);
         }
 
@@ -1946,10 +1949,17 @@ namespace gEmuera.Diagnostics
         void SetPanelVisible(bool visible)
         {
             panelVisible = visible;
-            panel.Visible = visible;
-            ballButton.Text = visible ? "×" : "调";
+            // 嵌入 Window 用标准 Show/Hide 显隐，比直接设 Visible 更可靠（修复无法关闭）。
             if (visible)
+            {
+                panel.Show();
                 ClampPanelToViewport();
+            }
+            else
+            {
+                panel.Hide();
+            }
+            ballButton.Text = visible ? "×" : "调";
         }
 
         /// <summary>
