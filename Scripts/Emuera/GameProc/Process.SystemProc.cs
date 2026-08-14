@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using MinorShift.Emuera.Sub;
@@ -647,6 +647,9 @@ namespace MinorShift.Emuera.GameProc
 
 		void beginShop()
 		{
+			// AgentBridge 检查点：仅入队（ConcurrentQueue 无锁），解释器线程零阻塞；
+			// Godot 主线程的 CheckpointPipelineComponent 消费后发信号。
+			gEmuera.AgentBridge.AgentBridgeQueue.Enqueue("Shop_Begin");
 			//連続調教コマンド処理中の状態が持ち越されていたらここで消しておく
 			if (isCTrain)
 				if (ClearCommands())
