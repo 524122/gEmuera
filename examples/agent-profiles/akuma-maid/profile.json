@@ -1,0 +1,147 @@
+{
+  "profile_version": "0",
+  "game": {
+    "game_id": "akuma-maid",
+    "title": "era悪魔で女仆",
+    "game_code": "20250628",
+    "version": "305",
+    "version_accept": "exact-or-higher",
+    "encoding": "utf-8-bom"
+  },
+  "engine_flow": "train-type",
+
+  "character_csv": {
+    "dir": "CSV/CHARA",
+    "filename_pattern": "^CHARA(\\d+)",
+    "number_key": ["番号"],
+    "name_key": ["名前", "名字"],
+    "call_name_key": ["呼び名", "称呼"],
+    "semantic_groups": {
+      "talent": ["素質", "素质"],
+      "ability": ["能力"],
+      "experience": ["経験", "经验"],
+      "base": ["基礎", "基础"],
+      "flag": ["フラグ"]
+    },
+    "favor": {
+      "cflag_name": ["好感度"],
+      "bands": [500, 1000, 2000]
+    }
+  },
+
+  "koujou": {
+    "gap_detection": "linecount_delta",
+    "layers": [
+      {
+        "id": "train_com",
+        "description": "TRAIN 指令口上（KOJO_MESSAGE_COM 调度：绝顶口上 → 指令口上 → 通用调教文本三级回落）",
+        "entry_label": "KOJO_MESSAGE_COM",
+        "chara_label_template": "KOJO_MESSAGE_COM_K{no}",
+        "extra_chara_labels": ["KOJO_MESSAGE_COMING_K{no}"],
+        "gate_variables": ["TEQUIP:口枷", "CFLAG:睡眠"],
+        "generic_fallback_labels": ["TRAIN_MESSAGE_C"],
+        "replace_fallback": false
+      },
+      {
+        "id": "train_com_before",
+        "description": "TRAIN 指令前口上（接吻文本之前）",
+        "entry_label": "KOJO_MESSAGE_BEFORE_COM",
+        "chara_label_template": "KOJO_MESSAGE_BEFORE_COM_K{no}",
+        "generic_fallback_labels": [],
+        "replace_fallback": false
+      },
+      {
+        "id": "train_com_end",
+        "description": "TRAIN 指令后口上（口上侧改标志的钩子，KOJO_ENDCOM）",
+        "entry_label": "KOJO_MESSAGE_ENDCOM",
+        "chara_label_template": "KOJO_ENDCOM_K{no}",
+        "generic_fallback_labels": [],
+        "replace_fallback": false
+      },
+      {
+        "id": "daily",
+        "description": "SHOP 画面日常台词（KOJO_DAILY，按 STR:事件名 派发；无台词时游戏自己 CLEARLINE 消掉名字行）",
+        "entry_label": "KOJO_DAILY",
+        "chara_label_template": "KOJO_DAILY_K{no}",
+        "generic_fallback_labels": [],
+        "replace_fallback": false
+      },
+      {
+        "id": "profile",
+        "description": "角色介绍/自室描写（EVENT_PROFILE，按 ARGS 派发）",
+        "entry_label": "EVENT_PROFILE",
+        "chara_label_template": "EVENT_PROFILE_K{no}",
+        "generic_fallback_labels": [],
+        "replace_fallback": false
+      },
+      {
+        "id": "event_k",
+        "description": "角色专属事件层（EVENT_K.ERB 总调度；ERB/EVENT_K/{nn 名前}/ 目录按角色分文件，如 EVENT_K5.ERB / EVENT_K33.ERB）",
+        "entry_label": "EVENT_K",
+        "chara_label_template": "EVENT_K{no}",
+        "generic_fallback_labels": [],
+        "replace_fallback": false
+      }
+    ]
+  },
+
+  "checkpoints": {
+    "primary": "Shop_Begin",
+    "engine_hooks": [
+      { "state": "Shop_Begin", "actions": ["summarize", "prefetch", "decide"] },
+      { "state": "AfterTrain_Begin", "actions": ["observe"] },
+      { "state": "Turnend_Begin", "actions": ["observe"] },
+      { "state": "SaveGame_Begin", "actions": ["snapshot_memory"] },
+      { "state": "LoadData_DataLoaded", "actions": ["snapshot_memory"] }
+    ],
+    "custom": []
+  },
+
+  "context": {
+    "snapshot": [
+      { "kind": "int", "name": "TARGET" },
+      { "kind": "int", "name": "SELECTCOM" },
+      { "kind": "int", "name": "PREVCOM" },
+      { "kind": "cond", "name": "朝" },
+      { "kind": "cflag", "name": "好感度", "band": true },
+      { "kind": "cflag", "name": "睡眠" },
+      { "kind": "tequip", "name": "口枷" }
+    ],
+    "prefetch_key": ["TARGET", "朝", "好感档"]
+  },
+
+  "behaviors": {
+    "whitelist": [
+      {
+        "id": "greet",
+        "description": "角色主动向主角打招呼（本作已有打招呼した/打招呼された 成对标志，EVENTSHOP 每日重置）",
+        "contexts": ["Shop_Begin"],
+        "effect": { "set_cflag": { "name": "打招呼された", "value": 1, "target_chara": true } },
+        "status": "draft"
+      },
+      {
+        "id": "gift",
+        "description": "角色送礼物给主角（本作已有 CFLAG:送禮渡し済 每日一次标志）",
+        "contexts": ["Shop_Begin"],
+        "effect": { "set_cflag": { "name": "送禮渡し済", "value": 1, "target_chara": true } },
+        "status": "draft"
+      },
+      {
+        "id": "invite_date",
+        "description": "角色主动邀请约会（EVENT/デート/EVENT_デート.ERB 存在；入参与前置条件未验证，阶段 4 实机走通后转 validated）",
+        "contexts": ["Shop_Begin"],
+        "effect": { "call_label": "EVENT_デート" },
+        "preconditions": ["好感度 >= 1000"],
+        "status": "draft"
+      }
+    ]
+  },
+
+  "budget": {
+    "tokens_per_turn": 8000,
+    "llm_calls_per_checkpoint": 1,
+    "prefetch_max_variants": 8
+  },
+
+  "fallback": "vanilla"
+}

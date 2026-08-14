@@ -1,0 +1,306 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "gemuera:agent-profile:schema:v0",
+  "title": "gEmuera Agent 游戏 Profile v0",
+  "description": "声明式游戏适配档案。核心据此驱动口上补充（Feature 1）与 AI 自主行为（Feature 2），不写代码即可适配绝大多数 Train 系 ERA 游戏。目录名禁止以 era 开头（.gitignore era*/ 规则）。",
+  "type": "object",
+  "required": ["profile_version", "game", "engine_flow", "character_csv", "koujou", "checkpoints", "budget", "fallback"],
+  "additionalProperties": false,
+  "properties": {
+    "profile_version": {
+      "const": "0",
+      "description": "Profile 格式版本。v0 = 阶段 0 草案，字段随 Spike 迭代，阶段 5 定稿为 v1 并锁 SemVer。"
+    },
+    "game": {
+      "type": "object",
+      "description": "游戏身份标识。加载时与 GameBase.csv 比对，不匹配则拒绝加载并走原版降级（不变量 #1）。",
+      "required": ["game_id", "title", "game_code", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "game_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "稳定短 ID（小写-连字符），同时用作记忆目录名 user://agent/memory/{game_id}/。禁止 era 前缀开头。"
+        },
+        "title": { "type": "string", "description": "游戏标题，来自 GameBase.csv 标题/タイトル 行。" },
+        "game_code": { "type": "string", "description": "GameBase.csv コード 行，如 20250628。" },
+        "version": { "type": "string", "description": "GameBase.csv バージョン 行，如 305。" },
+        "version_accept": {
+          "type": "string",
+          "description": "可选。接受的版本差异上限（对应 GameBase.csv バージョン違い認める 语义），缺省 = 精确匹配。"
+        },
+        "encoding": {
+          "type": "string",
+          "enum": ["utf-8", "utf-8-bom", "shift-jis", "auto"],
+          "description": "游戏 CSV/ERB 文本编码。实测本作为 utf-8-bom；日文原版常见 shift-jis。auto = 逐文件探测。"
+        }
+      }
+    },
+    "engine_flow": {
+      "type": "string",
+      "enum": ["train-type", "map-type"],
+      "description": "train-type = 走引擎 SystemStateCode 环（SHOP→TRAIN→AFTERTRAIN→ABLUP→TURNEND），检查点挂引擎状态转移；map-type = 环由 ERB 自驱，检查点必须全部由 custom 声明。"
+    },
+    "character_csv": {
+      "type": "object",
+      "description": "角色 CSV 的字段映射。数组字段 = 候选名列表（汉化/日文混用时按序尝试，首个命中生效）——这是实测必要设计：本作变量名日中混杂（名前/番号保留日文，部分键已汉化）。",
+      "required": ["dir", "filename_pattern", "semantic_groups"],
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "type": "string", "description": "角色 CSV 目录（相对游戏根），如 CSV/CHARA。" },
+        "filename_pattern": {
+          "type": "string",
+          "description": "文件名正则，捕获组 <no> 提取角色编号，如 ^CHARA(\\d+)。"
+        },
+        "number_key": { "type": "array", "items": { "type": "string" }, "description": "编号行键名，如 [\"番号\"]。" },
+        "name_key": { "type": "array", "items": { "type": "string" }, "description": "名字行键名，如 [\"名前\", \"名字\"]。" },
+        "call_name_key": { "type": "array", "items": { "type": "string" }, "description": "称呼行键名，如 [\"呼び名\", \"称呼\"]。" },
+        "semantic_groups": {
+          "type": "object",
+          "description": "CSV 分组行键 → 语义角色的映射。素質组是人格描述主来源（实测含 坏心眼/聰慧/冷静/献身 等性格项）。",
+          "required": ["talent", "ability"],
+          "additionalProperties": true,
+          "properties": {
+            "talent": { "type": "array", "items": { "type": "string" }, "description": "素质/性格组，如 [\"素質\", \"素质\"]。→ System Prompt 人格段。" },
+            "ability": { "type": "array", "items": { "type": "string" }, "description": "能力组，如 [\"能力\"]。→ System Prompt 能力段。" },
+            "experience": { "type": "array", "items": { "type": "string" }, "description": "经验组，如 [\"経験\", \"经验\"]。可选。" },
+            "base": { "type": "array", "items": { "type": "string" }, "description": "基础属性组（体力等），如 [\"基礎\", \"基础\"]。可选。" },
+            "flag": { "type": "array", "items": { "type": "string" }, "description": "初始标志组（含好感度初始值），如 [\"フラグ\"]。可选。" }
+          }
+        },
+        "favor": {
+          "type": "object",
+          "description": "好感度变量定义（Feature 2 决策与情境分档的关键输入）。",
+          "required": ["cflag_name"],
+          "additionalProperties": false,
+          "properties": {
+            "cflag_name": { "type": "array", "items": { "type": "string" }, "description": "运行期 CFLAG 键名候选，如 [\"好感度\"]。" },
+            "bands": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "情境分档阈值（升序），如 [500, 1000, 2000]。用于预取情境 key 降维，避免缓存碎片化。"
+            }
+          }
+        }
+      }
+    },
+    "koujou": {
+      "type": "object",
+      "description": "口上层描述。实测关键事实：本作口上缺失检测就是引擎通用的 LINECOUNT 差值法（MEMO_LINECOUNT = LINECOUNT → TRYCALLFORM → IF LINECOUNT == MEMO_LINECOUNT），GapDetector 与游戏原生模式同构，检测层与游戏无关。",
+      "required": ["layers"],
+      "additionalProperties": false,
+      "properties": {
+        "gap_detection": {
+          "type": "string",
+          "const": "linecount_delta",
+          "description": "缺口检测方法：CALL 块前后 LINECOUNT 差为零 = 角色专属口上未命中。"
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "description": "口上入口层。每层 = 一个调度函数 + 若干按角色编号动态派发的专属口上 label。",
+          "items": {
+            "type": "object",
+            "required": ["id", "entry_label", "chara_label_template"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "description": "层 ID，如 train_com / daily / profile。" },
+              "description": { "type": "string", "description": "该层语义，如 TRAIN 指令口上 / SHOP 画面日常台词。" },
+              "entry_label": { "type": "string", "description": "调度函数 label（不带 @），如 KOJO_MESSAGE_COM。" },
+              "chara_label_template": {
+                "type": "string",
+                "description": "专属口上 label 模板，{no} 占位角色编号，如 KOJO_MESSAGE_COM_K{no}。引擎在 TRYCALLFORM 派发前后做 LINECOUNT 差值。"
+              },
+              "extra_chara_labels": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "同层附加专属 label 模板（如绝顶口上 KOJO_MESSAGE_COMING_K{no}），任一命中即视为有口上。"
+              },
+              "gate_variables": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "压制口上的门变量（实测：TEQUIP:口枷 时跳过常规口上、CFLAG:睡眠 == 0 才说话）。门条件不满足时本层不做 AI 注入——物理静默不是缺口。"
+              },
+              "generic_fallback_labels": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "通用兜底文本 label（实测：TRAIN_MESSAGE_C 调教文本、PANT 汎用喘ぎ）。AI 注入点 = 专属口上缺失且即将落入通用兜底的瞬间；profile 可配置取代或保留兜底。"
+              },
+              "replace_fallback": {
+                "type": "boolean",
+                "default": false,
+                "description": "true = AI 文本取代通用兜底；false = 兜底照常输出，AI 只在完全零输出时补。默认 false（保守，不动原版观感）。"
+              }
+            }
+          }
+        }
+      }
+    },
+    "checkpoints": {
+      "type": "object",
+      "description": "检查点体系。train-type 只需声明主检查点与要订阅的引擎状态；map-type 必须提供 custom 列表。",
+      "required": ["primary"],
+      "additionalProperties": false,
+      "properties": {
+        "primary": {
+          "type": "string",
+          "enum": ["Shop_Begin", "custom"],
+          "description": "主检查点：一次 LLM 往返完成 记忆总结 + 口上预取 + 行为决策 三件事。Train 系固定 Shop_Begin（环上唯一 __CAN_SAVE__ 枢纽，实测 EVENTSHOP 在此做全日标志重置 + 朝事件，是天然回合边界）。map-type 游戏 = custom。"
+        },
+        "engine_hooks": {
+          "type": "array",
+          "description": "订阅的引擎状态转移（可选动作）。",
+          "items": {
+            "type": "object",
+            "required": ["state", "actions"],
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": ["Shop_Begin", "Train_Begin", "AfterTrain_Begin", "Turnend_Begin", "SaveGame_Begin", "LoadData_DataLoaded"],
+                "description": "SystemStateCode 名。SaveGame/LoadData 用于记忆快照挂载。"
+              },
+              "actions": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["summarize", "prefetch", "decide", "observe", "snapshot_memory"] },
+                "description": "该状态触发的流水线动作。"
+              }
+            }
+          }
+        },
+        "custom": {
+          "type": "array",
+          "description": "自定义检查点（map-type / 游戏特有触发点）。触发方式二选一：ERB 侧 CALLSHARP AI_CHECKPOINT 显式上报，或变量条件轮询。",
+          "items": {
+            "type": "object",
+            "required": ["id", "trigger", "actions"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "description": "检查点 ID，如 map_node_enter。" },
+              "trigger": {
+                "type": "object",
+                "oneOf": [
+                  {
+                    "required": ["callsharp"],
+                    "properties": { "callsharp": { "type": "string", "description": "CALLSHARP 方法名，如 AI_CHECKPOINT。" }, "arg": { "type": "string", "description": "可选参数，如 node_id。" } }
+                  },
+                  {
+                    "required": ["variable"],
+                    "properties": { "variable": { "type": "string", "description": "变量名，如 EVENT_FLAG。" }, "equals": { "type": ["integer", "string"] } }
+                  }
+                ]
+              },
+              "actions": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["summarize", "prefetch", "decide", "observe"] },
+                "description": "触发动作。"
+              }
+            }
+          }
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "description": "情境快照定义：进入口上层/检查点时抓取的变量集，构成预取缓存 key 与 Prompt 的情境段。",
+      "additionalProperties": false,
+      "properties": {
+        "snapshot": {
+          "type": "array",
+          "description": "变量快照清单。",
+          "items": {
+            "type": "object",
+            "required": ["kind", "name"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": { "type": "string", "enum": ["int", "str", "cflag", "cstr", "tequip", "cond"], "description": "变量类别。cond = 游戏自定义 COND() 字符串判定（实测本作用 COND(\"朝\") 判时段）。" },
+              "name": { "type": "string", "description": "变量名/判定名。" },
+              "band": { "type": "boolean", "default": false, "description": "true = 按 character_csv.favor.bands 分档后入 key（好感度专用，防缓存碎片）。" }
+            }
+          }
+        },
+        "prefetch_key": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "参与预取缓存 key 的快照字段名子集（精简 key 提升命中率），如 [\"TARGET\", \"时段\", \"好感档\"]。"
+        }
+      }
+    },
+    "behaviors": {
+      "type": "object",
+      "description": "Feature 2 行为白名单。AI 只能从此列表选择，输出经 JSON Schema 校验后由 ActionTranslator 映射为受限原语——AI 永不直接写变量/跳 label（不变量 #3）。",
+      "required": ["whitelist"],
+      "additionalProperties": false,
+      "properties": {
+        "whitelist": {
+          "type": "array",
+          "description": "白名单条目。effect 只允许两类受限原语：set_cflag / call_label。",
+          "items": {
+            "type": "object",
+            "required": ["id", "contexts", "effect"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "description": "行为 ID（LLM 结构化输出的枚举值）。如 invite_date / gift / greet。" },
+              "description": { "type": "string", "description": "行为语义（进 Prompt 的白名单说明）。" },
+              "contexts": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "生效情境（检查点 id 或引擎状态名），如 [\"Shop_Begin\"]。"
+              },
+              "effect": {
+                "type": "object",
+                "oneOf": [
+                  {
+                    "required": ["set_cflag"],
+                    "properties": {
+                      "set_cflag": {
+                        "type": "object",
+                        "required": ["name", "value"],
+                        "properties": {
+                          "name": { "type": "string", "description": "CFLAG 键名，必须游戏内真实存在。" },
+                          "value": { "type": ["integer", "string"] },
+                          "target_chara": { "type": "boolean", "default": true, "description": "true = 写 TARGET 角色。" }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "required": ["call_label"],
+                    "properties": { "call_label": { "type": "string", "description": "事件 label（不带 @），必须游戏内真实存在。" } }
+                  }
+                ]
+              },
+              "preconditions": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "前置条件表达式（引擎侧求值），不满足则该行为对本回合不可见。"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["draft", "validated"],
+                "default": "draft",
+                "description": "draft = label/变量名已实测存在但调用语义未验证；validated = 已在真机走通。"
+              }
+            }
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "description": "每回合 token 预算，核心强制执行（不变量 #5），Mod/ERB 侧无权突破。",
+      "required": ["tokens_per_turn", "llm_calls_per_checkpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "tokens_per_turn": { "type": "integer", "minimum": 0, "description": "单回合（主检查点到下个主检查点）token 上限。" },
+        "llm_calls_per_checkpoint": { "type": "integer", "minimum": 0, "maximum": 3, "description": "单检查点最大 LLM 往返数（预取批处理目标 = 1）。" },
+        "prefetch_max_variants": { "type": "integer", "minimum": 1, "maximum": 32, "default": 8, "description": "单次预取最大情境变体数。" }
+      }
+    },
+    "fallback": {
+      "type": "string",
+      "const": "vanilla",
+      "description": "降级策略：原版行为。provider 失败/无网络/缓存未命中/预算耗尽时游戏行为与无 AI 构建完全一致（不变量 #1）。"
+    }
+  }
+}
