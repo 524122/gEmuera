@@ -48,3 +48,15 @@ android_storage = false
 # 控制台还会分别记录 _Draw 与命中表重建的 CPU 回调采样。
 performance = false
 statement_recognition = false
+
+# Agent LLM 三元组（Spike 阶段）。全部留空 = 未配置 → AI 功能整体降级，游戏原样可玩（离线兜底）。
+# 密钥请写在 user://config.toml（AppData，不入仓库），本文件只留模板。
+# base_url 填 OpenAI 兼容端点；本地 Ollama 用 http://localhost:11434/v1（api_key 可留空）。
+# 示例：
+#   DeepSeek: base_url="https://api.deepseek.com/v1"  model="deepseek-chat"
+#   GLM:      base_url="https://open.bigmodel.cn/api/paas/v4"  model="glm-4-flash"
+# 修改后需重启生效（Spike 约束：进程内缓存）。
+[agent.llm]
+base_url = ""
+api_key = ""
+model = ""

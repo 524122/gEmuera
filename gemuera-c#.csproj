@@ -1,4 +1,4 @@
-﻿<Project Sdk="Godot.NET.Sdk/4.7.0">
+<Project Sdk="Godot.NET.Sdk/4.7.0">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
@@ -27,6 +27,10 @@
     <Compile Remove="tools\dialect-inventory\**" />
     <EmbeddedResource Remove="tools\dialect-inventory\**" />
     <None Remove="tools\dialect-inventory\**" />
+    <!-- xUnit tests build independently via their own csproj; keep them out of the Godot host glob. -->
+    <Compile Remove="tests\**" />
+    <EmbeddedResource Remove="tests\**" />
+    <None Remove="tests\**" />
     <!-- Evidence and upstream builds are generated data, never Godot host source. -->
     <Compile Remove="artifacts\**" />
     <EmbeddedResource Remove="artifacts\**" />

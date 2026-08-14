@@ -199,9 +199,25 @@ namespace MinorShift.Emuera.Runtime.Utils.PluginSystem
 		void RegisterBuiltinMethods()
 		{
 			AddMethod(new BuiltinPluginMethod("LAUNCH_BROWSER", "Open a URL or local file with the platform shell.", LaunchBrowser));
-			AddMethod(new BuiltinPluginMethod("CALL_GEMINI", "Built-in LLM fallback when no external plugin is installed.", MarkLlmUnavailable));
-			AddMethod(new BuiltinPluginMethod("CALL_OLLAMA", "Built-in LLM fallback when no external plugin is installed.", MarkLlmUnavailable));
-			AddMethod(new BuiltinPluginMethod("CALL_GENERIC_LLM_API", "Built-in LLM fallback when no external plugin is installed.", MarkLlmUnavailable));
+			AddMethod(new BuiltinPluginMethod("CALL_GEMINI", "Built-in LLM call routed to the OpenAI-compatible provider (preset alias; configure [agent.llm] in config.toml).", args => DispatchLlm("CALL_GEMINI", args)));
+			AddMethod(new BuiltinPluginMethod("CALL_OLLAMA", "Built-in LLM call routed to the OpenAI-compatible provider (preset alias; configure [agent.llm] in config.toml).", args => DispatchLlm("CALL_OLLAMA", args)));
+			AddMethod(new BuiltinPluginMethod("CALL_GENERIC_LLM_API", "Built-in LLM call routed to the OpenAI-compatible provider (configure [agent.llm] in config.toml).", args => DispatchLlm("CALL_GENERIC_LLM_API", args)));
+			AddMethod(new BuiltinPluginMethod("AI_PREFETCH_GET", "Read a prefetched koujou text by context key; RESULT=-1 when cache miss (degrade to vanilla).", args =>
+			{
+				string contextKey = ReadPluginStringArg(args, 0);
+				var (result, results) = global::MinorShift.Emuera.Runtime.AgentBridge.AgentLlmMethods.PrefetchGet(contextKey);
+				SetPluginResult(result, results);
+			}));
+			AddMethod(new BuiltinPluginMethod("AI_PREFETCH_STATUS", "Current prefetch cache entry count (Spike diagnostics).", args =>
+			{
+				SetPluginResult(global::MinorShift.Emuera.Runtime.AgentBridge.AgentLlmMethods.PrefetchCount, "");
+			}));
+		}
+
+		void DispatchLlm(string methodName, PluginMethodParameter[] args)
+		{
+			var (result, results) = global::MinorShift.Emuera.Runtime.AgentBridge.AgentLlmMethods.Execute(methodName, args);
+			SetPluginResult(result, results);
 		}
 
 		void LaunchBrowser(PluginMethodParameter[] args)
@@ -215,11 +231,6 @@ namespace MinorShift.Emuera.Runtime.Utils.PluginSystem
 
 			global::GenericUtils.ShellOpen(ResolveShellOpenTarget(target));
 			SetPluginResult(1, "");
-		}
-
-		void MarkLlmUnavailable(PluginMethodParameter[] args)
-		{
-			SetPluginResult(-1, "");
 		}
 
 		void SetPluginResult(long result, string results)

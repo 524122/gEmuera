@@ -9,6 +9,12 @@ public sealed partial class EmueraLifecycleComponent : Node
     bool applicationPauseActive = false;
     int maxFpsBeforeApplicationPause = -1;
 
+    public override void _EnterTree()
+    {
+        // AgentBridge 组合宿主：生命周期组件全程存活于 main 场景，是检查点队列消费方的挂载点。
+        AddChild(new gEmuera.AgentBridge.AgentBridgeHost { Name = "AgentBridgeHost" });
+    }
+
     public override void _Notification(int what)
     {
         HandleNotification(what);
