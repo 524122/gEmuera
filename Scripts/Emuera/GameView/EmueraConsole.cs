@@ -818,6 +818,20 @@ namespace MinorShift.Emuera.GameView
 			}
 		}
 
+		// 对照源码 IsWaintingInputWithMouse（IsWaitInputState && inputReq.MouseInput）：
+		// 当前等待是否接受鼠标指针输入（TINPUT 的 MOUSE 参数置 MouseInput；INPUT 系
+		// 的指针元数据选项置 EnablePointerInputMetadata）。用于决定空白右键/中键是否
+		// 提交——普通数值 INPUT 没有该标志时不应提交，避免与源码行为偏差。
+		internal bool IsWaitingInputWithMouse
+		{
+			get
+			{
+				return IsWaitInputState
+					&& inputReq != null
+					&& (inputReq.MouseInput || inputReq.EnablePointerInputMetadata);
+			}
+		}
+
 		internal bool IsWaitingDefaultableIntValue
 		{
 			get
@@ -1571,6 +1585,46 @@ namespace MinorShift.Emuera.GameView
 
 			}
 			InputMouseKey(1, (int)button, clientPoint.X, clientPoint.Y, buttonNum, 0);
+		}
+
+		// 对照源码 MoveMouse 的 CBG 命中：在 cbgButtonMap 上做像素查找，返回命中的按钮号
+		// （透明像素 = 未命中 → -1）。point 为客户端左上基准坐标（同 MouseDown 入参）。
+		// 供 EmueraContent hover 路径读取 CBG 按钮的 tooltip。
+		internal int GetCBGButtonAtClientPoint(Point point)
+		{
+			if (cbgButtonMap == null || !cbgButtonMap.IsCreated)
+				return -1;
+			Point clientPoint = point;
+			clientPoint.Y = point.Y - ClientHeight;
+			Point mapPoint = clientPoint;
+			mapPoint.Y = clientPoint.Y + cbgButtonMap.Height;
+			if (mapPoint.X >= 0 && mapPoint.Y >= 0 && mapPoint.X < cbgButtonMap.Width && mapPoint.Y < cbgButtonMap.Height)
+			{
+				uEmuera.Drawing.Color c = cbgButtonMap.Bitmap.GetPixel(mapPoint.X, mapPoint.Y);
+				if (c.A == 255)
+					return c.ToArgb() & 0xFFFFFF;
+			}
+			return -1;
+		}
+
+		// 对照源码 MoveMouse 的 CBG tooltip 查找：给定按钮号返回首个非空 tooltipString。
+		internal string GetCBGTooltip(int buttonValue)
+		{
+			if (buttonValue <= 0)
+				return null;
+			lock (cbgLock)
+			{
+				for (int i = 0; i < cbgList.Count; i++)
+				{
+					ClientBackGroundImage cbg = cbgList[i];
+					if (!cbg.isButton || cbg.buttonValue != buttonValue)
+						continue;
+					if (string.IsNullOrEmpty(cbg.tooltipString))
+						continue;
+					return cbg.tooltipString;
+				}
+			}
+			return null;
 		}
 
 		//1823 Key入力を捕まえる
