@@ -72,7 +72,11 @@ namespace MinorShift.Emuera.Compatibility
 
 			var builder = new LegacyCompatibilityProfileBuilder(plan, scopedVariableInstructionsEnabled);
 			foreach (ILegacyCompatibilityModule module in modules)
+			{
+				// 记录每个 Declare 名字的归属模块，供"未选中模块"诊断提示使用。
+				builder.SetDeclaringModule(module.ModuleId);
 				module.Declare(builder);
+			}
 			foreach (DialectModuleSnapshot selectedModule in plan.Dialect.Modules)
 			{
 				if (!modulesById.ContainsKey(selectedModule.ModuleId))
@@ -81,6 +85,7 @@ namespace MinorShift.Emuera.Compatibility
 						$"Legacy profile '{plan.ProfileId}' selected unsupported module '{selectedModule.ModuleId}'.");
 				}
 				ILegacyCompatibilityModule module = modulesById[selectedModule.ModuleId];
+				builder.SetDeclaringModule(module.ModuleId);
 				module.Apply(builder);
 			}
 			return builder.Build();
@@ -94,6 +99,10 @@ namespace MinorShift.Emuera.Compatibility
 		private readonly HashSet<string> hiddenFunctionNames = new HashSet<string>(StringComparer.Ordinal);
 		private readonly HashSet<string> scopedInstructionNames = new HashSet<string>(StringComparer.Ordinal);
 		private readonly HashSet<string> methodProjectedFunctionNames = new HashSet<string>(StringComparer.Ordinal);
+		// 隐藏名 → 声明它的方言模块 id（Declare/Hide 阶段记录，Expose 移除）。
+		// 用于"该标识符属于未选中模块"的诊断提示（如 v24pure 下提示改用 snake）。
+		private readonly Dictionary<string, string> hiddenNameOwners = new Dictionary<string, string>(StringComparer.Ordinal);
+		private string declaringModuleId = "";
 		private ISnakeCompatibilityPolicy snake = DisabledSnakeCompatibilityPolicy.Instance;
 		private IEraFlCompatibilityPolicy eraFl = DisabledEraFlCompatibilityPolicy.Instance;
 
@@ -107,16 +116,41 @@ namespace MinorShift.Emuera.Compatibility
 			this.scopedVariableInstructionsEnabled = scopedVariableInstructionsEnabled;
 		}
 
+		/// <summary>
+		/// Compose 在每个模块的 Declare/Apply 前设置当前模块 id，使隐藏归属可溯源。
+		/// </summary>
+		public void SetDeclaringModule(string moduleId)
+		{
+			declaringModuleId = moduleId ?? "";
+		}
+
+		private void RecordHiddenOwner(string name)
+		{
+			if (!string.IsNullOrEmpty(declaringModuleId) && !hiddenNameOwners.ContainsKey(name))
+				hiddenNameOwners[name] = declaringModuleId;
+		}
+
+		private void ForgetHiddenOwner(string name)
+		{
+			hiddenNameOwners.Remove(name);
+		}
+
 		public void DeclareInstructionNames(IEnumerable<string> names)
 		{
 			foreach (string name in names)
+			{
 				hiddenInstructionNames.Add(name);
+				RecordHiddenOwner(name);
+			}
 		}
 
 		public void DeclareFunctionNames(IEnumerable<string> names)
 		{
 			foreach (string name in names)
+			{
 				hiddenFunctionNames.Add(name);
+				RecordHiddenOwner(name);
+			}
 		}
 
 		public void DeclareScopedInstructionNames(IEnumerable<string> names)
@@ -134,13 +168,19 @@ namespace MinorShift.Emuera.Compatibility
 		public void ExposeInstructionNames(IEnumerable<string> names)
 		{
 			foreach (string name in names)
+			{
 				hiddenInstructionNames.Remove(name);
+				ForgetHiddenOwner(name);
+			}
 		}
 
 		public void ExposeFunctionNames(IEnumerable<string> names)
 		{
 			foreach (string name in names)
+			{
 				hiddenFunctionNames.Remove(name);
+				ForgetHiddenOwner(name);
+			}
 		}
 
 		/// <summary>
@@ -151,7 +191,10 @@ namespace MinorShift.Emuera.Compatibility
 		public void HideFunctionNames(IEnumerable<string> names)
 		{
 			foreach (string name in names)
+			{
 				hiddenFunctionNames.Add(name);
+				RecordHiddenOwner(name);
+			}
 		}
 
 		public void SetSnakePolicy(ISnakeCompatibilityPolicy policy)
@@ -175,7 +218,8 @@ namespace MinorShift.Emuera.Compatibility
 				hiddenInstructionNames,
 				hiddenFunctionNames,
 				scopedInstructionNames,
-				methodProjectedFunctionNames);
+				methodProjectedFunctionNames,
+				hiddenNameOwners);
 		}
 	}
 
@@ -290,10 +334,22 @@ namespace MinorShift.Emuera.Compatibility
 
 	internal sealed class LegacyEraFlCompatibilityModule : ILegacyCompatibilityModule
 	{
+		// eraFL 实测依赖的 snake 系指令（handler 由共享仓 snake 侧注册，erafl 只声明
+		// 可见性需求）。证据：erafl-master グラフィック生成.ERB:356 "SETANIMETIMER 1000 / フレームレート"。
+		// 三接口职责：v24pure = v24 参考；snake = v24 + snake 方言；erafl = v24 + eraFL 实测能力清单 + eraFL 策略。
+		private static readonly IReadOnlyCollection<string> InstructionNames =
+			Array.AsReadOnly(new[] { "SETANIMETIMER" });
+
 		public string ModuleId => EraFlCompatibilityModule.ModuleId;
-		public void Declare(LegacyCompatibilityProfileBuilder builder) { }
+		public void Declare(LegacyCompatibilityProfileBuilder builder)
+		{
+			// Declare 对所有会话执行：erafl 声明加入隐藏集（v24pure/snake 下该指令本就隐藏，
+			// 零影响）；仅 erafl 会话的 Apply 才解除隐藏。
+			builder.DeclareInstructionNames(InstructionNames);
+		}
 		public void Apply(LegacyCompatibilityProfileBuilder builder)
 		{
+			builder.ExposeInstructionNames(InstructionNames);
 			builder.SetEraFlPolicy(LegacyEraFlCompatibilityPolicy.Instance);
 		}
 	}

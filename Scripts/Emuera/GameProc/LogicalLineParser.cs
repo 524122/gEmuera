@@ -557,6 +557,9 @@ namespace MinorShift.Emuera.GameProc
 				if (stream.EOS)
 				{
 					errMes = "解釈できない行です";
+					// 指令未命中且属于未选中方言模块时，给出接口切换建议（如 v24pure 下提示改用 snake）。
+					if (idCode != null && Program.Compatibility.TryGetUnselectedModuleHint(idCode, out string hintModule))
+						errMes += "（" + idCode + " 属于 " + hintModule + " 模块的能力，建议在启动器中改用对应接口）";
 					goto err;
 				}
 				//命令行ではない→代入行のはず
