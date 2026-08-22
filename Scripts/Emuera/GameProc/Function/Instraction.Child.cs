@@ -349,9 +349,21 @@ namespace MinorShift.Emuera.GameProc.Function
 				}
 				
 				spSplitArg.Num.SetValue(strs.Length, exm);
-				string[] output = (string[])spSplitArg.Var.GetArray();
-				int outputlength = Math.Min(output.Length, strs.Length);
-				Array.Copy(strs, output, outputlength);
+				// RESULTS 等系统字符串数组在懒加载后端可能是 SparseArray<string>，
+				// 与上游同样按两种后端分别写入（对照 snake 参考 Instraction.Child.cs）。
+				object arrObj = spSplitArg.Var.GetArray();
+				if (arrObj is SparseArray<string> sparse)
+				{
+					int outputlength = Math.Min(sparse.Length, strs.Length);
+					for (int i = 0; i < outputlength; i++)
+						sparse[i] = strs[i];
+				}
+				else
+				{
+					string[] output = (string[])arrObj;
+					int outputlength = Math.Min(output.Length, strs.Length);
+					Array.Copy(strs, output, outputlength);
+				}
 			}
 		}
 		

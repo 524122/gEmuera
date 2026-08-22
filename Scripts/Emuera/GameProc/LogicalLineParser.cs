@@ -502,18 +502,23 @@ namespace MinorShift.Emuera.GameProc
 					//命令文
 					if (func != null)//関数文
 					{
-						// v24 declares VARI/VARS while building the logical line.  Snake
-						// retains its dynamic ArgumentBuilder path, so the selected profile
-						// determines the grammar once during parsing rather than execution.
-						if ((func.Code == FunctionCode.VARI || func.Code == FunctionCode.VARS)
-							&& !Program.Compatibility.Snake.IsEnabled)
-						{
-							return ParseV24ScopedVariableDeclaration(position, func, currentLabel, stream);
-						}
-						if (ShouldPreferPrivateVariableAssignment(idCode, currentLabel, stream))
-						{
-							stream.Seek(0, System.IO.SeekOrigin.Begin);
-						}
+					// v24 declares VARI/VARS while building the logical line.  Snake
+					// retains its dynamic ArgumentBuilder path, so the selected profile
+					// determines the grammar once during parsing rather than execution.
+					// A "#DIMS VARS" followed by "VARS = CFLAG" is an assignment to a
+					// same-named private variable, not a declaration — the assignment
+					// must win over the v24 declaration grammar in every profile.
+					bool preferPrivateVariableAssignment = ShouldPreferPrivateVariableAssignment(idCode, currentLabel, stream);
+					if ((func.Code == FunctionCode.VARI || func.Code == FunctionCode.VARS)
+						&& !Program.Compatibility.Snake.IsEnabled
+						&& !preferPrivateVariableAssignment)
+					{
+						return ParseV24ScopedVariableDeclaration(position, func, currentLabel, stream);
+					}
+					if (preferPrivateVariableAssignment)
+					{
+						stream.Seek(0, System.IO.SeekOrigin.Begin);
+					}
 						else
 						{
 							if (stream.EOS) //引数の無い関数
