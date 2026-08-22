@@ -575,6 +575,10 @@ namespace MinorShift.Emuera.GameProc
 				catch(CodeEE)
 				{
 					errMes = "解釈できない行です";
+					// 带参数的指令语法（如 SETANIMETIMER 100）走赋值解析失败分支，同样需要
+					// 追加未选中方言模块的接口切换建议，与上方 EOS 分支保持一致。
+					if (idCode != null && Program.Compatibility.TryGetUnselectedModuleHint(idCode, out string hintModule))
+						errMes += "（" + idCode + " 属于 " + hintModule + " 模块的能力，建议在启动器中改用对应接口）";
 					goto err;
 				}
 				//eramaker互換警告

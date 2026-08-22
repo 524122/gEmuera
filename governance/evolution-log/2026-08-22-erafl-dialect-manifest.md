@@ -82,7 +82,28 @@ private static readonly IReadOnlyCollection<string> InstructionNames =
 - `dotnet build`：0 错误 0 警告；xUnit 20/20 通过。
 - LegacyDialectSurfaceSmoke / LegacyDialectRuntimeSmoke：全绿。
 - 快照 erafl 维度：SETANIMETIMER visible=True、CALLSTR visible=False。
-- 桌面图形实测（eraFL 游戏 + erafl 接口启动、eraTW 回归）留待图形会话执行。
+- **无头游戏级实测（legacy-runner，Godot 4.7 mono @ `E:\Godot_v4.7-stable_mono_win64`）**：
+  - eraFL 真实游戏 + erafl：3/3 Passed，完整走完启动链到达标题主菜单
+    （2135 行控制台输出，errors 空）——SETANIMETIMER 解析点已越过；
+  - 最小 fixture（`SETANIMETIMER 100` + `PRINTW`）+ snake：3/3 Passed；
+  - 同 fixture + erafl：3/3 Passed；
+  - 同 fixture + v24pure：如期失败，emuera.log 报
+    `解釈できない行です（SETANIMETIMER 属于 game.snake 模块的能力…）`；
+  - 表达式 fixture（`LOCAL = SQL_CONNECT("x")`）+ v24pure：如期失败，报
+    `"SQL_CONNECT"は解釈できない識別子です（该标识符属于 game.snake 模块的能力…）`。
+
+## 收尾补遗（同日实测发现并修复）
+
+1. **LogicalLineParser 提示缺口**：语句位置报错有两条路径——`stream.EOS`
+   分支（光杆标识符）与赋值解析失败分支（带参数指令，如 `SETANIMETIMER 100`，
+   即 eraTW/eraFL 的真实语法）。原实现只挂了前者；实测后已给后者补挂同一提示
+   （fixture 复测通过）。
+2. **legacy-runner 工具链缺口**：`Invoke-LegacyRunner.ps1`（两处守卫）、
+   `Invoke-LegacyDisplayBaseline.ps1`（ValidateSet）、
+   `legacy-runner-config.schema.json`（两处 enum）的白名单落后于引擎侧
+   （LegacyRunnerConfig 已接受 erafl），已补齐 erafl。
+3. 解析时机备注：PRINTV 参数惰性求值（加载期不解析），验证表达式路径提示
+   需用赋值行（右值加载期解析）。
 
 ## 后续观察项
 
