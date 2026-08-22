@@ -756,6 +756,13 @@ namespace MinorShift.Emuera
 			
 				}
 			}
+			// 标识符未命中且属于未选中方言模块时，追加接口切换建议（如 v24pure 下提示改用 snake）。
+			// Program.Compatibility 在解析期已由 Main 配置（与 GetFunctionMethod 的 lazy 钩子同生命周期）。
+			if (Program.Compatibility.TryGetUnselectedModuleHint(idStr, out string hintModule))
+			{
+				throw new IdentifierNotFoundCodeEE("\"" + idStr + "\"は解釈できない識別子です（该标识符属于 "
+					+ hintModule + " 模块的能力，建议在启动器中改用对应接口）");
+			}
 			throw new IdentifierNotFoundCodeEE("\"" + idStr + "\"は解釈できない識別子です");
 		}
 		#endregion

@@ -83,6 +83,7 @@ namespace MinorShift.Emuera.Compatibility
 		private readonly ISet<string> hiddenFunctionNames;
 		private readonly ISet<string> scopedInstructionNames;
 		private readonly ISet<string> methodProjectedFunctionNames;
+		private readonly IReadOnlyDictionary<string, string> hiddenNameOwners;
 		private readonly bool scopedVariableInstructionsEnabled;
 
 		internal LegacyCompatibilityProfile(
@@ -94,7 +95,8 @@ namespace MinorShift.Emuera.Compatibility
 			IEnumerable<string> hiddenInstructionNames,
 			IEnumerable<string> hiddenFunctionNames,
 			IEnumerable<string> scopedInstructionNames,
-			IEnumerable<string> methodProjectedFunctionNames)
+			IEnumerable<string> methodProjectedFunctionNames,
+			IReadOnlyDictionary<string, string> hiddenNameOwners = null)
 		{
 			ProfileId = profileId;
 			Plan = plan;
@@ -105,6 +107,8 @@ namespace MinorShift.Emuera.Compatibility
 			this.hiddenFunctionNames = new HashSet<string>(hiddenFunctionNames, StringComparer.Ordinal);
 			this.scopedInstructionNames = new HashSet<string>(scopedInstructionNames, StringComparer.Ordinal);
 			this.methodProjectedFunctionNames = new HashSet<string>(methodProjectedFunctionNames, StringComparer.Ordinal);
+			this.hiddenNameOwners = hiddenNameOwners
+				?? new Dictionary<string, string>(StringComparer.Ordinal);
 		}
 
 		public string ProfileId { get; }
@@ -154,6 +158,34 @@ namespace MinorShift.Emuera.Compatibility
 			if (string.IsNullOrWhiteSpace(functionName))
 				return false;
 			return methodProjectedFunctionNames.Contains(functionName.Trim());
+		}
+
+		/// <summary>
+		/// 诊断提示：名字在当前会话中不可见（被隐藏），且声明它的方言模块未被本会话选中
+		/// （如 v24pure 会话中查询 snake 专属名字）时返回其归属模块 id。用于在报错文案里
+		/// 提示"该标识符属于 snake 系扩展，建议改用 snake 接口"。snake 会话中查询
+		/// SETANIMETIMER 函数形态（snake 自身隐藏）返回 false——snake 已选中，无需提示。
+		/// </summary>
+		public bool TryGetUnselectedModuleHint(string name, out string moduleId)
+		{
+			moduleId = null;
+			if (string.IsNullOrWhiteSpace(name))
+				return false;
+
+			string normalized = name.Trim();
+			// 指令名按 IsInstructionVisible 语义转大写，函数名保持原样（与 IsFunctionVisible 一致）。
+			if (!hiddenNameOwners.ContainsKey(normalized))
+				normalized = normalized.ToUpperInvariant();
+			if (!hiddenNameOwners.TryGetValue(normalized, out string owner))
+				return false;
+
+			foreach (DialectModuleSnapshot selected in Plan.Dialect.Modules)
+			{
+				if (string.Equals(selected.ModuleId, owner, StringComparison.Ordinal))
+					return false; // 归属模块已被选中，隐藏是模块自身语义，不提示
+			}
+			moduleId = owner;
+			return true;
 		}
 
 		public static LegacyCompatibilityProfile Create(
