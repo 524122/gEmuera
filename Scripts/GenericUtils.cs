@@ -1291,7 +1291,8 @@ internal static class GenericUtils
 
         string gamePath = _runtimeGamePath;
         string coreProfile = _runtimeCoreProfile;
-        bool useLazyLoading = false;
+        //报告头必须反映真实运行配置：此前硬编码 false，误导排障（20260819 华扇口上日志实证）。
+        bool useLazyLoading = MinorShift.Emuera.Config.UseLazyLoading && MinorShift.Emuera.Program.SupportsLazyLoading;
         bool ok = DiagnosticLogExporter.ExportDiagnosticLog(_runtimeConfig, path, gamePath, coreProfile, useLazyLoading, _saveLogOperationTrail, out errorMessage);
 
         if (_runtimeConfig != null && _runtimeConfig.BreadcrumbWriteOnExport)
@@ -1308,7 +1309,7 @@ internal static class GenericUtils
         }
         string gamePath = _runtimeGamePath;
         string coreProfile = _runtimeCoreProfile;
-        bool useLazyLoading = false;
+        bool useLazyLoading = MinorShift.Emuera.Config.UseLazyLoading && MinorShift.Emuera.Program.SupportsLazyLoading;
         return DiagnosticLogExporter.ExportDiagnosticPackage(_runtimeConfig, outputDirectory, gamePath, coreProfile, useLazyLoading, _inputReplay, out errorMessage);
     }
 

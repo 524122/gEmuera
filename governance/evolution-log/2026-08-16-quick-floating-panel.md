@@ -55,6 +55,10 @@
 - [x] 子代理代码审查（只读报告）：已当场修复 Q6/Q7（QuickFloatingWindow 按显隐开关
       `SetProcess`，消除隐藏态每帧 native 回调）与 Q8（`DetachQuick` 显式退订，
       消除同帧迁移双订阅风险）。
+- [x] **gEmuera 启动预设进化（最终落地）**：`~/.dsh/.agent-presets/gemuera/agent.cordis.yml`
+      persona 新增「构建与验证」「平台约束（Windows/Android 双轨）」「自我进化闭环」
+      「用户提示词模式精要」四章节；`preset.yml` 描述同步；YAML 结构验证通过。
+      本文件与 prompt-patterns/ 为临时沉淀，精华已合并进预设，下次会话直接生效。
 - [ ] 待用户实测 APK：移动端悬浮设置下面板显示位置（应保持右下角）与拖动滚动是否正常。
 - [ ] 待用户实测桌面：无边框透明悬浮窗在 4K/高分屏下的按钮大小与拖动手感。
 

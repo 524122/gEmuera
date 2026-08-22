@@ -165,7 +165,11 @@ gemuera-c#/
 │   └── uEmuera/               # System.Drawing/Forms 兼容层
 ├── src/Core/                  # 纯 C# 核心契约（GEmuera.Core，独立编译）
 ├── tools/                     # PowerShell 工具（governance/core-contracts 等）
-├── Fixtures/                  # 测试固件
+├── Build/                     # 构建/打包产物统一管理（gitignore：android/NativeLibs）
+│   ├── android/               # Godot Android 导出工程（gradle 构建，不入库）
+│   ├── NativeLibs/            # 预编译原生库（Android 构建自愈恢复，不入库）
+│   ├── Fixtures/              # 测试固件（manifest.json）
+│   └── *.apk / *.idsig        # 导出的 APK 产物（不入库）
 ├── test/                      # 测试
 └── addons/                    # Godot 编辑器插件
 ```

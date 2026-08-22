@@ -154,7 +154,11 @@ gemuera-c#/
 │   └── theme/                 # グローバルテーマ（gemuera_theme.tres）
 ├── src/Core/                  # 純 C# コア契約（GEmuera.Core、独立ビルド）
 ├── tools/                     # PowerShell ツール（governance/core-contracts 等）
-├── Fixtures/                  # テストフィクスチャ
+├── Build/                     # ビルド/パッケージ成果物（android/NativeLibs は gitignore）
+│   ├── android/               # Godot Android エクスポート工程（gradle ビルド、非コミット）
+│   ├── NativeLibs/            # プリコンパイル済みネイティブライブラリ（自動復元）
+│   ├── Fixtures/              # テストフィクスチャ（manifest.json）
+│   └── *.apk / *.idsig        # エクスポート済み APK 成果物（非コミット）
 ├── test/                      # テスト
 └── addons/                    # Godot エディタプラグイン
 ```

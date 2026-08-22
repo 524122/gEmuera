@@ -10,17 +10,18 @@ using LayoutPreset = Godot.Control.LayoutPreset;
 namespace gEmuera.Diagnostics
 {
     /// <summary>
-    /// 企业级说明：运行时诊断面板是配置编辑 UI，不承载日志路由和业务诊断逻辑。
+    /// 企业级说明：运行时诊断面板内容（纯 Control 构建）是配置编辑 UI，不承载日志路由和业务诊断逻辑。
     /// 面板只在 debug.runtime_panel.enabled=true 时实例化，避免普通 APK 游玩期增加节点和布局成本。
     /// 所有改动写入 user://config.toml，保存后可热重载轻量开关；结构性参数建议重启后生效。
-    /// 2026-08：从画布内嵌 PanelContainer 重构为原生 Window（标题栏/可拖动/可缩放，
-    /// 桌面端可为独立 OS 窗口，Android 为浮动子窗口），不再遮挡游戏内容。
+    /// 2026-08：从画布内嵌 PanelContainer 重构为原生 Window（标题栏/可拖动/可缩放）。
+    /// 2026-08 APK 修复：Android 上嵌入 Window（内部依赖 SubViewport 合成）在
+    /// gl_compatibility 渲染器下内容不渲染（与本仓库其它 SubViewport 路径一致地仅桌面可用），
+    /// 因此本类为共享内容（PanelContainer），同一份内容代码被两种宿主共用：
+    /// 桌面端由 RuntimeDiagnosticsPanel（Window）包一层原生标题栏/拖动/缩放，
+    /// Android 端由 FloatingDiagnosticsHost 直接作为全屏 Control 覆盖层挂载。
     /// </summary>
-    public partial class RuntimeDiagnosticsPanel : Window
+    public partial class RuntimeDiagnosticsPanelContent : PanelContainer
     {
-        static FloatingDiagnosticsHost _activeFloatingHost;
-        static Node _floatingAttachParent;
-
         RuntimeDiagnosticsConfig config;
         VBoxContainer optionRoot;
         TabContainer optionTabs;
@@ -39,29 +40,17 @@ namespace gEmuera.Diagnostics
         bool quickOptionsDirty;
         bool expertOptionsDirty;
 
-        const int MinWindowWidth = 360;
-        const int MinWindowHeight = 260;
-
         public bool FloatingMode { get; set; }
         public event Action HideRequested;
-        // 重命名避免遮蔽 Window 继承的 CloseRequested 信号（标题栏 ✕ 走原生信号）。
+        // 关闭事件：与桌面端原生 ✕（CloseRequested）同语义，宿主 QueueFree 整个悬浮窗。
         public event Action RequestCloseEvent;
 
         public override void _Ready()
         {
-            Title = "日志诊断";
-            MinSize = new Vector2I(MinWindowWidth, MinWindowHeight);
-            // 标题栏 ✕ → 与面板内 ✕ 同一关闭路径（宿主 QueueFree 整个悬浮窗）。
-            CloseRequested += OnNativeWindowCloseRequested;
+            // 标题栏/最小尺寸/原生 ✕ 由桌面端 RuntimeDiagnosticsPanel（Window）负责，
+            // 本类只构建纯 Control 内容，两种宿主（Window / Android 覆盖层）共用。
             BuildPanel();
             RefreshResponsiveLayout();
-        }
-
-        void OnNativeWindowCloseRequested()
-        {
-            // 先隐藏（Godot 标准），即使后续 QueueFree 延迟/失败，视觉先关闭。
-            Hide();
-            RequestCloseEvent?.Invoke();
         }
 
         public override void _Notification(int what)
@@ -70,84 +59,20 @@ namespace gEmuera.Diagnostics
                 RefreshResponsiveLayout();
         }
 
-        /// <summary>
-        /// WS2：启动挂载门仍为 RuntimePanelEnabled（debug.runtime_panel.enabled / [logging] panel_visible 等价复用，行为保留）。
-        /// 热重载通过 SetDiagnosticsPanelVisible 即时显隐悬浮球与面板。
-        /// </summary>
-        public static void AttachFloatingTo(Node parent)
-        {
-            // 宿主引用必须在门控之前无条件记录：启动时 panel_visible=false 不挂载，
-            // 之后热重载/设置页改回 true 时 SetDiagnosticsPanelVisible 依赖该引用补挂载。
-            if (parent != null)
-                _floatingAttachParent = parent;
-            var currentConfig = global::GenericUtils.GetRuntimeDiagnosticsConfig()
-                ?? RuntimeDiagnosticsConfigLoader.Load().Config;
-            if (parent == null || currentConfig == null || !currentConfig.RuntimePanelEnabled)
-                return;
-            if (_activeFloatingHost != null && GodotObject.IsInstanceValid(_activeFloatingHost))
-                return;
-
-            var layer = new CanvasLayer { Layer = 100 };
-            parent.AddChild(layer);
-
-            var host = new FloatingDiagnosticsHost();
-            host.SetAnchorsPreset(LayoutPreset.FullRect);
-            host.MouseFilter = MouseFilterEnum.Ignore;
-            layer.AddChild(host);
-            _activeFloatingHost = host;
-            host.TreeExiting += () =>
-            {
-                if (_activeFloatingHost == host)
-                    _activeFloatingHost = null;
-                layer.QueueFree();
-            };
-        }
-
-        /// <summary>
-        /// 运行时显示/隐藏悬浮球与面板。请求显示但尚未挂载时（例如热重载把 panel_visible 从 false 改为 true），
-        /// 会按当前配置补挂载；门控不通过时为空操作，可安全调用。
-        /// </summary>
-        public static void SetDiagnosticsPanelVisible(bool visible)
-        {
-            var host = _activeFloatingHost;
-            if ((host == null || !GodotObject.IsInstanceValid(host)) && visible)
-            {
-                var cfg = global::GenericUtils.GetRuntimeDiagnosticsConfig();
-                if (_floatingAttachParent != null && GodotObject.IsInstanceValid(_floatingAttachParent)
-                    && cfg != null && cfg.RuntimePanelEnabled)
-                {
-                    AttachFloatingTo(_floatingAttachParent);
-                }
-                host = _activeFloatingHost;
-            }
-            if (host == null || !GodotObject.IsInstanceValid(host))
-                return;
-            host.SetBallAndPanelVisible(visible);
-        }
-
-        public static bool GetDiagnosticsPanelVisible()
-        {
-            var host = _activeFloatingHost;
-            if (host == null || !GodotObject.IsInstanceValid(host))
-                return false;
-            return host.IsBallVisible();
-        }
-
         void BuildPanel()
         {
-            // Window 不是 Control：主题/panel 样式落在根 PanelContainer 上，FullRect 填满整个窗口。
-            var rootPanel = new PanelContainer();
-            rootPanel.AddThemeStyleboxOverride("panel", CreatePanelStyle());
-            rootPanel.SetAnchorsPreset(LayoutPreset.FullRect);
-            rootPanel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-            rootPanel.SizeFlagsVertical = SizeFlags.ExpandFill;
-            rootPanel.MouseFilter = MouseFilterEnum.Stop;
-            AddChild(rootPanel);
+            // 本类即根面板（PanelContainer）：桌面端由 Window 外壳包一层原生标题栏，
+            // Android 端直接 FullRect 填满视口；两种宿主共用同一份内容构建。
+            AddThemeStyleboxOverride("panel", CreatePanelStyle());
+            SetAnchorsPreset(LayoutPreset.FullRect);
+            SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            SizeFlagsVertical = SizeFlags.ExpandFill;
+            MouseFilter = MouseFilterEnum.Stop;
 
             panelMargin = new MarginContainer();
             panelMargin.MouseFilter = MouseFilterEnum.Pass;
             ApplyMargin(panelMargin, 12, 12);
-            rootPanel.AddChild(panelMargin);
+            AddChild(panelMargin);
 
             var root = new VBoxContainer();
             root.SizeFlagsHorizontal = SizeFlags.ExpandFill;
@@ -272,7 +197,9 @@ namespace gEmuera.Diagnostics
             if (FloatingMode && viewportSize.X > 0)
             {
                 float maxWidth = Mathf.Max(360.0f, viewportSize.X - outerMargin * 2.0f);
-                MinSize = new Vector2I((int)Mathf.Min(520.0f, maxWidth), 220);
+                // 桌面端 Window 的最小尺寸由宿主 Window 负责；这里只约束 Control 自身的最小宽，
+                // 保证 Android 覆盖层/窗口内容在窄屏下仍可读。FullRect 锚点下该值基本惰性。
+                CustomMinimumSize = new Vector2(Mathf.Min(520.0f, maxWidth), 220);
             }
 
             var root = panelMargin?.GetChildCount() > 0 ? panelMargin.GetChild(0) as VBoxContainer : null;
@@ -1862,8 +1789,127 @@ namespace gEmuera.Diagnostics
     }
 
     /// <summary>
+    /// 运行时诊断悬浮窗口（Godot 原生 Window）。桌面端以独立 OS 窗口显示（标题栏/可拖动/可缩放），
+    /// 内容由共享的 RuntimeDiagnosticsPanelContent 提供。Android 不使用本类的 Window 形态——
+    /// FloatingDiagnosticsHost 直接挂全屏 Control 覆盖层（嵌入 Window 在 gl_compatibility 的
+    /// Android 上内容不渲染，见 RuntimeDiagnosticsPanelContent 类注释）。
+    ///
+    /// Why（错误 1）：gEmuera 日志诊断面板保持为 Window 类，不退回画布内嵌面板——
+    /// Window 在桌面端是独立 OS 窗口，不遮挡游戏主画面，且带原生标题栏/关闭。
+    /// </summary>
+    public sealed partial class RuntimeDiagnosticsPanel : Window
+    {
+        const int MinWindowWidth = 360;
+        const int MinWindowHeight = 260;
+
+        // 悬浮宿主引用：启动门控 + 热重载补挂载共用（见 AttachFloatingTo）。
+        static FloatingDiagnosticsHost _activeFloatingHost;
+        static Node _floatingAttachParent;
+
+        RuntimeDiagnosticsPanelContent _content;
+
+        public event Action HideRequested;
+        public event Action RequestCloseEvent;
+
+        /// <summary>
+        /// WS2：启动挂载门仍为 RuntimePanelEnabled（debug.runtime_panel.enabled / [logging] panel_visible 等价复用，行为保留）。
+        /// 热重载通过 SetDiagnosticsPanelVisible 即时显隐悬浮球与面板。
+        /// </summary>
+        public static void AttachFloatingTo(Node parent)
+        {
+            // 宿主引用必须在门控之前无条件记录：启动时 panel_visible=false 不挂载，
+            // 之后热重载/设置页改回 true 时 SetDiagnosticsPanelVisible 依赖该引用补挂载。
+            if (parent != null)
+                _floatingAttachParent = parent;
+            var currentConfig = global::GenericUtils.GetRuntimeDiagnosticsConfig()
+                ?? RuntimeDiagnosticsConfigLoader.Load().Config;
+            if (parent == null || currentConfig == null || !currentConfig.RuntimePanelEnabled)
+                return;
+            if (_activeFloatingHost != null && GodotObject.IsInstanceValid(_activeFloatingHost))
+                return;
+
+            // Why（错误 3 修复）：悬浮球/面板层必须高于游戏系统菜单(100)与 tooltip(150)——
+            // 原先与菜单同层(100)，菜单或 tooltip 展开时可能盖住悬浮球，造成“悬浮小球不显示”。
+            var layer = new CanvasLayer { Layer = 160 };
+            parent.AddChild(layer);
+
+            var host = new FloatingDiagnosticsHost();
+            host.SetAnchorsPreset(LayoutPreset.FullRect);
+            host.MouseFilter = MouseFilterEnum.Ignore;
+            layer.AddChild(host);
+            _activeFloatingHost = host;
+            host.TreeExiting += () =>
+            {
+                if (_activeFloatingHost == host)
+                    _activeFloatingHost = null;
+                layer.QueueFree();
+            };
+        }
+
+        /// <summary>
+        /// 运行时显示/隐藏悬浮球与面板。请求显示但尚未挂载时（例如热重载把 panel_visible 从 false 改为 true），
+        /// 会按当前配置补挂载；门控不通过时为空操作，可安全调用。
+        /// </summary>
+        public static void SetDiagnosticsPanelVisible(bool visible)
+        {
+            var host = _activeFloatingHost;
+            if ((host == null || !GodotObject.IsInstanceValid(host)) && visible)
+            {
+                var cfg = global::GenericUtils.GetRuntimeDiagnosticsConfig();
+                if (_floatingAttachParent != null && GodotObject.IsInstanceValid(_floatingAttachParent)
+                    && cfg != null && cfg.RuntimePanelEnabled)
+                {
+                    AttachFloatingTo(_floatingAttachParent);
+                }
+                host = _activeFloatingHost;
+            }
+            if (host == null || !GodotObject.IsInstanceValid(host))
+                return;
+            host.SetBallAndPanelVisible(visible);
+        }
+
+        public static bool GetDiagnosticsPanelVisible()
+        {
+            var host = _activeFloatingHost;
+            if (host == null || !GodotObject.IsInstanceValid(host))
+                return false;
+            return host.IsBallVisible();
+        }
+
+        public override void _Ready()
+        {
+            Title = "日志诊断";
+            MinSize = new Vector2I(MinWindowWidth, MinWindowHeight);
+            // 标题栏 ✕ → 与面板内 ✕ 同一关闭路径（宿主 QueueFree 整个悬浮窗）。
+            CloseRequested += OnNativeWindowCloseRequested;
+
+            _content = new RuntimeDiagnosticsPanelContent { FloatingMode = true };
+            _content.SetAnchorsPreset(LayoutPreset.FullRect);
+            _content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            _content.SizeFlagsVertical = SizeFlags.ExpandFill;
+            // 内容内「隐藏」→ 仅隐藏窗口（保留悬浮球）；「关闭」→ 隐藏并通知宿主销毁。
+            _content.HideRequested += () => HideRequested?.Invoke();
+            _content.RequestCloseEvent += () =>
+            {
+                Hide();
+                RequestCloseEvent?.Invoke();
+            };
+            AddChild(_content);
+        }
+
+        void OnNativeWindowCloseRequested()
+        {
+            // 先隐藏（Godot 标准），即使后续 QueueFree 延迟/失败，视觉先关闭。
+            Hide();
+            RequestCloseEvent?.Invoke();
+        }
+    }
+
+    /// <summary>
     /// 企业级说明：悬浮诊断入口只负责调试 UI 的显示、隐藏和窗口尺寸调整。
     /// 它不读取业务状态、不写配置、不接入输入模拟器链路；全屏根节点保持 Ignore，避免悬浮入口以外区域拦截游戏触摸。
+    /// 2026-08 APK 修复：Android 上用全屏 Control 覆盖层承载面板内容（嵌入 Window 在
+    /// gl_compatibility 下不渲染），桌面端用原生 Window 外壳；悬浮球两种平台都可用。
     /// </summary>
     public sealed partial class FloatingDiagnosticsHost : Control
     {
@@ -1872,7 +1918,14 @@ namespace gEmuera.Diagnostics
         const float MinPanelWidth = 360.0f;
         const float MinPanelHeight = 260.0f;
 
-        RuntimeDiagnosticsPanel panel;
+        /// <summary>
+        /// Android 上嵌入 Window（内部依赖 SubViewport 合成）在 gl_compatibility 下内容不渲染，
+        /// 改用全屏 Control 覆盖层；桌面端保留原生 Window（标题栏/拖动/缩放）。
+        /// </summary>
+        internal static bool IsOverlayPanel => OS.GetName() == "Android";
+
+        RuntimeDiagnosticsPanelContent panelOverlay;
+        RuntimeDiagnosticsPanel panelWindow;
         Button ballButton;
         bool panelVisible;
 
@@ -1889,7 +1942,7 @@ namespace gEmuera.Diagnostics
                 return;
 
             ClampBallToViewport();
-            if (panelVisible)
+            if (panelVisible && panelWindow != null)
                 ClampPanelToViewport();
         }
 
@@ -1907,16 +1960,31 @@ namespace gEmuera.Diagnostics
             ballButton.Pressed += TogglePanel;
             AddChild(ballButton);
 
-            // 面板已重构为原生 Window：Window 自带标题栏/可拖动/可缩放，无需自定义 resize 手柄。
-            panel = new RuntimeDiagnosticsPanel
+            if (IsOverlayPanel)
             {
-                FloatingMode = true,
-                Visible = false,
-            };
-            panel.HideRequested += () => SetPanelVisible(false);
-            // 关闭：先隐藏面板（Godot 标准），再销毁宿主（连带面板）。
-            panel.RequestCloseEvent += () => { panel.Hide(); QueueFree(); };
-            AddChild(panel);
+                // Android：嵌入 Window 在 gl_compatibility 下不渲染，直接挂全屏 Control 覆盖层。
+                // 覆盖层 FullRect 填满视口，无需窗口几何/钳制；显隐走 Control.Visible。
+                panelOverlay = new RuntimeDiagnosticsPanelContent
+                {
+                    FloatingMode = true,
+                    Visible = false,
+                };
+                panelOverlay.SetAnchorsPreset(LayoutPreset.FullRect);
+                panelOverlay.HideRequested += () => SetPanelVisible(false);
+                panelOverlay.RequestCloseEvent += () => { SetPanelVisible(false); QueueFree(); };
+                AddChild(panelOverlay);
+            }
+            else
+            {
+                // 桌面端：原生 Window 外壳（标题栏/可拖动/可缩放），内容为纯 Control。
+                panelWindow = new RuntimeDiagnosticsPanel
+                {
+                    Visible = false,
+                };
+                panelWindow.HideRequested += () => SetPanelVisible(false);
+                panelWindow.RequestCloseEvent += () => { panelWindow.Hide(); QueueFree(); };
+                AddChild(panelWindow);
+            }
         }
 
         void PlaceInitialFloatingControls()
@@ -1928,16 +1996,20 @@ namespace gEmuera.Diagnostics
                 Mathf.Max(ViewportMargin, viewportSize.X - BallSize - ViewportMargin),
                 Mathf.Max(ViewportMargin, viewportSize.Y * 0.5f - BallSize * 0.5f));
 
-            // panel 是嵌入 Window：Position/Size 用主窗口物理像素（GetParentWindowPixelSize），
+            // 桌面端 Window 的 Position/Size 用主窗口物理像素（GetParentWindowPixelSize），
             // 不能用逻辑 viewport 尺寸，否则高分屏/拉伸下位置偏差、标题栏贴边。
-            Vector2I parentSize = GetParentWindowPixelSize();
-            Vector2I initialSize = new Vector2I(
-                (int)Mathf.Min(760.0f, Mathf.Max(MinPanelWidth, parentSize.X - ViewportMargin * 2.0f)),
-                (int)Mathf.Min(640.0f, Mathf.Max(MinPanelHeight, parentSize.Y - ViewportMargin * 2.0f)));
-            panel.Size = initialSize;
-            panel.Position = new Vector2I(
-                (int)Mathf.Max(ViewportMargin, parentSize.X - initialSize.X - ViewportMargin),
-                (int)Mathf.Max(ViewportMargin, 0));
+            // Android 覆盖层 FullRect 自动填满视口，无需几何设置。
+            if (panelWindow != null)
+            {
+                Vector2I parentSize = GetParentWindowPixelSize();
+                Vector2I initialSize = new Vector2I(
+                    (int)Mathf.Min(760.0f, Mathf.Max(MinPanelWidth, parentSize.X - ViewportMargin * 2.0f)),
+                    (int)Mathf.Min(640.0f, Mathf.Max(MinPanelHeight, parentSize.Y - ViewportMargin * 2.0f)));
+                panelWindow.Size = initialSize;
+                panelWindow.Position = new Vector2I(
+                    (int)Mathf.Max(ViewportMargin, parentSize.X - initialSize.X - ViewportMargin),
+                    (int)Mathf.Max(ViewportMargin, 0));
+            }
             SetPanelVisible(false);
         }
 
@@ -1945,19 +2017,26 @@ namespace gEmuera.Diagnostics
         {
             SetPanelVisible(!panelVisible);
         }
-
         void SetPanelVisible(bool visible)
         {
             panelVisible = visible;
-            // 嵌入 Window 用标准 Show/Hide 显隐，比直接设 Visible 更可靠（修复无法关闭）。
-            if (visible)
+            if (panelWindow != null)
             {
-                panel.Show();
-                ClampPanelToViewport();
+                // 桌面嵌入 Window 用标准 Show/Hide 显隐（比直接设 Visible 更可靠）。
+                if (visible)
+                {
+                    panelWindow.Show();
+                    ClampPanelToViewport();
+                }
+                else
+                {
+                    panelWindow.Hide();
+                }
             }
-            else
+            else if (panelOverlay != null)
             {
-                panel.Hide();
+                // Android 覆盖层：Control.Visible 即可（FullRect，无窗口几何）。
+                panelOverlay.Visible = visible;
             }
             ballButton.Text = visible ? "×" : "调";
         }
@@ -1979,20 +2058,24 @@ namespace gEmuera.Diagnostics
 
         void ClampPanelToViewport()
         {
-            // 面板钳制在父窗口内容区内，留 margin，标题栏始终可抓取。
+            // 仅桌面 Window 需要钳制：面板钳制在父窗口内容区内，留 margin，标题栏始终可抓取。
+            // Android 覆盖层为 FullRect，始终填满视口，无需钳制。
+            if (panelWindow == null)
+                return;
+
             Vector2I parentSize = GetParentWindowPixelSize();
             const int margin = 8;
             int maxX = Math.Max(0, parentSize.X - margin * 2);
             int maxY = Math.Max(0, parentSize.Y - margin * 2);
-            Vector2I size = panel.Size;
+            Vector2I size = panelWindow.Size;
             size.X = Mathf.Clamp(size.X, (int)Mathf.Min(MinPanelWidth, maxX), maxX);
             size.Y = Mathf.Clamp(size.Y, (int)Mathf.Min(MinPanelHeight, maxY), maxY);
 
-            Vector2I pos = panel.Position;
+            Vector2I pos = panelWindow.Position;
             pos.X = Mathf.Clamp(pos.X, margin, Math.Max(margin, parentSize.X - size.X - margin));
             pos.Y = Mathf.Clamp(pos.Y, margin, Math.Max(margin, parentSize.Y - size.Y - margin));
-            panel.Position = pos;
-            panel.Size = size;
+            panelWindow.Position = pos;
+            panelWindow.Size = size;
         }
 
         void ClampBallToViewport()

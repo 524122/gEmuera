@@ -161,7 +161,11 @@ gemuera-c#/
 │   └── theme/                 # Global Theme (gemuera_theme.tres)
 ├── src/Core/                  # Pure C# core contracts (GEmuera.Core, built separately)
 ├── tools/                     # PowerShell tooling (governance/core-contracts, etc.)
-├── Fixtures/                  # Test fixtures
+├── Build/                     # Build/package artifacts (android/NativeLibs are gitignored)
+│   ├── android/               # Godot Android export project (gradle build, not committed)
+│   ├── NativeLibs/            # Prebuilt native libs (self-healed for Android builds)
+│   ├── Fixtures/              # Test fixtures (manifest.json)
+│   └── *.apk / *.idsig        # Exported APK artifacts (not committed)
 ├── test/                      # Tests
 └── addons/                    # Godot editor plugins
 ```

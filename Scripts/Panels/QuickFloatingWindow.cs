@@ -1,20 +1,26 @@
 using Godot;
+using System;
 
 // 快捷按钮面板的悬浮宿主（Godot Window 组件）。
-// 悬浮样式沿用 quick 面板自身的透明样式：无边框透明窗口承载 QuickButtons（CanvasLayer），
-// 没有原生标题栏；拖动面板（内容无滚动余量时）移动窗口，内容有滚动余量时拖动仍为滚动。
-// 面板显隐通过 PadShown/PadHidden 信号同步窗口显隐；关闭/隐藏复用系统菜单 quick 按钮。
+// Why（2026-08-21 样式返工）：上一版无边框透明窗 + 自绘标题条/卡片在 Windows 上
+// 拖动、命中、Z 序全靠手写模拟，体验差；本版回归原生窗口组件——
+// 标准标题栏由 OS 负责拖动/关闭，窗口保持 Transient（总在主窗口之上），
+// Resizable=false（尺寸完全由面板内容驱动，SyncWindowSize 同步）。
+// 内容 1:1（按钮大小=配置值），面板内拖动语义沿用 QuickButtons：
+// 内容无滚动余量时拖动 = 移动窗口，有滚动余量时拖动 = 滚动。
+// 显隐通过 PadShown/PadHidden 信号同步窗口显隐。
 // 桌面端由 EmueraContent 按配置挂载；Android 不挂载本类（嵌入 Window 在
 // gl_compatibility 下内容不渲染，见 EmueraContent 门控），保持画布内嵌。
 //
-// 职责（组合优于继承）：只负责窗口几何、生命周期与位置拖动，不触碰按钮/滚动/
-// 拖拽等业务逻辑——那些仍由 QuickButtons 自行处理。
+// 职责（组合优于继承）：只负责窗口几何与生命周期，不触碰按钮/滚动/拖拽等
+// 业务逻辑——那些仍由 QuickButtons 自行处理。
 public partial class QuickFloatingWindow : Window
 {
+	// 面板四周留白（窗口内容区内）。
 	const int PanelMargin = 20;
 	const int ScreenMargin = 32;
-	const int MinWindowWidth = 80;
-	const int MinWindowHeight = 60;
+	const int MinWindowWidth = 180;
+	const int MinWindowHeight = 96;
 
 	QuickButtons quick;
 	bool positionInitialized;
@@ -50,17 +56,21 @@ public partial class QuickFloatingWindow : Window
 
 	public override void _Ready()
 	{
-		// 无边框透明窗口：沿用 quick 面板的透明样式，不显示原生标题栏。
-		Borderless = true;
-		Transparent = true;
-		TransparentBg = true;
+		// 原生窗口组件：OS 标题栏（拖动/关闭），Transient 保证盖在主窗口之上。
+		Title = MultiLanguage.Get("QuickFloatingWindow.Title", "Quick");
+		Borderless = false;
+		// 尺寸完全由面板内容驱动（SyncWindowSize），禁止用户手动缩放。
+		Unresizable = true;
+		Transient = true;
+		Exclusive = false;
 		Visible = false;
 		// _Process 只服务窗口尺寸同步；窗口隐藏时关闭，避免每帧一次
 		// native→managed 调用（OnPadShown 会按需重开）。
 		SetProcess(false);
-		// 内容 1:1（逻辑像素 = 物理像素）：按钮大小就是配置值，不再按主窗口
-		// stretch 缩放比放大，用户调节宽度/字号所见即所得。
 		MinSize = new Vector2I(MinWindowWidth, MinWindowHeight);
+		// 标题栏 ✕ 走 Godot CloseRequested：仅隐藏悬浮窗（保留系统菜单入口），
+		// 与 quick 面板显隐状态保持一致。
+		CloseRequested += OnCloseRequested;
 		if (quick != null)
 		{
 			quick.PadShown += OnPadShown;
@@ -71,12 +81,18 @@ public partial class QuickFloatingWindow : Window
 	public override void _ExitTree()
 	{
 		// 兜底退订（DetachQuick 之外的销毁路径，如场景卸载）。
+		CloseRequested -= OnCloseRequested;
 		if (quick != null)
 		{
 			quick.PadShown -= OnPadShown;
 			quick.PadHidden -= OnPadHidden;
 			quick.WindowDragRequested -= OnPanelWindowDrag;
 		}
+	}
+
+	void OnCloseRequested()
+	{
+		quick?.HidePad();
 	}
 
 	void OnPadShown()
@@ -132,7 +148,8 @@ public partial class QuickFloatingWindow : Window
 		Position = pos;
 	}
 
-	// 窗口内容区 = 面板尺寸 + 四周留白（无标题栏，1:1 无缩放）。
+	// 窗口内容区 = 面板尺寸 + 四周留白（1:1 无缩放；标题栏高度由 OS 管理，
+	// 不计入内容区——Godot Window.Size 即客户区尺寸）。
 	void SyncWindowSize()
 	{
 		if (quick == null)
