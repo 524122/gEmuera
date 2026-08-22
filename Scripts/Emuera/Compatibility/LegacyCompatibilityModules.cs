@@ -335,7 +335,11 @@ namespace MinorShift.Emuera.Compatibility
 		public string GMapQuestType => string.Empty;
 		public bool IsOmittedDefaultArgument(char currentToken) => false;
 		public bool IsPointerInputMetadataOption(string optionText) => false;
-		public int NormalizePointerButtonResult(int mouseButton) => mouseButton;
+		// Why（对照源码 MainWindow.MouseDown / EmueraConsole.InputMouseKey）：RESULT:1 的鼠标
+		// 按钮协议在所有 Emuera 实现中都是 1=左、2=右、3=中（文档约定），与是否为 eraFL 无关。
+		// 非 eraFL 策略之前原样返回宿主 VK（中键 0x04 → RESULT:1=4），依赖 RESULT:1==3 分支的
+		// snake/v24 游戏会读到错误值。What/How：与 eraFL 共用同一 0x04→3 归一化，其它值不改写。
+		public int NormalizePointerButtonResult(int mouseButton) => EraFlCompatibilityModule.NormalizePointerButtonResult(mouseButton);
 		public string NormalizePointerIntegerSubmission(string input, int mouseButton, bool waitingForInteger) => input ?? string.Empty;
 		public bool ShouldSubmitBlankPointerStringInput(int mouseButton, bool waitingForString) => false;
 		public bool TryRecoverQuestStartRoomIndex(string functionName, long returnedRoomIndex, string requestedRoomTag, long mapId, string questType, string[,] mapData, out long recoveredRoomIndex)

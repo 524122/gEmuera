@@ -4203,7 +4203,13 @@ namespace MinorShift.Emuera.GameData.Function
 			public GraphicsCreateFromFileMethod()
 			{
 				ReturnType = EraType.Integer;
-				argumentTypeArray = new EraType[] { EraType.Integer, EraType.String };
+				//对照 v24/snake Creator.Method.cs：GCREATEFROMFILE(ID, filename[, isRelative])，
+				//OmitStart=2 表示第 3 参（isRelative）可省略。
+				argumentTypeArrayEx = new ArgTypeList[]
+				{
+					new ArgTypeList { ArgTypes = new List<_ArgType> { ArgType.Int, ArgType.String, ArgType.Int }, OmitStart = 2 },
+				};
+				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4215,10 +4221,16 @@ namespace MinorShift.Emuera.GameData.Function
 					return 0;
 
 				string filename = arguments[1].GetStrValue(exm);
+				//v24/snake 语义：第 3 参 isRelative != 0 时按相对路径直接解析，
+				//否则按 ContentDir 基准解析。gEmuera 用 ResolveGraphicsResourceFilePath
+				//统一解析；isRelative 分支仅在路径为相对路径时影响基准目录。
+				bool isRelative = arguments.Length > 2 && arguments[2].GetIntValue(exm) != 0;
                 BitmapTexture bmp = null;
 				try
 				{
-					string filepath = ResolveGraphicsResourceFilePath(filename);
+					string filepath = isRelative
+						? uEmuera.Utils.ResolveExistingFilePath(filename)
+						: ResolveGraphicsResourceFilePath(filename);
 					if (!uEmuera.Utils.FileExists(filepath))
 						return 0;
 					bmp = new BitmapTexture(filepath);
@@ -4412,13 +4424,21 @@ namespace MinorShift.Emuera.GameData.Function
 
 		/// <summary>
 		/// GCLEAR(int ID, int cARGB)
+		/// GCLEAR(int ID, int cARGB, int x, int y, int w, int h)  ← EM_私家版_GCLEAR拡張
 		/// </summary>
 		public sealed class GraphicsClearMethod : FunctionMethod
 		{
 			public GraphicsClearMethod()
 			{
 				ReturnType = EraType.Integer;
-				argumentTypeArray = new EraType[] { EraType.Integer, EraType.Integer };
+				//对照 v24/snake Creator.Method.cs 的 EM_私家版_GCLEAR拡張：
+				//2 参全画面清除 + 6 参矩形区域清除两组签名，基类多签名机制校验。
+				argumentTypeArrayEx = new ArgTypeList[]
+				{
+					new ArgTypeList { ArgTypes = new List<_ArgType> { ArgType.Int, ArgType.Int } },
+					new ArgTypeList { ArgTypes = new List<_ArgType> { ArgType.Int, ArgType.Int, ArgType.Int, ArgType.Int, ArgType.Int, ArgType.Int } },
+				};
+				argumentTypeArray = null;
 				CanRestructure = false;
 			}
 			public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
@@ -4429,7 +4449,11 @@ namespace MinorShift.Emuera.GameData.Function
 				Color c = ReadColor(Name, exm, arguments, 1);
 				if (!g.IsCreated)
 					return 0;
-				g.GClear(c);
+				if (arguments.Length == 2)
+					g.GClear(c);
+				else
+					g.GClear(c, (int)arguments[2].GetIntValue(exm), (int)arguments[3].GetIntValue(exm),
+						(int)arguments[4].GetIntValue(exm), (int)arguments[5].GetIntValue(exm));
 				return 1;
 			}
 		}
@@ -6320,6 +6344,26 @@ namespace MinorShift.Emuera.GameData.Function
 			ReturnType = EraType.Integer;
 			argumentTypeArray = null;
 			CanRestructure = false;
+		}
+		// GGETTEXTSIZE 文本,字体名,字号[,样式]——对照 snake Creator.Method.cs：参数
+		// String,String,Int,Int，OmitStart=3 表示第 4 参可省略。argumentTypeArray 为
+		// null 本意是支持可变长参数，但基类 FunctionMethod.CheckArgumentType 会直接取
+		// argumentTypeArray.Length 判空抛 NullReferenceException（回归：ffb4835 改
+		// v24/Snake 语义时漏掉覆盖，erablue resort 地下城动画一调用即崩）。这里按真实
+		// 签名校验，3~4 参合法、第 4 参（样式）可省略。
+		public override string CheckArgumentType(string name, IOperandTerm[] arguments)
+		{
+			if (arguments == null || arguments.Length < 3 || arguments.Length > 4)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentNum0, name);
+			if (arguments[0] == null || !arguments[0].IsString)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 1);
+			if (arguments[1] == null || !arguments[1].IsString)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 2);
+			if (arguments[2] == null || !arguments[2].IsInteger)
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 3);
+			if (arguments.Length == 4 && (arguments[3] == null || !arguments[3].IsInteger))
+				return string.Format(Properties.Resources.SyntaxErrMesMethodDefaultArgumentType0, name, 4);
+			return null;
 		}
 		public override Int64 GetIntValue(ExpressionMediator exm, IOperandTerm[] arguments)
 		{

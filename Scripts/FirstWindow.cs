@@ -68,7 +68,7 @@ public partial class FirstWindow : Control
 		V24Pure,
 		Snake,
 		Diagnostics,
-		Announcement
+		Manual
 	}
 
 	public static string SelectedGamePath { get; private set; }
@@ -109,7 +109,7 @@ public partial class FirstWindow : Control
 	Button startButton;
 	Label statusLabel;
 	Label categoryHintLabel;
-	Label announcementStatusLabel;
+	Label manualStatusLabel;
 	CheckButton advancedCompatibilityToggle;
 	OptionButton compatibilityProfileOption;
 	MarginContainer launcherMargin;
@@ -117,9 +117,9 @@ public partial class FirstWindow : Control
 	Button v24TabButton;
 	Button snakeTabButton;
 	Button diagnosticsTabButton;
-	Button announcementTabButton;
+	Button manualTabButton;
 	Control gameTabContent;
-	Control announcementTabContent;
+	Control manualTabContent;
 	Control diagnosticsTabContent;
 	CheckButton emueraDebugModeToggle;
 	CheckButton debugShowWindowToggle;
@@ -154,6 +154,15 @@ public partial class FirstWindow : Control
 		BuildLauncherUi();
 		PlayLauncherEntrance();
 
+		// Why（回退到菜单布局修复）：游戏经 ChangeSceneToFile 从 main.tscn（根为纯
+		// Node）回到 first_window.tscn（根为全矩形 Control）时，canvas_items stretch 下
+		// 新根可能沿用前一场景的陈旧可见区域尺寸，首帧后若无视口尺寸变化就无人纠正，
+		// 表现为游戏列表滚动条异常、整页排版超出屏幕底部。这里订阅视口尺寸变化并在
+		// 本帧末主动贴合视口重新布局，与 EmueraContent.RefreshViewportMetrics 的既有
+		// 模式一致；尺寸本就正确时是零开销空操作。Android/Windows 都覆盖。
+		GetViewport().SizeChanged += OnLauncherViewportSizeChanged;
+		CallDeferred(nameof(RefitLauncherToViewport));
+
 		if (OS.GetName() == "Android")
 		{
 			GetTree().OnRequestPermissionsResult += OnPermissionsResult;
@@ -166,6 +175,22 @@ public partial class FirstWindow : Control
 		{
 			ScanGames();
 		}
+	}
+
+	// 启动器重新贴合视口：根 Control 必须等于可见区域尺寸，FullRect 子控件才不会
+	// 溢出屏幕底部。进入场景（本帧末）与视口尺寸变化时各调一次。
+	void RefitLauncherToViewport()
+	{
+		var viewport = GetViewport();
+		if (viewport == null || !IsInsideTree())
+			return;
+		// 根 Control 的 Size 一旦改变，FullRect 锚定子控件会自动跟随重新布局。
+		Size = viewport.GetVisibleRect().Size;
+	}
+
+	void OnLauncherViewportSizeChanged()
+	{
+		RefitLauncherToViewport();
 	}
 
 	void BuildLauncherUi()
@@ -283,10 +308,10 @@ public partial class FirstWindow : Control
 		gameTabContent.SetAnchorsPreset(LayoutPreset.FullRect);
 		contentStack.AddChild(gameTabContent);
 
-		announcementTabContent = CreateAnnouncementContent();
-		announcementTabContent.SetAnchorsPreset(LayoutPreset.FullRect);
-		announcementTabContent.Visible = false;
-		contentStack.AddChild(announcementTabContent);
+		manualTabContent = CreateManualContent();
+		manualTabContent.SetAnchorsPreset(LayoutPreset.FullRect);
+		manualTabContent.Visible = false;
+		contentStack.AddChild(manualTabContent);
 
 		diagnosticsTabContent = CreateDiagnosticsContent();
 		diagnosticsTabContent.SetAnchorsPreset(LayoutPreset.FullRect);
@@ -307,12 +332,12 @@ public partial class FirstWindow : Control
 		v24TabButton = CreateRailButton("v24", () => SelectLauncherTab(LauncherTab.V24Pure));
 		snakeTabButton = CreateRailButton("snake", () => SelectLauncherTab(LauncherTab.Snake));
 		diagnosticsTabButton = CreateRailButton(MultiLanguage.Get("FirstWindow.DebugLogButton", "调试/日志"), () => SelectLauncherTab(LauncherTab.Diagnostics));
-		announcementTabButton = CreateRailButton(MultiLanguage.Get("FirstWindow.NoticeButton", "公告"), () => SelectLauncherTab(LauncherTab.Announcement));
+		manualTabButton = CreateRailButton(MultiLanguage.Get("FirstWindow.ManualButton", "操作手册"), () => SelectLauncherTab(LauncherTab.Manual));
 
 		rail.AddChild(v24TabButton);
 		rail.AddChild(snakeTabButton);
 		rail.AddChild(diagnosticsTabButton);
-		rail.AddChild(announcementTabButton);
+		rail.AddChild(manualTabButton);
 
 		var spacer = new Control();
 		spacer.SizeFlagsVertical = SizeFlags.ExpandFill;
@@ -334,7 +359,7 @@ public partial class FirstWindow : Control
 
 	void SelectLauncherTab(LauncherTab tab)
 	{
-		if (currentTab == tab && tab != LauncherTab.Announcement && tab != LauncherTab.Diagnostics)
+		if (currentTab == tab && tab != LauncherTab.Manual && tab != LauncherTab.Diagnostics)
 			return;
 
 		currentTab = tab;
@@ -344,9 +369,9 @@ public partial class FirstWindow : Control
 			currentCategory = LauncherGameCategory.V24Pure;
 
 		// contentStack 规则：先隐藏全部子 content，再显示选中项。
-		// 不沿用 game/announcement 的两两互斥判断，避免新增第三个 content 后出现显隐竞态。
+		// 不沿用 game/manual 的两两互斥判断，避免新增第三个 content 后出现显隐竞态。
 		gameTabContent.Visible = false;
-		announcementTabContent.Visible = false;
+		manualTabContent.Visible = false;
 		if (diagnosticsTabContent != null)
 			diagnosticsTabContent.Visible = false;
 		UpdateTabButtonStyles();
@@ -356,19 +381,21 @@ public partial class FirstWindow : Control
 			if (diagnosticsTabContent != null)
 			{
 				// FadeInContent 只淡入 modulate 不改 Visible，必须先显式显示（与下方
-				// game/announcement 分支一致），否则页面永远空白。
+				// game/manual 分支一致），否则页面永远空白。
 				diagnosticsTabContent.Visible = true;
 				FadeInContent(diagnosticsTabContent);
 			}
 			return;
 		}
 
-		bool showingAnnouncement = tab == LauncherTab.Announcement;
-		gameTabContent.Visible = !showingAnnouncement;
-		announcementTabContent.Visible = showingAnnouncement;
+		bool showingManual = tab == LauncherTab.Manual;
+		gameTabContent.Visible = !showingManual;
+		manualTabContent.Visible = showingManual;
 
-		if (showingAnnouncement)
-			FadeInContent(announcementTabContent);
+		if (showingManual)
+		{
+			FadeInContent(manualTabContent);
+		}
 		else
 		{
 			UpdateCategoryHint();
@@ -382,7 +409,7 @@ public partial class FirstWindow : Control
 		ApplyRailButtonStyle(v24TabButton, currentTab == LauncherTab.V24Pure);
 		ApplyRailButtonStyle(snakeTabButton, currentTab == LauncherTab.Snake);
 		ApplyRailButtonStyle(diagnosticsTabButton, currentTab == LauncherTab.Diagnostics);
-		ApplyRailButtonStyle(announcementTabButton, currentTab == LauncherTab.Announcement);
+		ApplyRailButtonStyle(manualTabButton, currentTab == LauncherTab.Manual);
 	}
 
 	void ApplyRailButtonStyle(Button button, bool active)
@@ -415,20 +442,65 @@ public partial class FirstWindow : Control
 		tabFadeTween.TweenProperty(content, "modulate:a", 1.0, 0.22);
 	}
 
-	Control CreateNoticeTab()
+	Control CreateManualContent()
 	{
-		var content = CreateDialogTab(MultiLanguage.Get("FirstWindow.NoticeTitle", "公告"));
+		var scroll = new ScrollContainer();
+		scroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+		ApplyWideVerticalScrollbar(scroll.GetVScrollBar());
 
-		var body = CreateDialogText(MultiLanguage.Get("FirstWindow.NoticeBody",
-			"游戏放置说明:\n\n"
-			+ "新版蛇 TW 请放入 snake 文件夹下。详细路径: Android 为 /storage/emulated/0/emuera/snake/你的游戏文件夹；Windows 或编辑器测试时，为程序目录或项目目录下的 snake/你的游戏文件夹。放好后从左侧 snake 标签启动，会使用 snake 核心。\n\n"
-			+ "旧版蛇 TW 和其他 era 游戏请放入 emuera 文件夹下。详细路径: Android 为 /storage/emulated/0/emuera/你的游戏文件夹；Windows 或编辑器测试时，为程序目录或项目目录下的你的游戏文件夹。放好后从左侧 v24 标签启动。\n\n"
-			+ "如果出现 v24 无法启动、解析报错、资源路径异常等情况，可以把同一个游戏文件夹移动到 snake 文件夹下，再从 snake 标签启动，尝试放入 snake 核心。\n\n"
-			+ "eraFL 或其他独立 profile 请放入 compat/<profile>/游戏文件夹，例如 compat/erafl/eraFL0.48；它们仍显示在 v24 标签，但会按目录自动选择对应模块。启动器不会读取游戏内容自动识别类型。高级兼容模式只用于诊断或临时覆盖。\n\n"
-			+ "每个游戏文件夹内通常需要包含 ERB 文件夹，并至少包含 CSV、DAT 或 resources 其中之一。"));
-		content.AddChild(body);
+		var content = new VBoxContainer();
+		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		content.AddThemeConstantOverride("separation", 14);
+		scroll.AddChild(content);
 
-		return content;
+		content.AddChild(CreateSectionTitle(MultiLanguage.Get("FirstWindow.ManualTitle", "操作手册")));
+		content.AddChild(CreateManualMarkdown());
+		content.AddChild(CreateFeedbackTab());
+		content.AddChild(CreateProjectTab());
+
+		return scroll;
+	}
+
+	// 操作手册正文：MarkdownLabel 插件（addons/markdownlabel，扩展 RichTextLabel）
+	// 渲染 assets/text/manual.md（用户手写）。优先加载当前语言的 manual_<lang>.md，
+	// 缺失时回退 manual.md；多语言切换后由 LanguageChanged 订阅刷新。
+	Control CreateManualMarkdown()
+	{
+		var script = GD.Load<GDScript>("res://addons/markdownlabel/markdownlabel.gd");
+		var label = (RichTextLabel)script.New();
+		label.Name = "ManualMarkdown";
+		label.FitContent = true;
+		label.ScrollActive = false;
+		label.SelectionEnabled = true;
+		label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		label.MouseFilter = MouseFilterEnum.Stop;
+		label.AddThemeColorOverride("default_color", GEmueraTheme.TextPrimary);
+		label.AddThemeFontSizeOverride("normal_font_size", 15);
+		label.Set("markdown_text", LoadManualMarkdown());
+		// 语言切换时同步重载手册（与其它 MultiLanguage 订阅一致）。
+		MultiLanguage.LanguageChanged += () =>
+		{
+			if (GodotObject.IsInstanceValid(label))
+				label.Set("markdown_text", LoadManualMarkdown());
+		};
+		return label;
+	}
+
+	static string LoadManualMarkdown()
+	{
+		string lang = MultiLanguage.CurrentLanguage;
+		if (!string.IsNullOrEmpty(lang) && lang != "default")
+		{
+			string localized = $"res://assets/text/manual_{lang}.md";
+			if (Godot.FileAccess.FileExists(localized))
+				return Godot.FileAccess.GetFileAsString(localized);
+		}
+		const string fallback = "res://assets/text/manual.md";
+		if (Godot.FileAccess.FileExists(fallback))
+			return Godot.FileAccess.GetFileAsString(fallback);
+		return "# gEmuera 操作手册\n\n未找到 `assets/text/manual.md`，请检查资源目录。";
 	}
 
 	Control CreateFeedbackTab()
@@ -455,11 +527,11 @@ public partial class FirstWindow : Control
 		copyButton.Pressed += CopyFeedbackGroup;
 		content.AddChild(copyButton);
 
-		announcementStatusLabel = new Label();
-		announcementStatusLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-		announcementStatusLabel.AddThemeFontSizeOverride("font_size", 13);
-		announcementStatusLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
-		content.AddChild(announcementStatusLabel);
+		manualStatusLabel = new Label();
+		manualStatusLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+		manualStatusLabel.AddThemeFontSizeOverride("font_size", 13);
+		manualStatusLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextSecondary);
+		content.AddChild(manualStatusLabel);
 
 		return content;
 	}
@@ -498,27 +570,6 @@ public partial class FirstWindow : Control
 		label.AddThemeFontSizeOverride("font_size", 15);
 		label.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
 		return label;
-	}
-
-	Control CreateAnnouncementContent()
-	{
-		var scroll = new ScrollContainer();
-		scroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
-		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
-		ApplyWideVerticalScrollbar(scroll.GetVScrollBar());
-
-		var content = new VBoxContainer();
-		content.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		content.AddThemeConstantOverride("separation", 14);
-		scroll.AddChild(content);
-
-		content.AddChild(CreateSectionTitle(MultiLanguage.Get("FirstWindow.NoticeTitle", "公告")));
-		content.AddChild(CreateNoticeTab());
-		content.AddChild(CreateFeedbackTab());
-		content.AddChild(CreateProjectTab());
-
-		return scroll;
 	}
 
 	Control CreateDiagnosticsContent()
@@ -1127,8 +1178,8 @@ public partial class FirstWindow : Control
 	void CopyFeedbackGroup()
 	{
 		DisplayServer.ClipboardSet(FeedbackQqGroup);
-		if (announcementStatusLabel != null)
-			announcementStatusLabel.Text = MultiLanguage.Get("FirstWindow.QQCopied", "QQ群号已复制，可以粘贴分享给需要反馈的人。");
+		if (manualStatusLabel != null)
+			manualStatusLabel.Text = MultiLanguage.Get("FirstWindow.QQCopied", "QQ群号已复制，可以粘贴分享给需要反馈的人。");
 		if (statusLabel != null)
 			statusLabel.Text = "";
 	}
@@ -1147,6 +1198,7 @@ public partial class FirstWindow : Control
 
 	public override void _ExitTree()
 	{
+		GetViewport()?.SizeChanged -= OnLauncherViewportSizeChanged;
 		if (OS.GetName() == "Android")
 			GetTree().OnRequestPermissionsResult -= OnPermissionsResult;
 	}
@@ -1165,6 +1217,15 @@ public partial class FirstWindow : Control
 
 	public override void _Notification(int what)
 	{
+		if (what == NotificationWMGoBackRequest)
+		{
+			// 启动器没有游戏会话：保持原有“返回即退出”行为。project.godot 已设
+			// quit_on_go_back=false 关闭 Godot 默认自动退出，这里必须显式接管，
+			// 否则 Android 返回键在启动器上会变成无响应。
+			GetTree().Quit();
+			return;
+		}
+
 		if (statusLabel == null || OS.GetName() != "Android" || !androidPermissionCheckPending)
 			return;
 

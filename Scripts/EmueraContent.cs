@@ -37,6 +37,8 @@ public partial class EmueraContent : Control
 	SafeAreaApplicator menuSafeArea;
 	Inputpad inputpad;
 	QuickButtons quickButtons;
+	// quick 悬浮宿主（桌面端）：设置开启"悬浮窗"时承载 quickButtons，否则为 null。
+	QuickFloatingWindow quickFloatingWindow;
 	Scalepad scalepad;
 	ColorRect bgRect;
 	Control cbgContainer;
@@ -48,6 +50,12 @@ public partial class EmueraContent : Control
 	AudioStreamPlayer bgmPlayer;
 	List<AudioStreamPlayer> soundPlayers = new List<AudioStreamPlayer>();
 	List<int> soundRepeatRemaining = new List<int>();
+	// Stream 总时长缓存：GetLength() 是每帧 native 互操作，时长只随 Stream 实例变化，
+	// 缓存后空闲帧不再为每个播放器跨 native 边界查询。
+	AudioStream bgmLengthCachedStream;
+	double bgmLengthCachedTotalSec = -1.0;
+	List<AudioStream> soundLengthCachedStreams = new List<AudioStream>();
+	List<double> soundLengthCachedTotals = new List<double>();
 	float soundVolume = 1.0f;
 	float bgmVolume = 1.0f;
 	bool applicationPauseActive = false;
@@ -362,10 +370,11 @@ public partial class EmueraContent : Control
 	string canvasVisualButtonInput;
 	long canvasVisualButtonGeneration = long.MinValue;
 
-	// 虚拟鼠标状态：桌面端用真实鼠标按键直接传递；Android 端由 VirtualCursor
-	// 接管单指手势（移动光标+长按=右键+短按=左键），不再有“预选按键”状态。
+	// 虚拟鼠标状态：桌面端用真实鼠标按键直接传递；Android 端由 VirtualMouse（遥控器机身 +
+	// 全屏触控板）驱动共享指针（MOUSEX/MOUSEY）。VirtualPointer 只负责渲染可见光标。
 	int contentDragMouseVk = 0x01;       // 本次拖拽/点击使用的实际 VK
-	VirtualCursor virtualCursor;
+	VirtualPointer virtualPointer;
+	Vector2 lastVirtualCursorGlobalPosition = new Vector2(float.NaN, float.NaN); // 滚轮/提交的坐标基准
 
 	// Desired scroll is a mirror of the viewport position we want after Godot has
 	// completed its layout pass. This prevents layout refreshes from snapping the
@@ -473,6 +482,13 @@ public partial class EmueraContent : Control
 	static readonly Color ActiveSystemButtonColor = new Color(1.0f, 0.86f, 0.15f, 1.0f);
 	static readonly Color NormalSystemButtonColor = new Color(1, 1, 1, 1);
 
+	// 虚拟鼠标 hover Tooltip（对照源码 EmueraConsole 的 ToolTip 功能）：悬停在带
+	// Title 的按钮上时，在光标旁显示按钮说明。独立 CanvasLayer 保证盖在游戏内容之上。
+	CanvasLayer tooltipLayer;
+	PanelContainer tooltipPanel;
+	Label tooltipLabel;
+	const int TooltipOffsetPx = 16;
+
 	// Tool overlay panels are componentized as standalone .tscn scene assets so
 	// the same panel can be reused/mounted from any scene. Preloaded once and
 	// instantiated in _Ready, which replaces the previous `new X()` construction
@@ -481,7 +497,6 @@ public partial class EmueraContent : Control
 	static readonly PackedScene ScalepadScene = GD.Load<PackedScene>("res://assets/scenes/Scalepad.tscn");
 	static readonly PackedScene QuickButtonsScene = GD.Load<PackedScene>("res://assets/scenes/QuickButtons.tscn");
 	static readonly PackedScene OptionWindowScene = GD.Load<PackedScene>("res://assets/scenes/OptionWindow.tscn");
-	static readonly PackedScene VirtualCursorScene = GD.Load<PackedScene>("res://assets/scenes/VirtualCursor.tscn");
 
 	public static int ContentWidth { get; private set; }
 	public static int ContentHeight { get; private set; }
@@ -822,6 +837,8 @@ public partial class EmueraContent : Control
 		menuLayer.Layer = 100;
 		AddChild(menuLayer);
 
+		BuildTooltipLayer();
+
 		menuRoot = new HBoxContainer();
 		menuRoot.AnchorLeft = 1;
 		menuRoot.AnchorRight = 1;
@@ -865,7 +882,7 @@ public partial class EmueraContent : Control
 		AddIconButton("res://assets/icons/Title.svg", OnGotoTitlePressed);
 		AddIconButton("res://assets/icons/exit.svg", OnExitPressed);
 		scaleMenuButton = AddIconButton("res://assets/icons/Scale.svg", OnScaleTogglePressed);
-		mouseMenuButton = AddIconButton("res://assets/icons/mouse.svg", OnVirtualCursorTogglePressed);
+		mouseMenuButton = AddIconButton("res://assets/icons/mouse.svg", OnVirtualMouseTogglePressed);
 
 		// Toggle at the right edge (last child = rightmost in HBox).
 		var menuToggleBtn = new TextureButton();
@@ -898,10 +915,16 @@ public partial class EmueraContent : Control
 		// Tool overlays are siblings of the console so their CanvasLayer/z-order
 		// and input capture are independent from the scrollable console content.
 		quickButtons = (QuickButtons)QuickButtonsScene.Instantiate();
-		AddChild(quickButtons);
+		MountQuickButtonsHost();
 
-		virtualCursor = (VirtualCursor)VirtualCursorScene.Instantiate();
-		AddChild(virtualCursor);
+		// 共享虚拟指针层（可见光标）：唯一输入设备 VirtualMouse 驱动同一个指针，
+		// 光标始终显示在指针处。初始同步一次指针位置 + 可见性。
+		virtualPointer = new VirtualPointer();
+		AddChild(virtualPointer);
+		RefreshVirtualPointerVisibility();
+		var activeMouse = VirtualMouse.Active;
+		if (activeMouse != null && activeMouse.IsEnabled)
+			VirtualCursorSynchronizePosition(activeMouse.PointerGlobalPosition);
 
 		inputpad = (Inputpad)InputpadScene.Instantiate();
 		AddChild(inputpad);
@@ -1138,6 +1161,21 @@ public partial class EmueraContent : Control
 		DisposeAndroidSpriteAnimeFrameTextures();
 		if (instance == this)
 			instance = null;
+	}
+
+	// Android 系统返回键 / 全面屏手势返回：Godot 先把它作为 Escape 键事件送进
+	// _UnhandledInput（未消费时）再向全树广播 NotificationWMGoBackRequest。
+	// project.godot 已设 quit_on_go_back=false 关闭“收到返回请求即退出”，这里接管：
+	// 弹确认框，取消返回游戏、确定才退出——与系统菜单“退出”按钮同走
+	// RequestExitWithConfirmation。桌面端不会触发该通知，硬件 ESC 仍照常发给游戏。
+	public override void _Notification(int what)
+	{
+		if (what != NotificationWMGoBackRequest)
+			return;
+		// msgBox 已打开（确认框/等待提示）时忽略重复返回，避免重置已弹出的对话框。
+		if (msgBox == null || msgBox.Visible)
+			return;
+		RequestExitWithConfirmation();
 	}
 
 	int FontSize => Config.FontSize > 0 ? Config.FontSize : 18;
@@ -1530,7 +1568,7 @@ public partial class EmueraContent : Control
 
 	/// <summary>
 	/// In-game system buttons (msgbox OK/Cancel, Inputpad OK/Repeat, Scalepad 1:1/Fit,
-	/// OptionWindow Close, VirtualCursor M). Re-themed to the dark design system:
+	/// OptionWindow Close). Re-themed to the dark design system:
 	/// surface fill + border + hover/pressed states + press-down tween. Hit rect stays
 	/// byte-identical (content margins remain zero) and signals are untouched.
 	/// </summary>
@@ -1802,7 +1840,7 @@ public partial class EmueraContent : Control
 
 	void UpdateRenderedButtonMetadata(Control root, ConsoleDisplayLine line)
 	{
-		var buttonData = new List<(string input, long generation)>();
+		var buttonData = new List<(string input, long generation, string title)>();
 		CollectRenderedButtonData(line, buttonData);
 		if (buttonData.Count == 0)
 			return;
@@ -1817,10 +1855,12 @@ public partial class EmueraContent : Control
 				continue;
 			control.SetMeta("button_input", buttonData[i].input ?? "");
 			control.SetMeta("generation", buttonData[i].generation);
+			// tooltip 标题（对照源码 ConsoleButtonString.Title），供 hover 命中测试读取。
+			control.SetMeta("button_title", buttonData[i].title ?? "");
 		}
 	}
 
-	void CollectRenderedButtonData(ConsoleDisplayLine line, List<(string input, long generation)> output)
+	void CollectRenderedButtonData(ConsoleDisplayLine line, List<(string input, long generation, string title)> output)
 	{
 		if (line?.Buttons == null || output == null)
 			return;
@@ -1829,7 +1869,7 @@ public partial class EmueraContent : Control
 			if (button == null)
 				continue;
 			if (button.IsButton)
-				output.Add((button.Inputs, button.Generation));
+				output.Add((button.Inputs, button.Generation, button.Title));
 			if (button.StrArray == null)
 				continue;
 			foreach (var part in button.StrArray)
@@ -2030,6 +2070,8 @@ public partial class EmueraContent : Control
 		btn.MouseExited += () => SetRenderedButtonHover(btn, false);
 		btn.SetMeta("button_input", inputs);
 		btn.SetMeta("generation", generation);
+		// Tooltip 标题：首帧即写入，避免依赖 RefreshRenderedLineDataOnly 补刷新（对照源码按钮 Title）。
+		btn.SetMeta("button_title", button.Title ?? "");
 
 		var contentBox = new Control();
 		contentBox.MouseFilter = MouseFilterEnum.Ignore;
@@ -2160,6 +2202,9 @@ public partial class EmueraContent : Control
 				Input = button.Inputs,
 				Generation = button.Generation,
 				ContentCenter = bounds.Position + bounds.Size * 0.5f,
+				// Tooltip 标题必须写入缓存命中：hover 路径消费的是本缓存（AddCachedLineHitRects），
+				// 不写 Title 会让 Canvas 后端永远拿不到按钮说明。
+				Title = button.Title,
 			});
 		}
 		return hits == null ? null : hits.ToArray();
@@ -6379,8 +6424,9 @@ public partial class EmueraContent : Control
 	}
 
 	// ------------------------------------------------------------------
-	// VirtualCursor 转发入口：把私有的坐标换算/命中测试/点击提交/hover 高亮
-	// 方法暴露给 VirtualCursor，使其可以脱离真实 InputEvent 驱动同一套判定链路。
+	// 共享指针转发入口：把私有的坐标换算/命中测试/点击提交/hover 高亮
+	// 方法暴露给虚拟指针输入设备（VirtualMouse），使其可以脱离真实 InputEvent
+	// 驱动同一套判定链路。方法名保留 VirtualCursor* 前缀（历史命名，语义即"虚拟指针"）。
 	// ------------------------------------------------------------------
 
 	// 反向坐标换算：content-local 坐标 → 屏幕全局坐标（供光标可视化定位）。
@@ -6411,33 +6457,259 @@ public partial class EmueraContent : Control
 		return contentPosition;
 	}
 
-	// 当前可视内容区域（全局坐标），供 VirtualCursor clamp 光标移动范围。
+	// 当前可视内容区域（全局坐标），供 VirtualMouse clamp 光标/机身移动范围。
 	public Rect2 VirtualCursorGetContentViewportRect()
 	{
 		return scrollContainer != null ? scrollContainer.GetGlobalRect() : new Rect2(Vector2.Zero, GetViewport().GetVisibleRect().Size);
 	}
 
+	#region Tooltip（对照源码 EmueraConsole 的 ToolTip 功能）
+
+	void BuildTooltipLayer()
+	{
+		tooltipLayer = new CanvasLayer();
+		tooltipLayer.Layer = 150; // 在系统菜单(100)之上，悬浮球(诊断面板)之下
+		AddChild(tooltipLayer);
+
+		tooltipPanel = new PanelContainer();
+		tooltipPanel.MouseFilter = Control.MouseFilterEnum.Ignore;
+		tooltipPanel.Visible = false;
+		tooltipPanel.AddThemeStyleboxOverride(
+			"panel",
+			GEmueraTheme.SurfaceStyle(
+				GEmueraTheme.WithAlpha(GEmueraTheme.SurfaceRaised, 0.96f),
+				GEmueraTheme.Border,
+				GEmueraTheme.SmallRadius,
+				1,
+				6,
+				null,
+				6, 6, 4, 4));
+		tooltipLayer.AddChild(tooltipPanel);
+
+		tooltipLabel = new Label();
+		tooltipLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+		tooltipLabel.AddThemeFontSizeOverride("font_size", 13);
+		tooltipLabel.AddThemeColorOverride("font_color", GEmueraTheme.TextPrimary);
+		tooltipLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+		tooltipLabel.CustomMinimumSize = new Vector2(40, 0);
+		tooltipPanel.AddChild(tooltipLabel);
+	}
+
+	void UpdateTooltip(string title, Vector2 globalPosition)
+	{
+		if (string.IsNullOrEmpty(title))
+		{
+			HideTooltip();
+			return;
+		}
+		ShowTooltip(title, globalPosition);
+	}
+
+	void ShowTooltip(string title, Vector2 globalPosition)
+	{
+		if (tooltipPanel == null || tooltipLabel == null)
+			return;
+		title = title.Replace("<br>", "\n");
+		if (tooltipLabel.Text != title)
+		{
+			tooltipLabel.Text = title;
+			// 首次显示或标题变长时，PanelContainer 尺寸要到布局帧才知道；用 CallDeferred
+			// 在布局后重新钳制，否则 clamp 读到旧尺寸会在屏幕边缘摆出屏外。
+			CallDeferred(MethodName.RepositionTooltip, globalPosition);
+			return;
+		}
+		tooltipPanel.Visible = true;
+		RepositionTooltip(globalPosition);
+	}
+
+	void RepositionTooltip(Vector2 globalPosition)
+	{
+		if (tooltipPanel == null)
+			return;
+		tooltipPanel.Visible = true;
+		Vector2 target = ClampTooltipPosition(globalPosition + new Vector2(TooltipOffsetPx, TooltipOffsetPx));
+		// 位置未变（如钳制到屏幕边缘后光标继续移动）时跳过布局，避免每帧触发重排。
+		if (tooltipPanel.GlobalPosition != target)
+			tooltipPanel.GlobalPosition = target;
+	}
+
+	void HideTooltip()
+	{
+		if (tooltipPanel != null)
+			tooltipPanel.Visible = false;
+	}
+
+	Vector2 ClampTooltipPosition(Vector2 desired)
+	{
+		var viewport = GetViewport();
+		if (viewport == null)
+			return desired;
+		Vector2 viewportSize = viewport.GetVisibleRect().Size;
+		Vector2 size = tooltipPanel?.Size ?? Vector2.Zero;
+		// 保持 tooltip 完全可见：右/下超出时折返到光标另一侧或钳制到屏幕内。
+		if (desired.X + size.X > viewportSize.X)
+			desired.X = Mathf.Max(0f, desired.X - size.X - TooltipOffsetPx * 2f);
+		if (desired.Y + size.Y > viewportSize.Y)
+			desired.Y = Mathf.Max(0f, desired.Y - size.Y - TooltipOffsetPx * 2f);
+		desired.X = Mathf.Clamp(desired.X, 0f, Mathf.Max(0f, viewportSize.X - size.X));
+		desired.Y = Mathf.Clamp(desired.Y, 0f, Mathf.Max(0f, viewportSize.Y - size.Y));
+		return desired;
+	}
+
+	/// <summary>虚拟鼠标禁用时清除 hover 高亮与 Tooltip。</summary>
+	public void VirtualCursorClearHover()
+	{
+		ClearCanvasVisualButton();
+		GenericUtils.ClearPointingButton();
+		HideTooltip();
+		lastVirtualHoverRevision = int.MinValue; // 失效 hover 缓存，重新启用后重新命中
+	}
+
+	/// <summary>虚拟滚轮步进（对照源码 richTextBox1_MouseWheel）：滚轮上滑=+1，下滑=-1。</summary>
+	public void VirtualCursorScrollWheel(int wheelDelta)
+	{
+		if (scrollContainer == null)
+			return;
+		var console = GlobalStatic.Console;
+		if (console != null && console.IsWaitingPrimitive)
+		{
+			// 等待原始鼠标键输入时，直接提交 InputMouseKey(2, delta, x, y) 给脚本
+			// （对照源码 EmueraConsole.MouseWheel：clientPoint 为左下原点坐标，delta 为
+			// WinForms 惯例 ±120/格）。坐标必须用 client 坐标（不加滚动偏移），与
+			// MOUSEX/MOUSEY 语义一致；用 GetViewportPointerPositionFromGlobal 而非
+			// VirtualCursorGlobalToContent（后者会加滚动偏移 → RESULT:2/3 错位）。
+			Vector2 cursorPos = lastVirtualCursorGlobalPosition;
+			if (float.IsNaN(cursorPos.X) || float.IsNaN(cursorPos.Y))
+				cursorPos = VirtualCursorGetContentViewportRect().GetCenter();
+			Vector2 clientPos = GetViewportPointerPositionFromGlobal(cursorPos);
+			console.MouseWheel(new uEmuera.Drawing.Point((int)clientPos.X, (int)clientPos.Y), wheelDelta * 120);
+			return;
+		}
+		// 普通浏览态：滚轮滚动内容。上滑(wheelDelta>0)向内容开头滚动 → ScrollVertical 减小，
+		// 因此取负（对照源码 vScrollBar.Value += -Sign(e.Delta) * ...）。
+		// 滚动一格 = WheelStepPixels × 灵敏度（0.70 默认），让「虚拟鼠标灵敏度」有实际作用。
+		// 常量统一定义在 VirtualMouse（与手指滑动阈值 WheelStepThresholdPx 同处，避免漂移）。
+		ScrollContentBy(new Vector2(0f, -wheelDelta * VirtualMouse.WheelStepPixels * VirtualMouse.ConfiguredSensitivity));
+		// 滚动后内容在热点下方已变，重新命中 hover/高亮/Tooltip（对照源码滚轮后 MoveMouse）。
+		if (!float.IsNaN(lastVirtualCursorGlobalPosition.X) && !float.IsNaN(lastVirtualCursorGlobalPosition.Y))
+			VirtualCursorUpdateHover(lastVirtualCursorGlobalPosition);
+	}
+
+	// CBG 按钮 tooltip（对照源码 EmueraConsole.MoveMouse）：无文本按钮命中时，在 cbgButtonMap
+	// 上做像素查找，命中 CBG 按钮则返回其 tooltipString（CBG_SETBUTTONIMAGE tooltip=）。
+	// 坐标必须用 client 坐标（不加滚动偏移），与 MOUSEX/MOUSEY 语义一致。
+	string GetCbgHoverTitle(Vector2 globalPosition)
+	{
+		var console = GlobalStatic.Console;
+		if (console == null)
+			return null;
+		Vector2 clientPos = GetViewportPointerPositionFromGlobal(globalPosition);
+		int button = console.GetCBGButtonAtClientPoint(new uEmuera.Drawing.Point((int)clientPos.X, (int)clientPos.Y));
+		return console.GetCBGTooltip(button);
+	}
+
+	#endregion
+
 	// 虚拟光标重新显示或移动时，视觉坐标和脚本读取的 MOUSEX/MOUSEY 必须一起更新。
 	// 否则新内容会按旧指针位置计算 HTML div，造成视觉光标和游戏内浮层不一致。
 	public void VirtualCursorSynchronizePosition(Vector2 globalPosition)
 	{
+		lastVirtualCursorGlobalPosition = globalPosition;
 		UpdatePointerPosition(globalPosition);
 		VirtualCursorUpdateHover(globalPosition);
+		virtualPointer?.SetPointerPosition(globalPosition);
 	}
+
+	/// <summary>共享指针当前位置（null=尚未同步过）。供输入设备切换时继承指针位置。</summary>
+	public Vector2? CurrentPointerGlobalPosition
+	{
+		get
+		{
+			var p = lastVirtualCursorGlobalPosition;
+			if (float.IsNaN(p.X) || float.IsNaN(p.Y))
+				return null;
+			return p;
+		}
+	}
+
+	/// <summary>共享指针可见性：虚拟鼠标（VirtualMouse）启用则显示。</summary>
+	public void RefreshVirtualPointerVisibility()
+	{
+		bool anyDeviceEnabled = (VirtualMouse.Active?.IsEnabled ?? false);
+		virtualPointer?.SetPointerVisible(anyDeviceEnabled);
+	}
+
+	/// <summary>按下反馈环（VirtualMouse 按下机身按钮时在点击落点显示，松手隐藏）。</summary>
+	public void VirtualPointerShowPressFeedback(Vector2 globalPosition) => virtualPointer?.ShowPressFeedback(globalPosition);
+
+	/// <summary>按下反馈环隐藏。</summary>
+	public void VirtualPointerHidePressFeedback() => virtualPointer?.HidePressFeedback();
 
 	// 命中测试：光标当前全局坐标下是否有按钮，命中则驱动 Canvas 高亮（通道B）+
 	// 原生 hover 字段（通道A，ERB MOUSEBUTTON() 读取），未命中则清空两条通道。
+	// 命中按钮带 Title 时同时显示 Tooltip（对照源码 EmueraConsole 的 ToolTip 逻辑）。
+	// P0-4：与 UpdateCanvasHoverFromPointer 相同的移动阈值缓存——虚拟鼠标拖动时每个 drag
+	// delta 都会同步一次 hover，全树递归命中测试成本高；内容未变且指针移动 < 4px 时复用上次结果。
+	// P0-4b（拖动节流）：连续拖动时位移几乎总是 >4px，距离缓存失效；内容未变且距上次命中
+	// <33ms 时也复用上次结果，把全树扫描频率上界压到 ~30 次/秒（肉眼不可感知，Android 省 CPU）。
+	const float VirtualHoverCacheThresholdPx = 4.0f;
+	const ulong VirtualHoverMinIntervalMs = 33;
+	Vector2 lastVirtualHoverPos;
+	int lastVirtualHoverRevision = int.MinValue;
+	int lastVirtualHoverScrollY = int.MinValue;
+	bool lastVirtualHoverResult;
+	string lastVirtualHoverInput;
+	long lastVirtualHoverGeneration;
+	string lastVirtualHoverTitle;
+	ulong lastVirtualHoverTick;
+
 	public bool VirtualCursorUpdateHover(Vector2 globalPosition)
 	{
-		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out _, out var hoverInput, out var hoverGeneration,
-			out _, out _))
+		int revision = displayRevision;
+		int scrollY = scrollContainer != null ? scrollContainer.ScrollVertical : 0;
+		ulong nowTick = Time.GetTicksMsec();
+		bool contentUnchanged = lastVirtualHoverRevision == revision && lastVirtualHoverScrollY == scrollY;
+		if (contentUnchanged
+			&& (globalPosition.DistanceTo(lastVirtualHoverPos) < VirtualHoverCacheThresholdPx
+				|| nowTick - lastVirtualHoverTick < VirtualHoverMinIntervalMs))
+		{
+			// 复用上次命中结果：语义与重新命中一致，仅省去全树扫描。
+			if (lastVirtualHoverResult)
+			{
+				SetCanvasVisualButton(lastVirtualHoverInput, lastVirtualHoverGeneration);
+				GenericUtils.SetPointingButton(lastVirtualHoverInput, lastVirtualHoverGeneration);
+				UpdateTooltip(lastVirtualHoverTitle, globalPosition);
+				return true;
+			}
+			ClearCanvasVisualButton();
+			GenericUtils.ClearPointingButton();
+			// CBG tooltip：无文本按钮命中但悬停 CBG 按钮时仍有说明（UpdateTooltip 对空串即隐藏）。
+			UpdateTooltip(lastVirtualHoverTitle, globalPosition);
+			return false;
+		}
+
+		bool hit = TryFindConsoleButtonAtGlobalPosition(globalPosition, out _, out var hoverInput, out var hoverGeneration,
+			out _, out _, out var hoverTitle);
+		if (!hit)
+			hoverTitle = GetCbgHoverTitle(globalPosition);
+		lastVirtualHoverPos = globalPosition;
+		lastVirtualHoverRevision = revision;
+		lastVirtualHoverScrollY = scrollY;
+		lastVirtualHoverResult = hit;
+		lastVirtualHoverInput = hoverInput;
+		lastVirtualHoverGeneration = hoverGeneration;
+		lastVirtualHoverTitle = hoverTitle;
+		lastVirtualHoverTick = nowTick;
+		if (hit)
 		{
 			SetCanvasVisualButton(hoverInput, hoverGeneration);
 			GenericUtils.SetPointingButton(hoverInput, hoverGeneration);
+			UpdateTooltip(hoverTitle, globalPosition);
 			return true;
 		}
 		ClearCanvasVisualButton();
 		GenericUtils.ClearPointingButton();
+		UpdateTooltip(hoverTitle, globalPosition);
 		return false;
 	}
 
@@ -6445,9 +6717,21 @@ public partial class EmueraContent : Control
 	// TryAdvanceTap（空白区域点击，用于 eraFL 地图/状态切换等场景）。
 	public void VirtualCursorCommitClick(Vector2 globalPosition, int mouseVk)
 	{
+		var console = GlobalStatic.Console;
+		if (console != null && console.IsWaitingPrimitive)
+		{
+			// 等待原始鼠标键（INPUTMOUSEKEY）：对照源码 mainPicBox_MouseDown 的
+			// console.MouseDown(logicalPoint, e.Button) 路径——此时点按钮/空白都由脚本用
+			// RESULT 判定，端口旧路径走 PressEnterKey 导致 RESULT:2/3（client x/y）、
+			// RESULT:4（CBG 按钮号）永远为空。Why：让 RESULT:1~5 按源码填充，减少偏差。
+			// 坐标必须用 client 坐标（不加滚动偏移），与 MOUSEX/MOUSEY 语义一致。
+			Vector2 clientPos = GetViewportPointerPositionFromGlobal(globalPosition);
+			console.MouseDown(new uEmuera.Drawing.Point((int)clientPos.X, (int)clientPos.Y), ToPointerMouseButton(mouseVk));
+			return;
+		}
 		UpdatePointerPosition(globalPosition);
 		if (TryFindConsoleButtonAtGlobalPosition(globalPosition, out var hitButton, out var hitInput, out var hitGeneration,
-			out var contentCenterValid, out _))
+			out var contentCenterValid, out _, out _))
 		{
 			if (contentCenterValid)
 				UpdatePointerPosition(globalPosition);
@@ -6463,61 +6747,15 @@ public partial class EmueraContent : Control
 		}
 	}
 
-	public void VirtualCursorBeginSlide(Vector2 globalPosition)
+	// 宿主 VK（0x01/0x02/0x04）→ WinForms MouseButtons 枚举，供 console.MouseDown 使用。
+	static MinorShift._Library.MouseButtons ToPointerMouseButton(int vk)
 	{
-		if (scrollContainer == null)
-			return;
-
-		StopContentInertia();
-		contentDragActive = true;
-		contentDragMoved = true;
-		contentDragStartedOnButton = false;
-		contentDragButton = null;
-		contentDragButtonInput = null;
-		contentDragButtonGeneration = 0;
-		contentDragButtonContentCenterValid = false;
-		contentDragMouseVk = 0x01;
-		contentDragStartPosition = globalPosition;
-		contentDragLastPosition = globalPosition;
-		contentScrollVelocity = Vector2.Zero;
-		contentInertiaRemainder = Vector2.Zero;
-		contentLastDragTick = Time.GetTicksMsec();
-		lastScrollTraceDragTick = contentLastDragTick;
-		contentScrollInteractionSerial++;
-		ClearCanvasVisualButton();
-		UpdatePointerPosition(globalPosition);
-		if (GenericUtils.IsScrollTraceActive)
-			TraceScroll("virtual_cursor_slide_begin", () => $"pos=({Mathf.RoundToInt(globalPosition.X)},{Mathf.RoundToInt(globalPosition.Y)})");
-	}
-
-	public void VirtualCursorSlideBy(Vector2 pointerDelta)
-	{
-		if (scrollContainer == null)
-			return;
-
-		if (!contentDragActive)
-			VirtualCursorBeginSlide(VirtualCursorGetContentViewportRect().GetCenter());
-
-		var rawScrollDelta = -pointerDelta;
-		var appliedDelta = ScrollContentBy(rawScrollDelta);
-		UpdateContentScrollVelocity(rawScrollDelta, appliedDelta);
-		contentDragLastPosition += pointerDelta;
-		if (GenericUtils.IsScrollTraceActive && appliedDelta.LengthSquared() > 0.01f)
-			TraceScroll("virtual_cursor_slide_move", () => $"raw=({Mathf.RoundToInt(rawScrollDelta.X)},{Mathf.RoundToInt(rawScrollDelta.Y)}) applied=({Mathf.RoundToInt(appliedDelta.X)},{Mathf.RoundToInt(appliedDelta.Y)})");
-	}
-
-	public void VirtualCursorEndSlide(bool startInertia)
-	{
-		if (!contentDragActive)
-			return;
-
-		if (startInertia)
-			StartContentInertia();
-		else
-			StopContentInertia();
-		ResetContentDragState();
-		if (GenericUtils.IsScrollTraceActive)
-			TraceScroll("virtual_cursor_slide_end", () => $"inertia={startInertia}");
+		switch (vk)
+		{
+			case 0x02: return MinorShift._Library.MouseButtons.Right;
+			case 0x04: return MinorShift._Library.MouseButtons.Middle;
+			default: return MinorShift._Library.MouseButtons.Left;
+		}
 	}
 
 	// Hide quick buttons after one is pressed until a new button generation is
@@ -6544,6 +6782,58 @@ public partial class EmueraContent : Control
 	public void RefreshQuickButtonSettings()
 	{
 		quickButtons?.RefreshSizing();
+	}
+
+	// 悬浮窗仅桌面端可用：Android 上嵌入 Window（内部依赖 SubViewport 合成）在
+	// gl_compatibility 下内容不渲染（与日志/DEBUG 面板同因），保持画布内嵌。
+	static bool IsQuickFloatingSupported => !OS.HasFeature("mobile");
+
+	// 按配置挂载 quick 面板宿主：悬浮模式（桌面端）用 Godot Window 组件承载，
+	// 否则直接挂主节点。挂载/迁移后 quickButtons 自身布局按锚点配置重排。
+	void MountQuickButtonsHost()
+	{
+		if (quickButtons == null)
+			return;
+		if (QuickButtons.FloatingEnabled && IsQuickFloatingSupported)
+		{
+			quickFloatingWindow = new QuickFloatingWindow();
+			quickFloatingWindow.AttachQuick(quickButtons);
+			AddChild(quickFloatingWindow);
+		}
+		else
+		{
+			quickFloatingWindow = null;
+			// 内嵌模式复位悬浮宿主状态：移动端即使同步到悬浮设置，锚点也回到
+			// 常规位置（右下角），面板拖动恢复为滚动语义。
+			quickButtons.FloatingHosted = false;
+			quickButtons.WindowDragEnabled = false;
+			AddChild(quickButtons);
+		}
+	}
+
+	// 设置页切换"悬浮窗"开关后重建宿主（节点迁移保留面板状态，无重建成本）。
+	public void RefreshQuickHost()
+	{
+		if (quickButtons == null)
+			return;
+		bool shouldFloat = QuickButtons.FloatingEnabled && IsQuickFloatingSupported;
+		bool isFloating = quickFloatingWindow != null && GodotObject.IsInstanceValid(quickFloatingWindow);
+		if (shouldFloat == isFloating)
+			return;
+
+		var oldParent = quickButtons.GetParent();
+		if (oldParent != null)
+			oldParent.RemoveChild(quickButtons);
+		if (quickFloatingWindow != null)
+		{
+			// 显式解除关联（退订事件/复位宿主注入状态），不依赖 QueueFree 的
+			// _ExitTree 时序，避免同帧迁移时旧窗口仍订阅面板事件造成双订阅。
+			quickFloatingWindow.DetachQuick();
+			quickFloatingWindow.QueueFree();
+			quickFloatingWindow = null;
+		}
+		MountQuickButtonsHost();
+		quickButtons.RefreshSizing();
 	}
 
 	// Re-enable quick-button input when display revision or button generation has
@@ -6593,8 +6883,14 @@ public partial class EmueraContent : Control
 		if (quickAutoHiddenGeneration != lastButtonGeneration)
 			return;
 
-		// 企业级说明：部分 ERB 流程会在同一按钮代内完成处理并继续等待输入。
-		// 快捷按钮此前为了防止连点被临时隐藏；核心空闲后必须恢复面板，否则手机端会失去“移动”等唯一触摸入口。
+		// 企业级说明：点击选项后 quick 面板保持隐藏，直到核心重新进入"按钮选择"等待
+		// （INPUT/INPUTS 等带值输入且画面上存在当前代可选按钮）才恢复。
+		// EnterKey/AnyKey 等纯推进等待不恢复面板；同代回环流程（未重绘按钮直接再等输入）
+		// 仍能恢复，避免手机端失去"移动"等唯一触摸入口。
+		var console = GlobalStatic.Console;
+		if (console == null || !console.IsWaitingValueSelection || !console.HasCurrentGenerationButton(false))
+			return;
+
 		ClearQuickAutoHiddenState();
 		quickButtons.ShowPad();
 		quickButtons.SetInputEnabled(true);
@@ -6665,15 +6961,17 @@ public partial class EmueraContent : Control
 			TraceScroll("button_pressed", () => $"input={GenericUtils.ClipTrace(input, 64)} gen={generation} lastGen={lastButtonGeneration} skip={skip} vk={mouseVk}");
 			GenericUtils.StartScrollTraceCoreWindow(() => $"button input={GenericUtils.ClipTrace(input, 64)} gen={generation} skip={skip}");
 		}
+		// 右键点击按钮也触发跳过（对照源码：右键=跳过显示直达下一次按钮等待点，问题2）。
+		bool effectiveSkip = skip || ShouldRightClickSkip(mouseVk);
 		if (generation < lastButtonGeneration)
 		{
 			// Old button clicked - send empty input (acts as skip/advance)
 			if (GenericUtils.IsScrollTraceActive)
 				TraceScroll("button_pressed_old_generation", () => $"gen={generation} lastGen={lastButtonGeneration}");
-			EmueraThread.instance.Input("", false, skip);
+			EmueraThread.instance.Input("", false, effectiveSkip);
 			return;
 		}
-		EmueraThread.instance.Input(input, true, skip, mouseVk);
+		EmueraThread.instance.Input(input, true, effectiveSkip, mouseVk);
 	}
 
 	// Return to the first scene after confirming the emuera worker is idle.
@@ -6747,7 +7045,7 @@ public partial class EmueraContent : Control
 		{
 			quickButtons?.HidePad();
 			scalepad?.HidePad();
-			virtualCursor?.Disable();
+			VirtualMouse.Active?.Disable();
 			inputpad.ShowPad();
 		}
 		UpdateSystemButtonVisuals();
@@ -6766,7 +7064,7 @@ public partial class EmueraContent : Control
 			ClearQuickAutoHiddenState();
 			inputpad?.HidePad();
 			scalepad?.HidePad();
-			virtualCursor?.Disable();
+			VirtualMouse.Active?.Disable();
 			quickButtons.ShowPad();
 			SetLastButtonGeneration(lastButtonGeneration);
 		}
@@ -6867,6 +7165,15 @@ public partial class EmueraContent : Control
 	// Quit the Godot app after confirmation.
 	void OnExitPressed()
 	{
+		RequestExitWithConfirmation();
+	}
+
+	// 游戏界面请求退出的统一入口（系统菜单“退出”按钮 / Android 返回键手势共用）。
+	// Why：不让任何路径直接 Quit——先弹确认框，取消返回游戏、确定才退出；Emuera
+	// 工作线程忙时则先提示等待，避免在计算中途弹出退出框。确认回调里才调 Quit，
+	// 因此“取消”分支天然回到游戏。
+	void RequestExitWithConfirmation()
+	{
 		if (EmueraThread.instance.Running())
 		{
 			ShowMessageBox(
@@ -6896,26 +7203,28 @@ public partial class EmueraContent : Control
 		{
 			inputpad?.HidePad();
 			quickButtons?.HidePad();
-			virtualCursor?.Disable();
+			VirtualMouse.Active?.Disable();
 			scalepad.ShowPad();
 		}
 		UpdateSystemButtonVisuals();
 	}
 
-	// Toggle 虚拟光标模式；与 输入/快捷/缩放 面板保持同一套互斥逻辑，避免叠加遮挡触控区域。
-	void OnVirtualCursorTogglePressed()
+	// Toggle 输入设备（二态）：只在 OFF↔虚拟鼠标 之间切换。虚拟鼠标 = 遥控器机身 + 全屏触控板，
+	// 是 Android 端唯一的虚拟指针设备（旧 VirtualCursor 触摸板已合并进 VirtualMouse）。
+	void OnVirtualMouseTogglePressed()
 	{
 		ClearQuickAutoHiddenState();
-		if (virtualCursor != null && virtualCursor.IsEnabled)
+		VirtualMouse mouse = VirtualMouse.Instance;
+		if (mouse != null && mouse.IsEnabled)
 		{
-			virtualCursor.Disable();
+			mouse.Disable();
 		}
-		else
+		else if (mouse != null)
 		{
 			inputpad?.HidePad();
 			quickButtons?.HidePad();
 			scalepad?.HidePad();
-			virtualCursor?.Enable();
+			mouse.Enable();
 		}
 		UpdateSystemButtonVisuals();
 	}
@@ -6927,7 +7236,8 @@ public partial class EmueraContent : Control
 		SetSystemButtonActive(quickMenuButton, quickButtons != null && quickButtons.IsShow);
 		SetSystemButtonActive(autoSkipMenuButton, autoClickSkipEnabled);
 		SetSystemButtonActive(scaleMenuButton, scalepad != null && scalepad.IsShow);
-		SetSystemButtonActive(mouseMenuButton, virtualCursor != null && virtualCursor.IsEnabled);
+		SetSystemButtonActive(mouseMenuButton,
+			VirtualMouse.Active != null && VirtualMouse.Active.IsEnabled);
 	}
 
 	// Apply active/inactive tint to one menu icon.
@@ -6951,7 +7261,7 @@ public partial class EmueraContent : Control
 	void OnViewportSizeChanged()
 	{
 		ApplySafeAreaLayout();
-		virtualCursor?.RefreshViewportBounds();
+		VirtualMouse.Active?.RefreshViewportBounds();
 		QueueScaleBoundsUpdate();
 	}
 
@@ -7133,17 +7443,44 @@ public partial class EmueraContent : Control
 	{
 		if (bgmPlayer != null)
 		{
-			double total = bgmPlayer.Stream?.GetLength() ?? 0.0;
-			GenericUtils.NotifyBgmPlaybackPosition(bgmPlayer.GetPlaybackPosition(), total, bgmPlayer.Playing && !bgmPlayer.StreamPaused);
+			GenericUtils.NotifyBgmPlaybackPosition(bgmPlayer.GetPlaybackPosition(), GetBgmStreamLengthSec(), bgmPlayer.Playing && !bgmPlayer.StreamPaused);
 		}
 		for (int i = 0; i < soundPlayers.Count; i++)
 		{
 			var player = soundPlayers[i];
 			if (player == null)
 				continue;
-			double total = player.Stream?.GetLength() ?? 0.0;
-			GenericUtils.NotifySoundPlaybackPosition(i, player.GetPlaybackPosition(), total, player.Playing && !player.StreamPaused);
+			GenericUtils.NotifySoundPlaybackPosition(i, player.GetPlaybackPosition(), GetSoundStreamLengthSec(i), player.Playing && !player.StreamPaused);
 		}
+	}
+
+	// Cached stream length (seconds); AudioStream is an immutable resource, so the
+	// total only changes when a different stream instance is assigned to the player.
+	double GetBgmStreamLengthSec()
+	{
+		var stream = bgmPlayer.Stream;
+		if (!ReferenceEquals(bgmLengthCachedStream, stream))
+		{
+			bgmLengthCachedStream = stream;
+			bgmLengthCachedTotalSec = stream?.GetLength() ?? 0.0;
+		}
+		return bgmLengthCachedTotalSec;
+	}
+
+	double GetSoundStreamLengthSec(int channel)
+	{
+		var stream = soundPlayers[channel].Stream;
+		while (soundLengthCachedStreams.Count <= channel)
+		{
+			soundLengthCachedStreams.Add(null);
+			soundLengthCachedTotals.Add(-1.0);
+		}
+		if (!ReferenceEquals(soundLengthCachedStreams[channel], stream))
+		{
+			soundLengthCachedStreams[channel] = stream;
+			soundLengthCachedTotals[channel] = stream?.GetLength() ?? 0.0;
+		}
+		return soundLengthCachedTotals[channel];
 	}
 
 	// Continue pointer tracking outside the original Control when a drag started
@@ -7248,13 +7585,18 @@ public partial class EmueraContent : Control
 		long generation = 0)
 	{
 		if (HandleContentTouchGesture(@event, acceptEvent))
+		{
+			// 双指缩放等手势接管输入：取消虚拟鼠标当前按住/跟踪状态，避免释放事件被手势
+			// 处理器吞掉导致按住键泄漏、组件卡死（长按区域期间第二指触碰内容即触发此路径）。
+			VirtualMouse.Active?.CancelActiveGesture();
 			return true;
+		}
 
-		// 虚拟光标模式开启时，单指按下/拖动/释放全部交给 VirtualCursor 处理
-		// （移动光标 + 短按=左键/长按=右键），不进入下面的滚动/点击判定分支。
-		// 双指缩放优先级不受影响，因为已经在 HandleContentTouchGesture 判断之后。
-		if (virtualCursor != null && virtualCursor.IsEnabled
-			&& virtualCursor.HandleGesture(@event, acceptEvent))
+		// 虚拟鼠标模式开启时，单指按下/拖动/释放全部交给虚拟鼠标组件（遥控器机身 + 全屏触控板）
+		// 处理，不进入下面的滚动/点击判定分支。双指缩放优先级不受影响，
+		// 因为已经在 HandleContentTouchGesture 判断之后。
+		if (VirtualMouse.Active != null && VirtualMouse.Active.IsEnabled
+			&& VirtualMouse.Active.HandleGesture(@event, acceptEvent))
 			return true;
 
 		if (!TryGetPointer(@event, out var pointerPosition, out var pressed, out var released, out var motion, out var eventMouseVk))
@@ -7284,7 +7626,7 @@ public partial class EmueraContent : Control
 		{
 			bool hitContentCenterValid = false;
 			if (button == null && TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var hitButton, out var hitInput,
-				out var hitGeneration, out hitContentCenterValid, out _))
+				out var hitGeneration, out hitContentCenterValid, out _, out _))
 			{
 				button = hitButton;
 				input = hitInput;
@@ -7292,8 +7634,7 @@ public partial class EmueraContent : Control
 			}
 
 			// 桌面:用事件的真实 VK；Android 触控(eventMouseVk<0):默认左键。
-			// 右/中键在虚拟光标模式下改由 HandleVirtualCursorGesture 独立提交，
-			// 不会经过这条常规按钮按下路径。
+			// 右/中键在虚拟鼠标模式下由 VirtualMouse 独立提交，不会经过这条常规按钮按下路径。
 			int effectiveVk = eventMouseVk >= 0 ? eventMouseVk : 0x01;
 			MinorShift._Library.WinInput.PulseVirtualKey(effectiveVk);
 			contentDragMouseVk = effectiveVk;
@@ -7463,6 +7804,7 @@ public partial class EmueraContent : Control
 	bool lastHoverHit;
 	string lastHoverInput;
 	long lastHoverGeneration;
+	string lastHoverTitle;
 	int lastHoverDisplayRevision = int.MinValue;
 	int lastHoverScrollY = int.MinValue;
 
@@ -7479,41 +7821,54 @@ public partial class EmueraContent : Control
 				if (lastHoverHitRectValid && lastHoverHitRect.HasPoint(pointerPosition))
 				{
 					SetCanvasVisualButton(lastHoverInput, lastHoverGeneration);
+					UpdateTooltip(lastHoverTitle, pointerPosition);
 					return;
 				}
 			}
 			else if (pointerPosition.DistanceTo(lastHoverPointer) < HoverCacheMoveThresholdPx)
 			{
 				// 上一结果未命中且指针仅小幅移动 → 复用未命中结果。
+				// UpdateTooltip 对空串即隐藏；非空时是 CBG 按钮 tooltip，保持显示。
 				ClearCanvasVisualButton();
+				UpdateTooltip(lastHoverTitle, pointerPosition);
 				return;
 			}
 		}
 		// 缓存失效或指针离开上一区域：重新命中测试并更新缓存。
-		lastHoverHit = TryHitHoverButton(pointerPosition, out var hitRect, out var input, out var generation);
+		lastHoverHit = TryHitHoverButton(pointerPosition, out var hitRect, out var input, out var generation, out var title);
+		if (!lastHoverHit)
+			title = GetCbgHoverTitle(pointerPosition); // CBG 按钮 tooltip（对照源码 MoveMouse）
 		lastHoverHitRect = hitRect;
 		lastHoverHitRectValid = lastHoverHit && hitRect.Size.X > 0 && hitRect.Size.Y > 0;
 		lastHoverInput = input;
 		lastHoverGeneration = generation;
+		lastHoverTitle = title;
 		lastHoverPointer = pointerPosition;
 		lastHoverDisplayRevision = revision;
 		lastHoverScrollY = scrollY;
 		lastHoverCached = true;
 		if (lastHoverHit)
+		{
 			SetCanvasVisualButton(input, generation);
+			UpdateTooltip(title, pointerPosition);
+		}
 		else
+		{
 			ClearCanvasVisualButton();
+			UpdateTooltip(title, pointerPosition);
+		}
 	}
 
 	// 命中测试并返回可复用的按钮矩形（canvas 命中无 Control 节点时矩形无效，
 	// 由 UpdateCanvasHoverFromPointer 回退到移动阈值复用）。
-	bool TryHitHoverButton(Vector2 pointerPosition, out Rect2 hitRect, out string input, out long generation)
+	bool TryHitHoverButton(Vector2 pointerPosition, out Rect2 hitRect, out string input, out long generation, out string title)
 	{
 		hitRect = default;
 		input = null;
 		generation = 0;
+		title = null;
 		if (!TryFindConsoleButtonAtGlobalPosition(pointerPosition, out var button, out input, out generation,
-			out _, out _))
+			out _, out _, out title))
 			return false;
 		if (button != null && GodotObject.IsInstanceValid(button))
 			hitRect = button.GetGlobalRect();
@@ -7523,13 +7878,14 @@ public partial class EmueraContent : Control
 	// Android 上触摸事件有时只到达 ScrollContainer/root，绕过按钮 Panel.GuiInput。
 	// 这里按当前渲染树反向命中一次，保持主视图按钮和 quick 按钮的输入路径一致。
 	bool TryFindConsoleButtonAtGlobalPosition(Vector2 globalPosition, out Control button, out string input, out long generation,
-		out bool contentCenterValid, out Vector2 contentCenter)
+		out bool contentCenterValid, out Vector2 contentCenter, out string title)
 	{
 		button = null;
 		input = null;
 		generation = 0;
 		contentCenterValid = false;
 		contentCenter = Vector2.Zero;
+		title = null;
 		if (scaledContentRoot == null || !GodotObject.IsInstanceValid(scaledContentRoot))
 			return false;
 		if (UseCanvasRenderBackend
@@ -7541,18 +7897,21 @@ public partial class EmueraContent : Control
 			generation = hit.Generation;
 			contentCenterValid = true;
 			contentCenter = hit.ContentCenter;
+			title = hit.Title;
 			return true;
 		}
-		if (TryFindConsoleButtonAtGlobalPosition(scaledContentRoot, globalPosition, out button, out input, out generation))
+		if (TryFindConsoleButtonAtGlobalPosition(scaledContentRoot, globalPosition, out button, out input, out generation, out title))
 			return true;
 		return false;
 	}
 
-	bool TryFindConsoleButtonAtGlobalPosition(Node node, Vector2 globalPosition, out Control button, out string input, out long generation)
+	bool TryFindConsoleButtonAtGlobalPosition(Node node, Vector2 globalPosition, out Control button, out string input, out long generation,
+		out string title)
 	{
 		button = null;
 		input = null;
 		generation = 0;
+		title = null;
 		if (node == null || !GodotObject.IsInstanceValid(node))
 			return false;
 		if (node is Control parentControl && !parentControl.Visible)
@@ -7561,7 +7920,7 @@ public partial class EmueraContent : Control
 		var children = node.GetChildren();
 		for (int i = children.Count - 1; i >= 0; i--)
 		{
-			if (TryFindConsoleButtonAtGlobalPosition(children[i], globalPosition, out button, out input, out generation))
+			if (TryFindConsoleButtonAtGlobalPosition(children[i], globalPosition, out button, out input, out generation, out title))
 				return true;
 		}
 
@@ -7572,6 +7931,7 @@ public partial class EmueraContent : Control
 
 		input = control.GetMeta("button_input").As<string>();
 		generation = control.HasMeta("generation") ? control.GetMeta("generation").AsInt64() : 0;
+		title = control.HasMeta("button_title") ? control.GetMeta("button_title").AsString() : null;
 		button = control;
 		return !string.IsNullOrEmpty(input);
 	}
@@ -8244,12 +8604,16 @@ public partial class EmueraContent : Control
 			return false;
 		bool submitBlankLeftDefault = ShouldSubmitBlankLeftClickDefault(console, mouseVk);
 		bool submitEraFlBlankString = ShouldSubmitEraFlBlankPointerString(console, mouseVk);
-		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInput)
+		// Why（对照源码 MainWindow.MouseDown）：右/中键空白点击只在"当前等待接受鼠标输入"
+		// 时提交（TINPUT 的 MOUSE、eraFL INPUTS 指针元数据），普通数值 INPUT 不提交——
+		// 旧条件 (isNonLeft && console.IsWaitingInput) 对任意 INPUT 等待都提交，比源码宽，
+		// 会让依赖 RESULT:1 分支的游戏在普通 INPUT 阶段收到意外推进。
+		if (!console.IsWaitingEnterKey && !console.IsWaitAnyKey && !(isNonLeft && console.IsWaitingInputWithMouse)
 			&& !submitBlankLeftDefault && !submitEraFlBlankString)
 			return false;
 
 		uint nowTick = MinorShift._Library.WinmmTimer.TickCount;
-		bool skipFlag = (nowTick - lastClickTick < 200);
+		bool skipFlag = (nowTick - lastClickTick < 200) || ShouldRightClickSkip(mouseVk);
 		if (GenericUtils.IsScrollTraceActive)
 		{
 			TraceScroll("advance_tap", () => $"skip={skipFlag} vk={mouseVk}");
@@ -8262,6 +8626,19 @@ public partial class EmueraContent : Control
 		EmueraThread.instance.Input("", fromButton, skipFlag, fromButton ? mouseVk : 0);
 		lastClickTick = nowTick;
 		return true;
+	}
+
+	// 对照源码 MainWindow.mainPicBox_MouseDown：右键在 EnterKey/AnyKey 等待时
+	// PressEnterKey(true, ...) 置 MesSkip，跳过显示直达下一次按钮等待点（问题2）。
+	// Why：仅对可跳过的文本等待生效；EE_INPUT / 原始输入（IsWaitingInputWithMouse /
+	// IsWaitingPrimitive）由 RESULT:1=2 走独立路径，右键不触发跳过（与源码一致）。
+	static bool ShouldRightClickSkip(int mouseVk)
+	{
+		if (mouseVk != 0x02)
+			return false;
+		var console = GlobalStatic.Console;
+		return console != null && !console.IsWaitingInputWithMouse
+			&& (console.IsWaitingEnterKey || console.IsWaitAnyKey);
 	}
 
 	static bool ShouldSubmitEraFlBlankPointerString(MinorShift.Emuera.GameView.EmueraConsole console, int mouseVk)
@@ -8374,6 +8751,10 @@ public partial class EmueraContent : Control
 	// Keyboard fallback for desktop testing and for Android devices with hardware
 	// keyboards. Pointer events are also handled here when they were not captured
 	// by GUI controls.
+	// 注意：Android 上系统返回键/手势返回与物理 ESC 都以 Keycode==Escape 到达且无法
+	// 区分，因此 ESC 脉冲仅限非 Android（见下方分支）；Android 的物理 ESC 不再注入
+	// 游戏（已知取舍——无 API 可区分系统返回与实体按键）。等待输入态（IsWaitAnyKey
+	// 等）仍会把 Escape 当作任意键提交给游戏。
 	public override void _UnhandledInput(InputEvent @event)
 	{
 		if (HandleContentPointerInput(@event, false))
@@ -8383,7 +8764,10 @@ public partial class EmueraContent : Control
 		{
 			if (keyEvent.Keycode == Key.Enter || keyEvent.Keycode == Key.KpEnter)
 				MinorShift._Library.WinInput.PulseVirtualKey(0x0D);
-			else if (keyEvent.Keycode == Key.Escape)
+			// Android 上系统返回键/手势返回到达这里时 Keycode 就是 Escape；不注入 0x1B
+			// 避免给游戏一个多余的取消键，且保持事件未消费，让 Godot 继续广播
+			// WMGoBackRequest 由 _Notification 弹退出确认框。桌面端硬件 ESC 仍照常发给游戏。
+			else if (keyEvent.Keycode == Key.Escape && OS.GetName() != "Android")
 				MinorShift._Library.WinInput.PulseVirtualKey(0x1B);
 			int windowsKeyData = ToWindowsKeyData(keyEvent);
 			var console = GlobalStatic.Console;

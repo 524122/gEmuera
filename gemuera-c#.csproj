@@ -27,6 +27,10 @@
     <Compile Remove="tools\dialect-inventory\**" />
     <EmbeddedResource Remove="tools\dialect-inventory\**" />
     <None Remove="tools\dialect-inventory\**" />
+    <!-- Diagnostics config smoke links host sources with Godot stubs; never compile them into the Godot host. -->
+    <Compile Remove="tools\diagnostics-config-smoke\**" />
+    <EmbeddedResource Remove="tools\diagnostics-config-smoke\**" />
+    <None Remove="tools\diagnostics-config-smoke\**" />
     <!-- xUnit tests build independently via their own csproj; keep them out of the Godot host glob. -->
     <Compile Remove="tests\**" />
     <EmbeddedResource Remove="tests\**" />
@@ -48,13 +52,13 @@
 
   <ItemGroup Condition=" '$(GodotTargetPlatform)' == 'android' ">
 	<PackageDownload Include="SkiaSharp.NativeAssets.Android" Version="[2.88.8]" />
-    <None Include="NativeLibs\android\arm64-v8a\libe_sqlite3.so" CopyToOutputDirectory="PreserveNewest" TargetPath="libe_sqlite3.so" />
+    <None Include="Build\NativeLibs\android\arm64-v8a\libe_sqlite3.so" CopyToOutputDirectory="PreserveNewest" TargetPath="libe_sqlite3.so" />
 	<None Include="$(NuGetPackageRoot)skiasharp.nativeassets.android\2.88.8\runtimes\android-arm64\native\libSkiaSharp.so" CopyToOutputDirectory="PreserveNewest" TargetPath="libSkiaSharp.so" />
   </ItemGroup>
 
-  <!-- NativeLibs/ 已被 gitignore（编译产物不入库）。Android 构建前如缺失，
+  <!-- Build/NativeLibs/ 已被 gitignore（编译产物不入库）。Android 构建前如缺失，
        从 SQLitePCLRaw 的 NuGet 缓存 .aar 中自愈提取 jni/arm64-v8a/libe_sqlite3.so。 -->
-  <Target Name="RestoreAndroidSqliteNativeLibrary" BeforeTargets="Build" Condition=" '$(GodotTargetPlatform)' == 'android' And !Exists('NativeLibs\android\arm64-v8a\libe_sqlite3.so') ">
+  <Target Name="RestoreAndroidSqliteNativeLibrary" BeforeTargets="Build" Condition=" '$(GodotTargetPlatform)' == 'android' And !Exists('Build\NativeLibs\android\arm64-v8a\libe_sqlite3.so') ">
     <ItemGroup>
       <_SqliteAar Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3.android\**\lib\net6.0-android31.0\SQLitePCLRaw.lib.e_sqlite3.android.aar" />
     </ItemGroup>
@@ -62,13 +66,13 @@
       <_SqliteAarPath>@(_SqliteAar->'%(FullPath)', ';')</_SqliteAarPath>
     </PropertyGroup>
     <Warning Condition=" '$(_SqliteAarPath)' == '' "
-             Text="SQLitePCLRaw android .aar not found in NuGet cache; NativeLibs/android/arm64-v8a/libe_sqlite3.so will not be restored. Run 'dotnet restore' first." />
+             Text="SQLitePCLRaw android .aar not found in NuGet cache; Build/NativeLibs/android/arm64-v8a/libe_sqlite3.so will not be restored. Run 'dotnet restore' first." />
     <Exec Condition=" '$(_SqliteAarPath)' != '' "
-          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$aar='$(_SqliteAarPath)'; $tmp=[System.IO.Path]::GetTempFileName(); [System.IO.File]::Copy($aar,$tmp,$true); $out='$(MSBuildProjectDirectory)\NativeLibs\android\arm64-v8a'; New-Item -ItemType Directory -Force -Path $out | Out-Null; Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[System.IO.Compression.ZipFile]::OpenRead($tmp); $e=$z.Entries | Where-Object { $_.FullName -eq 'jni/arm64-v8a/libe_sqlite3.so' }; if($e){ [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e,(Join-Path $out 'libe_sqlite3.so'),$true) }; $z.Dispose(); Remove-Item $tmp -Force&quot;" />
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$aar='$(_SqliteAarPath)'; $tmp=[System.IO.Path]::GetTempFileName(); [System.IO.File]::Copy($aar,$tmp,$true); $out='$(MSBuildProjectDirectory)\Build\NativeLibs\android\arm64-v8a'; New-Item -ItemType Directory -Force -Path $out | Out-Null; Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[System.IO.Compression.ZipFile]::OpenRead($tmp); $e=$z.Entries | Where-Object { $_.FullName -eq 'jni/arm64-v8a/libe_sqlite3.so' }; if($e){ [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e,(Join-Path $out 'libe_sqlite3.so'),$true) }; $z.Dispose(); Remove-Item $tmp -Force&quot;" />
   </Target>
 
-  <Target Name="CopyAndroidSqliteNativeLibrary" AfterTargets="Build" Condition=" '$(GodotTargetPlatform)' == 'android' And Exists('NativeLibs\android\arm64-v8a\libe_sqlite3.so') ">
-    <Copy SourceFiles="NativeLibs\android\arm64-v8a\libe_sqlite3.so" DestinationFiles="$(OutputPath)libe_sqlite3.so" SkipUnchangedFiles="true" />
+  <Target Name="CopyAndroidSqliteNativeLibrary" AfterTargets="Build" Condition=" '$(GodotTargetPlatform)' == 'android' And Exists('Build\NativeLibs\android\arm64-v8a\libe_sqlite3.so') ">
+    <Copy SourceFiles="Build\NativeLibs\android\arm64-v8a\libe_sqlite3.so" DestinationFiles="$(OutputPath)libe_sqlite3.so" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyAndroidSkiaSharpNativeLibrary" AfterTargets="Build" Condition=" '$(GodotTargetPlatform)' == 'android' And Exists('$(NuGetPackageRoot)skiasharp.nativeassets.android\2.88.8\runtimes\android-arm64\native\libSkiaSharp.so') ">

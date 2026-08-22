@@ -767,6 +767,10 @@ namespace MinorShift.Emuera.GameProc.Function
 				ExpressionArgument arg = (ExpressionArgument)func.Argument;
 				InputRequest req = new InputRequest();
 				req.InputType = InputType.IntValue;
+				// 指针元数据选项（eraFL 的 INPUT ,1 / MOUSE）→ 请求级标志。对照源码
+				// Instraction.Child.cs 的 req.MouseInput=arg.Mouse!=0：让 IsWaitingInputWithMouse
+				// 能识别"INPUT 接受鼠标输入"，空白右键/中键才提交（RESULT:1 判定）。
+				req.EnablePointerInputMetadata = arg.EnablePointerInputMetadata;
 				if (arg.Term != null)
 				{
 					Int64 def;
@@ -822,6 +826,8 @@ namespace MinorShift.Emuera.GameProc.Function
 				InputRequest req = new InputRequest();
 				req.InputType = InputType.IntValue;
 				req.OneInput = true;
+				// 同上：ONEINPUT 也接受指针元数据，空白右键/中键按鼠标输入协议提交。
+				req.EnablePointerInputMetadata = arg.EnablePointerInputMetadata;
 				if (arg.Term != null)
 				{
 					//TODO:二文字以上セットできるようにするかエラー停止するか

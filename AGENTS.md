@@ -1,4 +1,4 @@
-# AGENT.md
+# AGENTS.md
 
 本文是 AI Agent（Claude Code、AI CLI、AI IDE）进入项目的首读文档。读完本文后，按需查阅「必读与配套文档」中的详细文档。
 
@@ -20,6 +20,7 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
 | 文档                                              | 状态     | 说明                                                                     |
 | ----------------------------------------------- | ------ | ---------------------------------------------------------------------- |
 | `docs/xEmueraCodeWiki`                          | 外部参考   | XEmuera-R：一款专门为Emuera1824+v24+EE+EM适配的模拟。这是使用gpt5.6-sol读取其代码并编写的架构指导文档 |
+| `governance/`                                   | 按需     | Agent 自我进化机制：任务复盘记录（evolution-log/）+ 用户提示词模式库（prompt-patterns/）。任务结束提交 PR 前按 `governance/README.md` 写进化记录 |
 | `addons/gdUnit4/ADDON.md`                       | 按需     | GDUnit4 插件使用指南（WHY/WHEN/WHERE/HOW），用 GDUnit 做 TDD 时阅读                  |
 | `ERBAPI.md`                                     | ERB解释器接口 | 需要为新的Era游戏做适配，且当前的Erb语法解析无法实现时，又或者需要更新Erb语法解释器时，指导Agent对接              |
 | `readme/README.md`（另有 en/ja 版）              | 项目概述   | 项目结构、构建、致谢；结构变更后请同步更新                                       |
@@ -45,6 +46,15 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
 - xUnit：测试 Emuera 核心（ERB 语法解释器）的纯 C# 逻辑。
 
 任务结束后，删除冗余的临时测试文件，避免造成垃圾文件。
+
+## 构建与验证（实测经验，2026-08）
+
+- **C# 编译/构建用 Godot mono**：`Godot_v4.7-stable_mono_win64_console.exe --headless
+  --path <项目根> --build-solutions --quit`。不要直接 `dotnet build`
+  （Godot.NET.Sdk 依赖 Godot 环境解析，命令行下常因 SDK resolver/证书问题失败）。
+- **构建成功的判定**：检查 `.godot/mono/temp/bin/Debug/gemuera-c#.dll` 时间戳已更新，
+  不要等进程退出——无头/受限环境下 Godot 可能卡在收尾阶段，但编译早已完成。
+- Android 相关结论必须以 APK 实测为准；桌面端仅用于调试。
 
 ## 架构速览
 
@@ -85,8 +95,9 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
    用描述用途的名字（如 `LegacyRunner`、`governance`）。
 4. **Godot `.import` 侧车文件必须入库**：`*.import` 是导入设置（importer/uid/params），
    官方要求提交 VCS；`.godot/`（含 `imported/` 二进制缓存）才是应忽略的可再生目录。
-5. **编译产物不入库**：`.gitignore` 已排除 `.godot/`、`bin/`、`obj/`、`NativeLibs/`、
-   `android/`、`*.apk/aab/exe/pck/idsig`、`reports/`、`artifacts/`。不要把新的编译/导出物加进 git。
+5. **编译产物不入库**：`.gitignore` 已排除 `.godot/`、`bin/`、`obj/`、`Build/NativeLibs/`、
+   `Build/android/`、`*.apk/aab/exe/pck/idsig`、`reports/`、`artifacts/`。不要把新的编译/导出物加进 git。
+   构建/打包相关文件夹（android 导出工程、NativeLibs、Fixtures、APK 产物）统一放在根目录 `Build/` 下管理。
 
 定位文件：优先用 CodeGraph（`codegraph explore "符号名"`）或 `src/Core`/`Scripts` 目录结构判断；
 不要靠猜测。
