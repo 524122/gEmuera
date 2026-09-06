@@ -24,10 +24,10 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
 | `addons/gdUnit4/ADDON.md`                       | 按需     | GDUnit4 插件使用指南（WHY/WHEN/WHERE/HOW），用 GDUnit 做 TDD 时阅读                  |
 | `ERBAPI.md`                                     | ERB解释器接口 | 需要为新的Era游戏做适配，且当前的Erb语法解析无法实现时，又或者需要更新Erb语法解释器时，指导Agent对接              |
 | `readme/README.md`（另有 en/ja 版）              | 项目概述   | 项目结构、构建、致谢；结构变更后请同步更新                                       |
-| `_CLAUDE.md`                                    | 归档参考   | 原 Claude/AI 工具执行指南（已由本文替代），含详细规则可备查                                    |
 
-> 历史 `docs/NewFrameworkDesign/`、`docs/OriginalFrameworkDesign/`、`docs/gEmueraCodeWiki/`、
-> `docs/staging/`、`docs/plans/` 已删除（其内容已过时或被本文与 `src/Core/` 取代）。
+> 历史 `docs/OriginalFrameworkDesign/`、`docs/gEmueraCodeWiki/`、`docs/staging/` 已删除（其内容已过时或被本文与 `src/Core/` 取代）。
+> `docs/plans/2026-08-11-spike-checkpoint-pipeline-workflow.md`（检查点管线工作流 spike 记录）与 `docs/NewFrameworkDesign/generated/dialect-registry-snapshots.json`（方言证据快照）仍保留且在使用中。
+> 原 AI 执行指南 `_CLAUDE.md` 亦已删除（2026-08-05），内容见 git 历史。
 > 不要重新创建 M0/M1…M7 之类"阶段代号"命名，AGENT 初见必须能从名字直接理解用途。
 
 ## 使用的工具与项目
@@ -75,7 +75,7 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
 - `Scripts/Emuera/GameProc/` — ERB 加载、逻辑行解析、label 索引、脚本执行状态机、lazy loading。
 - `Scripts/Emuera/GameData/` — 变量、表达式、常量、函数方法、角色数据。
 - `Scripts/Emuera/Content/` — 图片、精灵、Graphics surface、ColorMatrix 绘制。
-- `Scripts/Emuera/LegacyRunner/` — 旧版显示/输入回放诊断（原 `Scripts/M0/`，命名空间 `gEmuera.LegacyRunner`）。
+- `Scripts/LegacyRunner/` — 旧版显示/输入回放诊断（原 `Scripts/M0/`，命名空间 `gEmuera.LegacyRunner`）。
 - `Scripts/GodotHost/` — Godot 生命周期/平台桥组件（AppBootstrap、PlatformGateway、Emuera*Component）。
 - `Scripts/uEmuera/` — `System.Drawing` / `System.Windows.Forms` 兼容层。
 - `Scripts/Diagnostics/` — 运行期诊断、日志路由、导出、输入回放、诊断面板。
@@ -98,6 +98,10 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
 5. **编译产物不入库**：`.gitignore` 已排除 `.godot/`、`bin/`、`obj/`、`Build/NativeLibs/`、
    `Build/android/`、`*.apk/aab/exe/pck/idsig`、`reports/`、`artifacts/`。不要把新的编译/导出物加进 git。
    构建/打包相关文件夹（android 导出工程、NativeLibs、Fixtures、APK 产物）统一放在根目录 `Build/` 下管理。
+6. **C# 文件规模与细分**：新建文件硬上限 1500 行；既有 >2000 行文件"只减不增"，触碰时按功能域
+   顺手拆分（`Type.Feature.cs` partial 模式，纯移动不混逻辑改动）。拆分前必须核对仓库六类路径
+   钉扎/链接机制（方言证据链、契约测试、tools 工程源链接、场景脚本引用等），详见
+   [FILE_STANDARD.md](FILE_STANDARD.md) §6。
 
 定位文件：优先用 CodeGraph（`codegraph explore "符号名"`）或 `src/Core`/`Scripts` 目录结构判断；
 不要靠猜测。

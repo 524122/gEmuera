@@ -1198,7 +1198,12 @@ public partial class FirstWindow : Control
 
 	public override void _ExitTree()
 	{
-		GetViewport()?.SizeChanged -= OnLauncherViewportSizeChanged;
+		// 注意：写法不能用 GetViewport()?.SizeChanged -= ... 形式——null 条件赋值/复合赋值是
+		// C# 预览特性（CS8652），项目 LangVersion=latest 不支持；_ExitTree 时节点可能已脱离
+		// 树、GetViewport() 可能为 null，因此改为显式判空后取消订阅。
+		var launcherViewport = GetViewport();
+		if (launcherViewport != null)
+			launcherViewport.SizeChanged -= OnLauncherViewportSizeChanged;
 		if (OS.GetName() == "Android")
 			GetTree().OnRequestPermissionsResult -= OnPermissionsResult;
 	}
