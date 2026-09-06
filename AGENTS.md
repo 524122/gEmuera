@@ -104,6 +104,12 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
    顺手拆分（`Type.Feature.cs` partial 模式，纯移动不混逻辑改动）。拆分前必须核对仓库六类路径
    钉扎/链接机制（方言证据链、契约测试、tools 工程源链接、场景脚本引用等），详见
    [FILE_STANDARD.md](FILE_STANDARD.md) §6。
+7. **游戏内容与运行产物不得进入项目根（res://）**：Godot 编辑器会递归扫描导入 res:// 下全部资源，
+   一个 era 游戏意味着上千 CSV/上万文件，会令编辑器卡死并在游戏目录生成大量 `*.translation` 垃圾
+   （2026-09-07 实证：经 junction 链入后编辑器导入 1457 个 translation 文件）。因此：游戏本体只放
+   启动器扫描根（桌面编辑器运行=Godot exe 同级 `compat\<profile>\<游戏>`；Android=
+   `/storage/emulated/0/emuera/`）；`legacy-runner` 的 `-OutputDirectory` 必须指向**项目外**目录
+   （如 `D:\gemuera-reports\`）；禁止用 junction/symlink/复制把游戏放进 `D:\gemuera` 内。
 
 定位文件：优先用 CodeGraph（`codegraph explore "符号名"`）或 `src/Core`/`Scripts` 目录结构判断；
 不要靠猜测。
