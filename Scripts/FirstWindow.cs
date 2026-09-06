@@ -37,6 +37,8 @@ public partial class FirstWindow : Control
 	public const string CoreProfileV24Pure = "v24pure";
 	public const string CoreProfileSnake = "snake";
 	public const string CoreProfileEraFl = "erafl";
+	// megaten：eraMegaten 适配 profile（高级兼容下拉第 4 项）。
+	public const string CoreProfileMegaten = "megaten";
 	// 保留旧配置值，避免升级时无法读取 launcher.cfg；启动器不再执行自动探测。
 	public const string CoreProfileAutomatic = "auto";
 
@@ -1043,6 +1045,8 @@ public partial class FirstWindow : Control
 		compatibilityProfileOption.AddItem(CoreProfileV24Pure);
 		compatibilityProfileOption.AddItem(CoreProfileSnake);
 		compatibilityProfileOption.AddItem(CoreProfileEraFl);
+		// megaten：高级兼容下拉第 4 项（跟随现有 3 项模式）。
+		compatibilityProfileOption.AddItem(CoreProfileMegaten);
 		compatibilityProfileOption.Select(GetManualProfileOptionIndex());
 		compatibilityProfileOption.ItemSelected += OnManualProfileSelected;
 		compatibilityProfileOption.Visible = AdvancedCompatibilityEnabled;
@@ -1069,6 +1073,8 @@ public partial class FirstWindow : Control
 			0 => CoreProfileV24Pure,
 			1 => CoreProfileSnake,
 			2 => CoreProfileEraFl,
+			// megaten：下拉索引 3 → megaten profile。
+			3 => CoreProfileMegaten,
 			_ => CoreProfileV24Pure,
 		};
 		SaveCompatibilitySettings();
@@ -1108,6 +1114,9 @@ public partial class FirstWindow : Control
 			return CoreProfileSnake;
 		if (string.Equals(profileName, CoreProfileEraFl, System.StringComparison.OrdinalIgnoreCase))
 			return CoreProfileEraFl;
+		// megaten：手动配置值的大小写归一化（与既有三项同模式）。
+		if (string.Equals(profileName, CoreProfileMegaten, System.StringComparison.OrdinalIgnoreCase))
+			return CoreProfileMegaten;
 		// 旧版本曾把“自动识别”写入配置，回退后按安全的 v24 基线处理。
 		return CoreProfileV24Pure;
 	}
@@ -1118,6 +1127,8 @@ public partial class FirstWindow : Control
 		{
 			CoreProfileSnake => 1,
 			CoreProfileEraFl => 2,
+			// megaten：下拉索引 3。
+			CoreProfileMegaten => 3,
 			_ => 0,
 		};
 	}
@@ -1915,6 +1926,12 @@ public partial class FirstWindow : Control
 		if (string.Equals(coreProfileName, CoreProfileEraFl, System.StringComparison.OrdinalIgnoreCase))
 		{
 			normalizedProfileName = CoreProfileEraFl;
+			return true;
+		}
+		// megaten：launcher.cfg/runner 旧入口的大小写兼容（与 erafl 同模式）。
+		if (string.Equals(coreProfileName, CoreProfileMegaten, System.StringComparison.OrdinalIgnoreCase))
+		{
+			normalizedProfileName = CoreProfileMegaten;
 			return true;
 		}
 

@@ -45,6 +45,8 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
 - GDUnit4：测试 Godot 场景与需 Godot 组件的功能。
 - xUnit：测试 Emuera 核心（ERB 语法解释器）的纯 C# 逻辑。
 
+**游戏适配铁律（2026-09-07 起强制）**：为任何 Era 游戏做适配时，行为差异**必须**以方言模块方式实现（eraFL 模式：Core 声明模块 + BuiltInDialectCatalog 注册 + LegacyCompatibilityModule 的 Declare/Apply 会话门控 + policy flag 消费），**禁止直接修改 v24 基线共享路径**（Parser/VM/字典的未门控代码）。判断标准：改动在 v24pure/snake/erafl 会话下必须逐字节等价，并以方言快照名录对比（新旧 profile 指令/函数清单零差异）作为"未选择侧不变"的硬证据。参考先例：`governance/evolution-log/2026-08-22-erafl-dialect-manifest.md` 与 `2026-09-07-eramegan-adaptation.md`（含一次违规返工的完整记录）。
+
 任务结束后，删除冗余的临时测试文件，避免造成垃圾文件。
 
 ## 构建与验证（实测经验，2026-08）
