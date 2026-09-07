@@ -1625,9 +1625,18 @@ public partial class FirstWindow : Control
 				string gameRoot = CombineDirectory(profileRoot, gameDirectoryName);
 				if (!IsEraGameDirectory(gameRoot))
 				{
-					AddScanMessage(
-						scanMessages,
-						$"兼容目录 compat/{profileId}/{gameDirectoryName} 不是有效游戏目录，已跳过（不递归扫描）。");
+					// 2026-09-07：发行包常见 compat/<profile>/发布包外层/游戏根 的嵌套结构
+					//（如 EraMegan3.54正式汉化版β/[2026.4.14]MGT...）。直接递归查找游戏根，
+					// 沿用 v24 lane 的嵌套扫描与深度上限；外层目录不再作为问题刷扫描消息，
+					// 找不到游戏的空分支也保持静默（与 v24 lane 行为一致）。
+					ScanNestedEraGameDirectories(
+						gameRoot,
+						1,
+						profileId,
+						LauncherGameSource.CompatibilityDirectory,
+						entries,
+						addedPaths,
+						scanMessages);
 					continue;
 				}
 
