@@ -73,22 +73,30 @@ Get-ChildItem Scripts,src -Recurse -Filter *.cs -File | Where-Object { $_.FullNa
 2. 拆分合入后再提功能修改 PR（此时 diff 已变小）；
 3. 两者不得混在同一 PR（`AGENTS.md`：每个 PR 只解决一个明确问题）。
 
-存量清单与建议（按 2026-08-22 字节 LF 快照）：
+存量清单与建议（**已按 2026-09-13 字节 LF 快照更新**；原始 2026-08-22 快照见 git 历史与附录 A）：
 
 | 文件 | 行数 | 模式 | 备注 |
 | --- | --- | --- | --- |
-| `Scripts/EmueraContent.cs` | 9116 | A | **方言 marker 分类文件**（见 §6.1），拆分必须同 PR 更新 fileRegex |
-| `Scripts/Emuera/GameData/Function/Creator.Method.cs` | 8306 | A | snake-alignment 钉扎（§6.2）；沿用 DT/Map/Sql/Xml 先例按函数类别继续拆 |
-| `Scripts/Emuera/GameData/Variable/VariableToken.cs` | 4218 | A/B | |
-| `Scripts/Emuera/GameProc/Function/Instraction.Child.cs` | 4046 | B | snake-alignment 钉扎（§6.2） |
-| `Scripts/Emuera/GameData/Variable/VariableEvaluator.cs` | 3796 | A | **save-baseline SHA+字面量钉扎**（§6.3） |
-| `Scripts/GenericUtils.cs` | 2926 | A | legacy-runner 契约测试钉扎字面量（§6.4） |
-| `Scripts/Emuera/GameView/EmueraConsole.cs` | 2893 | A | snake-alignment 钉扎；沿用 `EmueraConsole.Print.cs` 先例 |
-| `Scripts/Emuera/GameData/ConstantData.cs` | 2633 | B | 常量表可豁免硬上限 |
-| `Scripts/Emuera/GameProc/Function/ArgumentBuilder.cs` | 2371 | A | snake-alignment 钉扎 |
-| `Scripts/Diagnostics/RuntimeDiagnosticsPanel.cs` | 2138 | A | 被 `assets/scenes/RuntimeDiagnosticsPanel.tscn` 无 uid 引用（§6.6） |
-| `Scripts/Emuera/GameView/HtmlManager.cs` | 2042 | A | snake-alignment 钉扎 |
-| `Scripts/FirstWindow.cs` | 2019 | A | 主入口；方言 profile-selection 钉扎（§6.1） |
+| `Scripts/EmueraContent.cs` | 8105 | A | **方言 marker 分类文件**（见 §6.1）——但实测 marker 命中 **0**，那 3 条 fileRegex 是惰性条目，拆分**不需要**改方言目录；不可迁核心 ≈1616 行，单轮不可能脱离 2000，目标是"只减不增 + 每轮 -30%" |
+| `Scripts/Emuera/GameData/Function/Creator.Method.cs` | 6282 | A | snake-alignment 钉扎（§6.2）；沿用 DT/Map/Sql/Xml 先例按函数类别继续拆。**注意：本文件 206 个类型声明全部嵌套**，无独立顶层类 → 只能用模式 A |
+| `Scripts/Emuera/GameData/Variable/VariableEvaluator.cs` | 3796 | A | **save-baseline SHA + 8 个方法符号钉扎**（§6.3）；`#region File操作`(2482–3610) 硬锁，**结构下限 ≈2057 行，不可达 2000** |
+| `Scripts/Emuera/GameData/Variable/VariableToken.cs` | 3524 | A/B | 2026-09-13 已搬出 VD.ref（694 行）。注意该文件装的是 `VariableData` 的实现，分片须命名 `VariableData.*`；实测还有 6 个 ≥200 行类族可切，全搬完 ≈1102 |
+
+**2026-09-13 已完成纯移动、脱离在册清单的 8 个文件**（提交 `8eef88a`、`e8ad27c`、第三批）：
+
+| 文件 | 原 → 现 | 新分片 |
+| --- | --- | --- |
+| `Scripts/Emuera/GameProc/Function/Instraction.Child.cs` | 4046/4051 → **1856** | `FunctionIdentifier.{FlowControl,Input,Print,Data}Instruction.cs` |
+| `Scripts/Emuera/GameView/EmueraConsole.cs` | 2893 → **1947** | `EmueraConsole.Cbg.cs`、`.Input.cs` |
+| `Scripts/GenericUtils.cs` | 2926 → **1094** | `GenericUtils.{Audio,Trace,DiagnosticsLogging}.cs` |
+| `Scripts/Emuera/GameProc/Function/ArgumentBuilder.cs` | 2371 → **1192** | `ArgumentParser.TypeChecked.cs` |
+| `Scripts/Emuera/GameData/ConstantData.cs` | 2633 → **1750** | `ConstantData.CsvFieldParsing.cs`、`.KeywordLookup.cs` |
+| `Scripts/Diagnostics/RuntimeDiagnosticsPanel.cs` | 2138 → **882** | `RuntimeDiagnosticsPanel.Options.cs` |
+| `Scripts/Emuera/GameView/HtmlManager.cs` | 2042 → **1826** | `HtmlManager.DisplayHtml.cs` |
+| `Scripts/FirstWindow.cs` | 2019/2050 → **1653** | `FirstWindow.DiagnosticsSettings.cs` |
+
+> ⚠️ 快照纪律对账：`Instraction.Child.cs` 本表原记 4046，实测已是 4051 —— **该文件在拆分前就违反了 §2「只减不增」**。
+> 另：所有行数以字节 LF 口径实测，`Get-Content` 在本仓会**少算并整体错位行号**，索引行号务必用 `ReadAllLines`。
 
 ## 6. 钉扎与链接机制（硬约束，拆分前必查）
 
@@ -192,24 +200,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 - 拆了文件但跨域调用反而增多（分片应沿依赖方向切，不是把纠缠切成两半）；
 - 跳过 §6 检查直接拆分（六类钉扎机制任何一类都可能被命中）。
 
-## 附录 A：>2000 行文件快照（2026-08-22，字节 LF 口径）
+## 附录 A：>2000 行文件快照（2026-09-13，字节 LF 口径）
 
 | 文件 | 行数 |
 | --- | --- |
-| `Scripts/EmueraContent.cs` | 9116 |
-| `Scripts/Emuera/GameData/Function/Creator.Method.cs` | 8306 |
-| `Scripts/Emuera/GameData/Variable/VariableToken.cs` | 4218 |
-| `Scripts/Emuera/GameProc/Function/Instraction.Child.cs` | 4046 |
+| `Scripts/EmueraContent.cs` | 8105 |
+| `Scripts/Emuera/GameData/Function/Creator.Method.cs` | 6282 |
 | `Scripts/Emuera/GameData/Variable/VariableEvaluator.cs` | 3796 |
-| `Scripts/GenericUtils.cs` | 2926 |
-| `Scripts/Emuera/GameView/EmueraConsole.cs` | 2893 |
-| `Scripts/Emuera/GameData/ConstantData.cs` | 2633 |
-| `Scripts/Emuera/GameProc/Function/ArgumentBuilder.cs` | 2371 |
-| `Scripts/Diagnostics/RuntimeDiagnosticsPanel.cs` | 2138 |
-| `Scripts/Emuera/GameView/HtmlManager.cs` | 2042 |
-| `Scripts/FirstWindow.cs` | 2019 |
+| `Scripts/Emuera/GameData/Variable/VariableToken.cs` | 3524 |
 
-分布：Scripts+src 共 253 个 .cs；>1000 行 31 个；>2000 行 12 个；>4000 行 4 个。
+分布：Scripts+src 共 276 个 .cs；>1000 行 33 个；>2000 行 4 个；>4000 行 2 个。
+
+> 上一版快照（2026-08-22）为：253 个 .cs、>1000 行 31 个、>2000 行 **12** 个、>4000 行 4 个。
+> 2026-09-13 三批纯移动拆分（提交 `8eef88a`、`e8ad27c` 及第三批）后，
+> `Instraction.Child.cs`、`EmueraConsole.cs`、`ArgumentBuilder.cs`、`ConstantData.cs`、
+> `RuntimeDiagnosticsPanel.cs`、`HtmlManager.cs`、`FirstWindow.cs`、`GenericUtils.cs`
+> **共 8 个文件已脱离本清单**（`EmueraContent.cs` 与 `Creator.Method.cs` 已大幅减量但仍在册）。
+> 再生成命令见 §2.1；**切勿用 `Get-Content` 复核行数或行号**（本仓实测会少算并整体错位）。
 
 ## 附录 B：现有分片家族（先例参考）
 
