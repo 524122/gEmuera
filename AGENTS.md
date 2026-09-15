@@ -78,8 +78,11 @@ dotnet build 'D:\gemuera\gemuera-c#.csproj' -v minimal -nodeReuse:false -m:1
 3. **`MSB3491 ... Access to the path ... is denied`**：`src/Core/obj|bin` 下可能有属于**其他 Agent harness
    沙箱身份**的历史残留文件（实测遇到过 `DESKTOP-MG17PVH\CodexSandboxOffline`），当前令牌无法覆盖/删除。
    处理：把 `obj`/`bin` **目录改名**后移出项目（它们带能力 ACE，允许改名）。
-   ⚠️ **不要移进 `Build/`**——`gemuera-c#.csproj` 的默认 glob **不排除** `Build/**`，放那里会把残留的
-   `AssemblyInfo.cs` 当源码编进去，产生 35 个 CS0579 重复特性错误。用 `.godot/` 或 `artifacts/`（两者都在排除列表内）。
+   ⚠️ 移出时**要选已在 csproj 排除列表里的目录**（`.godot/`、`artifacts/`、`reports/`、`Build/`）。
+   历史上 `Build/**` 与 `reports/**` **曾被默认 glob 收录**，把过期的 `obj/AssemblyInfo.cs` 挪进 `Build/`
+   会产生 35 个 CS0579 重复特性错误（报错文件看起来毫不相干）。
+   **已于 2026-09-13 在 csproj 补上 `<Compile Remove="Build\**" />` 与 `<Compile Remove="reports\**" />` 修复**
+   （并实测：往 `reports/` 放一个冲突 `.cs` 后构建仍 0 错误）。若你新建其它临时目录，仍需确认它是否被 glob 收录。
 
 - Android 相关结论必须以 APK 实测为准；桌面端仅用于调试。
 
@@ -138,6 +141,13 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
 
 定位文件：优先用 CodeGraph（`codegraph explore "符号名"`）或 `src/Core`/`Scripts` 目录结构判断；
 不要靠猜测。
+
+> **2026-09-13 实测：CodeGraph 在开发机上并未安装，`.codegraph/` 里只有一个 `.gitignore`（无索引库）。**
+> `codegraph` / `codegraph-mcp` 都不在 PATH 上，仓库 `package.json` 也只声明了 `claude` 依赖。
+> 所以**不要**在这台机器上把 `codegraph explore` 当第一步——它会失败并浪费时间。
+> 不可用时改用：`grep`（按正则找内容）→ `glob`（按路径找文件）→ `read`（按行号读区间），
+> 配合 `Scripts/`、`src/Core/` 的目录结构判断。另见 `FILE_STANDARD.md` §6.7：
+> `.codegraph/` 是可再生缓存，即便装了也需在大型拆分后重建，否则旧索引会系统性误导检索。
 
 ## 协作规则
 
