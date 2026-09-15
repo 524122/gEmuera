@@ -157,10 +157,12 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
 
 ### GitHub
 
-- 仓库：`upstream` = `https://github.com/wwwXiaoHan17/gEmuera`（上游），`origin` = `https://github.com/524122/gEmuera`（本机开发用的 fork）。
-- **PR 目标分支 = 本 fork 的 `feature` 分支**（`git push origin HEAD:feature`）。它既是集成分支，也是 PR base。
-- ⚠️ **不要按上游习惯把 PR 提到 `upstream/dev`**。上游文档里那句"默认协作分支 `dev`、提 PR 指向 `dev`"指的是上游贡献者流程；本机的工作流是**在自己 fork 里积攒**，等稳定了再由仓库所有者决定何时、以何种方式流向 `upstream`。跨仓库 PR（`origin/feature` → `upstream/dev`）已被明确排除。
-- 新建远端 PR 前先确认 base 是 `origin/feature`；推送用 `git push origin HEAD:feature`（本地分支名与远端 `feature` 不同名，裸 `git push` 会另建分支）。
+- 仓库：`upstream` = `https://github.com/wwwXiaoHan17/gEmuera`（上游），`origin` = `https://github.com/524122/gEmuera`（本机开发用的 fork，`524122` 对上游**无写权限**，只有 pull）。
+- 开发分支用 fork 的 `feature`（`git push origin HEAD:feature`）；**PR 目标是上游的 `future` 分支**：
+  `head = 524122:feature` → `base = wwwXiaoHan17:future`（即"把 fork 的 feature 提到上游的 future"）。
+- 注意别被名字绕晕：`feature`（fork 的开发分支）与 `future`（上游的集成分支）只差一个字母，是**两个不同仓库的不同分支**。
+- 上游 `future` 目前落后 `upstream/dev` 若干提交；从 `dev` 线派生的工作提给它通常是 fast-forward（`git merge-base --is-ancestor upstream/future HEAD` 返回 0 即可无冲突合并）。
+- 推送用 `git push origin HEAD:feature`（本地分支名与远端 `feature` 不同名，裸 `git push` 会另建分支）。
 - PR 标题与说明用中文。每个 PR 只解决一个明确问题，禁止混入无关重构、格式化和资源变更。
 - 禁止擅自强制推送、硬重置、删除远端分支、回滚他人提交。
 
