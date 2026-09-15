@@ -172,24 +172,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 
 ### 6.4 legacy-runner 契约测试
 
-`tools/legacy-runner/` 下 6 个 `Test-*.ps1` 按精确路径钉扎源文件，`Test-InProcessSessionCycle.ps1` 把会话重置语义文本钉在 `GenericUtils.cs` 内。拆 `GenericUtils.cs`（日志桥/UI 队列/诊断导出域）时须同 PR 更新断言位置并重跑。
-**已知存量损坏（2026-09-13 实测量化）**：M0→LegacyRunner 改名时失联，全部 6 个测试**跑不起来**——在任何内容断言之前就 throw
+`tools/legacy-runner/` 下 **7 个** `Test-*.ps1` 按精确路径钉扎源文件，`Test-InProcessSessionCycle.ps1` 把会话重置语义文本钉在 `GenericUtils.cs` 内。拆 `GenericUtils.cs`（日志桥/UI 队列/诊断导出域）时须同 PR 更新断言位置并重跑。
+
+**存量损坏与修复结果（2026-09-13 实测量化，已修机械部分）**：M0→LegacyRunner 改名时失联，**其中 6 个**（第 7 个 `Test-LegacyRunner.ps1` 本就无 M0 引用）在任何内容断言之前就 throw，
 （`In-process session-cycle contract file is missing: D:\gemuera\Scripts\M0\LegacyRunnerConfig.cs`，exit=1）。
-精确盘点：
-- **14 处陈旧路径**：13 处 `Scripts\M0\X.cs` 应映射到 `Scripts\LegacyRunner\X.cs`（8 个文件都真实存在：LegacyRunnerConfig / LegacyRunnerHost / LegacyRunnerReportWriter / LegacyDisplayObservation / LegacyInputReplayDriver / LegacySettlementTracker / LegacyTraceEvent / LegacyTraceRecorder）；
-  第 14 处 `Test-LegacySettlement.ps1:17` 的 `Scripts\EmueraContent.M0.cs` 应映射到 `Scripts\EmueraContent.LegacyRunner.cs`（`EmueraContent.M0.cs` 已不存在，仓库里还留着一个孤儿 `EmueraContent.M0.cs.uid`）。
-- **命名空间**：测试内嵌的 C# 探针写的是 `namespace gEmuera.M0` / `[gEmuera.M0.LegacyTrace]` 等；生产代码已全部迁到 `gEmuera.LegacyRunner`（`Scripts/LegacyRunner/*.cs` 9 个文件实测一致）。**C# 类型名本身没改**（`LegacyTraceRecorder`/`LegacySettlementTracker`/… 都还在），只改了命名空间。
-- **断言引用的 105 个符号里，78 个存在、25 个缺失**，缺失的分两类：
-  - **~11 个是纯改名，可机械映射且已在源码中验证对应名存在**：`CreateM0RunnerSessionLaunchRegistry`→`CreateLegacyRunnerSessionLaunchRegistry`、
-    `SwitchLegacySessionForM0RunnerAsync`→`SwitchLegacySessionForLegacyRunnerAsync`、`RestartLegacySessionForM0RunnerAsync`→…、`ConfigureM0Runner*`→`ConfigureLegacyRunner*`、
-    `TryResolveM0RunnerDefaultOutputLogPath`→`TryResolveLegacyRunnerDefaultOutputLogPath`、`CaptureM0Screenshot`→`CaptureScreenshot`、
-    `CaptureM0LegacyDisplayObservation`→`CaptureLegacyDisplayObservation`、`CaptureM0SettlementFingerprint`→`CaptureSettlementFingerprint`。
-  - **~9 个在生产源码里找不到任何对应物**（属**接口真实演进**，不是改名）：`EnsureM0ViewportSize`、`CanonicalizeDisplayBackend`、`effective_backend_mismatch`、
-    `_settleFramesRemaining`、`gpuQueue.TryDequeue`、`textRenderQueue.TryDequeue`（队列已改环形缓冲排空，同 `uiQueue` 的情形）、
-    `cross_aba_cycle_evidence_sample_invalid`、`summary.isolatedGameCopy`、`runtimeFixtureMutationChangeCounts`。
-    **这 9 条要修必须重新推导"现在应该断言什么"——那是契约决策，不是机械改名，需要领域判断，不要盲改。**
-> 结论：把路径+命名空间+11 个改名修好后，测试会**真正执行**，失败信息也会变成"哪条契约变了"而不是"文件缺失"这样的误导性首行。
-> 但**不可能仅靠改名让这套门禁变绿**——9 条真漂移必须有人定契约。遇到时先修机械部分、再把真漂移清单化，不要假装绿了。
+实测：**before = 6/6 红、断言执行数 0**；机械修复后 **5 个转绿（exit 0，其全部断言实跑通过）**，
+只剩 `Test-InProcessSessionCycle.ps1` 红——但它现在**执行了 221 次断言求值**，4 条失败各指名契约与符号，不再是"文件缺失"。
+
+已修的三类机械问题：
+- **15 处陈旧路径** = 14 处 `Scripts\M0\X.cs` → `Scripts\LegacyRunner\X.cs`（8 个目标文件都真实存在：LegacyRunnerConfig / LegacyRunnerHost / LegacyRunnerReportWriter / LegacyDisplayObservation / LegacyInputReplayDriver / LegacySettlementTracker / LegacyTraceEvent / LegacyTraceRecorder）
+  ＋ 1 处 `Test-LegacySettlement.ps1:17` 的 `Scripts\EmueraContent.M0.cs` → `Scripts\EmueraContent.LegacyRunner.cs`（前者已不存在，仓库里还留着一个孤儿 `EmueraContent.M0.cs.uid`）。
+- **命名空间**：测试内嵌的 C# 探针写的是 `namespace gEmuera.M0` / `[gEmuera.M0.LegacyTrace]` 等；生产端已全部是 `gEmuera.LegacyRunner`。**C# 类型名本身没改**（`LegacyTraceRecorder`/`LegacySettlementTracker`/… 都还在），只改了命名空间。
+- **断言符号的纯改名**：`CreateM0RunnerSessionLaunchRegistry`→`CreateLegacyRunnerSessionLaunchRegistry`、`SwitchLegacySessionForM0RunnerAsync`→`…ForLegacyRunnerAsync`、`RestartLegacySessionForM0RunnerAsync`→…、`ConfigureM0Runner*`→`ConfigureLegacyRunner*`、`TryResolveM0RunnerDefaultOutputLogPath`→`TryResolveLegacyRunnerDefaultOutputLogPath`、`ConfigureM0RunnerDisplayBackend`→`ConfigureLegacyRunnerDisplayBackend`、`CaptureM0Screenshot`→`CaptureScreenshot`、`CaptureM0LegacyDisplayObservation`→`CaptureLegacyDisplayObservation`、`EnsureM0ViewportSize`→`EnsureLegacyViewportSize`、`CaptureM0SettlementFingerprint`→**`CaptureLegacySettlementFingerprint`**（不是 `CaptureSettlementFingerprint`——后者是另一个已存在的符号，映射错会让断言必红）。
+
+**仍然红的 4 条 = 真正的契约漂移（未修，也不该盲修）**，全在 `Test-InProcessSessionCycle.ps1`：
+`L97 gpuQueue.TryDequeue`、`L98 textRenderQueue.TryDequeue`、`L99 EmueraMain.cs 内 ResetPendingRenderState`、`L208 while (uiQueue.TryDequeue(out _))`。
+四者是同一件事：队列/排空职责已从 `EmueraMain` / `GenericUtils` 迁进 `EmueraGpuRenderComponent` / `EmueraTextRenderComponent`，
+且 `uiQueue` 改成了环形缓冲（`uiQueueRing[256]` / `uiQueueHead` / `uiQueueCount`，排空为 `while (uiQueueCount > 0)`）。
+**这些要修必须重新推导"现在应该断言什么"——属契约决策，需要领域判断，不要盲改。**（且 L97–99 似已被 L102/L103/L106/L107 覆盖，"删除 vs 重写"同样是决策。）
+
+> ⚠️ **两处会误导后来者的陷阱（本轮真实踩到）**：
+> 1. **符号存在性搜索必须覆盖 `.ps1`/`.psm1`，不能只搜 `.cs`。** 本轮盘点时只搜了 `Scripts/`+`src/` 的 `.cs`，于是把 4 个**其实存在**的符号
+>    （`effective_backend_mismatch`、`summary.isolatedGameCopy`、`runtimeFixtureMutationChangeCounts`、`cross_aba_cycle_evidence_sample_invalid`——它们定义在 `tools/legacy-runner/Invoke-*.ps1` 里）误判为"已消失"。
+> 2. **不要"顺手修正"M0 字样。** `Program.cs` 的私有字段至今仍叫 `m0RunnerStartupErrorLogPath` / `m0RunnerDefaultOutputLogPath`，
+>    比较脚本里 `PreviousGate:M0` 也是**当前真实值**——把它们改成 LegacyRunner 反而会弄坏断言。
+> 3. 潜在缺陷（尚未修）：`Test-InProcessSessionCycle.ps1:184` 的 `Substring` 切片定界会算成 -1（`Program.cs` 的 `ResetSessionState()` 之后没有 `/// <summary>`），
+>    目前被 L97 掩盖；一旦 L97–99 修好，它会以不透明的 .NET 异常中断，**并使 L185/L186 在空切片上真空通过**。
+>    同类"真空通过"还有 `Test-LegacyDisplay.ps1:66`（`CanonicalizeDisplayBackend`）与 `Test-LegacySettlement.ps1:54`（`_settleFramesRemaining`）。
 
 ### 6.5 tools 工程显式源链接
 

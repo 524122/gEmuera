@@ -12,8 +12,8 @@ function Assert-InProcessCycleContract {
 }
 
 try {
-    $configPath = Join-Path $ProjectRoot 'Scripts\M0\LegacyRunnerConfig.cs'
-    $hostPath = Join-Path $ProjectRoot 'Scripts\M0\LegacyRunnerHost.cs'
+    $configPath = Join-Path $ProjectRoot 'Scripts\LegacyRunner\LegacyRunnerConfig.cs'
+    $hostPath = Join-Path $ProjectRoot 'Scripts\LegacyRunner\LegacyRunnerHost.cs'
     $mainPath = Join-Path $ProjectRoot 'Scripts\EmueraMain.cs'
     $gpuComponentPath = Join-Path $ProjectRoot 'Scripts\GodotHost\EmueraGpuRenderComponent.cs'
     $textComponentPath = Join-Path $ProjectRoot 'Scripts\GodotHost\EmueraTextRenderComponent.cs'
@@ -73,12 +73,12 @@ try {
     Assert-InProcessCycleContract ($configSource.Contains('in_process_cross_aba_switch_count_must_be_even')) 'Cross-ABA does not reject an odd switch count.'
     Assert-InProcessCycleContract ($configSource.Contains('in_process_session_switch_count_requires_cycle')) 'Runner config allows a stress switch count without a runner cycle.'
     Assert-InProcessCycleContract ($configSource.Contains('in_process_cross_aba_requires_alternate_session')) 'Cross-ABA does not require an alternate session.'
-    Assert-InProcessCycleContract ($configSource.Contains('CreateM0RunnerSessionLaunchRegistry')) 'Runner config does not build an immutable launch registry.'
+    Assert-InProcessCycleContract ($configSource.Contains('CreateLegacyRunnerSessionLaunchRegistry')) 'Runner config does not build an immutable launch registry.'
 
     $hostSource = [IO.File]::ReadAllText($hostPath)
     Assert-InProcessCycleContract ($hostSource.Contains('TickInProcessSessionCycle')) 'Runner host does not implement the in-process session-cycle state machine.'
     Assert-InProcessCycleContract ($hostSource.Contains('CreateInProcessSessionCycleTargets')) 'Runner host does not precompute the runner-only session cycle targets.'
-    Assert-InProcessCycleContract ($hostSource.Contains('SwitchLegacySessionForM0RunnerAsync')) 'Runner host does not call the cross-configuration session boundary.'
+    Assert-InProcessCycleContract ($hostSource.Contains('SwitchLegacySessionForLegacyRunnerAsync')) 'Runner host does not call the cross-configuration session boundary.'
     Assert-InProcessCycleContract ($hostSource.Contains('in_process_session_wait_fingerprint')) 'Runner host does not record per-cycle semantic fingerprints.'
     Assert-InProcessCycleContract ($hostSource.Contains('in_process_session_cycle_targets_must_match_switch_count')) 'Runner host does not validate the generated stress cycle length.'
     Assert-InProcessCycleContract ($hostSource.Contains('AreInProcessCycleFingerprintsStable')) 'Runner host does not validate all repeated session fingerprints.'
@@ -87,9 +87,9 @@ try {
     Assert-InProcessCycleContract ($hostSource.Contains('in_process_cross_aba_cycle_completed')) 'Runner host does not expose a completed cross-configuration A-to-B-to-A result.'
 
     $mainSource = [IO.File]::ReadAllText($mainPath)
-    Assert-InProcessCycleContract ($mainSource.Contains('RestartLegacySessionForM0RunnerAsync')) 'EmueraMain does not expose the runner-only restart boundary.'
-    Assert-InProcessCycleContract ($mainSource.Contains('ConfigureM0RunnerSessionLaunchRegistry')) 'EmueraMain does not receive runner routes before startup.'
-    Assert-InProcessCycleContract ($mainSource.Contains('SwitchLegacySessionForM0RunnerAsync')) 'EmueraMain does not expose the cross-configuration switch boundary.'
+    Assert-InProcessCycleContract ($mainSource.Contains('RestartLegacySessionForLegacyRunnerAsync')) 'EmueraMain does not expose the runner-only restart boundary.'
+    Assert-InProcessCycleContract ($mainSource.Contains('ConfigureLegacyRunnerSessionLaunchRegistry')) 'EmueraMain does not receive runner routes before startup.'
+    Assert-InProcessCycleContract ($mainSource.Contains('SwitchLegacySessionForLegacyRunnerAsync')) 'EmueraMain does not expose the cross-configuration switch boundary.'
     Assert-InProcessCycleContract ($mainSource.Contains('legacySessionFacade.SwitchAsync')) 'Runner-only restart does not use LegacySessionFacade.'
     Assert-InProcessCycleContract ($mainSource.Contains('if (!facade.IsBackendRunning)')) 'Runner-only restart does not use the facade-owned backend state.'
     Assert-InProcessCycleContract ($mainSource.Contains('Console.IsInProcess, which is false while')) 'Runner-only restart does not document the input-wait lifecycle distinction.'
@@ -107,16 +107,16 @@ try {
     Assert-InProcessCycleContract ($textComponentSource.Contains('ResetPendingRenderState')) 'Text component reset does not complete in-flight work.'
 
     $programSource = [IO.File]::ReadAllText($programPath)
-    Assert-InProcessCycleContract ($programSource.Contains('ConfigureM0RunnerStartupErrorLogPath')) 'Legacy Program does not expose a runner-only startup-error-log redirect.'
+    Assert-InProcessCycleContract ($programSource.Contains('ConfigureLegacyRunnerStartupErrorLogPath')) 'Legacy Program does not expose a runner-only startup-error-log redirect.'
     Assert-InProcessCycleContract ($programSource.Contains('GetSnakeStartupErrorLogPath')) 'Snake startup diagnostics do not resolve the runner-owned log path.'
-    Assert-InProcessCycleContract ($programSource.Contains('ConfigureM0RunnerDefaultOutputLogPath')) 'Legacy Program does not expose a runner-only default-output-log redirect.'
-    Assert-InProcessCycleContract ($programSource.Contains('TryResolveM0RunnerDefaultOutputLogPath')) 'Legacy Program does not constrain the default-output-log redirect to the runner-owned path.'
+    Assert-InProcessCycleContract ($programSource.Contains('ConfigureLegacyRunnerDefaultOutputLogPath')) 'Legacy Program does not expose a runner-only default-output-log redirect.'
+    Assert-InProcessCycleContract ($programSource.Contains('TryResolveLegacyRunnerDefaultOutputLogPath')) 'Legacy Program does not constrain the default-output-log redirect to the runner-owned path.'
     $consolePrintSource = [IO.File]::ReadAllText($consolePrintPath)
-    Assert-InProcessCycleContract ($consolePrintSource.Contains('TryResolveM0RunnerDefaultOutputLogPath')) 'Console output logging does not consume the runner-owned default log redirect.'
+    Assert-InProcessCycleContract ($consolePrintSource.Contains('TryResolveLegacyRunnerDefaultOutputLogPath')) 'Console output logging does not consume the runner-owned default log redirect.'
 
-    Assert-InProcessCycleContract ($hostSource.Contains('ConfigureM0RunnerStartupErrorLogPath')) 'Runner host does not configure the startup-error-log redirect before main.tscn is attached.'
+    Assert-InProcessCycleContract ($hostSource.Contains('ConfigureLegacyRunnerStartupErrorLogPath')) 'Runner host does not configure the startup-error-log redirect before main.tscn is attached.'
     Assert-InProcessCycleContract ($hostSource.Contains('emuera_startup_errors.log')) 'Runner host does not preserve the startup-error-log artifact name.'
-    Assert-InProcessCycleContract ($hostSource.Contains('ConfigureM0RunnerDefaultOutputLogPath')) 'Runner host does not configure the default-output-log redirect before main.tscn is attached.'
+    Assert-InProcessCycleContract ($hostSource.Contains('ConfigureLegacyRunnerDefaultOutputLogPath')) 'Runner host does not configure the default-output-log redirect before main.tscn is attached.'
     Assert-InProcessCycleContract ($hostSource.Contains('"emuera.log"')) 'Runner host does not preserve the default-output-log artifact name.'
 
     $runnerSource = [IO.File]::ReadAllText($runnerPath)
