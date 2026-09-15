@@ -94,14 +94,14 @@ try {
     Assert-InProcessCycleContract ($mainSource.Contains('if (!facade.IsBackendRunning)')) 'Runner-only restart does not use the facade-owned backend state.'
     Assert-InProcessCycleContract ($mainSource.Contains('Console.IsInProcess, which is false while')) 'Runner-only restart does not document the input-wait lifecycle distinction.'
     Assert-InProcessCycleContract ($mainSource.Contains('ResetCanarySessionState')) 'EmueraMain has no canary render-queue reset boundary.'
-    Assert-InProcessCycleContract ($mainSource.Contains('gpuQueue.TryDequeue')) 'EmueraMain reset does not drain stale GPU work.'
-    Assert-InProcessCycleContract ($mainSource.Contains('textRenderQueue.TryDequeue')) 'EmueraMain reset does not drain stale text work.'
-    Assert-InProcessCycleContract ($mainSource.Contains('ResetPendingRenderState')) 'EmueraMain reset does not complete an in-flight render request.'
     $gpuComponentSource = [IO.File]::ReadAllText($gpuComponentPath)
+    Assert-InProcessCycleContract ($gpuComponentSource.Contains('while (workQueue.TryDequeue(out var item))')) 'GPU component canary reset does not drain the stale GPU work queue.'
     Assert-InProcessCycleContract ($gpuComponentSource.Contains('ResetCanarySessionState')) 'GPU component has no canary queue reset boundary.'
     Assert-InProcessCycleContract ($gpuComponentSource.Contains('workQueue.TryDequeue')) 'GPU component reset does not drain stale work.'
     Assert-InProcessCycleContract ($gpuComponentSource.Contains('ResetPendingRenderState')) 'GPU component reset does not complete in-flight work.'
     $textComponentSource = [IO.File]::ReadAllText($textComponentPath)
+    Assert-InProcessCycleContract ($textComponentSource.Contains('while (renderQueue.TryDequeue(out var item))')) 'Text component canary reset does not drain the stale text work queue.'
+    Assert-InProcessCycleContract ($textComponentSource.Contains('slot.Item.Completed.Set();')) 'Text component canary reset does not release the in-flight render-slot waiters.'
     Assert-InProcessCycleContract ($textComponentSource.Contains('ResetCanarySessionState')) 'Text component has no canary queue reset boundary.'
     Assert-InProcessCycleContract ($textComponentSource.Contains('renderQueue.TryDequeue')) 'Text component reset does not drain stale work.'
     Assert-InProcessCycleContract ($textComponentSource.Contains('ResetPendingRenderState')) 'Text component reset does not complete in-flight work.'
@@ -180,7 +180,8 @@ try {
     $programSource = [IO.File]::ReadAllText($programPath)
     Assert-InProcessCycleContract ($programSource.Contains('ResetSessionState')) 'Program does not expose an explicit canary session-state reset boundary.'
     $programResetStart = $programSource.IndexOf('internal static void ResetSessionState()')
-    $programResetEnd = $programSource.IndexOf('/// <summary>', $programResetStart)
+    $programResetEnd = $programSource.IndexOf('internal static bool TryResolveLegacyRunnerDefaultOutputLogPath(', $programResetStart + 1)
+    Assert-InProcessCycleContract ($programResetStart -ge 0 -and $programResetEnd -gt $programResetStart) 'Program session-state reset boundary could not be isolated for the runner-owned sink checks.'
     $programResetSource = $programSource.Substring($programResetStart, $programResetEnd - $programResetStart)
     Assert-InProcessCycleContract (-not $programResetSource.Contains('m0RunnerStartupErrorLogPath')) 'Program session reset must preserve the runner-owned startup-error sink.'
     Assert-InProcessCycleContract (-not $programResetSource.Contains('m0RunnerDefaultOutputLogPath')) 'Program session reset must preserve the runner-owned default-output sink.'
@@ -205,7 +206,7 @@ try {
     $genericUtilsSource = [IO.File]::ReadAllText($genericUtilsPath)
     Assert-InProcessCycleContract ($genericUtilsSource.Contains('ResetCanarySessionState')) 'GenericUtils does not expose the bridge session reset boundary.'
     Assert-InProcessCycleContract ($genericUtilsSource.Contains('soundFallbackResolveCache.Clear()')) 'GenericUtils reset does not clear sound fallback paths.'
-    Assert-InProcessCycleContract ($genericUtilsSource.Contains('while (uiQueue.TryDequeue(out _))')) 'GenericUtils reset does not discard stale queued view work.'
+    Assert-InProcessCycleContract ($genericUtilsSource.Contains('while (uiQueueCount > 0)')) 'GenericUtils reset does not drain the stale UI ring buffer.'
     Assert-InProcessCycleContract ($genericUtilsSource.Contains('WinInput.ResetCanarySessionState()')) 'GenericUtils reset does not clear compatibility input state.'
     Assert-InProcessCycleContract ($genericUtilsSource.Contains('_saveLogOperationTrail.Clear()')) 'GenericUtils reset does not clear the session save-operation trail.'
 
@@ -262,7 +263,7 @@ try {
 
     $spriteManagerSource = [IO.File]::ReadAllText($spriteManagerPath)
     $forceClearStart = $spriteManagerSource.IndexOf('internal static void ForceClear()')
-    $forceClearEnd = $spriteManagerSource.IndexOf('static bool CanEvict', $forceClearStart)
+    $forceClearEnd = $spriteManagerSource.IndexOf('static bool CanEvict', [System.Math]::Max($forceClearStart, 0))
     Assert-InProcessCycleContract ($forceClearStart -ge 0 -and $forceClearEnd -gt $forceClearStart) 'SpriteManager full lifecycle cleanup boundary is missing.'
     $forceClearSource = $spriteManagerSource.Substring($forceClearStart, $forceClearEnd - $forceClearStart)
     Assert-InProcessCycleContract (-not $forceClearSource.Contains('GC.Collect()')) 'SpriteManager full cleanup must not rely on a forced garbage collection to hide retained ownership.'

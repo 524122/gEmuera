@@ -83,6 +83,10 @@ dotnet build 'D:\gemuera\gemuera-c#.csproj' -v minimal -nodeReuse:false -m:1
    会产生 35 个 CS0579 重复特性错误（报错文件看起来毫不相干）。
    **已于 2026-09-13 在 csproj 补上 `<Compile Remove="Build\**" />` 与 `<Compile Remove="reports\**" />` 修复**
    （并实测：往 `reports/` 放一个冲突 `.cs` 后构建仍 0 错误）。若你新建其它临时目录，仍需确认它是否被 glob 收录。
+4. **在 PowerShell 里给函数/别名起名，务必避开内置别名。** 别名解析优先于函数：
+   `function Rd { ... }` 会静默变成 `Remove-Item`（`rd` 是内置别名），一次审计脚本就此删掉 4 个仓库文件
+   （2026-09-15 实际发生，靠 `git restore --source=HEAD` 才还原）。危险名至少包括
+   `rd`/`del`/`rm`/`mv`/`cp`/`ls`/`cd`/`cat`/`sc`/`gc`。审计脚本直接内联 `[IO.File]::ReadAllText(...)`，不要包成短名函数。
 
 - Android 相关结论必须以 APK 实测为准；桌面端仅用于调试。
 

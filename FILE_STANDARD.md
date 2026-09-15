@@ -174,10 +174,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 
 `tools/legacy-runner/` 下 **7 个** `Test-*.ps1` 按精确路径钉扎源文件，`Test-InProcessSessionCycle.ps1` 把会话重置语义文本钉在 `GenericUtils.cs` 内。拆 `GenericUtils.cs`（日志桥/UI 队列/诊断导出域）时须同 PR 更新断言位置并重跑。
 
-**存量损坏与修复结果（2026-09-13 实测量化，已修机械部分）**：M0→LegacyRunner 改名时失联，**其中 6 个**（第 7 个 `Test-LegacyRunner.ps1` 本就无 M0 引用）在任何内容断言之前就 throw，
+> 这 7 个脚本**没有任何聚合入口**，且**不是同一类**：其中 6 个是纯文本契约测试
+> （`-ProjectRoot` 可选，无参可跑），第 7 个 `Test-LegacyRunner.ps1` 是**端到端 Godot 运行器**，
+> 其 `-GodotPath` 与 `-GameRoot` 是 `Mandatory = $true` ⇒ 不带参数跑它必然抛
+> `Cannot process command because of one or more missing mandatory parameters`。
+> 别把它那条 exit=1 当成契约失败（本轮本人踩过一次）。
+>
+> 即"拆了文件要重跑"目前靠人记得。改这些脚本后请手工逐个跑
+> `powershell -NoProfile -ExecutionPolicy Bypass -File tools\legacy-runner\Test-<X>.ps1 -ProjectRoot D:\gemuera`，
+> 或补一个聚合脚本（尚未有）。
+
+**存量损坏与修复结果（2026-09-13 实测量化 → 2026-09-15 全部修完）**：M0→LegacyRunner 改名时失联，**其中 6 个**（第 7 个 `Test-LegacyRunner.ps1` 本就无 M0 引用）在任何内容断言之前就 throw，
 （`In-process session-cycle contract file is missing: D:\gemuera\Scripts\M0\LegacyRunnerConfig.cs`，exit=1）。
-实测：**before = 6/6 红、断言执行数 0**；机械修复后 **5 个转绿（exit 0，其全部断言实跑通过）**，
+实测：**before = 6/6 红、断言执行数 0**；2026-09-13 机械修复后 **5 个转绿**，
 只剩 `Test-InProcessSessionCycle.ps1` 红——但它现在**执行了 221 次断言求值**，4 条失败各指名契约与符号，不再是"文件缺失"。
+**2026-09-15 补：第 6 个也已转绿（exit 0）**，那 4 条经查全部是 rename-only，见下节更正块。
 
 已修的三类机械问题：
 - **15 处陈旧路径** = 14 处 `Scripts\M0\X.cs` → `Scripts\LegacyRunner\X.cs`（8 个目标文件都真实存在：LegacyRunnerConfig / LegacyRunnerHost / LegacyRunnerReportWriter / LegacyDisplayObservation / LegacyInputReplayDriver / LegacySettlementTracker / LegacyTraceEvent / LegacyTraceRecorder）
@@ -185,20 +196,39 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 - **命名空间**：测试内嵌的 C# 探针写的是 `namespace gEmuera.M0` / `[gEmuera.M0.LegacyTrace]` 等；生产端已全部是 `gEmuera.LegacyRunner`。**C# 类型名本身没改**（`LegacyTraceRecorder`/`LegacySettlementTracker`/… 都还在），只改了命名空间。
 - **断言符号的纯改名**：`CreateM0RunnerSessionLaunchRegistry`→`CreateLegacyRunnerSessionLaunchRegistry`、`SwitchLegacySessionForM0RunnerAsync`→`…ForLegacyRunnerAsync`、`RestartLegacySessionForM0RunnerAsync`→…、`ConfigureM0Runner*`→`ConfigureLegacyRunner*`、`TryResolveM0RunnerDefaultOutputLogPath`→`TryResolveLegacyRunnerDefaultOutputLogPath`、`ConfigureM0RunnerDisplayBackend`→`ConfigureLegacyRunnerDisplayBackend`、`CaptureM0Screenshot`→`CaptureScreenshot`、`CaptureM0LegacyDisplayObservation`→`CaptureLegacyDisplayObservation`、`EnsureM0ViewportSize`→`EnsureLegacyViewportSize`、`CaptureM0SettlementFingerprint`→**`CaptureLegacySettlementFingerprint`**（不是 `CaptureSettlementFingerprint`——后者是另一个已存在的符号，映射错会让断言必红）。
 
-**仍然红的 4 条 = 真正的契约漂移（未修，也不该盲修）**，全在 `Test-InProcessSessionCycle.ps1`：
-`L97 gpuQueue.TryDequeue`、`L98 textRenderQueue.TryDequeue`、`L99 EmueraMain.cs 内 ResetPendingRenderState`、`L208 while (uiQueue.TryDequeue(out _))`。
-四者是同一件事：队列/排空职责已从 `EmueraMain` / `GenericUtils` 迁进 `EmueraGpuRenderComponent` / `EmueraTextRenderComponent`，
-且 `uiQueue` 改成了环形缓冲（`uiQueueRing[256]` / `uiQueueHead` / `uiQueueCount`，排空为 `while (uiQueueCount > 0)`）。
-**这些要修必须重新推导"现在应该断言什么"——属契约决策，需要领域判断，不要盲改。**（且 L97–99 似已被 L102/L103/L106/L107 覆盖，"删除 vs 重写"同样是决策。）
+~~**仍然红的 4 条 = 真正的契约漂移（未修，也不该盲修）**~~
 
-> ⚠️ **两处会误导后来者的陷阱（本轮真实踩到）**：
+> ✅ **2026-09-15 更正：上句定性被推翻，4 条已全部修好（该脚本现 exit 0）。**
+> 结论改为 **rename-only（含跨文件搬迁），业务契约本身没有变**。证据：旧实现
+> （`git show 'd24f656^:Scripts/EmueraMain.cs'` L69-83、`739b428^:Scripts/GenericUtils.cs` L438）
+> 与现行实现逐句同构，新代码只多不少（GPU 侧多了 `ResetColorMatrixMemoize()`，文本侧在途项由
+> 单槽加强为 4 槽，环形排空多了清槽/递减/归还信封池）。**"需要领域决策、不要盲改"这个判断是错的**——
+> 需要的是先导出新旧原文逐句对语义，确认"搬了"而不是"变了"，然后改指向 + 换语义锚点。
+> 另：`L97–99 已被 L102/L103/L106/L107 覆盖` 也不成立——`workQueue.TryDequeue` 子串在组件里
+> 还命中 CPU 兜底排空与 `_ExitTree` 排空，删掉真正的排空循环照样通过，是假覆盖。
+> 完整复盘见 `governance/evolution-log/2026-09-15-contract-assertion-repointing.md`。
+>
+> 修法（4 条）：`L97`→`$gpuComponentSource` 的 `while (workQueue.TryDequeue(out var item))`；
+> `L98`→`$textComponentSource` 的 `while (renderQueue.TryDequeue(out var item))`；
+> `L99`→`$textComponentSource` 的 `slot.Item.Completed.Set();`（全脚本首次覆盖"被阻塞的等待者会被唤醒"）；
+> `L208`→`while (uiQueueCount > 0)`（环形缓冲自己的非空谓词）。
+> 注意这三条改指**必须先上移读文件语句**——`$gpuComponentSource` 原在 L100 赋值，在被断言的 L97 之后。
+
+> ⚠️ **三处会误导后来者的陷阱（本轮真实踩到）**：
 > 1. **符号存在性搜索必须覆盖 `.ps1`/`.psm1`，不能只搜 `.cs`。** 本轮盘点时只搜了 `Scripts/`+`src/` 的 `.cs`，于是把 4 个**其实存在**的符号
 >    （`effective_backend_mismatch`、`summary.isolatedGameCopy`、`runtimeFixtureMutationChangeCounts`、`cross_aba_cycle_evidence_sample_invalid`——它们定义在 `tools/legacy-runner/Invoke-*.ps1` 里）误判为"已消失"。
 > 2. **不要"顺手修正"M0 字样。** `Program.cs` 的私有字段至今仍叫 `m0RunnerStartupErrorLogPath` / `m0RunnerDefaultOutputLogPath`，
 >    比较脚本里 `PreviousGate:M0` 也是**当前真实值**——把它们改成 LegacyRunner 反而会弄坏断言。
-> 3. 潜在缺陷（尚未修）：`Test-InProcessSessionCycle.ps1:184` 的 `Substring` 切片定界会算成 -1（`Program.cs` 的 `ResetSessionState()` 之后没有 `/// <summary>`），
->    目前被 L97 掩盖；一旦 L97–99 修好，它会以不透明的 .NET 异常中断，**并使 L185/L186 在空切片上真空通过**。
->    同类"真空通过"还有 `Test-LegacyDisplay.ps1:66`（`CanonicalizeDisplayBackend`）与 `Test-LegacySettlement.ps1:54`（`_settleFramesRemaining`）。
+> 3. 潜在缺陷（**2026-09-15 已修**）：`Test-InProcessSessionCycle.ps1` 的 `Substring` 切片定界会算成 -1
+>    （`Program.cs` 的 `ResetSessionState()` 之后没有 `/// <summary>`——全文 5 处 `/// <summary>`
+>    只在 L60/254/277/310/351，全在 L415 之前），当时被 L97 掩盖。
+>    ✅ **更正上文曾写的"并使 L185/L186 在空切片上真空通过"：不成立。** 实测 `IndexOf` 返回 -1 时
+>    长度为负 ⇒ `Substring` **必抛**（`Length cannot be less than zero`），L185/L186 根本不会执行。
+>    真实危害是**不可诊断的崩溃 + 吞掉它之后的全部诊断**（该行位置早于 GenericUtils 段，
+>    L209 的修复结果永远观测不到），不是真空通过。
+>    修法：先算两个 `IndexOf` → 先断言 `$programResetEnd -gt $programResetStart` → 最后才 `Substring`，
+>    且第二锚点起点写 `$programResetStart + 1`（锚点缺失时 startIndex=0 合法、不再抛）。
+>    同类"真空通过"还有 `Test-LegacyDisplay.ps1:66`（`CanonicalizeDisplayBackend`）与 `Test-LegacySettlement.ps1:54`（`_settleFramesRemaining`）——**这两处仍未复核**。
 
 ### 6.5 tools 工程显式源链接
 
@@ -256,7 +286,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 - 拆了文件但跨域调用反而增多（分片应沿依赖方向切，不是把纠缠切成两半）；
 - 跳过 §6 检查直接拆分（六类钉扎机制任何一类都可能被命中）。
 
-## 附录 A：>2000 行文件快照（2026-09-13，字节 LF 口径）
+## 附录 A：>2000 行文件快照（2026-09-15，字节 LF 口径）
+
+> 本清单是**行数 >2000 的"在册监控项"**，不是"尚待清理的欠债"——判定归属见 §2（既有 >2000 行文件"只减不增"，
+> 触碰时按功能域顺手拆分，不单独开重构 PR）。其中 `VariableEvaluator.cs` 已确认**有结构地板、降不到 2000 以下**（见下）。
 
 | 文件 | 行数 |
 | --- | --- |
@@ -264,6 +297,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 | `Scripts/Emuera/GameData/Function/Creator.Method.cs` | 6282 |
 | `Scripts/Emuera/GameData/Variable/VariableEvaluator.cs` | 3796 |
 | `Scripts/Emuera/GameData/Variable/VariableToken.cs` | 3524 |
+
+> `VariableEvaluator.cs` 属 §6 钉扎最重的一类：`tools/save-baseline/legacy-save-baseline.json`
+> 对它有 SHA-256 + 字节长度钉扎，且 8 个受钉扎的方法符号全部落在 1129 行的 `#region File操作` 内
+> （该区域被钉死不可移动），结构地板约 2057 行 ⇒ **它不可能降到 2000 以下，不要把它当"待清理项"**。
 
 分布：Scripts+src 共 276 个 .cs；>1000 行 33 个；>2000 行 4 个；>4000 行 2 个。
 
