@@ -251,6 +251,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 
 `.codegraph/` 是本机可再生缓存（非钉扎），但大拆分后旧索引会系统性误导检索。多文件移动/拆分的 PR 合入后重建索引（或注明索引需按需重建）。
 
+### 6.8 缩进与 `.editorconfig`（会反复触发"文件被莫名修改"）
+
+`.editorconfig` 是 `root = true`，其中 `[Scripts/*.cs]`、`[Scripts/Emuera/**.cs]`、`[Scripts/uEmuera/**.cs]`、`[addons/**.cs]` 都是
+`indent_style = tab`；只有 `src/Core/**.cs` 与 `tools/core-contracts/**.cs` 是 `indent_style = space`。
+
+**症状**：提交进仓库的文件若不符合该规定，编辑器（开了 format-on-save）**每次保存都会自动改写它们**，
+表现为"工作区莫名多出几个已修改文件、内容只有缩进差异"。实测 2026-09-15 同一批三个文件被改了两轮
+（时间戳 `17:27:02`、`19:00:10`）。`git diff --ignore-all-space` 输出为空即可判定属此类。
+
+**不要用"字符比例"机械换算**（如 4 空格→1 tab）：同文件内相邻行常常已经是 1 tab/级
+（例：`Scripts/Emuera/Content/ConstImage.cs` 的 namespace 内类声明是 1 tab，紧邻注释是 8 空格=2 级）。
+正确口径是**按层数**：`level = floor(前导空格数 / 4)`，输出 `level` 个 tab。
+
+**2026-09-15 已完成**：`GenericUtils.DiagnosticsLogging.cs`、`SpriteDebugNotifier.cs`、`SpriteDebugViewer.cs`
+三个文件已转为 tab（纯空白改动，`insertions == deletions`，构建 0 错误）。
+
+**仍未处理（量已实测，别低估）**：`Scripts/` 下还有 **50 个纯 space 文件**（缩进宽度同为 4，可机械转换）
+与 **77 个 tab/space 混杂文件**（如 `Creator.Method.cs` 4879 tab + 1071 space、
+`VariableEvaluator.cs` 3151 tab + 360 space）——混杂那批必须逐段判断以谁为准。
+另有 **102 个文件只有少量 width=1 的 space 行**，那是参数折行的**对齐续行**，转 tab 会破坏可读性，**不应**处理。
+
+> 属格式化的改动**必须单独一个 PR**（本仓 §8 禁止混入无关格式化）。因拆分产生的分片在旧 base 上不存在，
+> 这类 PR 的 base 要取**产生该分片的那个分支**（如 `feature`），否则 diff 会把整个拆分 PR 一起算进来。
+
 ## 7. 验证与合规清单（按范围分流）
 
 拆分 PR 完成前逐项确认（通用项 + 按文件所属范围的选择项）：
