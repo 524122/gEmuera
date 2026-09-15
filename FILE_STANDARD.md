@@ -183,6 +183,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 > 即"拆了文件要重跑"目前靠人记得。改这些脚本后请手工逐个跑
 > `powershell -NoProfile -ExecutionPolicy Bypass -File tools\legacy-runner\Test-<X>.ps1 -ProjectRoot D:\gemuera`，
 > 或补一个聚合脚本（尚未有）。
+>
+> 改了这些脚本要提 PR 时：**base 是 `origin/feature`（本 fork 的集成分支），不是 `upstream/dev`**——见 `AGENTS.md` 协作规则。
 
 **存量损坏与修复结果（2026-09-13 实测量化 → 2026-09-15 全部修完）**：M0→LegacyRunner 改名时失联，**其中 6 个**（第 7 个 `Test-LegacyRunner.ps1` 本就无 M0 引用）在任何内容断言之前就 throw，
 （`In-process session-cycle contract file is missing: D:\gemuera\Scripts\M0\LegacyRunnerConfig.cs`，exit=1）。

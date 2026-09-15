@@ -157,10 +157,11 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
 
 ### GitHub
 
-- 仓库：`https://github.com/wwwXiaoHan17/gEmuera`，默认协作分支 `dev`。
-- 每个任务从最新 `dev` 新建分支：`ai/<任务简述>` 或 `fix/<问题简述>`。
-- 不直接向 `dev` 或主分支提交代码；完成任务后提 PR 指向 `dev`，PR 标题与说明用中文。
-- 每个 PR 只解决一个明确问题，禁止混入无关重构、格式化和资源变更。
+- 仓库：`upstream` = `https://github.com/wwwXiaoHan17/gEmuera`（上游），`origin` = `https://github.com/524122/gEmuera`（本机开发用的 fork）。
+- **PR 目标分支 = 本 fork 的 `feature` 分支**（`git push origin HEAD:feature`）。它既是集成分支，也是 PR base。
+- ⚠️ **不要按上游习惯把 PR 提到 `upstream/dev`**。上游文档里那句"默认协作分支 `dev`、提 PR 指向 `dev`"指的是上游贡献者流程；本机的工作流是**在自己 fork 里积攒**，等稳定了再由仓库所有者决定何时、以何种方式流向 `upstream`。跨仓库 PR（`origin/feature` → `upstream/dev`）已被明确排除。
+- 新建远端 PR 前先确认 base 是 `origin/feature`；推送用 `git push origin HEAD:feature`（本地分支名与远端 `feature` 不同名，裸 `git push` 会另建分支）。
+- PR 标题与说明用中文。每个 PR 只解决一个明确问题，禁止混入无关重构、格式化和资源变更。
 - 禁止擅自强制推送、硬重置、删除远端分支、回滚他人提交。
 
 ## 常用文件入口
