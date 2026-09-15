@@ -26,6 +26,11 @@
   - **紧急 hotfix 豁免**：标注 `[hotfix]` 的 PR 可放宽到净增 ≤ 100 行，但 PR 描述必须登记"待拆分跟进项"，由后续触碰迁移偿还。
   - 小功能域（不足 200 行、切不出去）的新增代码写入主文件时，按上述 50 行净增额度执行，不强迫为几行代码建分片（避免与 §5"≥200 行才值得拆"矛盾）。
 - 行数统计口径：按字节 LF 计数。注意 PowerShell `Get-Content` 对大号无 BOM UTF-8 文件会系统性少算（实测 9116 行被算成 8799），附录 A 的再生成命令见 §2.1。
+- **⚠️ 行号索引同样不能用 `Get-Content`（2026-09-13 补）**：它不只是少算行数，还会**整体错位行号**。
+  后果比少算严重得多——**按行号区间做剪切/统计的脚本会静默算错区间**，不报错、结果错。
+  实测两例：`RuntimeDiagnosticsPanel.cs` 2138→`Get-Content` 记 2068（且"575–577 行"落在完全无关的成员体中部）、
+  `FirstWindow.cs` 2050→1980。某次侦察因此把 `AddCheck` 计数算成 140（实为 139）、`BeginTab` 算成 4（实为 8）。
+  **规则**：行数用 `ReadAllBytes` 数 `0x0A`；行号索引用 `[IO.File]::ReadAllLines($p,[Text.Encoding]::UTF8)`。
 
 ### 2.1 行数清单再生成（待拆状态的权威判定）
 
@@ -115,9 +120,26 @@ rg "res://Scripts" assets/scenes -g "*.tscn"; rg "preload" test -g "*.gd"
 
 ### 6.1 方言证据链（dialect-inventory）
 
-- **钉扎以文件为准，不凭记忆**：`tools/dialect-inventory/dialect-classification.json` 的全部 `fileRegex`（marker 分类规则）+ `dialect-name-lookup-contract.json` 与 `dialect-profile-selection.json` 的 `sourceFiles`。哈希是**文件字节级**的：拆分任何被命中的文件都会改变 DIA-01/02 哈希，必须同 PR 重新生成快照。
+- **钉扎以文件为准，不凭记忆**：`tools/dialect-inventory/dialect-classification.json` 的全部 `fileRegex`（marker 分类规则）+ `dialect-name-lookup-contract.json` 与 `dialect-profile-selection.json` 的 `sourceFiles`。
+- **⚠️ 2026-09-13 实测纠正：marker 是「标识符正则」，不是「文件分类」**（原文此处有误，曾据此白劝退两个低风险目标）。
+  机制在 `DialectInventory.psm1:5-16`，共 **10 条**正则（如 `profile.is-snake` → `\bIsSnakeProfile\b`）。
+  分类器**逐行扫 `Scripts/**/*.cs`，只有某行真的命中某标识符时**才去查 `fileRegex`（`:230-232`）；
+  命中而查不到规则才抛 `Unmapped dialect branch hit`（`:58-61`），**且要求恰好命中 1 条规则**（0 条→throw，>1 条→ambiguous throw）。
+  推论（都已实测）：
+  - **文件里没有那个标识符 → 规则永不参与判定**，是「声明了但惰性」的条目，拆它**不需要动 `dialect-classification.json`**。
+  - 哈希集（`$hashedSources`）**只收「真的命中过 marker 的文件」+「含注册行的 sourceFile」**（`:248`、`:257`），
+    所以**不是**"拆分任何被命中的文件都会改变 DIA-01/02 哈希"——没进哈希集的文件，拆了哈希不动。
+  - **实测**：`Scripts/EmueraContent.cs`、`Scripts/Emuera/GameView/EmueraConsole.cs`、`Creator.Method.cs` 的 10 条 marker 命中数**全为 0**；
+    它们对应的那些 `fileRegex` 规则都是惰性条目 → 拆这三个文件**无需改方言目录**。（`EmueraContent.cs` 有 3 条规则命中它，容易被误读成"marker 分类文件"。）
+  - 反例（真的要小心的是这个）：`Scripts/FirstWindow.cs` 实测 marker 命中 **36 处/35 行**，且它同时被
+    `dialect-profile-selection.json` 以**整文件 SHA-256** 钉扎 → 拆它必须同 PR 重算该 sha256。
+    本仓已在 2026-09-13 拆分中处理过一次（只重钉了 `FirstWindow.cs` 自己那条，另两条既有漂移未动）。
 - **`FunctionIdentifier.cs` 与 `Creator.cs` 禁止把注册行/注册方法移入 partial**：生成器 `Get-CSharpBlock` 有单声明约束，运行时隔离校验靠文本正则钉在这两个文件上，注册表行一旦移动，生成直接 `exit 1`。这两个文件只允许原地修改。
-- **新分片不得包含方言 branch marker 代码**：新路径文件命中 marker 而无 `fileRegex` 规则会抛 `Unmapped dialect branch hit`。功能域确实含 marker 代码时，先更新 `dialect-classification.json` 的 `fileRegex` 并重跑门禁。**注意 `Scripts/EmueraContent.cs` 本身就是 marker 分类文件**（多条精确规则命中）——拆它几乎必然要同 PR 扩展 fileRegex。
+  - 补充：注册行在同目录**其它文件**里也不存在——实测全仓 241 处 `addFunction(FunctionCode.` **全部**在 `FunctionIdentifier.cs`；表达式注册（`["KEY"] =`）全在 `Creator.cs`。所以拆 `Instraction.Child.cs`（同属 `partial class FunctionIdentifier`）是安全的，只要不搬注册块。
+- **新分片不得包含方言 branch marker 代码**：新路径文件**真的命中** marker 而无 `fileRegex` 规则会抛 `Unmapped dialect branch hit`。
+  但**先确认那个功能域里到底有没有 marker 标识符**（见本节第一条纠正：命中判定是逐行标识符正则，不是文件分类）。
+  实测 `EmueraContent.cs` / `EmueraConsole.cs` / `Creator.Method.cs` 迁出的分片 marker 命中均为 0，**无需新增 `fileRegex`**。
+  确实含 marker 代码时，才需要更新 `dialect-classification.json` 的 `fileRegex` 并重跑门禁。
 - 特例：`Creator.Method*.cs` 当前不在注册快照哈希集内（仅影响停摆未运行的 DIA-03~06 链），拆它不需要再钉扎注册快照。
 - **再钉扎流程**（拆了钉扎文件时）：
 
@@ -130,7 +152,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 ```
 
 新快照 JSON 与源码变更**同一 PR** 提交。先例：`governance/evolution-log/2026-08-22-erafl-dialect-manifest.md`。
-**存量红纪律**：这些门禁当前存在与拆分无关的既有失败（如 `Test-DialectRegistrySnapshot` 的 347/83 过期计数断言、DIA-01 的未裁决项）。正确做法是拆分前先在干净 `dev` 基线跑一次门禁并记录既有失败清单，PR 中只需证明**失败集合相对基线无新增**。
+**存量红纪律**：这些门禁当前存在与拆分无关的既有失败。正确做法是拆分前先在干净基线跑一次门禁并记录既有失败清单，PR 中只需证明**失败集合相对基线无新增**。
+> **2026-09-13 本机实测基线**（原文此处举例的"`Test-DialectRegistrySnapshot` 347/83 过期计数断言"已过时——该门禁实测**通过**）：
+> - **通过**：`Test-DialectInventory.ps1`、`Test-DialectRegistrySnapshot.ps1`、`Test-DialectSignatureInventory.ps1`。
+>   注意前两者都是**跑合成临时工程**（`$syntheticRoot`）或只断言投影性质，**不比对冻结哈希**，所以拆分真实文件不会打破它们。
+> - **失败（13 个）**：其余 `Test-Dialect*.ps1`，主因是 `docs/NewFrameworkDesign/generated/` 下**生成物缺失**
+>   （`dialect-inventory.json`、`dialect-plan-preflight.json`、`dialect-policy-surface.json` 等，该目录实测只有 `dialect-registry-snapshots.json`），
+>   另有 DIA-03 的 `sourceDescriptorSetHash` 漂移。
+> - **无法直接运行（2 个）**：`Test-DialectOwnershipEvidence.ps1` 需 `-UpstreamProjectRoot`、`Test-LegacyDialectUpstreamDiff.ps1` 需 `-V24ProjectRoot -SnakeProjectRoot`。
+> - 完整清单见 `reports/baseline-gates.md`（该目录被 gitignore）与 `governance/evolution-log/2026-09-13-*.md`。
 
 ### 6.2 snake-alignment 表面钉扎
 
@@ -142,7 +172,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/dialect-inventory/Test
 
 ### 6.4 legacy-runner 契约测试
 
-`tools/legacy-runner/` 下 6 个 `Test-*.ps1` 按精确路径钉扎源文件，`Test-InProcessSessionCycle.ps1` 把会话重置语义文本钉在 `GenericUtils.cs` 内。拆 `GenericUtils.cs`（日志桥/UI 队列/诊断导出域）时须同 PR 更新断言位置并重跑。**已知存量损坏**：部分测试仍引用已改名的 `Scripts\M0\*` 与 `EmueraContent.M0.cs`（M0→LegacyRunner 改名时失联，运行即 throw）——这是路径钉扎机制静默损坏的实证，遇到时先修测试路径再做拆分。
+`tools/legacy-runner/` 下 6 个 `Test-*.ps1` 按精确路径钉扎源文件，`Test-InProcessSessionCycle.ps1` 把会话重置语义文本钉在 `GenericUtils.cs` 内。拆 `GenericUtils.cs`（日志桥/UI 队列/诊断导出域）时须同 PR 更新断言位置并重跑。
+**已知存量损坏（2026-09-13 实测量化）**：M0→LegacyRunner 改名时失联，全部 6 个测试**跑不起来**——在任何内容断言之前就 throw
+（`In-process session-cycle contract file is missing: D:\gemuera\Scripts\M0\LegacyRunnerConfig.cs`，exit=1）。
+精确盘点：
+- **14 处陈旧路径**：13 处 `Scripts\M0\X.cs` 应映射到 `Scripts\LegacyRunner\X.cs`（8 个文件都真实存在：LegacyRunnerConfig / LegacyRunnerHost / LegacyRunnerReportWriter / LegacyDisplayObservation / LegacyInputReplayDriver / LegacySettlementTracker / LegacyTraceEvent / LegacyTraceRecorder）；
+  第 14 处 `Test-LegacySettlement.ps1:17` 的 `Scripts\EmueraContent.M0.cs` 应映射到 `Scripts\EmueraContent.LegacyRunner.cs`（`EmueraContent.M0.cs` 已不存在，仓库里还留着一个孤儿 `EmueraContent.M0.cs.uid`）。
+- **命名空间**：测试内嵌的 C# 探针写的是 `namespace gEmuera.M0` / `[gEmuera.M0.LegacyTrace]` 等；生产代码已全部迁到 `gEmuera.LegacyRunner`（`Scripts/LegacyRunner/*.cs` 9 个文件实测一致）。**C# 类型名本身没改**（`LegacyTraceRecorder`/`LegacySettlementTracker`/… 都还在），只改了命名空间。
+- **断言引用的 105 个符号里，78 个存在、25 个缺失**，缺失的分两类：
+  - **~11 个是纯改名，可机械映射且已在源码中验证对应名存在**：`CreateM0RunnerSessionLaunchRegistry`→`CreateLegacyRunnerSessionLaunchRegistry`、
+    `SwitchLegacySessionForM0RunnerAsync`→`SwitchLegacySessionForLegacyRunnerAsync`、`RestartLegacySessionForM0RunnerAsync`→…、`ConfigureM0Runner*`→`ConfigureLegacyRunner*`、
+    `TryResolveM0RunnerDefaultOutputLogPath`→`TryResolveLegacyRunnerDefaultOutputLogPath`、`CaptureM0Screenshot`→`CaptureScreenshot`、
+    `CaptureM0LegacyDisplayObservation`→`CaptureLegacyDisplayObservation`、`CaptureM0SettlementFingerprint`→`CaptureSettlementFingerprint`。
+  - **~9 个在生产源码里找不到任何对应物**（属**接口真实演进**，不是改名）：`EnsureM0ViewportSize`、`CanonicalizeDisplayBackend`、`effective_backend_mismatch`、
+    `_settleFramesRemaining`、`gpuQueue.TryDequeue`、`textRenderQueue.TryDequeue`（队列已改环形缓冲排空，同 `uiQueue` 的情形）、
+    `cross_aba_cycle_evidence_sample_invalid`、`summary.isolatedGameCopy`、`runtimeFixtureMutationChangeCounts`。
+    **这 9 条要修必须重新推导"现在应该断言什么"——那是契约决策，不是机械改名，需要领域判断，不要盲改。**
+> 结论：把路径+命名空间+11 个改名修好后，测试会**真正执行**，失败信息也会变成"哪条契约变了"而不是"文件缺失"这样的误导性首行。
+> 但**不可能仅靠改名让这套门禁变绿**——9 条真漂移必须有人定契约。遇到时先修机械部分、再把真漂移清单化，不要假装绿了。
 
 ### 6.5 tools 工程显式源链接
 

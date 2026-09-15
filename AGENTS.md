@@ -49,13 +49,38 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
 
 任务结束后，删除冗余的临时测试文件，避免造成垃圾文件。
 
-## 构建与验证（实测经验，2026-08）
+## 构建与验证（实测经验，2026-08；2026-09-13 补充本机实测）
 
-- **C# 编译/构建用 Godot mono**：`Godot_v4.7-stable_mono_win64_console.exe --headless
-  --path <项目根> --build-solutions --quit`。不要直接 `dotnet build`
-  （Godot.NET.Sdk 依赖 Godot 环境解析，命令行下常因 SDK resolver/证书问题失败）。
+- **C# 编译/构建首选 Godot mono**：`Godot_v4.7-stable_mono_win64_console.exe --headless
+  --path <项目根> --build-solutions --quit`。
 - **构建成功的判定**：检查 `.godot/mono/temp/bin/Debug/gemuera-c#.dll` 时间戳已更新，
   不要等进程退出——无头/受限环境下 Godot 可能卡在收尾阶段，但编译早已完成。
+
+### 2026-09-13 实测：Godot 那条路在本机**不可用**，用下面这条（已验证）
+
+```
+dotnet build 'D:\gemuera\gemuera-c#.csproj' -v minimal -nodeReuse:false -m:1
+```
+
+- **为什么 Godot 那条会失败**：安装目录 `D:\Godot_v4.7-stable_mono_win64\...\` 下
+  **没有任何 MSBuild 程序集**（只有 `GodotSharp\Tools\Microsoft.Build.Locator.dll`），
+  GodotTools 加载 `Microsoft.Build.Framework, Version=15.1.0.0` 时抛 `FileNotFoundException`，
+  构建回调失败并 abort（`Command line option --build-solutions was passed, but the build callback failed`）。
+- **判定口径同样适用**：输出里 `error CS`/`error MSB` 计数为 0 **且**上述 DLL 时间戳更新即可判成功，
+  不必等进程退出。原文"不要直接 dotnet build"的理由（SDK resolver/证书失败）在**本机不成立**——
+  restore 与编译都能跑通。
+
+#### 这条路上有三个会浪费你半小时的陷阱
+
+1. **必须带 `-nodeReuse:false -m:1`。** 复用陈旧 MSBuild 工作节点时会**静默失败**：
+   输出写"生成失败"却同时写"0 个错误"，且不产出 DLL。遇到不明失败先跑 `dotnet build-server shutdown`。
+2. **不要用 `--no-incremental`。** 它会先清空输出，一旦后续步骤失败就**连 DLL 一起丢掉**（实测踩过，需重建）。
+3. **`MSB3491 ... Access to the path ... is denied`**：`src/Core/obj|bin` 下可能有属于**其他 Agent harness
+   沙箱身份**的历史残留文件（实测遇到过 `DESKTOP-MG17PVH\CodexSandboxOffline`），当前令牌无法覆盖/删除。
+   处理：把 `obj`/`bin` **目录改名**后移出项目（它们带能力 ACE，允许改名）。
+   ⚠️ **不要移进 `Build/`**——`gemuera-c#.csproj` 的默认 glob **不排除** `Build/**`，放那里会把残留的
+   `AssemblyInfo.cs` 当源码编进去，产生 35 个 CS0579 重复特性错误。用 `.godot/` 或 `artifacts/`（两者都在排除列表内）。
+
 - Android 相关结论必须以 APK 实测为准；桌面端仅用于调试。
 
 ## 架构速览
