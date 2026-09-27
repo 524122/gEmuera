@@ -2,6 +2,9 @@
   <PropertyGroup>
     <!-- Godot desktop uses net8.0; Android and local validation use the repository-supported net9.0 SDK. -->
     <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <!-- Android 导出图整体走 net9.0（Emuera.csproj 同规则）。Core 若不跟随，其 net8.0 目标
+         会去引用 Android 下 net9.0-only 的 Emuera 契约程序集 → NU1201，导出 .NET 构建失败。 -->
+    <TargetFrameworks Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFrameworks>
     <RootNamespace>GEmuera.Core</RootNamespace>
     <AssemblyName>GEmuera.Core</AssemblyName>
     <Nullable>enable</Nullable>
