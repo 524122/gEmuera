@@ -79,7 +79,9 @@
        从 SQLitePCLRaw 的 NuGet 缓存 .aar 中自愈提取 jni/arm64-v8a/libe_sqlite3.so。 -->
   <Target Name="RestoreAndroidSqliteNativeLibrary" BeforeTargets="Build" Condition=" '$(GodotTargetPlatform)' == 'android' And !Exists('export\NativeLibs\android\arm64-v8a\libe_sqlite3.so') ">
     <ItemGroup>
-      <_SqliteAar Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3.android\**\lib\net6.0-android31.0\SQLitePCLRaw.lib.e_sqlite3.android.aar" />
+      <!-- 版本与上方 PackageDownload 的 [2.1.12] 保持一致：通配 ** 会匹配缓存中的多个历史版本，
+           拼成 ';' 连接的多路径后 File.Copy 静默失败（2026-09-28 实证：2.1.12 与 2.1.6 并存）。 -->
+      <_SqliteAar Include="$(NuGetPackageRoot)sqlitepclraw.lib.e_sqlite3.android\2.1.12\lib\net6.0-android31.0\SQLitePCLRaw.lib.e_sqlite3.android.aar" />
     </ItemGroup>
     <PropertyGroup>
       <_SqliteAarPath>@(_SqliteAar->'%(FullPath)', ';')</_SqliteAarPath>
