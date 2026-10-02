@@ -144,7 +144,9 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 ### 5.4 组装与会话绑定
 
-包贡献折叠进会话计划（等价今日 `BuiltInDialectCatalog.CreateLegacySessionPlan` 的产物类型 `CompatibilityPlan`，**plan 哈希链语义不变**，`DialectRuntime.cs:432-471`）；每个启用包的程序集哈希 + manifest 规范化内容进 plan 哈希（诊断可复现：同包内容同哈希）。会话生命周期遵守现状：一个 legacy 会话一个计划，`Program.ConfigureCompatibilityPlan` 拒绝换绑不同哈希（`Scripts/Emuera/Program.cs:325-341`）；停机后 Unload ALC 再允许下一局。
+包贡献折叠进会话计划（等价今日 `BuiltInDialectCatalog.CreateLegacySessionPlan` 的产物类型 `CompatibilityPlan`，**plan 哈希链语义不变**，`DialectRuntime.cs:432-471`）；每个启用包的程序集哈希 + manifest 规范化内容进 plan 哈希（诊断可复现：同包内容同哈希）。会话生命周期遵守现状：一个 legacy 会话一个计划，`Program.ConfigureCompatibilityPlan` 拒绝换绑不同哈希（`Scripts/Emuera/Program.cs`）。
+
+**会话持有 pack set 与确定性 Unload（2026-10-03 落地）**：`CompatPackHost.ConfigureForLaunch` 返回 `CompatPackLaunchResult(Plan, Session)`——成功路径把已加载句柄集合包装为 `CompatPackSession`（`src/Core/Compatibility/Packs/CompatPackSession.cs`，构造即接管句柄所有权，调用方不得再自行 UnloadAll），无包/失败路径 `Session` 为 null。`Program.ConfigureCompatibilityPlan(plan, packSession)` 把租约与计划同源绑定（`Program.CurrentCompatPackSession` 可观测）；`ClearCompatibilityPlan`/`ResetSessionState` 先 Dispose session（幂等：`Interlocked.Exchange` 保证对每个租约恰好一次 Unload，日志 `[LOAD] CompatPack session unloaded: count=N`）再清 plan/profile——Back/Restart/ERB 重启/退出路径无条件走到这里，包 ALC 的存活不再依赖 GC 猜测。配置装载后的同哈希重绑（null session）保留既有租约，避免启动中途卸载 ALC。`CompatPackHandle` 与 `CompatPackSet` 实现 `ICompatPackLease`（`CompatPackHandle.Unload`/`CompatPackSet.UnloadAll` 语义不变；集合侧接口方法 `Unload` = `UnloadAll`）。v2 代码贡献（ALC/委托存活）以此为所有权基座。
 
 ## 6. 信任边界
 
@@ -203,7 +205,7 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 3. **对账与降级加固**：§5.3(2) 的引擎 handler 对账已落地，基准 = Core 生成清单的六 profile 并集（不可用 funcDic 静态构造器：其比较器初始化读 Config.ICVariable，校验期早于配置装载，提前触发会把比较器钉在默认值）；组装段回放全程 try/catch（异常→组装错误→拒载，不再依赖宿主顶层兜底）；Compose 投影注入点异常降级为"当前 profile 纯基线 + 无包白名单"而非炸启动；ConfigureForLaunch 顶层兜底 + 零包/失败/清理路径全量复位跨会话静态投影（计划解绑联动复位）。
 4. **GameBase.csv 编码**：身份比对读取链 = BOM → 严格 UTF-8 → Shift-JIS 932（与 GodotHost GameContentProbe 同源；EraStreamReader 在本移植被钉为 UTF-8 故不可复用），SJIS 日文游戏的 gameIdentity 绑定不再必然失配。
 5. **`targetEngineApi` v1 语义**：单整数精确匹配（见 §9 改写）；原"次版本只增不改"承诺推迟 v2。
-6. **ALC 生命周期 v1 现状**：成功路径包 ALC 保持到进程结束（§5.4"停机后 Unload"推迟到宿主接线深化；同进程重启会话会为新会话重载新 ALC，旧实例按 v1 策略滞留）。ALC 解析面原状（v1.1 时点）：未匹配名落回默认解析，包技术上可绑定宿主已加载程序集——信任边界 §6 的"可见面"是约定而非机制强制。**2026-10-03 勘误增补：该回落已硬化为机制**——允许清单（契约程序集 + BCL + 包目录依赖）之外的绑定一律 `FileLoadException` 拒载（fail-closed），`GEmuera.Core` 显式分支与默认解析回落均已删除；拒载错误含被拒绝的程序集名与最内层异常（`CompatPackLoader.DescribeException` 保留 TargetInvocationException 包裹下的 FileLoadException 诊断）。实测证据见 §5.2 与 `CompatPackAlcIsolationTests`。规则 3（包目录 `<name>.dll`）语义不变：包目录内的宿主程序集文件按"包自带依赖"加载为该 ALC 私有实例，类型不与宿主统一，不构成宿主内部可变静态的泄露通道。
+6. **ALC 生命周期 v1 现状**：成功路径包 ALC 保持到进程结束（§5.4"停机后 Unload"推迟到宿主接线深化；同进程重启会话会为新会话重载新 ALC，旧实例按 v1 策略滞留）。ALC 解析面原状（v1.1 时点）：未匹配名落回默认解析，包技术上可绑定宿主已加载程序集——信任边界 §6 的"可见面"是约定而非机制强制。**2026-10-03 勘误增补：该回落已硬化为机制**——允许清单（契约程序集 + BCL + 包目录依赖）之外的绑定一律 `FileLoadException` 拒载（fail-closed），`GEmuera.Core` 显式分支与默认解析回落均已删除；拒载错误含被拒绝的程序集名与最内层异常（`CompatPackLoader.DescribeException` 保留 TargetInvocationException 包裹下的 FileLoadException 诊断）。实测证据见 §5.2 与 `CompatPackAlcIsolationTests`。规则 3（包目录 `<name>.dll`）语义不变：包目录内的宿主程序集文件按"包自带依赖"加载为该 ALC 私有实例，类型不与宿主统一，不构成宿主内部可变静态的泄露通道。**2026-10-03 二次增补：本条的"ALC 滞留到进程结束"缓释已关闭**——成功加载的句柄集合现由会话绑定对象 `CompatPackSession` 持有（§5.4），会话 Stop/Restart/退出清理路径（`Program.ClearCompatibilityPlan`/`ResetSessionState`）先 Dispose session 再清计划绑定，对每个租约幂等恰好一次 Unload；同进程重启不再滞留旧 ALC。
 7. **capability 消费面分裂（v1 已知限制）**：capability 词汇表 = 六 profile 并集；消费面有两类——策略类 capability（ContinuesAfterStartupFault 等）由 Plan.CapabilityIds 直读即生效，方言策略类只在对应模块 Apply 时激活。同一 id 可能"部分生效"；包作者以 §3.3 capability id 清单为准，分裂在 v2 统一。
 8. **启动器包选择（§10.3 落地）**：扫描候选 + 勾选 + 手动路径合并（存储格式不变）；恢复选中即回填编辑框（程序化 Select 不触发信号曾导致"启动即清空已存选择"）；相对路径在启动器侧按启动器根绝对化后才入存储/env。
 
@@ -280,6 +282,12 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
   `gemuera-c#.csproj` Release 构建 0 错误。
 - 新增 `tests/xUnitTest/DataOnlyCompatPackFixture`：只有内嵌 manifest、无入口类的真实
   程序集，端到端证明 manifest-only 加载路径。
+- **2026-10-03 增补（会话持有 pack set 与确定性 Unload，计划 E2-R2）**：`CompatPackSession`
+  落地（§5.4）——`CompatPackHandle`/`CompatPackSet` 实现 `ICompatPackLease`；
+  `ConfigureForLaunch` 返回 `CompatPackLaunchResult(Plan, Session)`；`Program` 持有租约并在
+  `ClearCompatibilityPlan`/`ResetSessionState` 先 Dispose（幂等恰好一次 Unload）再清
+  plan/profile。验收：GEmuera.Core.Tests 104（103 + `Dispose_UnloadsEachLeaseOnceIdempotently`）、
+  EmueraFacade.Tests 35、三冒烟全绿、宿主 Release 构建 0 错误。
 
 ### 13.8 社区最小数据包示例
 

@@ -156,17 +156,26 @@ internal static CompatPackValidationContext BuildValidationContext(string baseli
 			return ReadEnabledPackPaths().Count > 0;
 		}
 
-		/// <summary>
-		/// 启动期配置：无包原样返回基线；有包则加载→身份比对→组装。任何失败回退基线
-		/// （降级不变量）并记错误日志。v1 数据包不参与运行期执行，成功路径不保留
-		/// 包实例/句柄——plan 已是纯数据；v2 代码贡献接线时需由会话绑定对象持有 set
-		/// 并在 Stop/替换时确定性 UnloadAll。
-		/// </summary>
-internal static CompatibilityPlan ConfigureForLaunch(CompatibilityPlan baselinePlan, string gameRoot)
+	/// <summary>
+	/// 启动期配置结果：组装/回退计划 + 会话持有的包租约（无包或失败路径 Session 为 null）。
+	/// 调用方必须把两者一起交给 <see cref="Program.ConfigureCompatibilityPlan"/>——session
+	/// 的生命周期由 Program 的 Stop/Restart/退出清理路径（ClearCompatibilityPlan）确定性回收。
+	/// </summary>
+	/// <param name="Plan">本会话绑定的计划（成功 = 组装计划；无包/失败 = 基线）。</param>
+	/// <param name="Session">成功加载的包集合所有者；null = 本会话无包程序集需要回收。</param>
+	internal sealed record CompatPackLaunchResult(CompatibilityPlan Plan, CompatPackSession? Session);
+
+	/// <summary>
+	/// 启动期配置：无包原样返回基线；有包则加载→身份比对→组装。任何失败回退基线
+	/// （降级不变量）并记错误日志。成功路径把已加载句柄集合包装为 <see cref="CompatPackSession"/>
+	/// 一并返回——plan 是纯数据，但包程序集（ALC/入口实例）的存活由会话绑定对象确定性
+	/// 回收（Stop/替换时 UnloadAll，设计 §5.4）。
+	/// </summary>
+internal static CompatPackLaunchResult ConfigureForLaunch(CompatibilityPlan baselinePlan, string gameRoot)
         {
                 IReadOnlyList<string> paths = ReadEnabledPackPaths();
                 if (paths.Count == 0)
-                        return baselinePlan;
+                        return new CompatPackLaunchResult(baselinePlan, null);
 
                 // 顶层兜底：包路径上的任何异常（清单 getter、贡献回放、宿主自身缺陷……）一律
                 // 降级回基线 + 错误日志，绝不让异常逃逸到 Program.Main（降级不变量）。
@@ -177,7 +186,7 @@ internal static CompatibilityPlan ConfigureForLaunch(CompatibilityPlan baselineP
                         if (!CompatPackLoader.TryLoadSet(paths, context, out CompatPackSet? set, out IReadOnlyList<string> loadErrors))
                         {
                                 global::GenericUtils.Error("[LOAD] CompatPack disabled (load rejected): " + string.Join("; ", loadErrors));
-                                return baselinePlan;
+                                return new CompatPackLaunchResult(baselinePlan, null);
                         }
                         loadedSet = set;
 
@@ -185,14 +194,14 @@ internal static CompatibilityPlan ConfigureForLaunch(CompatibilityPlan baselineP
                         {
                                 set!.UnloadAll();
                                 global::GenericUtils.Error("[LOAD] CompatPack disabled (game identity mismatch): " + string.Join("; ", identityErrors));
-                                return baselinePlan;
+                                return new CompatPackLaunchResult(baselinePlan, null);
                         }
 
                         if (!CompatPackPlanAssembler.TryAssemble(baselinePlan, set!.Handles, out CompatibilityPlan assembled, out IReadOnlyList<string> assemblyErrors))
                         {
                                 set!.UnloadAll();
                                 global::GenericUtils.Error("[LOAD] CompatPack disabled (assembly rejected): " + string.Join("; ", assemblyErrors));
-                                return baselinePlan;
+                                return new CompatPackLaunchResult(baselinePlan, null);
                         }
 
                         foreach (CompatPackHandle handle in set!.Handles)
@@ -201,9 +210,9 @@ internal static CompatibilityPlan ConfigureForLaunch(CompatibilityPlan baselineP
                                         $"[LOAD] CompatPack enabled: id={handle.Manifest.PackId} version={handle.Manifest.PackVersion} "
                                         + $"engineApi={handle.Manifest.TargetEngineApi} sha256={handle.PackSha256}");
                         }
-                        // 计划自身已携带 pack 模块白名单与 variantSelections；这里不保留任何
-                        // process-wide 投影静态。v1 包不参与运行期执行，ALC/句柄随局部 set 释放。
-                        return assembled;
+                        // 计划自身已携带 pack 模块白名单与 variantSelections；包程序集的存活
+                        // 移交 CompatPackSession（随计划绑定会话，Stop/替换时确定性 UnloadAll）。
+                        return new CompatPackLaunchResult(assembled, new CompatPackSession(assembled, set.Handles));
                 }
                 catch (Exception exception)
                 {
@@ -217,7 +226,7 @@ internal static CompatibilityPlan ConfigureForLaunch(CompatibilityPlan baselineP
                         }
                         global::GenericUtils.Error("[LOAD] CompatPack disabled (unexpected failure): "
                                 + exception.GetType().Name + ": " + exception.Message);
-                        return baselinePlan;
+                        return new CompatPackLaunchResult(baselinePlan, null);
                 }
         }
 

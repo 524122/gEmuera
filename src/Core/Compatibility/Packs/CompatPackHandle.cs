@@ -7,7 +7,7 @@ namespace GEmuera.Core.Compatibility.Packs;
 /// 文件字节哈希；PackSha256 在其上叠加内嵌清单原始字节（file‖resource），供 DOD-3 组装期
 /// 并入 CompatibilityPlan 哈希链——同包内容必同哈希（诊断可复现）。
 /// </summary>
-public sealed class CompatPackHandle
+public sealed class CompatPackHandle : ICompatPackLease
 {
     internal CompatPackHandle(
         CompatPackManifest manifest,
@@ -60,7 +60,7 @@ public sealed class CompatPackHandle
 }
 
 /// <summary>一次会话启用包集合的全量结果（全部成功才存在；任一包失败则整体为 null 并回退纯 v24）。</summary>
-public sealed class CompatPackSet
+public sealed class CompatPackSet : ICompatPackLease
 {
     internal CompatPackSet(IReadOnlyList<CompatPackHandle> handles)
     {
@@ -74,4 +74,7 @@ public sealed class CompatPackSet
         foreach (CompatPackHandle handle in Handles)
             handle.Unload();
     }
+
+    /// <summary>租约语义的集合回收：等价 <see cref="UnloadAll"/>（对每个句柄恰好一次 Unload）。</summary>
+    public void Unload() => UnloadAll();
 }

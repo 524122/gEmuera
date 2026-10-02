@@ -12,6 +12,7 @@ using uEmuera.Drawing;
 using uEmuera.Forms;
 using uEmuera.Window;
 using GEmuera.Core.Compatibility;
+using GEmuera.Core.Compatibility.Packs;
 using MinorShift.Emuera.Compatibility;
 
 namespace MinorShift.Emuera
@@ -34,6 +35,10 @@ namespace MinorShift.Emuera
 		static string m0RunnerDefaultOutputLogPath = "";
 		static CompatibilityPlan m1CompatibilityPlan;
 		static LegacyCompatibilityProfile m1CompatibilityProfile;
+		// 会话持有的包程序集租约（CompatPackSession）：与计划绑定同源，Stop/Restart/退出
+		// 清理路径（ClearCompatibilityPlan/ResetSessionState）确定性 Dispose——包 ALC 的
+		// 存活不再依赖 GC（设计 §5.4，计划 E2-R2）。
+		static CompatPackSession m1CompatPackSession;
 		static readonly LegacyCompatibilityProfile defaultCompatibilityProfile =
 			LegacyCompatibilityProfile.CreateForProfile("v24pure", scopedVariableInstructionsEnabled: true);
 		// 启动器侧会话推送：UI 层在会话配置时推送所选 profile，解释器不再反查启动器 UI 的静态状态。
@@ -77,8 +82,10 @@ namespace MinorShift.Emuera
 					GetCompatibilityProfileId(detectedProfile));
 				// 兼容包接线：显式启用的包在会话计划绑定前加载并组装；任何失败回退纯基线
 				// （降级不变量）。配置加载后的重绑沿用同一 boundPlan（组装哈希稳定）。
-				sessionPlan = MinorShift.Emuera.Compatibility.CompatPackHost.ConfigureForLaunch(sessionPlan, ExeDir);
-				ConfigureCompatibilityPlan(sessionPlan);
+				// 成功加载的包集合包装为 CompatPackSession 随计划绑定，Stop/Restart 时
+				// 由 ClearCompatibilityPlan 确定性回收（设计 §5.4）。
+				var launch = MinorShift.Emuera.Compatibility.CompatPackHost.ConfigureForLaunch(sessionPlan, ExeDir);
+				ConfigureCompatibilityPlan(launch.Plan, launch.Session);
 				boundPlan = CurrentCompatibilityPlan;
 			}
 			else
@@ -92,8 +99,8 @@ namespace MinorShift.Emuera
 				if (MinorShift.Emuera.Compatibility.CompatPackHost.HasEnabledPacks())
 				{
 					ClearCompatibilityPlan();
-					var sessionPlan = MinorShift.Emuera.Compatibility.CompatPackHost.ConfigureForLaunch(boundPlan, ExeDir);
-					ConfigureCompatibilityPlan(sessionPlan);
+					var launch = MinorShift.Emuera.Compatibility.CompatPackHost.ConfigureForLaunch(boundPlan, ExeDir);
+					ConfigureCompatibilityPlan(launch.Plan, launch.Session);
 					boundPlan = CurrentCompatibilityPlan;
 				}
 			}
@@ -312,6 +319,15 @@ namespace MinorShift.Emuera
 		{
 			get { return System.Threading.Volatile.Read(ref m1CompatibilityPlan); }
 		}
+		/// <summary>
+		/// 当前会话绑定的包程序集租约（无包会话为 null）。生命周期与计划绑定同源：
+		/// <see cref="ConfigureCompatibilityPlan(CompatibilityPlan, CompatPackSession)"/> 显式
+		/// 传入时接管，ClearCompatibilityPlan/ResetSessionState 确定性释放。
+		/// </summary>
+		internal static CompatPackSession CurrentCompatPackSession
+		{
+			get { return System.Threading.Volatile.Read(ref m1CompatPackSession); }
+		}
 		internal static LegacyCompatibilityProfile Compatibility
 		{
 			get
@@ -334,16 +350,24 @@ namespace MinorShift.Emuera
 		/// <summary>
 		/// 兼容计划在启动 legacy 引擎前绑定，避免异步会话运行期间切换方言配置。
 		/// </summary>
-		internal static void ConfigureCompatibilityPlan(CompatibilityPlan plan)
+		internal static void ConfigureCompatibilityPlan(CompatibilityPlan plan, CompatPackSession packSession = null)
 		{
 			// This early binding occurs before the game configuration is available.
 			// Program.Main rebuilds the profile with the loaded value before any
 			// IdentifierDictionary or parser registry is constructed.
-			ConfigureCompatibilityPlan(plan, scopedVariableInstructionsEnabled: true);
+			ConfigureCompatibilityPlan(plan, packSession, scopedVariableInstructionsEnabled: true);
 		}
 
 		internal static void ConfigureCompatibilityPlan(
 			CompatibilityPlan plan,
+			bool scopedVariableInstructionsEnabled)
+		{
+			ConfigureCompatibilityPlan(plan, null, scopedVariableInstructionsEnabled);
+		}
+
+		private static void ConfigureCompatibilityPlan(
+			CompatibilityPlan plan,
+			CompatPackSession packSession,
 			bool scopedVariableInstructionsEnabled)
 		{
 			if (plan == null)
@@ -374,9 +398,21 @@ namespace MinorShift.Emuera
 
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, plan);
 			System.Threading.Volatile.Write(ref m1CompatibilityProfile, profile);
+
+			// 会话租约与计划同源绑定：显式传入时接管（孤儿租约防御性回收，正常序列已在
+			// ClearCompatibilityPlan 清空）；传 null 时不动现有绑定——配置装载后的重绑
+			// （同哈希）必须保留早前绑定的包租约，否则 ALC 会在启动中途被卸载。
+			if (packSession != null)
+			{
+				var orphaned = System.Threading.Volatile.Read(ref m1CompatPackSession);
+				if (orphaned != null && !ReferenceEquals(orphaned, packSession))
+					orphaned.Dispose();
+				System.Threading.Volatile.Write(ref m1CompatPackSession, packSession);
+			}
 		}
 
-		/// <summary>条件解绑：仅当当前绑定计划与传入计划同哈希时清理（canary 失败回滚路径）。</summary>
+		/// <summary>条件解绑：仅当当前绑定计划与传入计划同哈希时清理（canary 失败回滚路径）。
+		/// 同哈希时连同会话租约一并回收。</summary>
 		internal static void ClearCompatibilityPlan(CompatibilityPlan plan)
 		{
 			if (plan == null)
@@ -384,6 +420,7 @@ namespace MinorShift.Emuera
 			var existing = System.Threading.Volatile.Read(ref m1CompatibilityPlan);
 			if (existing != null && string.Equals(existing.CanonicalHash, plan.CanonicalHash, StringComparison.Ordinal))
 			{
+				DisposeCompatPackSession();
 				System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
 				System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 			}
@@ -393,11 +430,37 @@ namespace MinorShift.Emuera
 		/// The legacy VM is process-wide, so its compatibility context must be
 		/// released after the worker has stopped and before another launcher
 		/// selection can bind a new immutable plan.
+		/// 会话持有的包程序集租约在此一并确定性回收：先释放 session，再清 plan/profile
+		/// （设计 §5.4；Back/Restart/ERB 重启路径无条件走到这里，不得早退）。
 		/// </summary>
 		internal static void ClearCompatibilityPlan()
 		{
+			DisposeCompatPackSession();
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
 			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
+		}
+
+		/// <summary>
+		/// 回收当前会话的包程序集租约（幂等）：Stop/Restart/退出清理路径的唯一释放点。
+		/// 释放异常不阻断会话清理（记错误日志后继续清 plan/profile）。
+		/// </summary>
+		private static void DisposeCompatPackSession()
+		{
+			var session = System.Threading.Volatile.Read(ref m1CompatPackSession);
+			if (session == null)
+				return;
+			System.Threading.Volatile.Write(ref m1CompatPackSession, null);
+			try
+			{
+				int count = session.Handles.Count;
+				session.Dispose();
+				GenericUtils.Info("[LOAD] CompatPack session unloaded: count=" + count);
+			}
+			catch (Exception exception)
+			{
+				GenericUtils.Error("[LOAD] CompatPack session unload failed: "
+					+ exception.GetType().Name + ": " + exception.Message);
+			}
 		}
 
 		private static void ApplyAndroidWindowWidthPolicy()
@@ -472,6 +535,7 @@ namespace MinorShift.Emuera
 			AnalysisFiles = null;
 			debugMode = false;
 			DebugShowWindowOverride = null;
+			DisposeCompatPackSession();
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
 			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
 			StartTime = 0;
