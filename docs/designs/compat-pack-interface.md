@@ -319,3 +319,33 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 - 治理口径：`tools/dialect-inventory/*CompatibilityPack*` 是 M0 静态证据工具，其
   `BuiltInCompiledOnly`/`runtimeModuleLoading=NotImplemented` 描述的是当时证据边界，
   不是运行时 CompatPack 契约；运行时以本文件与 `compatpack.manifest.schema.json` 为准。
+
+### 13.10 v18 第一方数据包与等价门禁（2026-10-03）
+
+- `packs/gemuera.v18/`（manifest-only 数据包，packId=`pack.gemuera.v18`）内嵌的
+  `compatpack.manifest.json` 是**生成物**，由 `tools/compat-pack/Generate-V18PackManifest`
+  从生成清单 `LegacyDialectInventories`（唯一事实源）计算 v24−v18 差集：
+  hideInstructions=144、hideFunctions=106、add* 恒为空（v18 ⊆ v24 取证成立；add* 非空时
+  生成器以非零退出码失败并列出违规名）。闭包不变量由生成器自检：
+  v24 指令 561−144=417=v18、v24 函数 266−106=160=v18。输出规范化（键 Ordinal 排序、
+  LF、UTF-8 无 BOM、末尾单换行），重跑生成器即恢复，禁止手改。
+- packId 说明：不能取 `gemuera.v18`——与内置方言模块 id 撞名（Compose 的包模块白名单
+  禁止包含内置模块 id，加载校验的保留名对账同样拒载），故用 `pack.` 前缀。
+- 等价门禁（两层）：
+  1. `GEmuera.Core.Tests/V18PackManifestTests`：真实包 DLL → `CompatPackLoader` →
+     `CompatPackPlanAssembler`（基线 v24pure），断言组装后 `Dialect.Instructions/Functions`
+     键集合与内置 `CreateLegacySessionPlan("v18")` 逐名相等（排序数组 `Assert.Equal`）。
+  2. `LegacyDialectSurfaceSmoke.AssertV18PackEquivalence()`（`AssertPackProjection()` 之后
+     调用）：同链路再断言投影为 `LegacyCompatibilityProfile` 后（`ApplyPackSurface` 从
+     plan−基线差量反推隐藏）的指令/函数可见性在两侧计划键并集上逐名相等。
+- 历史差量对账（与 `LegacyV18CompatibilityModule` 手抄名单的交叉诊断，非事实源）：
+  - 手抄名单为 39 指令 + 110 函数；生成清单差集为 144 指令 + 106 函数。指令侧多出的
+    105 名是 v24 后增**函数**经 METHOD 投影进指令清单的同名条目（生成清单双侧声明），
+    指令/函数两侧同 hide，行为等价。
+  - 手抄函数名单多出的 4 名（`CHKGLOBALDATA`/`CHKVARDATA`/`FIND_VARDATA`/`GROTATE`）
+    是 v24 参考源码有、gEmuera 引擎投影（生成清单）中根本不存在的名字：对引擎而言
+    隐藏它们是 no-op，且包规则要求 hide ⊆ v24 基线（生成清单），故生成器不纳入。
+    两会话的键集合恰因此逐名闭合，等价仍是精确断言、无任何容差放宽。
+- 宿主 glob 提醒：`tools/compat-pack/**` 已加入 `gemuera-c#.csproj` 的 `Compile Remove`
+  兜底（工具 Program.cs 的顶层语句若被宿主收录会以全局命名空间 `Program` 遮蔽
+  `MinorShift.Emuera.Program`，表现为 CS0117）。

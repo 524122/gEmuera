@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Core\GEmuera.Core.csproj" />
+    <!-- v18 第一方数据包：等价门禁经真实包 DLL（内嵌生成清单）走完整加载/组装链。 -->
+    <ProjectReference Include="..\..\..\packs\gemuera.v18\gemuera.v18.csproj" />
     <Compile Include="..\..\..\Scripts\Emuera\Compatibility\LegacyCompatibilityProfile.cs" Link="LegacyCompatibilityProfile.cs" />
     <Compile Include="..\..\..\Scripts\Emuera\Compatibility\LegacyCompatibilityModules.cs" Link="LegacyCompatibilityModules.cs" />
   </ItemGroup>

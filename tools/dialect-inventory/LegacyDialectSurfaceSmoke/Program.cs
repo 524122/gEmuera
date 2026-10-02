@@ -291,6 +291,7 @@ static class Program
                 "v24pure 查询基线指令 PRINT 不应提示。");
 
             AssertPackProjection();
+            AssertV18PackEquivalence();
 
             Console.WriteLine("Legacy dialect surface smoke passed.");
             return 0;
@@ -417,6 +418,75 @@ static class Program
             "包注册名已解除隐藏，不应提示。");
 
         AssertMultiPackSurfaceReplay();
+    }
+
+    // —— v18 第一方数据包等价门禁：packs/gemuera.v18 的内嵌清单由生成器从
+    //    LegacyDialectInventories（唯一事实源）计算 v24−v18 差集（禁止手改），经真实
+    //    包 DLL → CompatPackLoader → CompatPackPlanAssembler 组装进 v24pure 基线后：
+    //    (1) 指令/函数键集合与内置 v18 计划逐名相等；(2) 投影为 LegacyCompatibilityProfile
+    //    （ApplyPackSurface 从 plan−基线差量反推隐藏）后可见性仍逐名相等。
+    //    清单漂移（生成清单再生成后未重跑生成器、或手改 JSON）在此处先红。——
+    private static void AssertV18PackEquivalence()
+    {
+        // 经包工程的 public 标记类取真实 DLL 路径（MSBuild 保证已构建并复制到本输出目录）。
+        string packPath = typeof(GemueraV18Pack.GemueraV18PackMarker).Assembly.Location;
+        var context = new CompatPackValidationContext(
+            engineModuleApiVersion: 1,
+            knownCapabilityIds: new HashSet<string>(StringComparer.Ordinal),
+            knownBuiltinVariantNames: new HashSet<string>(StringComparer.Ordinal),
+            baselineInstructions: new HashSet<string>(
+                GEmuera.Core.Compatibility.LegacyDialectInventories.V24InstructionNames, StringComparer.Ordinal),
+            baselineFunctions: new HashSet<string>(
+                GEmuera.Core.Compatibility.LegacyDialectInventories.V24Functions.Select(entry => entry.Name),
+                StringComparer.Ordinal));
+        if (!CompatPackLoader.TryLoad(packPath, context, out CompatPackHandle? handle, out var loadErrors))
+            throw new InvalidOperationException("v18 第一方数据包加载失败：" + string.Join("; ", loadErrors));
+
+        try
+        {
+            CompatibilityPlan baseline = BuiltInDialectCatalog.CreateLegacySessionPlan("v24pure");
+            if (!CompatPackPlanAssembler.TryAssemble(
+                    baseline, new[] { handle! }, out CompatibilityPlan assembled, out var assemblyErrors))
+                throw new InvalidOperationException("v18 第一方数据包组装失败：" + string.Join("; ", assemblyErrors));
+
+            CompatibilityPlan builtinV18Plan = BuiltInDialectCatalog.CreateLegacySessionPlan("v18");
+            Assert(builtinV18Plan.Dialect.Instructions.Keys.Order(StringComparer.Ordinal)
+                    .SequenceEqual(assembled.Dialect.Instructions.Keys.Order(StringComparer.Ordinal)),
+                "v24pure + v18 包的指令键集合 != 内置 v18 计划（清单漂移？重跑 Generate-V18PackManifest）。");
+            Assert(builtinV18Plan.Dialect.Functions.Keys.Order(StringComparer.Ordinal)
+                    .SequenceEqual(assembled.Dialect.Functions.Keys.Order(StringComparer.Ordinal)),
+                "v24pure + v18 包的函数键集合 != 内置 v18 计划（清单漂移？重跑 Generate-V18PackManifest）。");
+
+            LegacyCompatibilityProfile builtinV18 = LegacyCompatibilityProfile.Create(builtinV18Plan, true);
+            LegacyCompatibilityProfile packed = LegacyCompatibilityProfile.Create(assembled, true);
+
+            // 投影后可见性逐名相等：universe 取两侧计划键的并集（含保留名/隐藏差量）。
+            IEnumerable<string> instructionUniverse = builtinV18.Plan.Dialect.Instructions.Keys
+                .Concat(packed.Plan.Dialect.Instructions.Keys)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal);
+            foreach (string name in instructionUniverse)
+                Assert(builtinV18.IsInstructionVisible(name) == packed.IsInstructionVisible(name),
+                    $"v18 包投影与内置 v18 可见性不一致（指令 {name}：builtin={builtinV18.IsInstructionVisible(name)} packed={packed.IsInstructionVisible(name)}）。");
+            IEnumerable<string> functionUniverse = builtinV18.Plan.Dialect.Functions.Keys
+                .Concat(packed.Plan.Dialect.Functions.Keys)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal);
+            foreach (string name in functionUniverse)
+                Assert(builtinV18.IsFunctionVisible(name) == packed.IsFunctionVisible(name),
+                    $"v18 包投影与内置 v18 可见性不一致（函数 {name}：builtin={builtinV18.IsFunctionVisible(name)} packed={packed.IsFunctionVisible(name)}）。");
+
+            // 抽样哨兵（失败信息可读性）：基线保留，v24 后增与 snake 专属不泄漏。
+            Assert(packed.IsInstructionVisible("PRINT") && packed.IsFunctionVisible("ABS"),
+                "v18 包会话丢失基线指令/函数。");
+            Assert(!packed.IsInstructionVisible("SETBGIMAGE") && !packed.IsFunctionVisible("GETVAR")
+                && !packed.IsFunctionVisible("SQL_CONNECT"),
+                "v18 包会话泄漏了 v24 后增或 snake 专属名字。");
+        }
+        finally
+        {
+            handle!.Unload();
+        }
     }
 
     // —— 多包回放归属（分组语义）：注册项按各自 packId 归属回放——每包的注册名都
