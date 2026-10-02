@@ -1,0 +1,6 @@
+{
+  "packId": "community.contract-fixture",
+  "packVersion": "1.0.0",
+  "targetEngineApi": 1,
+  "baseProfileId": "v24pure"
+}

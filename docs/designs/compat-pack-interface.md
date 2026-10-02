@@ -298,7 +298,11 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 ```
 
 - 该程序集不需要任何 C# 类型；把 JSON 以 `LogicalName=compatpack.manifest.json`
-  内嵌进一个 `net8.0`/`net9.0-android` 类库即可。
+  内嵌进一个 `net8.0`/`net9.0-android` 类库即可。仓库内可直接复制的模板工程为
+  `packs/CommunityPackTemplate/`（manifest-only，packId=community.template），社区
+  入口文档为 `packs/README.md`；带最小 `ICompatPack` 入口类的对照夹具为
+  `tests/xUnitTest/CompatPackContractOnlyFixture/`（packId=community.contract-fixture，
+  只引用 Emuera 契约程序集，供 ALC 正向用例复用）。
 - `baseProfileId` 必须与 launcher 实际会话基线一致（v1 只支持 v24pure）；否则整包拒载回退。
 - `capabilities` 只接受引擎已收录 id；`surface` 名字必须命中引擎 handler/基线对账。
 - 完整功能后续（自定义 handler/策略）仍需 v2 的 `IInstructionVariantContribution`/`IPolicyContribution`

@@ -41,6 +41,10 @@
     <Compile Remove="tests\**" />
     <EmbeddedResource Remove="tests\**" />
     <None Remove="tests\**" />
+    <!-- 社区兼容包模板（packs/）是独立编译的类库样本，由测试工程引用；不入 Godot 宿主 glob。 -->
+    <Compile Remove="packs\**" />
+    <EmbeddedResource Remove="packs\**" />
+    <None Remove="packs\**" />
     <!-- Evidence and upstream builds are generated data, never Godot host source. -->
     <Compile Remove="artifacts\**" />
     <EmbeddedResource Remove="artifacts\**" />
