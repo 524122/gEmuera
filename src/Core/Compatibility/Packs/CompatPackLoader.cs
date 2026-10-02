@@ -85,7 +85,7 @@ public static class CompatPackLoader
         ICompatPack? pack;
         try
         {
-            pack = FindSinglePackEntry(assembly, collected);
+            pack = ResolvePackEntry(assembly, manifest, collected);
         }
         catch (Exception exception)
         {
@@ -101,7 +101,9 @@ public static class CompatPackLoader
             return false;
         }
 
-        if (!ValidatePackEntry(pack, manifest, context, out IReadOnlyList<ICompatPackContribution> contributions, out var entryErrors))
+        IReadOnlyList<ICompatPackContribution> manifestContributions = CreateManifestContributions(manifest, context);
+        if (!ValidatePackEntry(pack, manifest, context, out IReadOnlyList<ICompatPackContribution> contributions,
+                out var entryErrors, manifestContributions))
         {
             collected.AddRange(entryErrors.Select(error => prefix + error));
             loadContext.Unload();
@@ -178,7 +180,8 @@ public static class CompatPackLoader
         CompatPackManifest manifest,
         CompatPackValidationContext context,
         out IReadOnlyList<ICompatPackContribution> contributions,
-        out IReadOnlyList<string> errors)
+        out IReadOnlyList<string> errors,
+        IReadOnlyList<ICompatPackContribution>? manifestContributions = null)
     {
         var collected = new List<string>();
         contributions = Array.Empty<ICompatPackContribution>();
@@ -193,7 +196,14 @@ public static class CompatPackLoader
                 return false;
             }
 
-            contributions = pack.Contributions ?? Array.Empty<ICompatPackContribution>();
+            IReadOnlyList<ICompatPackContribution> entryContributions =
+                pack.Contributions ?? Array.Empty<ICompatPackContribution>();
+            var combined = new List<ICompatPackContribution>(
+                (manifestContributions?.Count ?? 0) + entryContributions.Count);
+            if (manifestContributions is { Count: > 0 })
+                combined.AddRange(manifestContributions);
+            combined.AddRange(entryContributions);
+            contributions = combined;
             if (!CompatPackRules.Validate(manifest, contributions, context, out var ruleErrors))
             {
                 collected.AddRange(ruleErrors);
@@ -213,7 +223,15 @@ public static class CompatPackLoader
         }
     }
 
-    static ICompatPack? FindSinglePackEntry(Assembly assembly, List<string> errors)
+    /// <summary>
+    /// 解析包入口：恰好一个 ICompatPack 实现类；零个入口类时按 manifest-only 数据包处理
+    /// （表面/capability/variant 全部来自内嵌清单，不要求包作者编写 C# 入口）。
+    /// 多个入口类仍拒载（fail-closed）。
+    /// </summary>
+    internal static ICompatPack? ResolvePackEntry(
+        Assembly assembly,
+        CompatPackManifest manifest,
+        List<string> errors)
     {
         Type[] types;
         try
@@ -232,17 +250,41 @@ public static class CompatPackLoader
                 && !type.IsAbstract
                 && typeof(ICompatPack).IsAssignableFrom(type))
             .ToList();
-        if (entries.Count == 0)
-        {
-            errors.Add("程序集内没有 ICompatPack 实现类；缺入口的程序集不是兼容包。");
-            return null;
-        }
         if (entries.Count > 1)
         {
             errors.Add("程序集内存在多个 ICompatPack 实现类（" + entries.Count + " 个），必须恰好一个。");
             return null;
         }
-        return (ICompatPack?)Activator.CreateInstance(entries[0]);
+        if (entries.Count == 0)
+            return new ManifestOnlyCompatPack(manifest);
+
+        try
+        {
+            return (ICompatPack?)Activator.CreateInstance(entries[0]);
+        }
+        catch (Exception exception)
+        {
+            errors.Add("包入口实例化失败：" + exception.Message);
+            return null;
+        }
+    }
+
+    internal static IReadOnlyList<ICompatPackContribution> CreateManifestContributions(
+        CompatPackManifest manifest,
+        CompatPackValidationContext context)
+    {
+        CompatPackSurface surface = manifest.Surface;
+        if (surface.AddInstructions.Count == 0
+            && surface.HideInstructions.Count == 0
+            && surface.AddFunctions.Count == 0
+            && surface.HideFunctions.Count == 0)
+        {
+            return Array.Empty<ICompatPackContribution>();
+        }
+        return new ICompatPackContribution[]
+        {
+            new ManifestSurfaceContribution(surface, context.KnownFunctionReturnTypes),
+        };
     }
 
     static string ComputePackHash(Assembly assembly, byte[] assemblyBytes)

@@ -424,9 +424,14 @@ public partial class EmueraMain : Node
 		}
 
 		var backend = legacySessionBackend;
-		if (backend is null || !backend.IsRunning)
+		if (backend is null)
 			return;
 
+		// 重要：不能在这里用 !backend.IsRunning 提前返回。Back/Restart/ERB restart 路径
+		// 会先调用 EmueraThread.End()，此时线程已停、IsRunning=false，但会话清理
+		// （GlobalStatic.Reset + Program.ClearCompatibilityPlan）尚未执行；跳过会让上一局
+		// plan 绑定残留，下一次启动在 hash 防御处失败。StopLegacyBaselineAsync 对已停止
+		// 线程幂等，必须无条件调用。
 		try
 		{
 			backend.StopLegacyBaselineAsync().AsTask().GetAwaiter().GetResult();

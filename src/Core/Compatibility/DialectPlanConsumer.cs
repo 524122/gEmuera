@@ -17,6 +17,8 @@ public sealed class DialectPlanConsumer
     public string ProfileId => _plan.ProfileId;
     public string PlanHash => _plan.CanonicalHash;
     public IReadOnlyList<DialectModuleSnapshot> Modules => _plan.Dialect.Modules;
+    public IReadOnlyList<string> PackModuleIds => _plan.Dialect.PackModuleIds;
+    public IReadOnlyDictionary<string, string> VariantSelections => _plan.Dialect.VariantSelections;
     public IReadOnlyDictionary<string, InstructionDescriptor> Instructions => _instructions;
     public IReadOnlyDictionary<string, FunctionDescriptor> Functions => _functions;
     public bool TryGetInstruction(string name, out InstructionDescriptor descriptor) => _instructions.TryGetValue(name.Trim().ToUpperInvariant(), out descriptor!);

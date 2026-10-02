@@ -107,7 +107,7 @@ Audio: BGM 加载失败 → file=bgm01.ogg error=FileNotFoundException
   `GD.PushError` 镜像到 Godot 控制台，无需直推。
 - 允许直用 `GD.*` 的例外：
   1. `DiagnosticLogSinks.WriteToGodotConsole` —— 路由自身的 Godot 控制台渲染通道
-     （transport，非旁路）。
+	 （transport，非旁路）。
   2. Godot 生命周期级致命输出（崩溃前最后手段），须注释说明为何不能走路由。
 
 **存量直推 `GD.Push*` 台账**（2026-09-19 重新盘点，各有基础设施生命周期理由，暂不收口；触碰时再评估）：

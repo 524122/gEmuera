@@ -258,9 +258,15 @@ static class Program
             // 在严格 v24 下致命退出，原生启动器容错继续。
             LegacyCompatibilityProfile megaten = LegacyCompatibilityProfile.CreateForProfile("megaten", true);
             Assert(megaten.ContinuesAfterStartupFault
-                && megaten.Plan.CapabilityIds.Count == 1
-                && megaten.Plan.CapabilityIds.Contains(GEmuera.Core.Compatibility.MegatenCompatibilityModule.ContinueAfterStartupFaultCapability),
-                "megaten 计划必须恰好声明启动容错 capability。");
+                && megaten.Plan.CapabilityIds.Count == 4
+                && megaten.Plan.CapabilityIds.Contains(GEmuera.Core.Compatibility.MegatenCompatibilityModule.ContinueAfterStartupFaultCapability)
+                && megaten.Plan.CapabilityIds.Contains(GEmuera.Core.Compatibility.MegatenCompatibilityModule.LabelLookupCaseBehavior)
+                && megaten.Plan.CapabilityIds.Contains(GEmuera.Core.Compatibility.MegatenCompatibilityModule.RefOutNameBehavior)
+                && megaten.Plan.CapabilityIds.Contains(GEmuera.Core.Compatibility.MegatenCompatibilityModule.PrivateSystemShadowBehavior)
+                && megaten.Megaten.UsesVariableCaseForFunctionLabelLookup
+                && megaten.Megaten.AllowsOutAsVariableNameAfterRefKeyword
+                && megaten.Megaten.AllowsPrivateSystemVariableShadowing,
+                "megaten 计划必须声明启动容错 + 三个 behavior capability，并激活对应 policy flag。");
             Assert(megaten.IsInstructionVisible("PRINT") && megaten.IsInstructionVisible("CALLSHARP"),
                 "megaten 保持 v24 基座指令面。");
             Assert(!megaten.IsInstructionVisible("SETANIMETIMER") && !megaten.IsInstructionVisible("CALLSTR")
@@ -316,8 +322,12 @@ static class Program
 
     private static void AssertPackProjection()
     {
+        string snakeCapabilities = string.Join(
+            ",",
+            GEmuera.Core.Compatibility.SnakeCompatibilityCapabilities.RequiredCapabilityIds
+                .Select(id => "\"" + id + "\""));
         string smokeJson = "{\"packId\":\"smoke.pack\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
-            + "\"capabilities\":[\"startup.continue-after-fault.v1\"],"
+            + "\"capabilities\":[" + snakeCapabilities + ",\"display.extended-history.v1\"],"
             + "\"variantSelections\":{\"SETBGIMAGE\":\"builtin:snake\"}}";
         var manifest = CompatPackManifest.TryParse(smokeJson, out var parsed, out var manifestErrors)
             ? parsed! : throw new InvalidOperationException(string.Join("; ", manifestErrors));
@@ -333,9 +343,7 @@ static class Program
         if (!CompatPackPlanAssembler.TryAssemble(baseline, new[] { handle }, out CompatibilityPlan assembled, out var assemblyErrors))
             throw new InvalidOperationException("pack assembly failed: " + string.Join("; ", assemblyErrors));
 
-        LegacyCompatibilityProfile packed = LegacyCompatibilityProfile.Create(
-            assembled, true, new[] { "smoke.pack" },
-            new Dictionary<string, string>(StringComparer.Ordinal) { ["SETBGIMAGE"] = "builtin:snake" });
+        LegacyCompatibilityProfile packed = LegacyCompatibilityProfile.Create(assembled, true);
 
         Assert(packed.IsInstructionVisible("SETANIMETIMER"), "包注册指令 SETANIMETIMER 在 v24 会话不可见。");
         Assert(packed.IsFunctionVisible("SQL_CONNECT"), "包注册函数 SQL_CONNECT 在 v24 会话不可见。");
@@ -343,20 +351,53 @@ static class Program
         Assert(!packed.IsFunctionVisible("EXISTVAR"), "包隐藏函数 EXISTVAR 仍泄漏在 v24 会话。");
         Assert(packed.Plan.CapabilityIds.Contains("startup.continue-after-fault.v1"), "包 capability 未进入会话账本。");
         Assert(packed.ContinuesAfterStartupFault, "包声明的启动容错 quirk 未在会话生效。");
+        // capability 激活与内置模块解耦的回归哨兵：v24pure + 包声明 snake/erafl quirk id
+        // 也必须安装对应 policy 并让具体 flag 生效（否则 P-D 无法把内置模块退役为包）。
+        Assert(packed.Snake.UsesTimesClamp, "包声明 snake capability 未在 v24pure 会话激活对应 policy。");
+        Assert(packed.Snake.IsEnabled, "完整 snake capability 集未在 v24pure 会话激活 module 语义。");
+        Assert(packed.UsesDialectFunctionContract("TOINT"), "完整 snake capability 集未激活 DFC 重载契约。");
+        Assert(packed.EraFl.UsesExtendedDisplayHistory, "包声明 erafl capability 未在 v24pure 会话激活对应 policy。");
 
-        // 信任边界：同一组装 plan 在无白名单入口（历史严格校验）下必须拒绝——
-        // 未知模块不会因为"看起来像包"而被放行。
+        // 信任边界：pack 模块白名单来自 plan 数据；plan 声明了额外模块却未把其列入
+        // PackModuleIds 时必须拒绝——未知模块不会因为"看起来像包"而被放行。
+        var missingMetadataDialect = new DialectPlan(
+            assembled.Dialect.Modules,
+            assembled.Dialect.Ports,
+            assembled.Dialect.Instructions,
+            assembled.Dialect.Functions,
+            assembled.Dialect.CanonicalHash,
+            packModuleIds: Array.Empty<string>(),
+            variantSelections: assembled.Dialect.VariantSelections);
+        var missingMetadataPlan = new CompatibilityPlan(
+            assembled.ProfileId,
+            missingMetadataDialect,
+            assembled.CapabilityIds,
+            assembled.SaveProfileId,
+            assembled.CanonicalHash);
         bool strictRejected = false;
-        try { LegacyCompatibilityProfile.Create(assembled, true); }
+        try { LegacyCompatibilityProfile.Create(missingMetadataPlan, true); }
         catch (InvalidOperationException) { strictRejected = true; }
-        Assert(strictRejected, "无白名单入口接受了未分类包模块（信任边界泄漏）。");
+        Assert(strictRejected, "plan 缺少 PackModuleIds 时接受了未分类包模块（信任边界泄漏）。");
 
-        // 白名单撞内置方言模块必须抛（防御深度回归钉：保留名拒载在加载段，这里验证
-        // 即便有人绕过 Host 直接传入坏白名单，Compose 也不会放行）。
+        // 防御深度：即便有人伪造 plan 把内置方言模块列进 PackModuleIds，Compose 也必须拒绝。
+        var builtinWhitelistDialect = new DialectPlan(
+            assembled.Dialect.Modules,
+            assembled.Dialect.Ports,
+            assembled.Dialect.Instructions,
+            assembled.Dialect.Functions,
+            assembled.Dialect.CanonicalHash,
+            packModuleIds: new[] { "game.snake" },
+            variantSelections: assembled.Dialect.VariantSelections);
+        var builtinWhitelistPlan = new CompatibilityPlan(
+            assembled.ProfileId,
+            builtinWhitelistDialect,
+            assembled.CapabilityIds,
+            assembled.SaveProfileId,
+            assembled.CanonicalHash);
         bool builtinWhitelistRejected = false;
-        try { LegacyCompatibilityProfile.Create(assembled, true, new[] { "game.snake" }); }
+        try { LegacyCompatibilityProfile.Create(builtinWhitelistPlan, true); }
         catch (InvalidOperationException) { builtinWhitelistRejected = true; }
-        Assert(builtinWhitelistRejected, "白名单含内置方言模块未被拒绝。");
+        Assert(builtinWhitelistRejected, "plan 把内置方言模块列入 PackModuleIds 未被拒绝。");
 
         // 变体投影：包声明 builtin:snake 选 SETBGIMAGE → 投影注入后 TryGetInstructionVariant
         // 返回真 enum（FunctionIdentifier 将据此构造 SNAKE_SETBGIMAGE handler）。
@@ -420,8 +461,7 @@ static class Program
         if (!CompatPackPlanAssembler.TryAssemble(baseline, new[] { packA, packB }, out CompatibilityPlan assembled, out var assemblyErrors))
             throw new InvalidOperationException("multi-pack assembly failed: " + string.Join("; ", assemblyErrors));
 
-        LegacyCompatibilityProfile multi = LegacyCompatibilityProfile.Create(
-            assembled, true, new[] { "smoke.pack.a", "smoke.pack.b" });
+        LegacyCompatibilityProfile multi = LegacyCompatibilityProfile.Create(assembled, true);
 
         Assert(multi.IsInstructionVisible("SETANIMETIMER"), "包 A 注册指令 SETANIMETIMER 在多包会话不可见。");
         Assert(multi.IsInstructionVisible("SETIMAGELAYER"), "包 B 注册指令 SETIMAGELAYER 在多包会话不可见。");

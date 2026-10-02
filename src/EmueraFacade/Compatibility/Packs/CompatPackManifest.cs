@@ -30,7 +30,34 @@ namespace Emuera.Compatibility.Packs
 		public string VersionAccept { get; }
 	}
 
-	/// <summary>
+		/// <summary>
+	/// 清单声明的静态表面（纯数据，无需程序集入口代码）：指令/函数名单增删。
+	/// 指令名在解析期 Trim+Upper，函数名保持原样；语义对账在加载器/规则层。
+	/// </summary>
+	public sealed class CompatPackSurface
+	{
+		public static CompatPackSurface Empty { get; } = new CompatPackSurface(
+			Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+
+		internal CompatPackSurface(
+			IReadOnlyList<string> addInstructions,
+			IReadOnlyList<string> hideInstructions,
+			IReadOnlyList<string> addFunctions,
+			IReadOnlyList<string> hideFunctions)
+		{
+			AddInstructions = addInstructions;
+			HideInstructions = hideInstructions;
+			AddFunctions = addFunctions;
+			HideFunctions = hideFunctions;
+		}
+
+		public IReadOnlyList<string> AddInstructions { get; }
+		public IReadOnlyList<string> HideInstructions { get; }
+		public IReadOnlyList<string> AddFunctions { get; }
+		public IReadOnlyList<string> HideFunctions { get; }
+	}
+
+/// <summary>
 	/// 兼容包内嵌清单（compatpack.manifest.json）的不可变模型与解析器。
 	/// 结构校验全部 fail-closed：任一字段不合法即整体拒绝，错误全量收集（agent-profiles
 	/// 的 outcome.Errors 模式），绝不半解析静默继续。语义校验（capability id 词汇表命中、
@@ -54,6 +81,8 @@ namespace Emuera.Compatibility.Packs
 			string packId,
 			string packVersion,
 			int targetEngineApi,
+			string baseProfileId,
+			CompatPackSurface surface,
 			string? baseSurfaceHash,
 			IReadOnlyList<string> capabilities,
 			string? saveProfileId,
@@ -63,6 +92,8 @@ namespace Emuera.Compatibility.Packs
 			PackId = packId;
 			PackVersion = packVersion;
 			TargetEngineApi = targetEngineApi;
+			BaseProfileId = baseProfileId;
+			Surface = surface;
 			BaseSurfaceHash = baseSurfaceHash;
 			Capabilities = capabilities;
 			SaveProfileId = saveProfileId;
@@ -73,6 +104,10 @@ namespace Emuera.Compatibility.Packs
 		public string PackId { get; }
 		public string PackVersion { get; }
 		public int TargetEngineApi { get; }
+		/// <summary>包叠加的基线 profile。v1 固定为 v24pure；宿主会与当前会话基线核对，不匹配拒载。</summary>
+		public string BaseProfileId { get; }
+		/// <summary>manifest 静态表面（空 = 仅 capability/variant 声明）。</summary>
+		public CompatPackSurface Surface { get; }
 		/// <summary>可选：声明基于哪个 v24 表面快照（生成清单哈希），仅用于对齐提示，不作拒载依据。</summary>
 		public string? BaseSurfaceHash { get; }
 		public IReadOnlyList<string> Capabilities { get; }
@@ -125,6 +160,8 @@ namespace Emuera.Compatibility.Packs
 				string packId = RequireId(root, "packId", collected, required: true) ?? "";
 				string packVersion = Require(root, "packVersion", collected, SemverPattern, "语义化版本 x.y.z");
 				int targetEngineApi = RequirePositiveInt(root, "targetEngineApi", collected);
+				string baseProfileId = OptionalIdOrDefault(root, "baseProfileId", "v24pure", collected);
+				CompatPackSurface surface = RequireSurface(root, collected);
 				string? baseSurfaceHash = Optional(root, "baseSurfaceHash", collected, LowerHexPattern, "小写十六进制哈希（8-64 位）");
 				IReadOnlyList<string> capabilities = RequireStringArray(root, "capabilities", collected, required: false);
 				string? saveProfileId = RequireId(root, "saveProfileId", collected, required: false);
@@ -139,6 +176,8 @@ namespace Emuera.Compatibility.Packs
 						case "packId":
 						case "packVersion":
 						case "targetEngineApi":
+						case "baseProfileId":
+						case "surface":
 						case "baseSurfaceHash":
 						case "capabilities":
 						case "saveProfileId":
@@ -159,6 +198,8 @@ namespace Emuera.Compatibility.Packs
 					packId,
 					packVersion,
 					targetEngineApi,
+					baseProfileId,
+					surface,
 					baseSurfaceHash,
 					capabilities,
 					saveProfileId,
@@ -373,6 +414,113 @@ namespace Emuera.Compatibility.Packs
 				}
 			}
 			return new ReadOnlyDictionary<string, string>(result);
+		}
+
+		private static string OptionalIdOrDefault(JsonElement root, string field, string defaultValue, List<string> errors)
+		{
+			if (!root.TryGetProperty(field, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
+				return defaultValue;
+			if (value.ValueKind != JsonValueKind.String)
+			{
+				errors.Add("字段 '" + field + "' 不是字符串。");
+				return defaultValue;
+			}
+			string text = (value.GetString() ?? "").Trim();
+			if (!IdPattern.IsMatch(text))
+			{
+				errors.Add("字段 '" + field + "' 形式不合法（小写字母数字、点、连字符）：" + text);
+				return defaultValue;
+			}
+			return text;
+		}
+
+		private static CompatPackSurface RequireSurface(JsonElement root, List<string> errors)
+		{
+			if (!root.TryGetProperty("surface", out JsonElement value) || value.ValueKind == JsonValueKind.Null)
+				return CompatPackSurface.Empty;
+			if (value.ValueKind != JsonValueKind.Object)
+			{
+				errors.Add("字段 'surface' 必须是对象。");
+				return CompatPackSurface.Empty;
+			}
+
+			IReadOnlyList<string> addInstructions = Array.Empty<string>();
+			IReadOnlyList<string> hideInstructions = Array.Empty<string>();
+			IReadOnlyList<string> addFunctions = Array.Empty<string>();
+			IReadOnlyList<string> hideFunctions = Array.Empty<string>();
+			foreach (JsonProperty property in value.EnumerateObject())
+			{
+				switch (property.Name)
+				{
+					case "addInstructions":
+						addInstructions = RequireSurfaceNameArray(value, property.Name, errors, normalizeUpper: true);
+						break;
+					case "hideInstructions":
+						hideInstructions = RequireSurfaceNameArray(value, property.Name, errors, normalizeUpper: true);
+						break;
+					case "addFunctions":
+						addFunctions = RequireSurfaceNameArray(value, property.Name, errors, normalizeUpper: false);
+						break;
+					case "hideFunctions":
+						hideFunctions = RequireSurfaceNameArray(value, property.Name, errors, normalizeUpper: false);
+						break;
+					default:
+						errors.Add("字段 'surface' 含未知成员：'" + property.Name + "'。");
+						break;
+				}
+			}
+			return new CompatPackSurface(addInstructions, hideInstructions, addFunctions, hideFunctions);
+		}
+
+		private static IReadOnlyList<string> RequireSurfaceNameArray(
+			JsonElement parent, string field, List<string> errors, bool normalizeUpper)
+		{
+			var result = new List<string>();
+			if (!parent.TryGetProperty(field, out JsonElement value) || value.ValueKind == JsonValueKind.Null)
+				return new ReadOnlyCollection<string>(result);
+			if (value.ValueKind != JsonValueKind.Array)
+			{
+				errors.Add("字段 '" + field + "' 必须是字符串数组。");
+				return new ReadOnlyCollection<string>(result);
+			}
+
+			var seen = new HashSet<string>(StringComparer.Ordinal);
+			foreach (JsonElement item in value.EnumerateArray())
+			{
+				if (item.ValueKind != JsonValueKind.String)
+				{
+					errors.Add("字段 '" + field + "' 含非字符串元素。");
+					continue;
+				}
+				string text = (item.GetString() ?? "").Trim();
+				if (text.Length == 0)
+				{
+					errors.Add("字段 '" + field + "' 含空名字。");
+					continue;
+				}
+				bool hasWhitespace = false;
+				foreach (char c in text)
+				{
+					if (char.IsWhiteSpace(c))
+					{
+						hasWhitespace = true;
+						break;
+					}
+				}
+				if (hasWhitespace)
+				{
+					errors.Add("字段 '" + field + "' 的名字不允许包含空白：'" + text + "'。");
+					continue;
+				}
+				string normalized = normalizeUpper ? text.ToUpperInvariant() : text;
+				if (!seen.Add(normalized))
+				{
+					errors.Add("字段 '" + field + "' 名字重复：" + normalized);
+					continue;
+				}
+				result.Add(normalized);
+			}
+			return new ReadOnlyCollection<string>(result);
 		}
 
 		private static CompatPackGameIdentity? RequireGameIdentity(JsonElement root, List<string> errors)

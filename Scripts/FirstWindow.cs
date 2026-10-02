@@ -1406,9 +1406,15 @@ public partial class FirstWindow : Control
 
 		string effectiveProfile = GetSelectedCoreProfileName(entry);
 		string routeDescription = GetEntryRouteDescription(entry);
+		string packWarning = "";
+		int selectedPackCount = GetSelectedCompatPackCount();
+		if (selectedPackCount > 0 && !string.Equals(effectiveProfile, CoreProfileV24Pure, System.StringComparison.Ordinal))
+		{
+			packWarning = $"；已选 {selectedPackCount} 项兼容包，但包要求 v24pure 基线——本次组合将被拒载并回退 {effectiveProfile}。";
+		}
 		statusLabel.Text = AdvancedCompatibilityEnabled
-			? $"高级兼容模式：本次启动使用 {effectiveProfile}（目录路由为 {entry.ProfileId}，来源 {routeDescription}）。"
-			: $"目录路由：{routeDescription} → {effectiveProfile}";
+			? $"高级兼容模式：本次启动使用 {effectiveProfile}（目录路由为 {entry.ProfileId}，来源 {routeDescription}）{packWarning}"
+			: $"目录路由：{routeDescription} → {effectiveProfile}{packWarning}";
 	}
 
 	static void SetSelectedGamePath(string path, string coreProfileName = CoreProfileV24Pure)

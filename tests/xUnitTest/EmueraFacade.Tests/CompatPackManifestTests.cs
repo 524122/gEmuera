@@ -189,4 +189,29 @@ public class CompatPackManifestTests
         Assert.False(CompatPackManifest.TryParse(json, out _, out var errors));
         Assert.True(errors.Count >= 3, "应至少报告 packVersion 缺失、packId 形式、targetEngineApi、未知字段四类错误：" + string.Join("; ", errors));
     }
+    [Fact]
+    public void Parse_SurfaceAndBaseProfile_Succeeds()
+    {
+        string json = "{\"packId\":\"test.surface\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"baseProfileId\":\"v24pure\","
+            + "\"surface\":{\"addInstructions\":[\" setanimtimer \"],\"hideInstructions\":[\"CALLSHARP\"],"
+            + "\"addFunctions\":[\"SQL_CONNECT\"],\"hideFunctions\":[\"EXISTVAR\"]}}";
+        Assert.True(CompatPackManifest.TryParse(json, out var manifest, out var errors), string.Join("; ", errors));
+        Assert.Equal("v24pure", manifest!.BaseProfileId);
+        Assert.Equal(new[] { "SETANIMTIMER" }, manifest.Surface.AddInstructions);
+        Assert.Equal(new[] { "CALLSHARP" }, manifest.Surface.HideInstructions);
+        Assert.Equal(new[] { "SQL_CONNECT" }, manifest.Surface.AddFunctions);
+        Assert.Equal(new[] { "EXISTVAR" }, manifest.Surface.HideFunctions);
+    }
+
+    [Fact]
+    public void Parse_SurfaceInvalid_Fails()
+    {
+        Assert.False(CompatPackManifest.TryParse(WithField("\"baseProfileId\"", "\"UPPER\""), out _, out _));
+        Assert.False(CompatPackManifest.TryParse(WithField("\"surface\"", "{\"addInstructions\":\"SETANIMTIMER\"}"), out _, out _));
+        Assert.False(CompatPackManifest.TryParse(WithField("\"surface\"", "{\"addInstructions\":[\"SETANIMTIMER\",\" setanimtimer \"]}"), out _, out _));
+        Assert.False(CompatPackManifest.TryParse(WithField("\"surface\"", "{\"addInstructions\":[\"\"]}"), out _, out _));
+        Assert.False(CompatPackManifest.TryParse(WithField("\"surface\"", "{\"unknown\":[\"X\"]}"), out _, out _));
+    }
+
 }

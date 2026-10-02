@@ -11,6 +11,8 @@ public sealed class CompatPackValidationContext
     static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> NoBuiltinVariantInstructions =
         new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
     static readonly IReadOnlySet<string> NoHandlers = new HashSet<string>(StringComparer.Ordinal);
+    static readonly IReadOnlyDictionary<string, string> NoFunctionReturnTypes =
+        new Dictionary<string, string>(StringComparer.Ordinal);
 
     public CompatPackValidationContext(
         int engineModuleApiVersion,
@@ -21,7 +23,9 @@ public sealed class CompatPackValidationContext
         IReadOnlySet<string>? reservedModuleIds = null,
         IReadOnlyDictionary<string, IReadOnlySet<string>>? knownBuiltinVariantInstructions = null,
         IReadOnlySet<string>? knownInstructionHandlers = null,
-        IReadOnlySet<string>? knownFunctionHandlers = null)
+        IReadOnlySet<string>? knownFunctionHandlers = null,
+        IReadOnlyDictionary<string, string>? knownFunctionReturnTypes = null,
+        string? baselineProfileId = null)
     {
         if (engineModuleApiVersion <= 0)
             throw new ArgumentOutOfRangeException(nameof(engineModuleApiVersion));
@@ -34,6 +38,8 @@ public sealed class CompatPackValidationContext
         KnownBuiltinVariantInstructions = knownBuiltinVariantInstructions ?? NoBuiltinVariantInstructions;
         KnownInstructionHandlers = knownInstructionHandlers ?? NoHandlers;
         KnownFunctionHandlers = knownFunctionHandlers ?? NoHandlers;
+        KnownFunctionReturnTypes = knownFunctionReturnTypes ?? NoFunctionReturnTypes;
+        BaselineProfileId = string.IsNullOrWhiteSpace(baselineProfileId) ? "v24pure" : baselineProfileId.Trim();
     }
 
     /// <summary>引擎当前 ModuleApiVersion（与 DialectModuleDefinition.ModuleApiVersion 同源）。</summary>
@@ -78,4 +84,13 @@ public sealed class CompatPackValidationContext
     /// <see cref="KnownInstructionHandlers"/> 对称：函数注册名无真实 handler 即拒载。
     /// </summary>
     public IReadOnlySet<string> KnownFunctionHandlers { get; }
+
+    /// <summary>
+    /// 引擎表达式函数名 → 真实返回类型（宿主传入时用于 manifest-only 表面贡献生成
+    /// FunctionDescriptor；缺失时规则层拒载，避免 plan 元数据与 handler 不一致）。
+    /// </summary>
+    public IReadOnlyDictionary<string, string> KnownFunctionReturnTypes { get; }
+
+    /// <summary>包声明的基线 profile 必须与会话基线一致；缺省 v24pure。</summary>
+    public string BaselineProfileId { get; }
 }

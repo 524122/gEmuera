@@ -280,19 +280,29 @@ public sealed class DialectPlan
 {
     private readonly ReadOnlyCollection<DialectModuleSnapshot> _modules;
     private readonly ReadOnlyCollection<BehaviorPortSnapshot> _ports;
+    private readonly ReadOnlyCollection<string> _packModuleIds;
 
     internal DialectPlan(
         IEnumerable<DialectModuleSnapshot> modules,
         IEnumerable<BehaviorPortSnapshot> ports,
         IReadOnlyDictionary<string, InstructionDescriptor> instructions,
         IReadOnlyDictionary<string, FunctionDescriptor> functions,
-        string canonicalHash)
+        string canonicalHash,
+        IEnumerable<string>? packModuleIds = null,
+        IReadOnlyDictionary<string, string>? variantSelections = null)
     {
         _modules = new ReadOnlyCollection<DialectModuleSnapshot>(modules.ToList());
         _ports = new ReadOnlyCollection<BehaviorPortSnapshot>(ports.ToList());
         Instructions = instructions;
         Functions = functions;
         CanonicalHash = ContractText.Required(canonicalHash, nameof(canonicalHash));
+        _packModuleIds = new ReadOnlyCollection<string>(
+            (packModuleIds ?? Array.Empty<string>())
+                .Select(value => ContractText.RequiredIdentifier(value, nameof(packModuleIds)))
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToArray());
+        VariantSelections = CopyVariantSelections(variantSelections);
     }
 
     public IReadOnlyList<DialectModuleSnapshot> Modules => _modules;
@@ -300,6 +310,35 @@ public sealed class DialectPlan
     public IReadOnlyDictionary<string, InstructionDescriptor> Instructions { get; }
     public IReadOnlyDictionary<string, FunctionDescriptor> Functions { get; }
     public string CanonicalHash { get; }
+
+    /// <summary>
+    /// 本计划中来自 CompatPack 的合成模块 id（会话投影白名单的唯一事实源）。
+    /// 基线 plan 为空；包组装 plan 在 CompatPackPlanAssembler 中固化。
+    /// </summary>
+    public IReadOnlyList<string> PackModuleIds => _packModuleIds;
+
+    /// <summary>
+    /// 包声明的内置 handler 变体选择（指令名 Trim+Upper → builtin:*）。
+    /// 与 PackModuleIds 同属 plan 数据，使投影不再依赖 process-wide 静态。
+    /// </summary>
+    public IReadOnlyDictionary<string, string> VariantSelections { get; }
+
+    private static IReadOnlyDictionary<string, string> CopyVariantSelections(
+        IReadOnlyDictionary<string, string>? selections)
+    {
+        if (selections is null || selections.Count == 0)
+            return new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(StringComparer.Ordinal));
+
+        var copy = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pair in selections)
+        {
+            string key = ContractText.Required(pair.Key, nameof(selections)).Trim().ToUpperInvariant();
+            string value = ContractText.Required(pair.Value, nameof(selections));
+            if (!copy.TryAdd(key, value))
+                throw new ArgumentException("Duplicate variant selection instruction: " + key, nameof(selections));
+        }
+        return new ReadOnlyDictionary<string, string>(copy);
+    }
 
     public bool TryGetInstruction(string name, out InstructionDescriptor descriptor)
     {

@@ -126,21 +126,6 @@ namespace MinorShift.Emuera.Compatibility
 		public static LegacyCompatibilityProfile Compose(
 			CompatibilityPlan plan,
 			bool scopedVariableInstructionsEnabled)
-			=> Compose(plan, scopedVariableInstructionsEnabled, null);
-
-		/// <summary>
-		/// packModuleIds 是宿主（CompatPackHost）显式放行的兼容包合成模块白名单：闭包 =
-		/// 期望闭包 ∪ 白名单。白名单外的任何额外模块仍按未分类抛异常（信任边界：
-		/// 未知模块不会因为"看起来像包"而被放行）。null/空 = 无包，行为与历史严格校验逐字节一致。
-		/// packVariantSelections 是包清单的 builtin:* 变体选择（指令 → builtin 名），
-		/// 经 BuiltinCompatPackVariants 注册表解析为 LegacyInstructionVariant 并注入投影——
-		/// 包声明的内置变体在会话内真实替换引擎 handler。null = 无变体选择。
-		/// </summary>
-		public static LegacyCompatibilityProfile Compose(
-			CompatibilityPlan plan,
-			bool scopedVariableInstructionsEnabled,
-			System.Collections.Generic.IReadOnlyCollection<string>? packModuleIds,
-			System.Collections.Generic.IReadOnlyDictionary<string, string>? packVariantSelections = null)
 		{
 			if (!expectedModuleClosures.ContainsKey(plan.ProfileId))
 			{
@@ -152,7 +137,9 @@ namespace MinorShift.Emuera.Compatibility
 			var selectedModules = new HashSet<string>(
 				plan.Dialect.Modules.Select(module => module.ModuleId),
 				StringComparer.Ordinal);
-			var packModules = new HashSet<string>(packModuleIds ?? Array.Empty<string>(), StringComparer.Ordinal);
+			// 包合成模块白名单是 plan 的一等数据（CompatPackPlanAssembler 固化）：
+			// 不再依赖宿主进程静态，也不需要在会话结束时手动复位。
+			var packModules = new HashSet<string>(plan.Dialect.PackModuleIds, StringComparer.Ordinal);
 			if (packModules.Overlaps(modulesById.Keys))
 			{
 				throw new InvalidOperationException(
@@ -197,10 +184,31 @@ namespace MinorShift.Emuera.Compatibility
 				module.Apply(builder);
 			}
 
+			// 策略激活与"哪个内置模块被选中"解耦：policy 对象从 plan.CapabilityIds 派生。
+			// 内置 profile 仍得到与旧实现相同的布尔组合；社区包在 v24pure 基线上声明同一组
+			// capability 即可激活对应行为，不再要求引擎内置模块仍在场（P-D 前提）。
+			builder.SetSnakePolicy(LegacySnakeCompatibilityPolicy.FromCapabilities(
+				plan.CapabilityIds, selectedModules.Contains(SnakeModuleId)));
+			builder.SetEraFlPolicy(LegacyEraFlCompatibilityPolicy.FromCapabilities(
+				plan.CapabilityIds, selectedModules.Contains(EraFlModuleId)));
+			builder.SetMegatenPolicy(LegacyMegatenCompatibilityPolicy.FromCapabilities(
+				plan.CapabilityIds, selectedModules.Contains(MegatenModuleId)));
+
+			// 蛇系函数参数契约与 module.Apply 解耦：完整 snake capability 集在场时，
+			// 社区包在 v24pure 基线上也能激活同名函数的重载差异契约。
+			bool snakeCapabilitiesComplete = GEmuera.Core.Compatibility.SnakeCompatibilityCapabilities
+				.RequiredCapabilityIds.All(plan.CapabilityIds.Contains);
+			if (selectedModules.Contains(SnakeModuleId) || snakeCapabilitiesComplete)
+			{
+				builder.SetDeclaringModule(SnakeModuleId);
+				builder.ActivateDialectFunctionContracts(LegacySnakeCompatibilityModule.DivergentFunctionContractNames);
+			}
+
 			if (packModuleIdsInClosure.Count > 0)
 				ApplyPackSurface(plan, packModuleIdsInClosure, builder);
 
-			if (packVariantSelections is { Count: > 0 })
+			IReadOnlyDictionary<string, string> packVariantSelections = plan.Dialect.VariantSelections;
+			if (packVariantSelections.Count > 0)
 			{
 				foreach (KeyValuePair<string, string> selection in packVariantSelections)
 				{
@@ -527,7 +535,7 @@ namespace MinorShift.Emuera.Compatibility
 		// 蛇系参数契约名集：这些同名函数在 snake 与 v24 参考注册表中重载形态不同
 		//（DialectFunctionContracts 逐名提供 CheckArgumentType 差异）。激活后该会话
 		// 使用蛇系契约；v24pure/erafl 会话保持 v24 形态。
-		private static readonly IReadOnlyCollection<string> DivergentFunctionContractNames =
+		internal static readonly IReadOnlyCollection<string> DivergentFunctionContractNames =
 			Array.AsReadOnly(new[]
 			{
 				"ABS", "ARGLEN", "CBGSETSPRITE", "CBRT", "EXISTVAR", "EXPONENT",
@@ -604,13 +612,11 @@ namespace MinorShift.Emuera.Compatibility
 			builder.ExposeInstructionNames(InstructionNames);
 			builder.ExposeFunctionNames(FunctionNames);
 			builder.HideFunctionNames(SnakeExcludedFunctionNames);
-			builder.SetSnakePolicy(LegacySnakeCompatibilityPolicy.FromCapabilities(builder.Plan.CapabilityIds));
 			// snake 覆盖 v24 基线：SETBGIMAGE 用 snake 变体；FOR 回退共享表原条目
 			//（snake 的 FOR 文法即共享表注册的 REPEAT 内核，EXTENDED 标志保持不变）。
 			builder.SubstituteInstruction("FOR", LegacyInstructionVariant.SharedTable);
 			builder.SubstituteInstruction("SETBGIMAGE", LegacyInstructionVariant.SetBgImageSnake);
-			// 蛇系函数参数契约（重载差异名集）随模块激活。
-			builder.ActivateDialectFunctionContracts(DivergentFunctionContractNames);
+			// 蛇系函数参数契约（重载差异名集）已在 Compose 中按 capability/模块选中统一激活。
 		}
 	}
 
@@ -679,7 +685,8 @@ namespace MinorShift.Emuera.Compatibility
 		public void Declare(LegacyCompatibilityProfileBuilder builder) { }
 		public void Apply(LegacyCompatibilityProfileBuilder builder)
 		{
-			builder.SetMegatenPolicy(LegacyMegatenCompatibilityPolicy.Instance);
+			// 策略安装已集中到 LegacyCompatibilityModuleCatalog.Compose：由 plan.CapabilityIds
+			// 决定（模块选中或包声明同一组 capability 均可激活），不再依赖本模块 Apply 是否执行。
 		}
 	}
 
@@ -701,7 +708,6 @@ namespace MinorShift.Emuera.Compatibility
 		public void Apply(LegacyCompatibilityProfileBuilder builder)
 		{
 			builder.ExposeInstructionNames(InstructionNames);
-			builder.SetEraFlPolicy(LegacyEraFlCompatibilityPolicy.FromCapabilities(builder.Plan.CapabilityIds));
 			// erafl 显式绑定共享表的 SETANIMETIMER handler：绑定归属在模块声明中可见，
 			// 未来 snake 侧 handler 分叉时 erafl 在此固定自己的变体，不再隐式跟随共享表。
 			builder.SubstituteInstruction("SETANIMETIMER", LegacyInstructionVariant.SharedTable);
@@ -761,17 +767,24 @@ namespace MinorShift.Emuera.Compatibility
 		// 映射穷尽性由 SurfaceSmoke 反射断言把关）。
 		private readonly IReadOnlyCollection<string> capabilities;
 
-		private LegacySnakeCompatibilityPolicy(IReadOnlyCollection<string> capabilities)
+		private readonly bool moduleSelected;
+
+		private LegacySnakeCompatibilityPolicy(IReadOnlyCollection<string> capabilities, bool moduleSelected)
 		{
 			this.capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
+			this.moduleSelected = moduleSelected;
 		}
 
-		public static LegacySnakeCompatibilityPolicy FromCapabilities(IReadOnlyCollection<string> capabilityIds)
+		public static LegacySnakeCompatibilityPolicy FromCapabilities(
+			IReadOnlyCollection<string> capabilityIds, bool moduleSelected)
 		{
-			return new LegacySnakeCompatibilityPolicy(capabilityIds);
+			return new LegacySnakeCompatibilityPolicy(capabilityIds, moduleSelected);
 		}
 
-		public bool IsEnabled => true;
+		// 模块语义仍以选中为准；社区包在 v24pure 基线上声明完整 snake capability 集时，
+		// IsEnabled 同样为 true（P-D 后内置模块退场，包成为唯一声明载体）。
+		public bool IsEnabled => moduleSelected
+			|| GEmuera.Core.Compatibility.SnakeCompatibilityCapabilities.RequiredCapabilityIds.All(capabilities.Contains);
 		public bool UsesParserDiagnostics => capabilities.Contains(GEmuera.Core.Compatibility.SnakeCompatibilityCapabilities.ParserDiagnostics);
 		public bool AllowsUserDefinedVariableResolution => capabilities.Contains(GEmuera.Core.Compatibility.SnakeCompatibilityCapabilities.UserDefinedVariableResolution);
 		public bool AllowsPrivateArguments => capabilities.Contains(GEmuera.Core.Compatibility.SnakeCompatibilityCapabilities.PrivateArguments);
@@ -804,119 +817,169 @@ namespace MinorShift.Emuera.Compatibility
 		public bool AllowsPrivateSystemVariableShadowing => false;
 	}
 
-	// megaten 启用策略：三个 flag 全 true，仅在 megaten 会话的 Apply 阶段注入。
+	// megaten 策略：moduleSelected 保持内置 profile 语义；三个 flag 由 plan capability 派生，
+	// 因此社区包在 v24pure 基线上声明对应 behavior id 也能激活。
 	internal sealed class LegacyMegatenCompatibilityPolicy : IMegatenCompatibilityPolicy
 	{
-		public static readonly LegacyMegatenCompatibilityPolicy Instance = new LegacyMegatenCompatibilityPolicy();
-		public bool IsEnabled => true;
-		public bool UsesVariableCaseForFunctionLabelLookup => true;
-		public bool AllowsOutAsVariableNameAfterRefKeyword => true;
-		public bool AllowsPrivateSystemVariableShadowing => true;
+		static readonly IReadOnlySet<string> RequiredCapabilities = new HashSet<string>(StringComparer.Ordinal)
+		{
+			MegatenCompatibilityModule.LabelLookupCaseBehavior,
+			MegatenCompatibilityModule.RefOutNameBehavior,
+			MegatenCompatibilityModule.PrivateSystemShadowBehavior,
+		};
+
+		private readonly IReadOnlyCollection<string> capabilities;
+		private readonly bool moduleSelected;
+
+		private LegacyMegatenCompatibilityPolicy(
+			IReadOnlyCollection<string> capabilities,
+			bool moduleSelected)
+		{
+			this.capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
+			this.moduleSelected = moduleSelected;
+		}
+
+		public static LegacyMegatenCompatibilityPolicy FromCapabilities(
+			IReadOnlyCollection<string> capabilityIds,
+			bool moduleSelected)
+		{
+			return new LegacyMegatenCompatibilityPolicy(capabilityIds, moduleSelected);
+		}
+
+		public bool IsEnabled => moduleSelected || RequiredCapabilities.All(capabilities.Contains);
+		public bool UsesVariableCaseForFunctionLabelLookup =>
+			capabilities.Contains(MegatenCompatibilityModule.LabelLookupCaseBehavior);
+		public bool AllowsOutAsVariableNameAfterRefKeyword =>
+			capabilities.Contains(MegatenCompatibilityModule.RefOutNameBehavior);
+		public bool AllowsPrivateSystemVariableShadowing =>
+			capabilities.Contains(MegatenCompatibilityModule.PrivateSystemShadowBehavior);
 	}
 
 	internal sealed class DisabledEraFlCompatibilityPolicy : IEraFlCompatibilityPolicy
-	{
-		public static readonly DisabledEraFlCompatibilityPolicy Instance = new DisabledEraFlCompatibilityPolicy();
-		public bool IsEnabled => false;
-		public bool UsesExtendedDisplayHistory => false;
-		public bool AllowsFloatLiterals => false;
-		public bool AllowsOutKeyword => false;
-		public bool UsesSafeArithmeticGuard => false;
-		public bool AllowsExtendedHtmlAttributes => false;
-		public string TaskStartRoomLookupFunction => string.Empty;
-		public string GMapQuestType => string.Empty;
-		public bool IsOmittedDefaultArgument(char currentToken) => false;
-		public bool IsPointerInputMetadataOption(string optionText) => false;
-		// Why（对照源码 MainWindow.MouseDown / EmueraConsole.InputMouseKey）：RESULT:1 的鼠标
-		// 按钮协议在所有 Emuera 实现中都是 1=左、2=右、3=中（文档约定），与是否为 eraFL 无关。
-		// 非 eraFL 策略之前原样返回宿主 VK（中键 0x04 → RESULT:1=4），依赖 RESULT:1==3 分支的
-		// snake/v24 游戏会读到错误值。What/How：与 eraFL 共用同一 0x04→3 归一化，其它值不改写。
-		public int NormalizePointerButtonResult(int mouseButton) => EraFlCompatibilityModule.NormalizePointerButtonResult(mouseButton);
-		public string NormalizePointerIntegerSubmission(string input, int mouseButton, bool waitingForInteger) => input ?? string.Empty;
-		public bool ShouldSubmitBlankPointerStringInput(int mouseButton, bool waitingForString) => false;
-		public bool TryRecoverQuestStartRoomIndex(string functionName, long returnedRoomIndex, string requestedRoomTag, long mapId, string questType, string[,] mapData, out long recoveredRoomIndex)
-		{
-			recoveredRoomIndex = returnedRoomIndex;
-			return false;
-		}
-		public bool TryPopulateGMapRoomData(long mapId, string[,] mapData, IReadOnlyList<EraFlGMapNode> nodes) => false;
-		public bool TryParseGMapDataTableFromXml(string schemaXml, string dataXml, out System.Data.DataTable table, out IReadOnlyList<EraFlGMapNode> nodes)
-		{
-			table = new System.Data.DataTable();
-			nodes = Array.Empty<EraFlGMapNode>();
-			return false;
-		}
-	}
+{
+    public static readonly DisabledEraFlCompatibilityPolicy Instance = new DisabledEraFlCompatibilityPolicy();
+    public bool IsEnabled => false;
+    public bool UsesExtendedDisplayHistory => false;
+    public bool AllowsFloatLiterals => false;
+    public bool AllowsOutKeyword => false;
+    public bool UsesSafeArithmeticGuard => false;
+    public bool AllowsExtendedHtmlAttributes => false;
+    public string TaskStartRoomLookupFunction => string.Empty;
+    public string GMapQuestType => string.Empty;
+    public bool IsOmittedDefaultArgument(char currentToken) => false;
+    public bool IsPointerInputMetadataOption(string optionText) => false;
+    // Why（对照源码 MainWindow.MouseDown / EmueraConsole.InputMouseKey）：RESULT:1 的鼠标
+    // 按钮协议在所有 Emuera 实现中都是 1=左、2=右、3=中（文档约定），与是否为 eraFL 无关。
+    // 非 eraFL 策略之前原样返回宿主 VK（中键 0x04 → RESULT:1=4），依赖 RESULT:1==3 分支的
+    // snake/v24 游戏会读到错误值。What/How：与 eraFL 共用同一 0x04→3 归一化，其它值不改写。
+    public int NormalizePointerButtonResult(int mouseButton) => EraFlCompatibilityModule.NormalizePointerButtonResult(mouseButton);
+    public string NormalizePointerIntegerSubmission(string input, int mouseButton, bool waitingForInteger) => input ?? string.Empty;
+    public bool ShouldSubmitBlankPointerStringInput(int mouseButton, bool waitingForString) => false;
+    public bool TryRecoverQuestStartRoomIndex(string functionName, long returnedRoomIndex, string requestedRoomTag, long mapId, string questType, string[,] mapData, out long recoveredRoomIndex)
+    {
+        recoveredRoomIndex = returnedRoomIndex;
+        return false;
+    }
+    public bool TryPopulateGMapRoomData(long mapId, string[,] mapData, IReadOnlyList<EraFlGMapNode> nodes) => false;
+    public bool TryParseGMapDataTableFromXml(string schemaXml, string dataXml, out System.Data.DataTable table, out IReadOnlyList<EraFlGMapNode> nodes)
+    {
+        table = new System.Data.DataTable();
+        nodes = Array.Empty<EraFlGMapNode>();
+        return false;
+    }
+}
 
-	internal sealed class LegacyEraFlCompatibilityPolicy : IEraFlCompatibilityPolicy
-	{
-		// 布尔型/开关型 quirk 由 capability 账本派生（erafl profile 声明），
-		// 算法型行为（GMap、指针归一化）仍委托 Core 模块的确定性实现。
-		private readonly IReadOnlyCollection<string> capabilities;
+internal sealed class LegacyEraFlCompatibilityPolicy : IEraFlCompatibilityPolicy
+{
+    // 布尔型/开关型 quirk 由 capability 账本派生（erafl profile 或社区包声明），
+    // 算法型行为（GMap、指针归一化）仍委托 Core 模块的确定性实现，但按 capability 放行。
+    private readonly IReadOnlyCollection<string> capabilities;
+    private readonly bool moduleSelected;
+    private bool HasDynamicMap => capabilities.Contains(EraFlCompatibilityModule.DynamicMapCapability);
+    private bool HasPointerButton => capabilities.Contains(EraFlCompatibilityModule.PointerButtonCapability);
 
-		private LegacyEraFlCompatibilityPolicy(IReadOnlyCollection<string> capabilities)
-		{
-			this.capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
-		}
+    private LegacyEraFlCompatibilityPolicy(IReadOnlyCollection<string> capabilities, bool moduleSelected)
+    {
+        this.capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
+        this.moduleSelected = moduleSelected;
+    }
 
-		public static LegacyEraFlCompatibilityPolicy FromCapabilities(IReadOnlyCollection<string> capabilityIds)
-		{
-			return new LegacyEraFlCompatibilityPolicy(capabilityIds);
-		}
+    public static LegacyEraFlCompatibilityPolicy FromCapabilities(
+        IReadOnlyCollection<string> capabilityIds, bool moduleSelected)
+    {
+        return new LegacyEraFlCompatibilityPolicy(capabilityIds, moduleSelected);
+    }
 
-		public bool IsEnabled => true;
-		public bool UsesExtendedDisplayHistory => capabilities.Contains(EraFlCompatibilityModule.DisplayExtendedHistoryBehavior);
-		public bool AllowsFloatLiterals => capabilities.Contains(EraFlCompatibilityModule.FloatLiteralsBehavior);
-		public bool AllowsOutKeyword => capabilities.Contains(EraFlCompatibilityModule.OutKeywordBehavior);
-		public bool UsesSafeArithmeticGuard => capabilities.Contains(EraFlCompatibilityModule.SafeArithmeticGuardBehavior);
-		public bool AllowsExtendedHtmlAttributes => capabilities.Contains(EraFlCompatibilityModule.ExtendedHtmlAttributesBehavior);
-		public string TaskStartRoomLookupFunction => EraFlCompatibilityModule.TaskStartRoomLookupFunction;
-		public string GMapQuestType => EraFlCompatibilityModule.GMapQuestType;
-		public bool IsOmittedDefaultArgument(char currentToken) =>
-			capabilities.Contains(EraFlCompatibilityModule.InputOmittedDefaultArgumentBehavior)
-			&& EraFlCompatibilityModule.IsOmittedDefaultArgument(currentToken);
-		public bool IsPointerInputMetadataOption(string optionText) => EraFlCompatibilityModule.IsPointerInputMetadataOption(optionText);
-		public int NormalizePointerButtonResult(int mouseButton) => EraFlCompatibilityModule.NormalizePointerButtonResult(mouseButton);
-		public string NormalizePointerIntegerSubmission(string input, int mouseButton, bool waitingForInteger) =>
-			EraFlCompatibilityModule.NormalizePointerIntegerSubmission(input, mouseButton, waitingForInteger);
-		public bool ShouldSubmitBlankPointerStringInput(int mouseButton, bool waitingForString) =>
-			capabilities.Contains(EraFlCompatibilityModule.PointerBlankStringBehavior)
-			&& EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(mouseButton, waitingForString);
-		public bool TryRecoverQuestStartRoomIndex(string functionName, long returnedRoomIndex, string requestedRoomTag, long mapId, string questType, string[,] mapData, out long recoveredRoomIndex) =>
-			EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
-				functionName,
-				returnedRoomIndex,
-				requestedRoomTag,
-				mapId,
-				questType,
-				mapData,
-				out recoveredRoomIndex);
-		public bool TryPopulateGMapRoomData(long mapId, string[,] mapData, IReadOnlyList<EraFlGMapNode> nodes)
-		{
-			if (nodes == null)
-				return false;
-			var coreNodes = new List<EraFlCompatibilityModule.GMapNodeData>(nodes.Count);
-			foreach (EraFlGMapNode node in nodes)
-				coreNodes.Add(new EraFlCompatibilityModule.GMapNodeData(node.NodeId, node.NodeName, node.PathList));
-			return EraFlCompatibilityModule.TryPopulateGMapRoomData(mapId, mapData, coreNodes);
-		}
-		public bool TryParseGMapDataTableFromXml(string schemaXml, string dataXml, out System.Data.DataTable table, out IReadOnlyList<EraFlGMapNode> nodes)
-		{
-			if (!EraFlCompatibilityModule.TryParseGMapDataTableFromXml(schemaXml, dataXml,
-				out System.Data.DataTable? parsedTable,
-				out IReadOnlyList<EraFlCompatibilityModule.GMapNodeData> coreNodes)
-				|| parsedTable == null)
-			{
-				table = new System.Data.DataTable();
-				nodes = Array.Empty<EraFlGMapNode>();
-				return false;
-			}
-			table = parsedTable;
-			var projected = new List<EraFlGMapNode>(coreNodes.Count);
-			foreach (EraFlCompatibilityModule.GMapNodeData node in coreNodes)
-				projected.Add(new EraFlGMapNode(node.NodeId, node.NodeName ?? string.Empty, node.PathList ?? string.Empty));
-			nodes = projected.AsReadOnly();
-			return true;
-		}
-	}
+    public bool IsEnabled => moduleSelected || EraFlCompatibilityModule.RequiredCapabilityIds.All(capabilities.Contains);
+    public bool UsesExtendedDisplayHistory => capabilities.Contains(EraFlCompatibilityModule.DisplayExtendedHistoryBehavior);
+    public bool AllowsFloatLiterals => capabilities.Contains(EraFlCompatibilityModule.FloatLiteralsBehavior);
+    public bool AllowsOutKeyword => capabilities.Contains(EraFlCompatibilityModule.OutKeywordBehavior);
+    public bool UsesSafeArithmeticGuard => capabilities.Contains(EraFlCompatibilityModule.SafeArithmeticGuardBehavior);
+    public bool AllowsExtendedHtmlAttributes => capabilities.Contains(EraFlCompatibilityModule.ExtendedHtmlAttributesBehavior);
+    public string TaskStartRoomLookupFunction => HasDynamicMap ? EraFlCompatibilityModule.TaskStartRoomLookupFunction : string.Empty;
+    public string GMapQuestType => HasDynamicMap ? EraFlCompatibilityModule.GMapQuestType : string.Empty;
+    public bool IsOmittedDefaultArgument(char currentToken) =>
+        capabilities.Contains(EraFlCompatibilityModule.InputOmittedDefaultArgumentBehavior)
+        && EraFlCompatibilityModule.IsOmittedDefaultArgument(currentToken);
+    public bool IsPointerInputMetadataOption(string optionText) =>
+        HasPointerButton && EraFlCompatibilityModule.IsPointerInputMetadataOption(optionText);
+    public int NormalizePointerButtonResult(int mouseButton) => EraFlCompatibilityModule.NormalizePointerButtonResult(mouseButton);
+    public string NormalizePointerIntegerSubmission(string input, int mouseButton, bool waitingForInteger) =>
+        HasPointerButton
+            ? EraFlCompatibilityModule.NormalizePointerIntegerSubmission(input, mouseButton, waitingForInteger)
+            : input ?? string.Empty;
+    public bool ShouldSubmitBlankPointerStringInput(int mouseButton, bool waitingForString) =>
+        capabilities.Contains(EraFlCompatibilityModule.PointerBlankStringBehavior)
+        && EraFlCompatibilityModule.ShouldSubmitBlankPointerStringInput(mouseButton, waitingForString);
+    public bool TryRecoverQuestStartRoomIndex(string functionName, long returnedRoomIndex, string requestedRoomTag, long mapId, string questType, string[,] mapData, out long recoveredRoomIndex)
+    {
+        if (!HasDynamicMap)
+        {
+            recoveredRoomIndex = returnedRoomIndex;
+            return false;
+        }
+        return EraFlCompatibilityModule.TryRecoverQuestStartRoomIndex(
+            functionName,
+            returnedRoomIndex,
+            requestedRoomTag,
+            mapId,
+            questType,
+            mapData,
+            out recoveredRoomIndex);
+    }
+    public bool TryPopulateGMapRoomData(long mapId, string[,] mapData, IReadOnlyList<EraFlGMapNode> nodes)
+    {
+        if (!HasDynamicMap || nodes == null)
+            return false;
+        var coreNodes = new List<EraFlCompatibilityModule.GMapNodeData>(nodes.Count);
+        foreach (EraFlGMapNode node in nodes)
+            coreNodes.Add(new EraFlCompatibilityModule.GMapNodeData(node.NodeId, node.NodeName, node.PathList));
+        return EraFlCompatibilityModule.TryPopulateGMapRoomData(mapId, mapData, coreNodes);
+    }
+    public bool TryParseGMapDataTableFromXml(string schemaXml, string dataXml, out System.Data.DataTable table, out IReadOnlyList<EraFlGMapNode> nodes)
+    {
+        if (!HasDynamicMap)
+        {
+            table = new System.Data.DataTable();
+            nodes = Array.Empty<EraFlGMapNode>();
+            return false;
+        }
+        if (!EraFlCompatibilityModule.TryParseGMapDataTableFromXml(schemaXml, dataXml,
+                out System.Data.DataTable? parsedTable,
+                out IReadOnlyList<EraFlCompatibilityModule.GMapNodeData> coreNodes)
+            || parsedTable == null)
+        {
+            table = new System.Data.DataTable();
+            nodes = Array.Empty<EraFlGMapNode>();
+            return false;
+        }
+        table = parsedTable;
+        var projected = new List<EraFlGMapNode>(coreNodes.Count);
+        foreach (EraFlCompatibilityModule.GMapNodeData node in coreNodes)
+            projected.Add(new EraFlGMapNode(node.NodeId, node.NodeName ?? string.Empty, node.PathList ?? string.Empty));
+        nodes = projected.AsReadOnly();
+        return true;
+    }
+}
+
 }

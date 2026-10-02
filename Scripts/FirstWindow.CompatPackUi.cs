@@ -239,10 +239,9 @@ public partial class FirstWindow
 			row.Toggle.Disabled = !compatPackUiEnabled;
 	}
 
-	void RefreshCompatPackHeader()
+	/// <summary>当前 UI 勾选 + 手动路径合并后的启用包数量（不含存储态）。</summary>
+	internal int GetSelectedCompatPackCount()
 	{
-		if (compatPackHeaderLabel == null)
-			return;
 		int enabledCount = 0;
 		foreach (CompatPackCandidateRow row in compatPackCandidateRows)
 		{
@@ -251,6 +250,14 @@ public partial class FirstWindow
 		}
 		if (compatPackPathsEdit != null)
 			enabledCount += CompatPackLauncherConfig.ParseSelection(compatPackPathsEdit.Text).Count;
+		return enabledCount;
+	}
+
+	void RefreshCompatPackHeader()
+	{
+		if (compatPackHeaderLabel == null)
+			return;
+		int enabledCount = GetSelectedCompatPackCount();
 		compatPackHeaderLabel.Text = enabledCount > 0
 			? string.Format(
 				MultiLanguage.Get("FirstWindow.CompatPackSectionActive", "兼容包（已启用 {0} 项，按所选游戏保存）"),

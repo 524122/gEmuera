@@ -357,19 +357,14 @@ namespace MinorShift.Emuera
 			LegacyCompatibilityProfile profile;
 			try
 			{
-				profile = LegacyCompatibilityProfile.Create(
-					plan,
-					scopedVariableInstructionsEnabled,
-					MinorShift.Emuera.Compatibility.CompatPackHost.ActivePackModuleIds,
-					MinorShift.Emuera.Compatibility.CompatPackHost.ActiveVariantSelections);
+				// plan 自身携带 pack 模块白名单与 variantSelections（CompatPackPlanAssembler
+				// 固化）；投影不再读取 process-wide 静态，因此这里没有额外的复位/传参路径。
+				profile = LegacyCompatibilityProfile.Create(plan, scopedVariableInstructionsEnabled);
 			}
 			catch (Exception exception)
 			{
 				global::GenericUtils.Error("[LOAD] CompatPack projection failed, fallback to no-pack composition: "
 					+ exception.GetType().Name + ": " + exception.Message);
-				// 降级后投影静态不再合法（属已失败的包计划），同步复位——否则下方
-				// :145 语义的重组合会把残留变体选择再次喂给基线 Create。
-				MinorShift.Emuera.Compatibility.CompatPackHost.ResetActiveSessionProjection();
 				plan = BuiltInDialectCatalog.CreateLegacySessionPlan(plan.ProfileId);
 				profile = LegacyCompatibilityProfile.Create(plan, scopedVariableInstructionsEnabled);
 			}
@@ -391,9 +386,6 @@ namespace MinorShift.Emuera
 			{
 				System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
 				System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
-				// 计划解绑时同步清包投影静态：投影只对其所属计划合法，防止后续早绑定
-				// （EmueraMain 显示默认值路径）消费上一会话残留的白名单/变体选择。
-				MinorShift.Emuera.Compatibility.CompatPackHost.ResetActiveSessionProjection();
 			}
 		}
 
@@ -406,7 +398,6 @@ namespace MinorShift.Emuera
 		{
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
 			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
-			MinorShift.Emuera.Compatibility.CompatPackHost.ResetActiveSessionProjection();
 		}
 
 		private static void ApplyAndroidWindowWidthPolicy()
@@ -483,7 +474,6 @@ namespace MinorShift.Emuera
 			DebugShowWindowOverride = null;
 			System.Threading.Volatile.Write(ref m1CompatibilityPlan, null);
 			System.Threading.Volatile.Write(ref m1CompatibilityProfile, null);
-			MinorShift.Emuera.Compatibility.CompatPackHost.ResetActiveSessionProjection();
 			StartTime = 0;
 		}
 

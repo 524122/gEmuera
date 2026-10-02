@@ -17,6 +17,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Core\GEmuera.Core.csproj" />
+    <!-- 数据包夹具：无 ICompatPack 入口，仅内嵌 manifest（manifest-only 加载路径端到端）。 -->
+    <ProjectReference Include="..\DataOnlyCompatPackFixture\DataOnlyCompatPackFixture.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- 本测试程序集兼任加载器测试的"真实包样本"：以规范资源名内嵌合法清单，

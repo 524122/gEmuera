@@ -215,4 +215,60 @@ public class CompatPackLoaderTests
         protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
             => throw new InvalidOperationException("boom");
     }
+    [Fact]
+    public void ResolvePackEntry_AssemblyWithoutEntry_ReturnsManifestOnlyPack()
+    {
+        string json = "{\"packId\":\"test.data-only\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"surface\":{\"addInstructions\":[\"SETANIMETIMER\"]}}";
+        var manifest = CompatPackManifest.TryParse(json, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+
+        var errors = new List<string>();
+        ICompatPack? pack = CompatPackLoader.ResolvePackEntry(typeof(object).Assembly, manifest, errors);
+
+        Assert.Empty(errors);
+        Assert.IsType<ManifestOnlyCompatPack>(pack);
+        Assert.Same(manifest, pack!.Manifest);
+    }
+
+    [Fact]
+    public void ManifestOnlyPack_WithManifestSurface_ValidatesThroughCombinedContributions()
+    {
+        string json = "{\"packId\":\"test.data-surface\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"baseProfileId\":\"v24pure\","
+            + "\"surface\":{\"addInstructions\":[\"SETANIMETIMER\"],\"hideInstructions\":[\"CALLSHARP\"],"
+            + "\"addFunctions\":[\"SQL_CONNECT\"],\"hideFunctions\":[\"EXISTVAR\"]}}";
+        var manifest = CompatPackManifest.TryParse(json, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+        var context = RealContext();
+        ICompatPack pack = new ManifestOnlyCompatPack(manifest);
+        IReadOnlyList<ICompatPackContribution> manifestContributions =
+            CompatPackLoader.CreateManifestContributions(manifest, context);
+
+        Assert.Single(manifestContributions);
+        Assert.IsType<ManifestSurfaceContribution>(manifestContributions[0]);
+        Assert.True(
+            CompatPackLoader.ValidatePackEntry(
+                pack, manifest, context, out var combined, out var errors, manifestContributions),
+            string.Join("; ", errors));
+        Assert.Single(combined);
+        Assert.IsType<ManifestSurfaceContribution>(combined[0]);
+    }
+
+    [Fact]
+    public void TryLoad_ManifestOnlyAssembly_LoadsWithoutEntryType()
+    {
+        string packPath = typeof(DataOnlyFixture.DataOnlyCompatPackFixtureMarker).Assembly.Location;
+        Assert.True(CompatPackLoader.TryLoad(packPath, RealContext(), out var handle, out var errors),
+            string.Join("; ", errors));
+
+        Assert.Equal("test.data-only", handle!.Manifest.PackId);
+        Assert.IsType<ManifestOnlyCompatPack>(handle.Pack);
+        Assert.Single(handle.Surface);
+        Assert.IsType<ManifestSurfaceContribution>(handle.Surface[0]);
+        Assert.Contains("SETANIMETIMER", handle.Manifest.Surface.AddInstructions);
+        Assert.Contains("CALLSHARP", handle.Manifest.Surface.HideInstructions);
+        handle.Unload();
+    }
+
 }

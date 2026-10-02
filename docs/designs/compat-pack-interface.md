@@ -203,3 +203,115 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 6. **ALC 生命周期 v1 现状**：成功路径包 ALC 保持到进程结束（§5.4"停机后 Unload"推迟到宿主接线深化；同进程重启会话会为新会话重载新 ALC，旧实例按 v1 策略滞留）。ALC 解析面：未匹配名落回默认解析，包技术上可绑定宿主已加载程序集——信任边界 §6 的"可见面"是约定而非机制强制，v1 接受并在本条明示。
 7. **capability 消费面分裂（v1 已知限制）**：capability 词汇表 = 六 profile 并集；消费面有两类——策略类 capability（ContinuesAfterStartupFault 等）由 Plan.CapabilityIds 直读即生效，方言策略类只在对应模块 Apply 时激活。同一 id 可能"部分生效"；包作者以 §3.3 capability id 清单为准，分裂在 v2 统一。
 8. **启动器包选择（§10.3 落地）**：扫描候选 + 勾选 + 手动路径合并（存储格式不变）；恢复选中即回填编辑框（程序化 Select 不触发信号曾导致"启动即清空已存选择"）；相对路径在启动器侧按启动器根绝对化后才入存储/env。
+
+
+## 13. v1.1 实施增补（2026-10-02：数据包 + 会话所有权 + capability 激活解耦）
+
+本节记录在 §12 基础上落地的第一批地基增补；目标是把 CompatPack 从"只有引擎内部模块
+可用的表面选择器"推进为"社区可写数据包、且行为激活不依赖内置模块在场"的可持续地基。
+
+### 13.1 manifest-only 数据包（无需 C# 入口）
+
+- 程序集只内嵌 `compatpack.manifest.json`、不含任何 `ICompatPack` 实现类时，加载器按
+  数据包处理（`ManifestOnlyCompatPack`）；表面/能力/变体全部来自 manifest。
+- manifest 新增静态 `surface` 名单（纯数据，解析期规范化）：
+  - `addInstructions` / `hideInstructions`（指令名 Trim+Upper）
+  - `addFunctions` / `hideFunctions`（函数名保持原样；新增函数返回类型由引擎六 profile
+    清单解析，包作者不再手填）
+- 仍允许程序集携带 `ICompatPack` 实现类（动态/getter 场景）；但大多数社区包不需要写代码。
+- schema 与 `CompatPackManifest` 同步扩展；未知成员/空白名/重复名依旧 fail-closed。
+
+### 13.2 基线约束（baseProfileId）
+
+- manifest 新增可选 `baseProfileId`，缺省 `v24pure`；加载校验要求它与当前会话基线一致，
+  不一致整包拒载。这消除了"校验基准 v24、组装基准却是 snake/v18"的静默错叠。
+- launcher 在已选 pack 且有效 profile 非 v24pure 时显示明确回退警告；pack 选择应始终
+  以 v24pure 为基座。
+
+### 13.3 saveProfileId v1 显式拒载（组装器已预留聚合语义）
+
+- v1 legacy 存档路径尚不消费 `CompatibilityPlan.SaveProfileId`；按死契约纪律，manifest
+  携带非空 `saveProfileId` 即拒载，避免"进 plan/哈希但存档格式不变"的静默误导。
+- 组装器已实现 v2 预留的聚合语义：跨包同键同值幂等、异值拒载；有声明则覆盖基线
+  save profile，并进入 plan envelope hash。v2 宿主接线存档路径后删除规则层拒载即可恢复。
+- `baseSurfaceHash` 仍保留为对齐提示（当前尚无生成端消费者），列入 §14 开放项。
+
+### 13.4 投影数据 plan 内聚（删除 process-wide 静态）
+
+- `DialectPlan` 新增 `PackModuleIds` 与 `VariantSelections` 两个具名字段；组装器把包模块
+  白名单与内置变体选择固化进 plan。
+- `LegacyCompatibilityProfile.Create(plan, scoped)` 只从 plan 重建投影；删除
+  `CompatPackHost.ActivePackModuleIds` / `ActiveVariantSelections` / `ResetActiveSessionProjection`
+  及其手动复位点。信任校验仍保留：plan 未声明的额外模块、或把内置模块列入
+  PackModuleIds，Compose 仍拒载。
+- 成功加载的 `CompatPackSet` 不再需要跨会话持有：v1 包不参与运行期执行，plan 已是
+  纯数据；v2 代码贡献若落地，需由会话绑定对象持有 set 并确定性 Unload。
+
+### 13.5 capability 激活与内置模块解耦（P-D 前提）
+
+- 三个策略（snake/erafl/megaten）不再由各自 `module.Apply` 安装；`Compose` 统一从
+  `plan.CapabilityIds` 构造 policy，`moduleSelected` 只决定 `IsEnabled` 的模块语义。
+- 具体 flag 始终由 capability 派生。因此社区数据包在 v24pure 基线上声明 e.g.
+  `math.times-clamp.v1` / `display.extended-history.v1` 即可激活对应行为，无需内置
+  snake/erafl 模块在场。
+- snake 的 DialectFunctionContract（DFC 重载差异名集）同样从 `module.Apply` 解耦：
+  模块选中或完整 snake capability 集在场时，在 `Compose` 统一激活；完整 snake 数据包
+  可在 v24pure 上获得与 snake profile 一致的 DFC 语义。
+- megaten 三个门控行为补上 behavior capability id（`parser.label-lookup-case.v1`、
+  `parser.ref-out-name.v1`、`parser.private-system-shadow.v1`），megaten profile 显式声明。
+- 内置 profile 行为逐字节保持不变；`LegacyDialectSurfaceSmoke` 增加
+  "v24pure + 包 capability 激活 policy flag" 哨兵回钉。
+
+### 13.6 默认路径会话清理 P0 修复
+
+- `EmueraMain.StopLegacySession` 不再用 `!backend.IsRunning` 提前返回：Back/Restart/ERB
+  重启会先 `EmueraThread.End()`，旧逻辑会跳过 `GlobalStatic.Reset + ClearCompatibilityPlan`，
+  导致 plan 残留、同进程下一次启动 hash 防御失败。
+- `LegacySessionBackend.StopLegacyBaselineAsync` 对已停止线程幂等，现无条件调用。
+
+### 13.7 本批验收
+
+- GEmuera.Core.Tests：98（95 + 数据包加载/plan 元数据/save profile/capability 规则/数据包夹具）。
+- EmueraFacade.Tests：35（33 + surface/baseProfile 解析）。
+- LegacyDialectSurfaceSmoke / LegacyDialectRuntimeSmoke / CoreContractSmoke 全绿；
+  `gemuera-c#.csproj` Release 构建 0 错误。
+- 新增 `tests/xUnitTest/DataOnlyCompatPackFixture`：只有内嵌 manifest、无入口类的真实
+  程序集，端到端证明 manifest-only 加载路径。
+
+### 13.8 社区最小数据包示例
+
+```jsonc
+{
+  "packId": "community.example",
+  "packVersion": "1.0.0",
+  "targetEngineApi": 1,
+  "baseProfileId": "v24pure",
+  "capabilities": ["math.times-clamp.v1", "display.extended-history.v1"],
+  "surface": {
+    "addInstructions": ["SETANIMETIMER"],
+    "hideInstructions": ["CALLSHARP"],
+    "addFunctions": ["SQL_CONNECT"],
+    "hideFunctions": ["EXISTVAR"]
+  },
+  "variantSelections": { "SETBGIMAGE": "builtin:snake" }
+}
+```
+
+- 该程序集不需要任何 C# 类型；把 JSON 以 `LogicalName=compatpack.manifest.json`
+  内嵌进一个 `net8.0`/`net9.0-android` 类库即可。
+- `baseProfileId` 必须与 launcher 实际会话基线一致（v1 只支持 v24pure）；否则整包拒载回退。
+- `capabilities` 只接受引擎已收录 id；`surface` 名字必须命中引擎 handler/基线对账。
+- 完整功能后续（自定义 handler/策略）仍需 v2 的 `IInstructionVariantContribution`/`IPolicyContribution`
+  接线；v1 携带即拒载，不会静默 no-op。
+
+### 13.9 未完成（下一批候选）
+
+- `IInstructionVariantContribution` / `IPolicyContribution` v2 运行时接线与会话持有
+  pack set（code contribution 生命周期）。
+- `baseSurfaceHash` 生成/校验端；`targetEngineApi` 与 interpreter engine identity 统一。
+- ALC allow-list 硬化（GEmuera.Core/默认解析回落）、跨契约程序集拆分。
+- launcher/runner 的 per-game env 通道去全局化、Android 路径大小写规范化。
+- 内置模块退役（P-D）的 profile/闭包迁移；本批只解除了 capability 激活的机制阻塞。
+- 治理口径：`tools/dialect-inventory/*CompatibilityPack*` 是 M0 静态证据工具，其
+  `BuiltInCompiledOnly`/`runtimeModuleLoading=NotImplemented` 描述的是当时证据边界，
+  不是运行时 CompatPack 契约；运行时以本文件与 `compatpack.manifest.schema.json` 为准。
