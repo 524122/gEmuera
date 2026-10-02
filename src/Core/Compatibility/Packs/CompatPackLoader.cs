@@ -89,7 +89,7 @@ public static class CompatPackLoader
         }
         catch (Exception exception)
         {
-            collected.Add(prefix + "包入口实例化失败：" + exception.Message);
+            collected.Add(prefix + "包入口实例化失败：" + DescribeException(exception));
             loadContext.Unload();
             errors = collected;
             return false;
@@ -264,7 +264,7 @@ public static class CompatPackLoader
         }
         catch (Exception exception)
         {
-            errors.Add("包入口实例化失败：" + exception.Message);
+            errors.Add("包入口实例化失败：" + DescribeException(exception));
             return null;
         }
     }
@@ -285,6 +285,22 @@ public static class CompatPackLoader
         {
             new ManifestSurfaceContribution(surface, context.KnownFunctionReturnTypes),
         };
+    }
+
+    /// <summary>
+    /// 拒载错误文案：Activator.CreateInstance 把构造器异常包进 TargetInvocationException
+    /// （通用文案，不携带原因），诊断必须保留最内层异常类型与消息——例如 ALC 允许清单
+    /// 硬化后的 FileLoadException（指名被拒绝的绑定程序集）。
+    /// </summary>
+    internal static string DescribeException(Exception exception)
+    {
+        Exception innermost = exception;
+        while (innermost.InnerException is { } inner)
+            innermost = inner;
+        if (ReferenceEquals(innermost, exception))
+            return exception.Message;
+        return exception.GetType().Name + ": " + exception.Message
+            + "（最内层 " + innermost.GetType().Name + ": " + innermost.Message + "）";
     }
 
     static string ComputePackHash(Assembly assembly, byte[] assemblyBytes)

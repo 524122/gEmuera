@@ -125,13 +125,16 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 ### 5.2 隔离（ALC）
 
-每包一个 `CompatPackLoadContext : AssemblyLoadContext`（isCollectible: true，支持会话边界 Unload）。程序集绑定规则复用 `PluginLoadContext` 已实证的三条（`Scripts/Emuera/Runtime/Utils/PluginSystem/PluginLoadContext.cs:8-21`）：
+每包一个 `CompatPackLoadContext : AssemblyLoadContext`（isCollectible: true，支持会话边界 Unload）。程序集绑定规则为**契约-only 允许清单**——fail-closed 机制而非约定（与宿主 `PluginLoadContext`（`Scripts/Emuera/Runtime/Utils/PluginSystem/PluginLoadContext.cs:8-21`）同源的姊妹实现，规则更严）：
 
 1. `Emuera/emuera` → EmueraFacade 契约程序集（与包共享类型标识，简单名匹配绑定）；
-2. `netstandard/System.*/Microsoft.*` → 宿主已加载框架程序集（不发起绑定，net 版本回落）；
-3. 其余 → 包目录探测，null 落回默认解析。
+2. `netstandard/System.*/Microsoft.*` → 宿主已加载框架程序集（不发起绑定；未命中由运行时默认解析接手，BCL 名字无宿主泄露面）；
+3. 其余名字 → 包目录探测 `<name>.dll`，命中即仅在该 ALC 内加载（包自带依赖的私有副本，与宿主实例类型不统一）；
+4. 仍未命中 → **抛出 `FileLoadException`，不再返回 null 落回默认解析**（默认解析可见宿主全部已加载程序集，回落即泄露）。
 
-注意：现有 `PluginLoadContext` 是 internal 且服务游戏插件；CompatPack 用同规则的姊妹类，不复用实例。
+宿主内部程序集（如 `GEmuera.Core`）对包不可见：早期 v1 的 `GEmuera.Core` 显式分支与"null 落回默认解析"已于 2026-10-03 硬化删除（`src/Core/Compatibility/Packs/CompatPackLoadContext.cs`）。实测行为（`tests/xUnitTest/GEmuera.Core.Tests/CompatPackAlcIsolationTests.cs`）：部署于空目录的宿主绑定探针（合法 `ICompatPack` 入口但构造器引用 `CompatibilityPlan`）在 `TryLoad` 的入口实例化期被拒载，错误含 `FileLoadException` 消息与被拒绝的程序集名，句柄为 null；契约-only 夹具（只引用契约程序集）加载成功，表面贡献正常折叠进 v24pure 会话计划（指令落位 + 哈希变化）。包确实需要 Core 数据类型时，必须经契约程序集暴露或另签契约，不允许 ALC 回落。
+
+注意：现有 `PluginLoadContext` 是 internal 且服务游戏插件；CompatPack 用姊妹类，不复用实例。
 
 ### 5.3 校验（fail-closed 三原则 + 对账）
 
@@ -200,7 +203,7 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 3. **对账与降级加固**：§5.3(2) 的引擎 handler 对账已落地，基准 = Core 生成清单的六 profile 并集（不可用 funcDic 静态构造器：其比较器初始化读 Config.ICVariable，校验期早于配置装载，提前触发会把比较器钉在默认值）；组装段回放全程 try/catch（异常→组装错误→拒载，不再依赖宿主顶层兜底）；Compose 投影注入点异常降级为"当前 profile 纯基线 + 无包白名单"而非炸启动；ConfigureForLaunch 顶层兜底 + 零包/失败/清理路径全量复位跨会话静态投影（计划解绑联动复位）。
 4. **GameBase.csv 编码**：身份比对读取链 = BOM → 严格 UTF-8 → Shift-JIS 932（与 GodotHost GameContentProbe 同源；EraStreamReader 在本移植被钉为 UTF-8 故不可复用），SJIS 日文游戏的 gameIdentity 绑定不再必然失配。
 5. **`targetEngineApi` v1 语义**：单整数精确匹配（见 §9 改写）；原"次版本只增不改"承诺推迟 v2。
-6. **ALC 生命周期 v1 现状**：成功路径包 ALC 保持到进程结束（§5.4"停机后 Unload"推迟到宿主接线深化；同进程重启会话会为新会话重载新 ALC，旧实例按 v1 策略滞留）。ALC 解析面：未匹配名落回默认解析，包技术上可绑定宿主已加载程序集——信任边界 §6 的"可见面"是约定而非机制强制，v1 接受并在本条明示。
+6. **ALC 生命周期 v1 现状**：成功路径包 ALC 保持到进程结束（§5.4"停机后 Unload"推迟到宿主接线深化；同进程重启会话会为新会话重载新 ALC，旧实例按 v1 策略滞留）。ALC 解析面原状（v1.1 时点）：未匹配名落回默认解析，包技术上可绑定宿主已加载程序集——信任边界 §6 的"可见面"是约定而非机制强制。**2026-10-03 勘误增补：该回落已硬化为机制**——允许清单（契约程序集 + BCL + 包目录依赖）之外的绑定一律 `FileLoadException` 拒载（fail-closed），`GEmuera.Core` 显式分支与默认解析回落均已删除；拒载错误含被拒绝的程序集名与最内层异常（`CompatPackLoader.DescribeException` 保留 TargetInvocationException 包裹下的 FileLoadException 诊断）。实测证据见 §5.2 与 `CompatPackAlcIsolationTests`。规则 3（包目录 `<name>.dll`）语义不变：包目录内的宿主程序集文件按"包自带依赖"加载为该 ALC 私有实例，类型不与宿主统一，不构成宿主内部可变静态的泄露通道。
 7. **capability 消费面分裂（v1 已知限制）**：capability 词汇表 = 六 profile 并集；消费面有两类——策略类 capability（ContinuesAfterStartupFault 等）由 Plan.CapabilityIds 直读即生效，方言策略类只在对应模块 Apply 时激活。同一 id 可能"部分生效"；包作者以 §3.3 capability id 清单为准，分裂在 v2 统一。
 8. **启动器包选择（§10.3 落地）**：扫描候选 + 勾选 + 手动路径合并（存储格式不变）；恢复选中即回填编辑框（程序化 Select 不触发信号曾导致"启动即清空已存选择"）；相对路径在启动器侧按启动器根绝对化后才入存储/env。
 
@@ -314,6 +317,8 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
   pack set（code contribution 生命周期）。
 - `baseSurfaceHash` 生成/校验端；`targetEngineApi` 与 interpreter engine identity 统一。
 - ALC allow-list 硬化（GEmuera.Core/默认解析回落）、跨契约程序集拆分。
+  —— **硬化部分已于 2026-10-03 完成**（§5.2/§12.6：清单外绑定 FileLoadException 拒载）；
+  跨契约程序集拆分仍开放。
 - launcher/runner 的 per-game env 通道去全局化、Android 路径大小写规范化。
 - 内置模块退役（P-D）的 profile/闭包迁移；本批只解除了 capability 激活的机制阻塞。
 - 治理口径：`tools/dialect-inventory/*CompatibilityPack*` 是 M0 静态证据工具，其
