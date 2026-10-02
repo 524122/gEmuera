@@ -13,7 +13,26 @@ namespace GEmuera.Core.Compatibility.Packs;
 /// </summary>
 public static class CompatPackLoader
 {
-    /// <summary>加载单个包。任何失败返回 false 且 handle 为 null，绝不返回半加载结果。</summary>
+    /// <summary>
+    /// 仅测试 seam：注入包程序集字节读取器（按路径 → 字节）。默认 null，生产路径恒走
+    /// <see cref="File.ReadAllBytes(string)"/>；测试用它钉住"哈希与加载同源字节"的 TOCTOU
+    /// 不变量（E2-R5）。生产代码不得赋值。
+    /// </summary>
+    internal static Func<string, byte[]>? BytesReaderOverrideForTest { get; set; }
+
+    /// <summary>
+    /// 包程序集字节读取的唯一入口（<see cref="BytesReaderOverrideForTest"/> 命中时走 seam，
+    /// 否则走磁盘读取）。调用方拿到的是同一份 byte[]，哈希与 stream 装载必须共用它。
+    /// </summary>
+    static byte[] ReadBytes(string packAssemblyPath) =>
+        BytesReaderOverrideForTest is { } reader ? reader(packAssemblyPath) : File.ReadAllBytes(packAssemblyPath);
+
+    /// <summary>
+    /// 加载单个包。任何失败返回 false 且 handle 为 null，绝不返回半加载结果。
+    /// 同源字节不变量（E2-R5 TOCTOU）：程序集字节恰好读一次，双哈希与经 stream 的程序集
+    /// 装载共用这同一份 byte[]；<see cref="CompatPackHandle.PackAssemblyPath"/> 仅作诊断与
+    /// 包目录依赖解析来源，不再作为装载输入。
+    /// </summary>
     public static bool TryLoad(
         string packAssemblyPath,
         CompatPackValidationContext context,
@@ -46,7 +65,7 @@ public static class CompatPackLoader
         byte[] assemblyBytes;
         try
         {
-            assemblyBytes = File.ReadAllBytes(packAssemblyPath);
+            assemblyBytes = ReadBytes(packAssemblyPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -55,11 +74,14 @@ public static class CompatPackLoader
             return false;
         }
 
+        // 同源字节不变量（E2-R5 TOCTOU）：assemblyBytes 恰好读一次，既是双哈希的输入，
+        // 也是经 MemoryStream 装载的程序集本体——两次独立读盘（先哈希后按路径装载）会被
+        // 并发的文件替换撕开，固化哈希描述旧内容而运行的是新内容。
         Assembly assembly;
         var loadContext = new CompatPackLoadContext(packAssemblyPath);
         try
         {
-            assembly = loadContext.LoadFromAssemblyPath(Path.GetFullPath(packAssemblyPath));
+            assembly = loadContext.LoadFromStream(new MemoryStream(assemblyBytes));
         }
         catch (Exception exception)
         {
