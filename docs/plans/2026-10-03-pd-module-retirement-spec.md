@@ -212,6 +212,13 @@
    快照再生见 §7.3；
 5. 等价测试改写：内置链路消失，测试改为"包链路 ≡ 退役前 golden 快照"（golden 数据来自 Red 步骤 2，
    以只读常量/夹具固化）。
+6. **（G3 前置工作项，随对应退役步落地）扩展快照生成器**：`tools/dialect-inventory/DialectInventory.psm1`
+   的 profiles 映射（`New-DialectRegistrySnapshotReport`，`:697-700`）现仅产出 `v24`/`snake`/`erafl`
+   三键（§7.3）——
+   - 新增 v18/erablue/megaten 条目，使 G3 对步 1-3 生效；扩展落地前，这三步的名录零差异证据由
+     G4 承担（`profiles.generated.json` 六 profile 覆盖）；
+   - snake/erafl 退役步同步处理自身快照条目的移除，及 v24 排除集对 `LegacySnakeCompatibilityModule`
+     字段名的读取依赖（`DialectInventory.psm1:621-624`），避免模块删除后生成器失效。
 
 **Green（退役提交验收，全绿方可合入）**：
 
@@ -219,7 +226,7 @@
 | --- | --- | --- |
 | G1 | 三冒烟 | `LegacyDialectSurfaceSmoke`（含 `AssertPackProjection` 与改写后的包等价断言）、`LegacyDialectRuntimeSmoke`、`CoreContractSmoke` 全绿（命令 §7.1） |
 | G2 | 全量 xUnit | `tests/xUnitTest/GEmuera.Core.Tests` 全绿（等价测试已改写为 golden 口径） |
-| G3 | 快照名录零差异 | `dialect-registry-snapshots.json` 再生后，**存活 profile 的 canonicalHash 与退役前逐一相等**；退役 profile 条目消失 = 唯一允许的显式 diff，须在 PR 中单独列出（§7.3） |
+| G3 | 快照名录零差异 | `dialect-registry-snapshots.json` 再生后，**快照覆盖集内存活 profile 的 canonicalHash 与退役前逐一相等**——覆盖集 = 快照文件 `profiles` 三键 `v24`/`snake`/`erafl`（键 `v24` 对应 profileId `v24pure`；生成器仅产出这三个，`DialectInventory.psm1:697-700`）；覆盖集内退役 profile（erafl/snake 步）条目消失 = 唯一允许的显式 diff，PR 单独列出。**v18/megaten/erablue 步不在快照覆盖内**，其名录零差异由 G4 承担（§7.3；扩展生成器见 Change 第 6 项） |
 | G4 | 生成名录零差异（存活部分） | `profiles.generated.json` 再生后，存活 profile 的 `modules`/`instructionCount`/`functionCount` 逐字节不变；退役 profile 条目消失 |
 | G5 | capability 词汇表冻结 | `CompatPackHost.BuildValidationContext` 的 capability 并集（`CompatPackHost.cs:61-63`）在退役前后**集合相等**——词汇表是包校验契约，不随 profile 退役收缩（实现建议：首个退役步把 `AllProfileIds` 驱动的并集（`CompatPackHost.cs:27`）固化为显式 id 常量，哨兵断言由 SurfaceSmoke 承担） |
 | G6 | 六游戏启动矩阵 | §7.2 矩阵中依赖该 profile 的游戏经新链路（v24pure + 包 / 映射注入）无头跑到输入等待 + 关键输出核对；其余游戏回归不劣化 |
@@ -386,12 +393,21 @@ DOTNET_ROLL_FORWARD=Major dotnet run --project tools/core-contracts/CoreContract
 - 快照文件真实路径：**`docs/NewFrameworkDesign/generated/dialect-registry-snapshots.json`**
   （生成入口 `tools/dialect-inventory/Invoke-DialectRegistrySnapshot.ps1:15-17`，默认输出即此路径；
   契约自检 `tools/dialect-inventory/Test-DialectRegistrySnapshot.ps1`）。
-- 零差异口径：再生后对比退役前留档——**存活 profile 的 `canonicalHash` 逐一相等**（v24pure/snake/
-  erafl/erablue/megaten 中未被退役者）；`snapshotSetHash` 变化仅允许由退役 profile 条目移除引起。
-  退役 profile 条目消失是显式评审项（PR 描述单独列出），不计入"意外差异"。
-- 硬证据链：快照零差异（G3）+ 生成名录零差异（G4）+ capability 词汇表冻结（G5）共同构成
-  "未选择侧不变"的证据，替代逐字节会话回放（引擎注册表在退役步必然变化，逐字节口径只适用于
-  存活 profile 的投影）。
+- **工具实际覆盖（2026-10-03 核实）**：快照生成器 `New-DialectRegistrySnapshotReport`
+  （`tools/dialect-inventory/DialectInventory.psm1:619`，profiles 映射 `:697-700`）只产出三个
+  profile——快照键 `v24`（内部 profileId 即 `v24pure`，`:634-635` 以 `-ProfileId 'v24pure'` 构造）、
+  `snake`、`erafl`；快照文件 `profiles` 键 = `[v24, snake, erafl]`，**没有 v18/erablue/megaten 条目**。
+- 零差异口径（G3 的真实范围）：再生后对比退役前留档——**快照覆盖集内未被退役的 profile
+  （`v24`→v24pure / snake / erafl）的 `canonicalHash` 逐一相等**；覆盖集内被退役者（erafl/snake 步）
+  条目消失是唯一允许的显式 diff（PR 描述单独列出）。键名映射注意：快照键 `v24` ≠ profileId 字面
+  `v24`，对应 `v24pure`；且"v24 条目消失"不属于任何退役步（v24 模块永不退役）。
+- **覆盖缺口与补偿**：v18/megaten/erablue 三步（步 1-3）的退役 profile 本就不在快照内——G3 对它们
+  "无条目可比、也无条目可消失"，该三步的名录零差异证据由 **G4**
+  （`tools/legacy-runner/profiles.generated.json`，再生后六 profile 覆盖核验）独自承担，直至快照
+  生成器按 §4.2 Change 第 6 项前置工作项扩展。
+- 硬证据链：快照零差异（G3，范围如上）+ 生成名录零差异（G4）+ capability 词汇表冻结（G5）共同
+  构成"未选择侧不变"的证据，替代逐字节会话回放（引擎注册表在退役步必然变化，逐字节口径只适用
+  于存活 profile 的投影）。
 
 ---
 
@@ -416,4 +432,4 @@ DOTNET_ROLL_FORWARD=Major dotnet run --project tools/core-contracts/CoreContract
 - [ ] §3.2 requiredPackVersion 实现档位（PE 探测 vs 记录性降级）
 - [ ] §4.1 退役顺序 v18 → megaten → erablue → erafl → snake
 - [ ] §5 删除清单与 §5.3 不删清单
-- [ ] §7 验证入口与零差异口径
+- [ ] §7 验证入口与零差异口径（快照工具现仅覆盖 v24pure/snake/erafl，v18/erablue/megaten 步暂由 G4 承担，见 §7.3）
