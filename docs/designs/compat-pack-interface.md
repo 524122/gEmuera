@@ -150,7 +150,7 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 ## 6. 信任边界
 
-- 用户显式按游戏启用；无全局生效、无静默安装。
+- 用户显式按游戏启用；无全局生效、无静默安装。**2026-10-03 增补（env/路径/runner 通道硬化，E2-R3/R4）**："按游戏"语义已平台正确化——游戏键比较器 `CompatPackLauncherConfig.GameKeyComparer`（Windows=`OrdinalIgnoreCase`，Android/Linux=`Ordinal`）与 `NormalizeGameKey(root, caseSensitiveFilesystem)`：大小写敏感文件系统上仅差大小写的两个游戏根不再共用配置键（原实现无条件 `ToLowerInvariant` 会把 A 的包选择静默套到 B）；包路径比对统一走 `NormalizePackPath`（GetFullPath + 分隔符统一 + 去尾斜杠，大小写语义交给比较器）。启用清单注入统一走 `MergeSelection(stored, external)`：launcher 按游戏选择非空时优先，外部 `GEMUERA_COMPAT_PACKS` 不再永久早退遮蔽选择（无选择时仅作诊断输入透传，并存时状态提示行 + `UI.WARN` 日志同步警告）；runner/in-process switch 每次会话绑定经 `FirstWindow.ConfigureLegacyRunnerSession` 重算注入（无选择即清除），不沿用上一局清单。
 - `[LOAD]` 账本记录：packId/packVersion/程序集 SHA256/targetEngineApi（遵循 docs/logging-convention.md 文案规范）。
 - 程序集在 ALC 内运行，可见面 = EmueraFacade 契约 + 框架库；不向包暴露引擎内部可变静态。
 - 分发不在本契约范围：不做市场/自动更新/签名校验（本地文件 only）。若未来需要签名，挂接点是 5.3 校验段。
@@ -330,7 +330,7 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 - ALC allow-list 硬化（GEmuera.Core/默认解析回落）、跨契约程序集拆分。
   —— **硬化部分已于 2026-10-03 完成**（§5.2/§12.6：清单外绑定 FileLoadException 拒载）；
   跨契约程序集拆分仍开放。
-- launcher/runner 的 per-game env 通道去全局化、Android 路径大小写规范化。
+- ~~launcher/runner 的 per-game env 通道去全局化、Android 路径大小写规范化~~ **已于 2026-10-03 完成**（E2-R3/R4）：`MergeSelection` 选择优先（外部 env 仅诊断输入 + UI 警告）、平台正确游戏键（`GameKeyComparer`/`NormalizeGameKey(caseSensitiveFilesystem)`/`NormalizePackPath`）、runner/in-process switch per-session 注入刷新——语义见 §6 增补；Android 真机路径行为**待 Android 实测**。
 - 内置模块退役（P-D）的 profile/闭包迁移；本批只解除了 capability 激活的机制阻塞。
 - 治理口径：`tools/dialect-inventory/*CompatibilityPack*` 是 M0 静态证据工具，其
   `BuiltInCompiledOnly`/`runtimeModuleLoading=NotImplemented` 描述的是当时证据边界，
