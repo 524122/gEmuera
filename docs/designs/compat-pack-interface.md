@@ -66,7 +66,7 @@ gEmuera App（本体）
 
 ## 4. 程序集契约（C# 接口草案）
 
-落点：**`src/EmueraFacade`（契约程序集，AssemblyName=Emuera，net8.0 桌面 / net9.0 android 条件目标）新增 `Compatibility.Packs` 命名空间**。理由：包作者编译面最小（只引契约程序集，不引宿主全集）；与现有插件契约（IPluginMethod 等）同一落点先例；避免 src/Core 引擎宿主类型。*备选：接口进 src/Core + 变体工厂弱类型桥（`Func<object>`）——不推荐，损失类型安全。*（此为设计决定点，标注待用户确认。）
+落点（2026-10-03 更新，见拆分 ADR `docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md`）：**独立契约程序集 `src/EmueraCompatPack`（AssemblyName=`Emuera.CompatPack`，独立 SemVer 线 1.0.0 起步，net8.0/net9.0 双目标），类型命名空间保持 `Emuera.Compatibility.Packs`**。v1 时契约曾与上游插件 ABI（IPluginMethod 等）同居 `src/EmueraFacade`（AssemblyName=Emuera, 1.824.0.0）；拆分后 facade 经 `TypeForwardedTo` 把全部契约类型链到 `Emuera.CompatPack` 同一实例——拆分前编译的旧包（AssemblyRef=Emuera）继续可载，兼容窗口无限期。理由：包契约可独立语义版本演进，不再牵动上游插件 ABI 版本面；包作者编译面最小（只引契约程序集）。*备选：接口进 src/Core + 变体工厂弱类型桥（`Func<object>`）——不推荐，损失类型安全。*
 
 ```csharp
 namespace Emuera.Compatibility.Packs;
@@ -190,7 +190,7 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 ## 10. 开放问题（需裁定，不阻塞本文评审）
 
-1. ~~契约落点：EmueraFacade（推荐）vs src/Core 弱类型桥~~ **已裁定并落地：EmueraFacade**（§4 推荐项，PR #12 起实施）。
+1. ~~契约落点：EmueraFacade（推荐）vs src/Core 弱类型桥~~ **已裁定并落地：EmueraFacade**（§4 推荐项，PR #12 起实施）；**2026-10-03 起契约拆分至独立程序集 `Emuera.CompatPack`（src/EmueraCompatPack），facade 保留 TypeForwardedTo 兼容旧包**（§4 更新与拆分 ADR `docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md`）。
 2. 包安装位置约定：候选 `compat/packs/<packId>/`（桌面）与 `/storage/emulated/0/emuera/packs/`（Android）；**不得**放 export/（那是导出工作区）。**v1 启动器实现取 exe 同级 `compat_packs/`（桌面，另加编辑器 `res://compat_packs` 调试根）与 `/storage/emulated/0/emuera/packs/`（Android）为扫描根**，仅顶层 `*.dll`；与本条原候选的差异（compat_packs vs compat/packs）在第一方包分发定稿时统一。
 3. ~~launcher UI 的按游戏包选择交互~~ **已落地**：扫描候选 + 勾选（CheckButton 48px 触控行）+ 手动路径合并 + 桌面 FileDialog；默认推荐映射（六游戏矩阵 profile→包）仍待第一方包迁移（P-A 起）。
 4. v18 壳包是否携带全量清单于 manifest（417 指令/160 函数的单文件体积可接受性）。

@@ -5,7 +5,8 @@
 （指令/函数表面名单、行为 capability、内置变体选择）。
 
 设计契约全文见 `docs/designs/compat-pack-interface.md`；清单 JSON Schema 见
-`src/EmueraFacade/Compatibility/Packs/compatpack.manifest.schema.json`。
+`src/EmueraCompatPack/compatpack.manifest.schema.json`（契约程序集 `Emuera.CompatPack`，
+2026-10-03 自 Emuera facade 拆分，旧包经 TypeForwardedTo 继续兼容）。
 可直接复制的模板工程：[`CommunityPackTemplate/`](CommunityPackTemplate/)。
 
 ## 目录约定
@@ -23,7 +24,7 @@ packs/
 - **带入口类的包（少数场景）**：程序集内实现恰好一个 `ICompatPack`（+ 任意
   `ISurfaceContribution` / `ICapabilityContribution` 贡献），用于清单表达不了的
   动态名单。可参考测试夹具 `tests/xUnitTest/CompatPackContractOnlyFixture/`
-  （只依赖 `src/EmueraFacade/Emuera.csproj` 契约程序集即可实现入口，无需引擎核心）。
+  （只依赖契约程序集 `src/EmueraCompatPack/EmueraCompatPack.csproj` 即可实现入口，无需引擎核心）。
   入口类自报的 Manifest 必须与内嵌清单同源（packId/packVersion 一致），否则拒载。
 
 ## 清单字段（compatpack.manifest.json）

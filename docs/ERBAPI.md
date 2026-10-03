@@ -118,7 +118,9 @@ DIA 静态测试在分类修复后，仍只应得到结构性证据。现有合�
 
 > 口径说明（2026-10-02）：本清单的"外部 DLL"指绕过 CompatPack 契约、直接向 Parser/VM 注入的 ad-hoc 反射扩展。
 > 受治理的 CompatPack 通道见 `docs/designs/compat-pack-interface.md`：manifest-only 数据包 + 显式启用 + plan/fail-closed 校验，
-> 当前 v1 不支持任意代码回调（变体/策略贡献 v2 预留，v1 拒载）。插件通道（CALLSHARP/Plugins）与兼容包通道仍是两套独立契约。
+> 当前 v1 不支持任意代码回调（变体/策略贡献 v2 预留，v1 拒载）。插件通道（CALLSHARP/Plugins）与兼容包通道仍是两套独立契约：
+> 插件 ABI 面在 `Emuera`（src/EmueraFacade，1.824.0.0 不变），兼容包契约面在独立契约程序集 `Emuera.CompatPack`
+> （src/EmueraCompatPack，2026-10-03 拆分，拆分 ADR 见 `docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md`）。
 
 
 - 在 Godot `Node`、`Control`、Autoload 或 signal 中保存 ERB state、等待状态或关键字语义；
