@@ -48,7 +48,7 @@ gEmuera App（本体）
   "packId": "game.erafl",              // 沿用现有方言模块 id 风格；全局唯一，注册冲突拒载
   "packVersion": "1.0.0",              // semver
   "targetEngineApi": "1",              // 对应引擎 ModuleApiVersion；兼容判定见 §9
-  "baseSurfaceHash": "<可选>",          // 声明基于哪个 v24 表面快照（生成清单哈希）；不匹配记警告不拒载（对齐提示用）
+  "baseSurfaceHash": "<可选>",          // 声明基于哪个 v24 表面快照（生成清单哈希）；v1 起精确对账——声明非空且与当前引擎基线不一致即拒载（算法见 §12.9），不声明则不校验
   "capabilities": ["input.pointer-button.v1", ...],  // 复用现有 capability id 词汇表；未知 id 拒载（fail-closed）
   "saveProfileId": "gemuera.erafl",    // 可选
   "variantSelections": { "SETBGIMAGE": "builtin:snake" },  // 内置变体选择；自带变体经 §4 贡献声明
@@ -208,6 +208,7 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 6. **ALC 生命周期 v1 现状**：成功路径包 ALC 保持到进程结束（§5.4"停机后 Unload"推迟到宿主接线深化；同进程重启会话会为新会话重载新 ALC，旧实例按 v1 策略滞留）。ALC 解析面原状（v1.1 时点）：未匹配名落回默认解析，包技术上可绑定宿主已加载程序集——信任边界 §6 的"可见面"是约定而非机制强制。**2026-10-03 勘误增补：该回落已硬化为机制**——允许清单（契约程序集 + BCL + 包目录依赖）之外的绑定一律 `FileLoadException` 拒载（fail-closed），`GEmuera.Core` 显式分支与默认解析回落均已删除；拒载错误含被拒绝的程序集名与最内层异常（`CompatPackLoader.DescribeException` 保留 TargetInvocationException 包裹下的 FileLoadException 诊断）。实测证据见 §5.2 与 `CompatPackAlcIsolationTests`。规则 3（包目录 `<name>.dll`）语义不变：包目录内的宿主程序集文件按"包自带依赖"加载为该 ALC 私有实例，类型不与宿主统一，不构成宿主内部可变静态的泄露通道。**2026-10-03 二次增补：本条的"ALC 滞留到进程结束"缓释已关闭**——成功加载的句柄集合现由会话绑定对象 `CompatPackSession` 持有（§5.4），会话 Stop/Restart/退出清理路径（`Program.ClearCompatibilityPlan`/`ResetSessionState`）先 Dispose session 再清计划绑定，对每个租约幂等恰好一次 Unload；同进程重启不再滞留旧 ALC。
 7. **capability 消费面分裂（v1 已知限制）**：capability 词汇表 = 六 profile 并集；消费面有两类——策略类 capability（ContinuesAfterStartupFault 等）由 Plan.CapabilityIds 直读即生效，方言策略类只在对应模块 Apply 时激活。同一 id 可能"部分生效"；包作者以 §3.3 capability id 清单为准，分裂在 v2 统一。
 8. **启动器包选择（§10.3 落地）**：扫描候选 + 勾选 + 手动路径合并（存储格式不变）；恢复选中即回填编辑框（程序化 Select 不触发信号曾导致"启动即清空已存选择"）；相对路径在启动器侧按启动器根绝对化后才入存储/env。
+9. **`baseSurfaceHash` v1 精确对账（2026-10-03 落地，E2-R6）**：该字段从"对齐提示"升级为精确对账——manifest 声明非空 `baseSurfaceHash` 且不等于当前 v24 基线表面快照即拒载（错误文案 `baseSurfaceHash 与当前 v24 表面快照不一致`，附声明值与当前基线值）；不声明（可选字段）不触发校验。基线哈希由 `LegacySurfaceHash.ComputeV24SurfaceHash()`（`src/Core/Compatibility/Packs/LegacySurfaceHash.cs`）从生成清单 `LegacyDialectInventories` 计算，宿主 `CompatPackHost.BuildValidationContext` 显式注入 `CompatPackValidationContext.BaselineSurfaceHash`。**规范化算法（第三方可复算）**：取生成清单 `V24InstructionNames` 按 Ordinal 排序；取 `V24Functions` 每条折叠为 `Name|ReturnType` 复合串按 Ordinal 排序；拼接 UTF-8 文本（LF、无 BOM）`instruction=<名1>,<名2>,…\nfunction=<名|返回类型>,…\n`（逗号分隔、无空格、两行各以单个 \n 结尾）；SHA256 取小写十六进制 64 字符。当前基线值 `8024d88063bd63d08d202e56565e353b7669c9c2b4506f235d8989214f0a78a1` 由 `LegacySurfaceHashTests.LegacySurfaceHash_V24_IsStable` 钉住——生成清单变化时该测试先红，必须先走 `LegacyDialectInventoryGenerator` 再生流程、再重新发布/更新包声明（发布端 CI 生成流水线仍开放，见 §13.9）。
 
 
 ## 13. v1.1 实施增补（2026-10-02：数据包 + 会话所有权 + capability 激活解耦）
@@ -239,7 +240,8 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
   携带非空 `saveProfileId` 即拒载，避免"进 plan/哈希但存档格式不变"的静默误导。
 - 组装器已实现 v2 预留的聚合语义：跨包同键同值幂等、异值拒载；有声明则覆盖基线
   save profile，并进入 plan envelope hash。v2 宿主接线存档路径后删除规则层拒载即可恢复。
-- `baseSurfaceHash` 仍保留为对齐提示（当前尚无生成端消费者），列入 §14 开放项。
+- `baseSurfaceHash` 的提示语义已被 §12.9 的 v1 精确对账取代（2026-10-03）：声明非空且与
+  当前 v24 基线表面快照不一致即拒载；不声明则不校验。
 
 ### 13.4 投影数据 plan 内聚（删除 process-wide 静态）
 
@@ -323,7 +325,8 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 - `IInstructionVariantContribution` / `IPolicyContribution` v2 运行时接线与会话持有
   pack set（code contribution 生命周期）。
-- `baseSurfaceHash` 生成/校验端；`targetEngineApi` 与 interpreter engine identity 统一。
+- `baseSurfaceHash` 运行时校验端已完成（§12.9，2026-10-03：精确对账 + 仓内钉子测试）；
+  仍开放：发布端/CI 的声明值生成流水线；`targetEngineApi` 与 interpreter engine identity 统一。
 - ALC allow-list 硬化（GEmuera.Core/默认解析回落）、跨契约程序集拆分。
   —— **硬化部分已于 2026-10-03 完成**（§5.2/§12.6：清单外绑定 FileLoadException 拒载）；
   跨契约程序集拆分仍开放。

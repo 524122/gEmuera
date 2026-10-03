@@ -72,7 +72,11 @@ internal static CompatPackValidationContext BuildValidationContext(string baseli
                         BuildEngineInstructionHandlerNames(),
                         BuildEngineFunctionHandlerNames(),
                         BuildEngineFunctionReturnTypes(),
-                        baselineProfileId);
+                        baselineProfileId,
+                        // v24 基线表面快照哈希（baseSurfaceHash 精确对账基准，E2-R6）：与
+                        // BaselineInstructions/BaselineFunctions 同源（生成清单），显式传入而非
+                        // 依赖缺省——宿主是语义校验输入的唯一提供方，缺省仅留给测试场景。
+                        LegacySurfaceHash.ComputeV24SurfaceHash());
         }
 
 		/// <summary>

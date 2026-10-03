@@ -25,7 +25,8 @@ public sealed class CompatPackValidationContext
         IReadOnlySet<string>? knownInstructionHandlers = null,
         IReadOnlySet<string>? knownFunctionHandlers = null,
         IReadOnlyDictionary<string, string>? knownFunctionReturnTypes = null,
-        string? baselineProfileId = null)
+        string? baselineProfileId = null,
+        string? baselineSurfaceHash = null)
     {
         if (engineModuleApiVersion <= 0)
             throw new ArgumentOutOfRangeException(nameof(engineModuleApiVersion));
@@ -40,6 +41,9 @@ public sealed class CompatPackValidationContext
         KnownFunctionHandlers = knownFunctionHandlers ?? NoHandlers;
         KnownFunctionReturnTypes = knownFunctionReturnTypes ?? NoFunctionReturnTypes;
         BaselineProfileId = string.IsNullOrWhiteSpace(baselineProfileId) ? "v24pure" : baselineProfileId.Trim();
+        BaselineSurfaceHash = string.IsNullOrWhiteSpace(baselineSurfaceHash)
+            ? LegacySurfaceHash.ComputeV24SurfaceHash()
+            : baselineSurfaceHash.Trim();
     }
 
     /// <summary>引擎当前 ModuleApiVersion（与 DialectModuleDefinition.ModuleApiVersion 同源）。</summary>
@@ -93,4 +97,12 @@ public sealed class CompatPackValidationContext
 
     /// <summary>包声明的基线 profile 必须与会话基线一致；缺省 v24pure。</summary>
     public string BaselineProfileId { get; }
+
+    /// <summary>
+    /// 当前引擎侧的 v24 基线表面快照哈希（<see cref="LegacySurfaceHash.ComputeV24SurfaceHash"/>，
+    /// 生成清单的规范化 SHA256）。manifest 声明非空 <c>baseSurfaceHash</c> 且与本值不一致即拒载
+    ///（精确对账）；缺省（宿主未传/null/空白）取 <see cref="LegacySurfaceHash.ComputeV24SurfaceHash"/>
+    /// 的现算值，测试场景可显式传入自定基准。
+    /// </summary>
+    public string BaselineSurfaceHash { get; }
 }

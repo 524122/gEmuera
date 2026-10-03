@@ -442,6 +442,27 @@ public class CompatPackRulesTests
     }
 
     [Fact]
+    public void Validate_BaseSurfaceHashMismatch_Rejects()
+    {
+        // 精确对账（E2-R6）：manifest 声明非空 baseSurfaceHash 且与当前 v24 表面快照不一致
+        // → 拒载（错误文案含 baseSurfaceHash）；声明与基线一致 → 放行；不声明 → 不触发本规则。
+        string mismatchJson = "{\"packId\":\"test.hash\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"baseSurfaceHash\":\"" + new string('0', 64) + "\"}";
+        var mismatchManifest = CompatPackManifest.TryParse(mismatchJson, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+
+        Assert.False(CompatPackRules.Validate(mismatchManifest, Array.Empty<ICompatPackContribution>(), Context(), out var errors));
+        Assert.Contains(errors, e => e.Contains("baseSurfaceHash"));
+
+        string matchingJson = "{\"packId\":\"test.hash\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"baseSurfaceHash\":\"" + LegacySurfaceHash.ComputeV24SurfaceHash() + "\"}";
+        var matchingManifest = CompatPackManifest.TryParse(matchingJson, out var parsedMatch, out _)
+            ? parsedMatch! : throw new InvalidOperationException();
+        Assert.True(CompatPackRules.Validate(matchingManifest, Array.Empty<ICompatPackContribution>(), Context(), out var matchErrors),
+            string.Join("; ", matchErrors));
+    }
+
+    [Fact]
     public void Validate_ManifestSurfaceFunctionWithoutReturnTypeMetadata_Rejects()
     {
         string json = "{\"packId\":\"test.surface-return\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
