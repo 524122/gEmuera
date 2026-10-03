@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- CompatPack 契约程序集（docs/designs/compat-pack-interface.md §4；拆分 ADR：
+         docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md）。字面名
+         Emuera.CompatPack 是包作者的编译面（包程序集 AssemblyRef 按此简单名绑定）；
+         契约类型命名空间保持 Emuera.Compatibility.Packs 不变——包按类型全名发现入口类。 -->
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <AssemblyName>Emuera.CompatPack</AssemblyName>
+    <!-- 契约程序集独立 SemVer 线：v1 契约面 = 1.0；演进不再牵动上游插件 ABI 的 1.824。 -->
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0</FileVersion>
+    <RootNamespace>Emuera.Compatibility.Packs</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 契约类型（自 src/EmueraFacade/Compatibility/Packs/ git mv 而来，XML 文档注释原样保留）。 -->
+    <Compile Include="ICompatPack.cs" />
+    <Compile Include="CompatPackManifest.cs" />
+    <Compile Include="CompatPackVariants.cs" />
+    <!-- 清单 schema 仅供包作者编辑器校验与文档对照，随包分发不参与编译。 -->
+    <None Include="compatpack.manifest.schema.json" Pack="false" />
+  </ItemGroup>
+</Project>

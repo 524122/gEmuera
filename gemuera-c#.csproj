@@ -11,6 +11,9 @@
     <ProjectReference Include="src\Core\GEmuera.Core.csproj" />
     <!-- 外部插件契约程序集（字面名 Emuera，匹配插件按 'Emuera, 1.824' 的强引用编译）。 -->
     <ProjectReference Include="src\EmueraFacade\Emuera.csproj" />
+    <!-- CompatPack 契约程序集（2026-10-03 拆分，见 docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md）：
+         Scripts/Emuera/Compatibility/CompatPackHost.cs 直名 Emuera.Compatibility.Packs.CompatPackGameIdentity。 -->
+    <ProjectReference Include="src\EmueraCompatPack\EmueraCompatPack.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="uEmuera-0.2.9d\**" />
@@ -27,6 +30,10 @@
     <Compile Remove="src\EmueraFacade\**" />
     <EmbeddedResource Remove="src\EmueraFacade\**" />
     <None Remove="src\EmueraFacade\**" />
+    <!-- CompatPack 契约程序集（2026-10-03 拆分）同上，独立编译，不入宿主 glob。 -->
+    <Compile Remove="src\EmueraCompatPack\**" />
+    <EmbeddedResource Remove="src\EmueraCompatPack\**" />
+    <None Remove="src\EmueraCompatPack\**" />
     <Compile Remove="tools\core-contracts\**" />
     <EmbeddedResource Remove="tools\core-contracts\**" />
     <None Remove="tools\core-contracts\**" />
