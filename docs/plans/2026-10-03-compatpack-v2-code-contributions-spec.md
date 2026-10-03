@@ -122,7 +122,7 @@
 
 ---
 
-## 2. 三个候选方案（Brief Step 2）
+## 2. 两个候选方案（Brief Step 2）
 
 > 背景约束：收窄目标类型必须被**宿主与包共享同一类型标识**。ALC 简单名匹配下，唯一既被
 > 宿主加载又被包绑定的程序集是契约程序集（`CompatPackLoadContext.cs:35-36`，与包共享同一
@@ -336,8 +336,9 @@ Program.ConfigureCompatibilityPlan(plan, session, scoped)（Program.cs:368）
   └─ session == null ? 空映射（零开销，无包路径逐字节等价）
      : PackFactoryMapExtractor.Extract(session.Handles)
        /* 遍历 handle.Variants（CompatPackHandle.cs:43），折叠为
-          Dictionary<string /*Trim+Upper 指令名*/, ICompatInstructionFactory>
-          （键冲突已在规则段拒载，CompatPackRules.cs:168-169 跨贡献去重）；
+          Dictionary<string /*Trim+Upper 指令名*/, ICompatInstructionFactory>；
+          键冲突在正常加载序不可达（跨包冲突已在组装段 fail-at-load，见下注；
+          本提取期碰撞仅作纵深防御）；
           提取失败 → 走既有投影失败兜底（Program.cs:384-392） */
   └─ LegacyCompatibilityProfile.Create(plan, scoped, packInstructionFactories)
        /* 现签名 LegacyCompatibilityProfile.cs:280-287 增加可选参数；
@@ -351,6 +352,15 @@ Program.ConfigureCompatibilityPlan(plan, session, scoped)（Program.cs:368）
                → new FunctionIdentifier(source.Name, source.Code, shim)；
             3. 仍未命中 → 返回 source（不变）。
 ```
+
+> **跨包绑定冲突的真相与对策（评审修正 2026-10-03）**：`CompatPackRules.Validate` 是
+> **单清单签名**（`CompatPackRules.cs:15-19`），其 `:168-169` 去重字典作用域为单次调用 =
+> **包内跨贡献去重**；跨包同名绑定（两个启用包各绑 `DRAWLINE`）**今天双双通过校验、
+> 并未被拒载**。v2 的防线在组装段（§7.2 新增条目）：`CompatPackPlanAssembler.TryAssemble`
+> 折叠 `pack.Variants` 绑定名时复用表面注册的"被多个包注册"错误模式（先例
+> `CompatPackPlanAssembler.cs:128-129`/`:135-136`），错误条目指明**两个冲突包**；任一冲突
+> → `TryAssemble` 返回 false → 宿主卸载全部句柄回退基线（`CompatPackHost.cs:204-209`，
+> 整包集拒载语义）。本段 map 提取因此只承担纵深防御，不是冲突的唯一防线。
 
 ### 5.3 存活边界
 
@@ -401,6 +411,37 @@ public sealed record EnginePolicyBinding(string CapabilityId, ICompatPolicyAdapt
 - 被否决的备选：新增平行记录 `EnginePolicyImplementation` 保留 v1 记录不动——避免
   "同一概念两个记录长期并存"的契约面混淆；v1 记录的拒载向测试用例随接线任务一并改写。
 
+**`ICompatPolicyAdapter` 定义（契约程序集 `Emuera.Compatibility.Packs`，v2.0）**：
+
+```csharp
+/// <summary>
+/// 策略适配器标记基接口：`EnginePolicyBinding.Implementation` 的统一收窄/校验目标。
+/// v2.0 无成员——各能力域的窄子接口携带成员并扩展本标记
+/// （首个试点：`ICompatFunctionContractPolicy : ICompatPolicyAdapter`，§6.4.4）。
+/// </summary>
+public interface ICompatPolicyAdapter
+{
+}
+```
+
+- **为何是空标记**：策略各域之间无公共成员可提炼（对比指令 handler 有统一的 `Execute`
+  回调，§4.1），标记接口只承担两个职责——记录与校验有单一类型目标（`is` 收窄，与 §3 的
+  指令收窄同构），以及记录签名随域增长保持稳定（新域 = 新子接口扩展标记，记录不动）；
+  成员面（兼容性负担）全部落在子接口，只增不改承诺（§6.4.4）在子接口层面兑现。
+- **capability id → 域接口映射的提供方（§6.4.2 校验输入）**：由**宿主校验上下文供给**——
+  `CompatPackValidationContext` 新增 `PolicyDomainByCapabilityId`
+  （`IReadOnlyDictionary<string, Type>`，值 = 该 capability 所属域窄接口的契约 `Type`），
+  由 `CompatPackHost.BuildValidationContext` 填充。选择依据：沿"宿主是语义校验输入的
+  唯一提供方"的既有纪律（先例：`CompatPackHost.cs:76-79` 显式注入 `BaselineSurfaceHash`
+  的注释理由）；Core 规则侧以 `Type.IsInstanceOfType(Implementation)` 判定（契约接口的
+  类型标识由宿主与包共享同一程序集实例，跨 ALC 判定有效，`CompatPackLoadContext.cs:35-36`）。
+  新域接口接线时随该接口的独立提交同步登记映射（§6.4.4 增量协议的 (a)+(d) 项）。
+- **映射无条目 = 拒载（fail-closed，防静默 no-op）**：绑定的 capability id 既无内置实现、
+  又无已登记域接口 = 引擎尚无该 id 的消费面——放行会让绑定经组装折叠（§6.1 消费点 2）
+  静默进 capability 账本而无任何行为，正是 v1 拒载条目防的"看起来生效的静默误导"
+  （同类理由先例：saveProfileId 拒载注释 `CompatPackRules.cs:58-65`）。v2.0 映射初始
+  内容 = 首个试点域的登记条目（试点是否采纳 `ICompatFunctionContractPolicy` 见 §10.5）。
+
 **不引入策略工厂**：与指令 handler（每指令一实例、按会话创建）不同，策略实现默认无状态
 （行为开关/纯函数），由包入口在 `Contributions` 构造时直接提供实例（与现有测试样本
 `HelloPolicyContribution` 同构，`tests/xUnitTest/GEmuera.Core.Tests/HelloCompatPack.cs:58-66`）。
@@ -420,7 +461,9 @@ public sealed record EnginePolicyBinding(string CapabilityId, ICompatPolicyAdapt
 1. **生命周期**：实现实例随 `CompatPackHandle.Policies` 存活（`CompatPackHandle.cs:44`）；
    投影映射随 profile 存活；会话 Dispose 全部回收。
 2. **校验期失败（全部错误条目、整包拒载）**：
-   - `Implementation` 为 null / 未实现该 capability 所属域的窄接口 → 新增错误；
+   - `Implementation` 为 null / 未实现该 capability 所属域的窄接口（域期望由宿主供给的
+     `PolicyDomainByCapabilityId` 映射给出，§6.2）→ 新增错误；映射无条目（该 capability
+     在引擎侧尚无消费面）→ 同样拒载（§6.2，防静默 no-op）；
    - 绑定 capability id 拥有**内置引擎实现** → 拒载（防覆盖内置语义；内置判定基准见下）；
    - 绑定未知 capability id → 拒载（现有 `CompatPackRules.cs:133-134` 保留）。
    - **前置取证项**：现行 `KnownCapabilityIds` 是六 profile 声明的并集（`CompatPackHost.cs:61-63`），
@@ -479,6 +522,7 @@ public sealed record EnginePolicyBinding(string CapabilityId, ICompatPolicyAdapt
 | **新增** | 干跑收窄：`CreateInstruction()` 返回 `is ICompatInstructionAdapter`，异常/null/异型 = 错误条目 | §4.2.1 |
 | **新增** | 策略绑定：`Implementation` 非 null 且实现所属域接口；绑定的 capability id 无内置实现（前置取证 §6.4.2）；未知 id 沿用 `:133-134` | §6.4 |
 | **新增** | 贡献变体绑定进方言差量哈希：`ComputeDialectDeltaHash` 增 `+variant=<指令名>\|<packId>` 行（现缺口见 §1.6） | `CompatPackPlanAssembler.cs:295-320` |
+| **新增** | **跨包变体绑定同名冲突检测**：`CompatPackRules.Validate` 为单清单签名（`CompatPackRules.cs:15-19`），包内去重（`:168-169`）不覆盖跨包——跨包同名绑定今天双双通过校验（§5.2 修正注）。v2 在组装段 `TryAssemble` 折叠 `pack.Variants` 绑定名时复用表面注册的"被多个包注册"错误模式（先例 `CompatPackPlanAssembler.cs:128-129`/`:135-136`），错误条目**指明两个冲突包**；任一冲突 → `TryAssemble` 返回 false → 宿主卸载全部句柄回退基线（`CompatPackHost.cs:204-209`），fail-closed 与表面注册冲突同语义 | `CompatPackPlanAssembler.cs:126-143`（先例模式）；§5.2 修正注 |
 | 保持 | fail-closed 不变量：错误全量收集不短路；包代码调用全程 try/catch；任何错误 → 整包拒载 → 宿主回退基线 + `[LOAD]` 日志 | `:24`/`:205-218`；`CompatPackHost.cs:190-234` |
 
 > spike 期间 `:113-120`/`:137-144` 保持原样；上表是 v2 接线任务的执行计划，不是本提交的变更。
@@ -569,7 +613,8 @@ DOTNET_ROLL_FORWARD=Major dotnet run --project tools/core-contracts/CoreContract
    （输出列宽依赖终端宽度），可换成更纯的指令（如 `INITRAND` 类副作用指令）——fixture
    定稿时二选一。
 5. **策略试点域**（§6.4.4）：`ICompatFunctionContractPolicy` 为建议值，若 P-D snake 步
-   （其 §4.1 步 5，DFC 名单最重）先落地，也可换 snake 退役暴露的真实域。
+   （其 §4.1 步 5，DFC 名单最重）先落地，也可换 snake 退役暴露的真实域。§6.2 的
+   `PolicyDomainByCapabilityId` 映射表初始内容（宿主供给、随试点域登记）请一并裁定。
 
 ## 11. 评审裁定清单（OWNER 勾选即视为 spec 通过）
 
