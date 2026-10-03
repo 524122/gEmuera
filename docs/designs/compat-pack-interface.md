@@ -296,6 +296,16 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
   `ClearCompatibilityPlan`/`ResetSessionState` 先 Dispose（幂等恰好一次 Unload）再清
   plan/profile。验收：GEmuera.Core.Tests 104（103 + `Dispose_UnloadsEachLeaseOnceIdempotently`）、
   EmueraFacade.Tests 35、三冒烟全绿、宿主 Release 构建 0 错误。
+- **2026-10-03 增补（P0 静态回归守卫，计划批次 2 Task 11）**：新增
+  `tools/compat-pack/Test-CompatPackLifecycle.ps1`（`-ProjectRoot <项目根>`，exit 0/1），
+  静态断言 §13.6 的 P0 修复不回退：(1) `EmueraMain.StopLegacySession` 方法体内不得出现
+  `IsRunning` 条件早退（注释/字符串字面量剥离后按大括号配对提取方法体再检查，方法内的
+  P0 说明注释本身提到 `!backend.IsRunning` 不会误报）；(2) `LegacySessionBackend.StopLegacyBaselineAsync`
+  必须调用 `ClearCompatibilityPlan`；(3) `CompatPackHost` 不得再现
+  `ActivePackModuleIds`/`ActiveVariantSelections`/`ResetActiveSessionProjection`；
+  (4) `DialectPlan` 必须声明 `PackModuleIds` 与 `VariantSelections`。验收命令：
+  `powershell -NoProfile -ExecutionPolicy Bypass -File tools/compat-pack/Test-CompatPackLifecycle.ps1 -ProjectRoot <项目根>`，
+  已接入 `tools/governance/Test-Governance.ps1`（其无参调用即执行本守卫）。
 
 ### 13.8 社区最小数据包示例
 
@@ -328,6 +338,9 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
   接线；v1 携带即拒载，不会静默 no-op。
 
 ### 13.9 未完成（下一批候选）
+
+- P0 静态回归守卫（§13.7，2026-10-03）只覆盖文本级回归，**不能替代真机 e2e**：
+  pack 游戏启动 → Back/Restart → 同进程二次启动（hash 防御）路径的 Android 真机实测仍开放。
 
 - `IInstructionVariantContribution` / `IPolicyContribution` v2 运行时接线与会话持有
   pack set（code contribution 生命周期）。

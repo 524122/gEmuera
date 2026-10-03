@@ -64,6 +64,14 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
   引擎注册表/方言清单变化后先 `dotnet run --project tools/dialect-inventory/LegacyDialectInventoryGenerator -- <项目根>`
   再生清单（`LegacyDialectInventories.Generated.cs` + `tools/legacy-runner/profiles.generated.json`），
   最后用 legacy-runner 做 v24pure/snake/erafl 三 profile 无头执行级冒烟。
+- **CompatPack 生命周期 P0 静态守卫**（2026-10）：改动 `Scripts/EmueraMain.cs`（StopLegacySession）、
+  `Scripts/GodotHost/LegacySessionBackend.cs`、`Scripts/Emuera/Compatibility/CompatPackHost.cs`
+  或 `src/Core/Compatibility/DialectRuntime.cs` 的会话生命周期/投影相关代码后，跑
+  `powershell -NoProfile -ExecutionPolicy Bypass -File tools/compat-pack/Test-CompatPackLifecycle.ps1 -ProjectRoot <项目根>`
+  （已接入 `tools/governance/Test-Governance.ps1`；四项检查：StopLegacySession 无
+  `IsRunning` 条件早退、StopLegacyBaselineAsync 必须调用 `ClearCompatibilityPlan`、
+  CompatPackHost 无投影静态残留、DialectPlan 保留 `PackModuleIds`/`VariantSelections`）。
+  该守卫只防静态文本回归，**真机 e2e 仍是最终验收**。
 - **Godot 构建回调不可用时的逃生通道**（个别安装缺 MSBuild 程序集时）：
   `dotnet build <项目根>/gemuera-c#.csproj -nodeReuse:false -m:1`，判定口径同为
   `error CS/MSB` 计 0 且输出 DLL 时间戳更新。两个通用陷阱：必须带 `-nodeReuse:false -m:1`

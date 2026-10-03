@@ -1,8 +1,14 @@
-[CmdletBinding()]
-param([string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path)
+﻿[CmdletBinding()]
+param([string]$ProjectRoot)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 在 [CmdletBinding()] 脚本的 param 默认值表达式里 $PSScriptRoot
+# 为空（脚本体内才有值），因此缺省解析必须放在此处而非 param 默认值。
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+    $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
 
 function Assert-Governance {
     param([bool]$Condition, [string]$Message)
@@ -45,5 +51,13 @@ try {
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force
 }
+
+# CompatPack 会话生命周期 P0 静态回归守卫（2026-10-03，计划批次 2 Task 11）：
+# 防止 StopLegacySession 的 IsRunning 条件早退 / plan 清理丢失 / 投影静态回潮 /
+# DialectPlan 投影字段缺失四类静态回归（设计 docs/designs/compat-pack-interface.md §13.6/§13.7）。
+$lifecycleGuard = Join-Path $ProjectRoot 'tools\compat-pack\Test-CompatPackLifecycle.ps1'
+Assert-Governance (Test-Path -LiteralPath $lifecycleGuard -PathType Leaf) 'CompatPack lifecycle guard script is missing.'
+& powershell -NoProfile -ExecutionPolicy Bypass -File $lifecycleGuard -ProjectRoot $ProjectRoot
+Assert-Governance ($LASTEXITCODE -eq 0) 'CompatPack lifecycle guard failed.'
 
 Write-Output 'M3-M7 governance contract passed.'
