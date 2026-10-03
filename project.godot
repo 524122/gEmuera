@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="gemuera-c#"
-run/main_scene="res://first_window.tscn"
+run/main_scene="res://assets/scenes/first_window.tscn"
 config/quit_on_go_back=false
 config/features=PackedStringArray("4.7", "C#", "Mobile")
 prototype_runtime=true

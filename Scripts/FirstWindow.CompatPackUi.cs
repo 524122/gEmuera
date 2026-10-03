@@ -239,10 +239,9 @@ public partial class FirstWindow
 			row.Toggle.Disabled = !compatPackUiEnabled;
 	}
 
-	void RefreshCompatPackHeader()
+	/// <summary>当前 UI 勾选 + 手动路径合并后的启用包数量（不含存储态）。</summary>
+	internal int GetSelectedCompatPackCount()
 	{
-		if (compatPackHeaderLabel == null)
-			return;
 		int enabledCount = 0;
 		foreach (CompatPackCandidateRow row in compatPackCandidateRows)
 		{
@@ -251,6 +250,14 @@ public partial class FirstWindow
 		}
 		if (compatPackPathsEdit != null)
 			enabledCount += CompatPackLauncherConfig.ParseSelection(compatPackPathsEdit.Text).Count;
+		return enabledCount;
+	}
+
+	void RefreshCompatPackHeader()
+	{
+		if (compatPackHeaderLabel == null)
+			return;
+		int enabledCount = GetSelectedCompatPackCount();
 		compatPackHeaderLabel.Text = enabledCount > 0
 			? string.Format(
 				MultiLanguage.Get("FirstWindow.CompatPackSectionActive", "兼容包（已启用 {0} 项，按所选游戏保存）"),
@@ -280,7 +287,7 @@ public partial class FirstWindow
 		// 已存选择分流：命中扫描候选 → 勾选对应项；未命中 → 保留进手动区显示
 		// （UI 升级不丢既有数据）。
 		var manualPaths = new List<string>();
-		var checkedKeys = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+		var checkedKeys = new HashSet<string>(CompatPackLauncherConfig.GameKeyComparer);
 		foreach (string path in storedPaths)
 		{
 			string key = GetCompatPackPathKey(path);
@@ -322,10 +329,10 @@ public partial class FirstWindow
 		if (compatPackEditGameKey == null)
 			return;
 
-		// 合并勾选区与手动区（勾选在前、手动在后），大小写不敏感去重；
-		// 相对路径按启动器根绝对化后再写存储。
+		// 合并勾选区与手动区（勾选在前、手动在后），按平台 GameKeyComparer 去重
+		//（Windows 大小写不敏感 / Android 大小写敏感）；相对路径按启动器根绝对化后再写存储。
 		var paths = new List<string>();
-		var seenKeys = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+		var seenKeys = new HashSet<string>(CompatPackLauncherConfig.GameKeyComparer);
 		foreach (CompatPackCandidateRow row in compatPackCandidateRows)
 		{
 			if (row.Toggle.ButtonPressed && seenKeys.Add(GetCompatPackPathKey(row.PackPath)))
@@ -354,16 +361,18 @@ public partial class FirstWindow
 	{
 		foreach (string candidate in compatPackCandidatePaths)
 		{
-			if (GetCompatPackPathKey(candidate) == pathKey)
+			if (CompatPackLauncherConfig.GameKeyComparer.Equals(GetCompatPackPathKey(candidate), pathKey))
 				return true;
 		}
 		return false;
 	}
 
-	// 路径比对键：绝对化 + 统一分隔符 + 去尾斜杠 + 小写（沿用存储键的大小写不敏感惯例）。
+	// 路径比对键：启动器根绝对化后 NormalizePackPath（GetFullPath + 分隔符统一 + 去尾
+	// 斜杠）；键保留大小写，大小写语义交给 GameKeyComparer——大小写敏感文件系统上
+	// A.dll 与 a.dll 是不同文件，去重不得折叠（与游戏键同一条平台纪律，E2-R4）。
 	static string GetCompatPackPathKey(string path)
 	{
-		return AbsoluteizeCompatPackPath(path).TrimEnd('/').ToLowerInvariant();
+		return CompatPackLauncherConfig.NormalizePackPath(AbsoluteizeCompatPackPath(path));
 	}
 
 	/// <summary>
@@ -425,7 +434,7 @@ public partial class FirstWindow
 			return;
 		// 选中的文件追加进手动区（去重），随后与勾选区一起走统一提交。
 		var merged = new List<string>(CompatPackLauncherConfig.ParseSelection(compatPackPathsEdit.Text));
-		var seenKeys = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+		var seenKeys = new HashSet<string>(CompatPackLauncherConfig.GameKeyComparer);
 		foreach (string existing in merged)
 			seenKeys.Add(GetCompatPackPathKey(existing));
 		foreach (string file in files)

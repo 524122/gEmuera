@@ -116,9 +116,17 @@ DIA 静态测试在分类修复后，仍只应得到结构性证据。现有合�
 
 以下都不属于可接受的 ERB 扩展：
 
+> 口径说明（2026-10-02）：本清单的"外部 DLL"指绕过 CompatPack 契约、直接向 Parser/VM 注入的 ad-hoc 反射扩展。
+> 受治理的 CompatPack 通道见 `docs/designs/compat-pack-interface.md`：manifest-only 数据包 + 显式启用 + plan/fail-closed 校验，
+> 当前 v1 不支持任意代码回调（变体/策略贡献 v2 预留，v1 拒载）。插件通道（CALLSHARP/Plugins）与兼容包通道仍是两套独立契约：
+> 插件 ABI 面在 `Emuera`（src/EmueraFacade，1.824.0.0 不变），兼容包契约面在独立契约程序集 `Emuera.CompatPack`
+> （src/EmueraCompatPack，2026-10-03 拆分，拆分 ADR 见 `docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md`）。
+
+
 - 在 Godot `Node`、`Control`、Autoload 或 signal 中保存 ERB state、等待状态或关键字语义；
 - 在 Parser/VM hot path 新增按游戏目录名、函数名或 `Program.IsSnakeProfile` 的业务分支；
-- 让 CompatibilityPack 指定 assembly、任意 C# 类型、脚本回调、绝对路径或 URL；
+- 绕开 `docs/designs/compat-pack-interface.md` 的 CompatPack 契约（显式按游戏启用、ALC/fail-closed、manifest 对账、baseProfile 约束），让任意 CompatibilityPack 指定 assembly、任意 C# 类型、脚本回调、绝对路径或 URL；
+   受契约治理的 CompatPack 通道是唯一例外：v1 只接受 manifest 数据包/表面声明，`IInstructionVariantContribution`/`IPolicyContribution` 未接线前携带即拒载；
 - 用 `_Rename.csv` 文本替换冒充 registry alias/replacement；
 - 用反射扫描程序集发现移动端方言 module；
 - 仅增加 Core descriptor、`FunctionCode` 或 `VariableCode` 就宣称完整语义已实现。

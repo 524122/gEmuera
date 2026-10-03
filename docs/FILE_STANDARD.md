@@ -128,12 +128,12 @@ rg "res://Scripts" assets/scenes -g "*.tscn"; rg "preload" tests -g "*.gd"
   推论（都已实测）：
   - **文件里没有那个标识符 → 规则永不参与判定**，是「声明了但惰性」的条目，拆它**不需要动 `dialect-classification.json`**。
   - 哈希集（`$hashedSources`）**只收「真的命中过 marker 的文件」+「含注册行的 sourceFile」**（`:248`、`:257`），
-    所以**不是**"拆分任何被命中的文件都会改变 DIA-01/02 哈希"——没进哈希集的文件，拆了哈希不动。
+	所以**不是**"拆分任何被命中的文件都会改变 DIA-01/02 哈希"——没进哈希集的文件，拆了哈希不动。
   - **实测**：`Scripts/EmueraContent.cs`、`Scripts/Emuera/GameView/EmueraConsole.cs`、`Creator.Method.cs` 的 10 条 marker 命中数**全为 0**；
-    它们对应的那些 `fileRegex` 规则都是惰性条目 → 拆这三个文件**无需改方言目录**。（`EmueraContent.cs` 有 3 条规则命中它，容易被误读成"marker 分类文件"。）
+	它们对应的那些 `fileRegex` 规则都是惰性条目 → 拆这三个文件**无需改方言目录**。（`EmueraContent.cs` 有 3 条规则命中它，容易被误读成"marker 分类文件"。）
   - 反例（真的要小心的是这个）：`Scripts/FirstWindow.cs` 实测 marker 命中 **36 处/35 行**，且它同时被
-    `dialect-profile-selection.json` 以**整文件 SHA-256** 钉扎 → 拆它必须同 PR 重算该 sha256。
-    本仓已在 2026-09-13 拆分中处理过一次（只重钉了 `FirstWindow.cs` 自己那条，另两条既有漂移未动）。
+	`dialect-profile-selection.json` 以**整文件 SHA-256** 钉扎 → 拆它必须同 PR 重算该 sha256。
+	本仓已在 2026-09-13 拆分中处理过一次（只重钉了 `FirstWindow.cs` 自己那条，另两条既有漂移未动）。
 - **`FunctionIdentifier.cs` 与 `Creator.cs` 禁止把注册行/注册方法移入 partial**：生成器 `Get-CSharpBlock` 有单声明约束，运行时隔离校验靠文本正则钉在这两个文件上，注册表行一旦移动，生成直接 `exit 1`。这两个文件只允许原地修改。
   - 补充：注册行在同目录**其它文件**里也不存在——实测全仓 241 处 `addFunction(FunctionCode.` **全部**在 `FunctionIdentifier.cs`；表达式注册（`["KEY"] =`）全在 `Creator.cs`。所以拆 `Instraction.Child.cs`（同属 `partial class FunctionIdentifier`）是安全的，只要不搬注册块。
 - **新分片不得包含方言 branch marker 代码**：新路径文件**真的命中** marker 而无 `fileRegex` 规则会抛 `Unmapped dialect branch hit`。

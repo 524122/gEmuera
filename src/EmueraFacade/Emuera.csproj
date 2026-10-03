@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <!-- 契约程序集：字面名必须是 Emuera（外部插件按 'Emuera, Version=1.824.0.0' 强引用编译，
-         .NET 绑定按简单名匹配，见 2026-09-04 Phase C 复现实验）。 -->
+         .NET 绑定按简单名匹配，见 2026-09-04 Phase C 复现实验）。本程序集只承载上游插件
+         ABI；CompatPack 契约已拆分至 Emuera.CompatPack（src/EmueraCompatPack，经
+         CompatPackContractForwarding.cs 的 TypeForwardedTo 保持旧包兼容，见拆分 ADR）。 -->
     <TargetFramework>net8.0</TargetFramework>
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
     <AssemblyName>Emuera</AssemblyName>
@@ -13,9 +15,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="*.cs" />
-    <!-- 兼容包契约层（docs/designs/compat-pack-interface.md §4）。 -->
-    <Compile Include="Compatibility\**\*.cs" />
-    <!-- 清单 schema 仅供包作者编辑器校验与文档对照，随包分发不参与编译。 -->
-    <None Include="Compatibility\**\*.json" Pack="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- TypeForwardedTo 需要 new 契约程序集的类型标识（编译期引用），同时让 facade 的
+         引用闭包继续向旧式引用方传递契约程序集。 -->
+    <ProjectReference Include="..\EmueraCompatPack\EmueraCompatPack.csproj" />
   </ItemGroup>
 </Project>

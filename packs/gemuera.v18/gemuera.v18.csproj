@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- v18 第一方数据包：程序集只内嵌"生成器产出的 manifest"，不含 ICompatPack 入口类
+         （manifest-only 数据包路径）。清单由 tools/compat-pack/Generate-V18PackManifest
+         从 LegacyDialectInventories 生成，禁止手改。 -->
+    <EmbeddedResource Include="compatpack.manifest.json" LogicalName="compatpack.manifest.json" />
+  </ItemGroup>
+</Project>

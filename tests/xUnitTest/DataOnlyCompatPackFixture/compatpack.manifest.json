@@ -1,0 +1,13 @@
+{
+  "packId": "test.data-only",
+  "packVersion": "1.0.0",
+  "targetEngineApi": 1,
+  "baseProfileId": "v24pure",
+  "capabilities": ["startup.continue-after-fault.v1"],
+  "surface": {
+    "addInstructions": ["SETANIMETIMER"],
+    "hideInstructions": ["CALLSHARP"],
+    "addFunctions": ["SQL_CONNECT"],
+    "hideFunctions": ["EXISTVAR"]
+  }
+}

@@ -17,6 +17,16 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Core\GEmuera.Core.csproj" />
+    <!-- 数据包夹具：无 ICompatPack 入口，仅内嵌 manifest（manifest-only 加载路径端到端）。 -->
+    <ProjectReference Include="..\DataOnlyCompatPackFixture\DataOnlyCompatPackFixture.csproj" />
+    <!-- 社区包模板（packs/，manifest-only 数据包脚手架）。 -->
+    <ProjectReference Include="..\..\..\packs\CommunityPackTemplate\CommunityPackTemplate.csproj" />
+    <!-- v18 第一方数据包（packs/，生成清单差量的端到端等价门禁）。 -->
+    <ProjectReference Include="..\..\..\packs\gemuera.v18\gemuera.v18.csproj" />
+    <!-- 契约夹具：只引用 Emuera 契约程序集的最小 ICompatPack 样本（ALC 正向用例复用）。 -->
+    <ProjectReference Include="..\CompatPackContractOnlyFixture\CompatPackContractOnlyFixture.csproj" />
+    <!-- 宿主绑定探针（负向夹具）：故意引用 GEmuera.Core，钉住 ALC 允许清单 fail-closed 拒载。 -->
+    <ProjectReference Include="..\CompatPackHostBindingProbe\CompatPackHostBindingProbe.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- 本测试程序集兼任加载器测试的"真实包样本"：以规范资源名内嵌合法清单，

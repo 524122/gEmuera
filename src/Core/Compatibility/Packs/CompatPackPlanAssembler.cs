@@ -15,9 +15,9 @@ namespace GEmuera.Core.Compatibility.Packs;
 /// </summary>
 public static class CompatPackPlanAssembler
 {
-    /// <summary>折叠包集合进基线计划。任一跨包冲突（同名注册、变体选择同键异值）即整体失败
-    /// （fail-closed，与加载器同纪律）。包清单的 saveProfileId v1 不参与组装——存档 profile
-    /// 由基线会话决定，包级覆盖留宿主接线增量裁定。</summary>
+    /// <summary>折叠包集合进基线计划。任一跨包冲突（同名注册、变体选择同键异值、save profile
+    /// 同键异值）即整体失败（fail-closed，与加载器同纪律）。saveProfileId 采用"包声明覆盖
+    /// 基线、跨包必须一致"的确定性语义；无包声明时保持基线 save profile。</summary>
     public static bool TryAssemble(
         CompatibilityPlan baseline,
         IReadOnlyList<CompatPackHandle> packs,
@@ -195,8 +195,13 @@ public static class CompatPackPlanAssembler
         var modules = baseline.Dialect.Modules.ToList();
         // 模块快照按 packId 固化排序：组装产出的计划数据与包传入顺序无关（与哈希同纪律）。
         modules.AddRange(packModules.OrderBy(module => module.ModuleId, StringComparer.Ordinal));
+        string[] packModuleIds = packModules
+            .Select(module => module.ModuleId)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
         var variantSelections = CollectVariantSelections(packs, collected);
+        string? saveProfileId = CollectSaveProfileId(baseline, packs, collected);
         if (collected.Count > 0)
         {
             errors = collected;
@@ -204,9 +209,16 @@ public static class CompatPackPlanAssembler
         }
 
         string dialectHash = ComputeDialectDeltaHash(baseline, packHashLines, addedInstructions, addedFunctions, removedInstructions, removedFunctions, variantSelections);
-        var dialect = new DialectPlan(modules, baseline.Dialect.Ports, instructions, functions, dialectHash);
-        string canonicalHash = ComputePlanEnvelopeHash(baseline, dialectHash, capabilities);
-        assembled = new CompatibilityPlan(baseline.ProfileId, dialect, capabilities, baseline.SaveProfileId, canonicalHash);
+        var dialect = new DialectPlan(
+            modules,
+            baseline.Dialect.Ports,
+            instructions,
+            functions,
+            dialectHash,
+            packModuleIds: packModuleIds,
+            variantSelections: variantSelections);
+        string canonicalHash = ComputePlanEnvelopeHash(baseline, dialectHash, capabilities, saveProfileId);
+        assembled = new CompatibilityPlan(baseline.ProfileId, dialect, capabilities, saveProfileId, canonicalHash);
         errors = collected;
         return true;
     }
@@ -248,6 +260,33 @@ public static class CompatPackPlanAssembler
         return selections;
     }
 
+    static string? CollectSaveProfileId(
+        CompatibilityPlan baseline,
+        IReadOnlyList<CompatPackHandle> packs,
+        List<string> errors)
+    {
+        string? declared = null;
+        string? declaringPack = null;
+        foreach (CompatPackHandle pack in packs)
+        {
+            string? candidate = pack.Manifest.SaveProfileId;
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+            if (declared is null)
+            {
+                declared = candidate;
+                declaringPack = pack.Manifest.PackId;
+                continue;
+            }
+            if (!string.Equals(declared, candidate, StringComparison.Ordinal))
+            {
+                errors.Add("包 " + declaringPack + " 与 " + pack.Manifest.PackId
+                    + " 的 saveProfileId 冲突：" + declared + " 与 " + candidate + "。");
+            }
+        }
+        return declared ?? baseline.SaveProfileId;
+    }
+
     /// <summary>
     /// 方言层差量哈希：基线方言哈希 +（包 id|包字节哈希）有序对 + 表面差量 + 变体选择。
     /// 与 CompatibilityPlanBuilder 的哈希格式分层同构（dialect hash → plan hash），
@@ -280,12 +319,16 @@ public static class CompatPackPlanAssembler
         return Hash(canonical.ToString());
     }
 
-    static string ComputePlanEnvelopeHash(CompatibilityPlan baseline, string dialectHash, IEnumerable<string> capabilities)
+    static string ComputePlanEnvelopeHash(
+        CompatibilityPlan baseline,
+        string dialectHash,
+        IEnumerable<string> capabilities,
+        string? saveProfileId)
     {
         var canonical = new StringBuilder()
             .Append("profile=").Append(baseline.ProfileId).Append('\n')
             .Append("dialect=").Append(dialectHash).Append('\n')
-            .Append("save=").Append(baseline.SaveProfileId ?? string.Empty).Append('\n');
+            .Append("save=").Append(saveProfileId ?? string.Empty).Append('\n');
         foreach (string capability in capabilities)
             canonical.Append("capability=").Append(capability).Append('\n');
         return Hash(canonical.ToString());

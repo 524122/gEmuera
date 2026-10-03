@@ -11,6 +11,9 @@
     <ProjectReference Include="src\Core\GEmuera.Core.csproj" />
     <!-- 外部插件契约程序集（字面名 Emuera，匹配插件按 'Emuera, 1.824' 的强引用编译）。 -->
     <ProjectReference Include="src\EmueraFacade\Emuera.csproj" />
+    <!-- CompatPack 契约程序集（2026-10-03 拆分，见 docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md）：
+         Scripts/Emuera/Compatibility/CompatPackHost.cs 直名 Emuera.Compatibility.Packs.CompatPackGameIdentity。 -->
+    <ProjectReference Include="src\EmueraCompatPack\EmueraCompatPack.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="uEmuera-0.2.9d\**" />
@@ -27,6 +30,10 @@
     <Compile Remove="src\EmueraFacade\**" />
     <EmbeddedResource Remove="src\EmueraFacade\**" />
     <None Remove="src\EmueraFacade\**" />
+    <!-- CompatPack 契约程序集（2026-10-03 拆分）同上，独立编译，不入宿主 glob。 -->
+    <Compile Remove="src\EmueraCompatPack\**" />
+    <EmbeddedResource Remove="src\EmueraCompatPack\**" />
+    <None Remove="src\EmueraCompatPack\**" />
     <Compile Remove="tools\core-contracts\**" />
     <EmbeddedResource Remove="tools\core-contracts\**" />
     <None Remove="tools\core-contracts\**" />
@@ -37,10 +44,19 @@
     <Compile Remove="tools\diagnostics-config-smoke\**" />
     <EmbeddedResource Remove="tools\diagnostics-config-smoke\**" />
     <None Remove="tools\diagnostics-config-smoke\**" />
+    <!-- compat-pack 工具（生成器等）独立编译；其 Program.cs 的顶层语句会生成全局命名空间
+         Program 类，若被宿主 glob 收录会遮蔽 MinorShift.Emuera.Program（CS0117）。 -->
+    <Compile Remove="tools\compat-pack\**" />
+    <EmbeddedResource Remove="tools\compat-pack\**" />
+    <None Remove="tools\compat-pack\**" />
     <!-- xUnit tests build independently via their own csproj; keep them out of the Godot host glob. -->
     <Compile Remove="tests\**" />
     <EmbeddedResource Remove="tests\**" />
     <None Remove="tests\**" />
+    <!-- 社区兼容包模板（packs/）是独立编译的类库样本，由测试工程引用；不入 Godot 宿主 glob。 -->
+    <Compile Remove="packs\**" />
+    <EmbeddedResource Remove="packs\**" />
+    <None Remove="packs\**" />
     <!-- Evidence and upstream builds are generated data, never Godot host source. -->
     <Compile Remove="artifacts\**" />
     <EmbeddedResource Remove="artifacts\**" />

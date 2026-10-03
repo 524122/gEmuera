@@ -13,7 +13,26 @@ namespace GEmuera.Core.Compatibility.Packs;
 /// </summary>
 public static class CompatPackLoader
 {
-    /// <summary>加载单个包。任何失败返回 false 且 handle 为 null，绝不返回半加载结果。</summary>
+    /// <summary>
+    /// 仅测试 seam：注入包程序集字节读取器（按路径 → 字节）。默认 null，生产路径恒走
+    /// <see cref="File.ReadAllBytes(string)"/>；测试用它钉住"哈希与加载同源字节"的 TOCTOU
+    /// 不变量（E2-R5）。生产代码不得赋值。
+    /// </summary>
+    internal static Func<string, byte[]>? BytesReaderOverrideForTest { get; set; }
+
+    /// <summary>
+    /// 包程序集字节读取的唯一入口（<see cref="BytesReaderOverrideForTest"/> 命中时走 seam，
+    /// 否则走磁盘读取）。调用方拿到的是同一份 byte[]，哈希与 stream 装载必须共用它。
+    /// </summary>
+    static byte[] ReadBytes(string packAssemblyPath) =>
+        BytesReaderOverrideForTest is { } reader ? reader(packAssemblyPath) : File.ReadAllBytes(packAssemblyPath);
+
+    /// <summary>
+    /// 加载单个包。任何失败返回 false 且 handle 为 null，绝不返回半加载结果。
+    /// 同源字节不变量（E2-R5 TOCTOU）：程序集字节恰好读一次，双哈希与经 stream 的程序集
+    /// 装载共用这同一份 byte[]；<see cref="CompatPackHandle.PackAssemblyPath"/> 仅作诊断与
+    /// 包目录依赖解析来源，不再作为装载输入。
+    /// </summary>
     public static bool TryLoad(
         string packAssemblyPath,
         CompatPackValidationContext context,
@@ -46,7 +65,7 @@ public static class CompatPackLoader
         byte[] assemblyBytes;
         try
         {
-            assemblyBytes = File.ReadAllBytes(packAssemblyPath);
+            assemblyBytes = ReadBytes(packAssemblyPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -55,11 +74,14 @@ public static class CompatPackLoader
             return false;
         }
 
+        // 同源字节不变量（E2-R5 TOCTOU）：assemblyBytes 恰好读一次，既是双哈希的输入，
+        // 也是经 MemoryStream 装载的程序集本体——两次独立读盘（先哈希后按路径装载）会被
+        // 并发的文件替换撕开，固化哈希描述旧内容而运行的是新内容。
         Assembly assembly;
         var loadContext = new CompatPackLoadContext(packAssemblyPath);
         try
         {
-            assembly = loadContext.LoadFromAssemblyPath(Path.GetFullPath(packAssemblyPath));
+            assembly = loadContext.LoadFromStream(new MemoryStream(assemblyBytes));
         }
         catch (Exception exception)
         {
@@ -85,11 +107,11 @@ public static class CompatPackLoader
         ICompatPack? pack;
         try
         {
-            pack = FindSinglePackEntry(assembly, collected);
+            pack = ResolvePackEntry(assembly, manifest, collected);
         }
         catch (Exception exception)
         {
-            collected.Add(prefix + "包入口实例化失败：" + exception.Message);
+            collected.Add(prefix + "包入口实例化失败：" + DescribeException(exception));
             loadContext.Unload();
             errors = collected;
             return false;
@@ -101,7 +123,9 @@ public static class CompatPackLoader
             return false;
         }
 
-        if (!ValidatePackEntry(pack, manifest, context, out IReadOnlyList<ICompatPackContribution> contributions, out var entryErrors))
+        IReadOnlyList<ICompatPackContribution> manifestContributions = CreateManifestContributions(manifest, context);
+        if (!ValidatePackEntry(pack, manifest, context, out IReadOnlyList<ICompatPackContribution> contributions,
+                out var entryErrors, manifestContributions))
         {
             collected.AddRange(entryErrors.Select(error => prefix + error));
             loadContext.Unload();
@@ -178,7 +202,8 @@ public static class CompatPackLoader
         CompatPackManifest manifest,
         CompatPackValidationContext context,
         out IReadOnlyList<ICompatPackContribution> contributions,
-        out IReadOnlyList<string> errors)
+        out IReadOnlyList<string> errors,
+        IReadOnlyList<ICompatPackContribution>? manifestContributions = null)
     {
         var collected = new List<string>();
         contributions = Array.Empty<ICompatPackContribution>();
@@ -193,7 +218,14 @@ public static class CompatPackLoader
                 return false;
             }
 
-            contributions = pack.Contributions ?? Array.Empty<ICompatPackContribution>();
+            IReadOnlyList<ICompatPackContribution> entryContributions =
+                pack.Contributions ?? Array.Empty<ICompatPackContribution>();
+            var combined = new List<ICompatPackContribution>(
+                (manifestContributions?.Count ?? 0) + entryContributions.Count);
+            if (manifestContributions is { Count: > 0 })
+                combined.AddRange(manifestContributions);
+            combined.AddRange(entryContributions);
+            contributions = combined;
             if (!CompatPackRules.Validate(manifest, contributions, context, out var ruleErrors))
             {
                 collected.AddRange(ruleErrors);
@@ -213,7 +245,15 @@ public static class CompatPackLoader
         }
     }
 
-    static ICompatPack? FindSinglePackEntry(Assembly assembly, List<string> errors)
+    /// <summary>
+    /// 解析包入口：恰好一个 ICompatPack 实现类；零个入口类时按 manifest-only 数据包处理
+    /// （表面/capability/variant 全部来自内嵌清单，不要求包作者编写 C# 入口）。
+    /// 多个入口类仍拒载（fail-closed）。
+    /// </summary>
+    internal static ICompatPack? ResolvePackEntry(
+        Assembly assembly,
+        CompatPackManifest manifest,
+        List<string> errors)
     {
         Type[] types;
         try
@@ -232,17 +272,57 @@ public static class CompatPackLoader
                 && !type.IsAbstract
                 && typeof(ICompatPack).IsAssignableFrom(type))
             .ToList();
-        if (entries.Count == 0)
-        {
-            errors.Add("程序集内没有 ICompatPack 实现类；缺入口的程序集不是兼容包。");
-            return null;
-        }
         if (entries.Count > 1)
         {
             errors.Add("程序集内存在多个 ICompatPack 实现类（" + entries.Count + " 个），必须恰好一个。");
             return null;
         }
-        return (ICompatPack?)Activator.CreateInstance(entries[0]);
+        if (entries.Count == 0)
+            return new ManifestOnlyCompatPack(manifest);
+
+        try
+        {
+            return (ICompatPack?)Activator.CreateInstance(entries[0]);
+        }
+        catch (Exception exception)
+        {
+            errors.Add("包入口实例化失败：" + DescribeException(exception));
+            return null;
+        }
+    }
+
+    internal static IReadOnlyList<ICompatPackContribution> CreateManifestContributions(
+        CompatPackManifest manifest,
+        CompatPackValidationContext context)
+    {
+        CompatPackSurface surface = manifest.Surface;
+        if (surface.AddInstructions.Count == 0
+            && surface.HideInstructions.Count == 0
+            && surface.AddFunctions.Count == 0
+            && surface.HideFunctions.Count == 0)
+        {
+            return Array.Empty<ICompatPackContribution>();
+        }
+        return new ICompatPackContribution[]
+        {
+            new ManifestSurfaceContribution(surface, context.KnownFunctionReturnTypes),
+        };
+    }
+
+    /// <summary>
+    /// 拒载错误文案：Activator.CreateInstance 把构造器异常包进 TargetInvocationException
+    /// （通用文案，不携带原因），诊断必须保留最内层异常类型与消息——例如 ALC 允许清单
+    /// 硬化后的 FileLoadException（指名被拒绝的绑定程序集）。
+    /// </summary>
+    internal static string DescribeException(Exception exception)
+    {
+        Exception innermost = exception;
+        while (innermost.InnerException is { } inner)
+            innermost = inner;
+        if (ReferenceEquals(innermost, exception))
+            return exception.Message;
+        return exception.GetType().Name + ": " + exception.Message
+            + "（最内层 " + innermost.GetType().Name + ": " + innermost.Message + "）";
     }
 
     static string ComputePackHash(Assembly assembly, byte[] assemblyBytes)

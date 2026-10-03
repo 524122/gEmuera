@@ -148,6 +148,10 @@ public sealed class LegacySessionBackend : ILegacySessionBackend
 
     private static void ApplyLaunchConfiguration(LegacySessionLaunchConfiguration launch)
     {
+        // Per-session pack 通道刷新（E2-R3）：ConfigureLegacyRunnerSession 内部按目标游戏
+        // 重算 GEMUERA_COMPAT_PACKS（CompatPackLauncherConfig.MergeSelection：按游戏选择
+        // 优先，外部诊断 env 次之，皆空清除）——canary 切换 / in-process cycle 换局不沿用
+        // 上一局的启用清单。
         if (!global::FirstWindow.ConfigureLegacyRunnerSession(
                 launch.GameRoot,
                 launch.ProfileId,

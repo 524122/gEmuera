@@ -8,7 +8,7 @@ Emuera 是日本 eramaker 系列文字游戏的执行引擎，通过解析 `.ERB
 
 ## 开发者接手
 
-AI/开发者接手以仓库根目录 [AGENTS.md](../AGENTS.md) 为权威入口（项目简介、必读与配套文档、构建与验证、架构速览、协作规则）；需要扩展 ERB 解释器接口时参见 [ERBAPI.md](../ERBAPI.md)。[DeveloperHandoff.md](../docs/NewFrameworkDesign/DeveloperHandoff.md) 是 2026-07-17 的历史存档快照，仅作参考；不要把其中的长期目标设计直接视为已完成实现。
+AI/开发者接手以仓库根目录 [AGENTS.md](../AGENTS.md) 为权威入口（项目简介、必读与配套文档、构建与验证、架构速览、协作规则）；需要扩展 ERB 解释器接口时参见 [ERBAPI.md](../docs/ERBAPI.md)。[DeveloperHandoff.md](../docs/NewFrameworkDesign/DeveloperHandoff.md) 是 2026-07-17 的历史存档快照，仅作参考；不要把其中的长期目标设计直接视为已完成实现。
 
 ## 特性
 
@@ -137,13 +137,12 @@ eraGameName/
 gemuera-c#/
 ├── project.godot              # Godot 项目配置
 ├── gemuera-c#.csproj          # .NET 项目文件
-├── first_window.tscn          # 启动器场景
-├── main.tscn                  # 主游戏场景
 ├── assets/                    # 全部 Godot 运行时资源（统一管理、复用）
 │   ├── fonts/                 # 字体（MS Gothic / Microsoft YaHei，单一副本）
 │   ├── icons/                 # 界面图标（SVG）
+│   ├── image/                 # 启动器图片（main.jpg）
 │   ├── lang/                  # 多语言文本（default/en_us/jp/zh_cn）
-│   ├── scenes/                # 面板场景（*.tscn）
+│   ├── scenes/                # 全部场景（first_window / main / 面板 *.tscn）
 │   ├── text/                  # emuera_config 模板
 │   └── theme/                 # 全局 Theme（gemuera_theme.tres）
 ├── Scripts/

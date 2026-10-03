@@ -55,23 +55,29 @@ namespace MinorShift.Emuera.Compatibility
 			return paths;
 		}
 
-		internal static CompatPackValidationContext BuildValidationContext()
-		{
-			var profiles = BuiltInDialectCatalog.CreateLegacyProfileCatalog();
-			var capabilities = new HashSet<string>(StringComparer.Ordinal);
-			foreach (string profileId in AllProfileIds)
-				capabilities.UnionWith(profiles.Resolve(profileId).RequiredCapabilityIds);
-			return new CompatPackValidationContext(
-				EngineModuleApiVersion,
-				capabilities,
-				new HashSet<string>(BuiltinVariantNames, StringComparer.Ordinal),
-				new HashSet<string>(LegacyDialectInventories.V24InstructionNames, StringComparer.Ordinal),
-				new HashSet<string>(LegacyDialectInventories.V24Functions.Select(entry => entry.Name), StringComparer.Ordinal),
-				new HashSet<string>(ReservedModuleIds, StringComparer.Ordinal),
-				BuiltinVariantInstructions,
-				BuildEngineInstructionHandlerNames(),
-				BuildEngineFunctionHandlerNames());
-		}
+internal static CompatPackValidationContext BuildValidationContext(string baselineProfileId)
+        {
+                var profiles = BuiltInDialectCatalog.CreateLegacyProfileCatalog();
+                var capabilities = new HashSet<string>(StringComparer.Ordinal);
+                foreach (string profileId in AllProfileIds)
+                        capabilities.UnionWith(profiles.Resolve(profileId).RequiredCapabilityIds);
+                return new CompatPackValidationContext(
+                        EngineModuleApiVersion,
+                        capabilities,
+                        new HashSet<string>(BuiltinVariantNames, StringComparer.Ordinal),
+                        new HashSet<string>(LegacyDialectInventories.V24InstructionNames, StringComparer.Ordinal),
+                        new HashSet<string>(LegacyDialectInventories.V24Functions.Select(entry => entry.Name), StringComparer.Ordinal),
+                        new HashSet<string>(ReservedModuleIds, StringComparer.Ordinal),
+                        BuiltinVariantInstructions,
+                        BuildEngineInstructionHandlerNames(),
+                        BuildEngineFunctionHandlerNames(),
+                        BuildEngineFunctionReturnTypes(),
+                        baselineProfileId,
+                        // v24 基线表面快照哈希（baseSurfaceHash 精确对账基准，E2-R6）：与
+                        // BaselineInstructions/BaselineFunctions 同源（生成清单），显式传入而非
+                        // 依赖缺省——宿主是语义校验输入的唯一提供方，缺省仅留给测试场景。
+                        LegacySurfaceHash.ComputeV24SurfaceHash());
+        }
 
 		/// <summary>
 		/// 引擎指令 handler 名全集（register 对账基准）。真实注册表（FunctionIdentifier.funcDic）
@@ -107,22 +113,43 @@ namespace MinorShift.Emuera.Compatibility
 			union.UnionWith(LegacyDialectInventories.V18Functions.Select(entry => entry.Name));
 			return union;
 		}
+		/// <summary>
+		/// 引擎表达式函数名 → 真实返回类型，供 manifest-only 数据包生成 descriptor；
+		/// 与 handler 名全集同源（六 profile 生成清单并集）。名字以 Trim+Upper 规范化，
+		/// 与 CompatPackRules 录制回放的函数名规范化一致；同一名字返回类型冲突即宿主配置错误。
+		/// </summary>
+		static IReadOnlyDictionary<string, string> BuildEngineFunctionReturnTypes()
+		{
+			var map = new Dictionary<string, string>(StringComparer.Ordinal);
+			AddFunctionReturnTypes(map, LegacyDialectInventories.V24Functions);
+			AddFunctionReturnTypes(map, LegacyDialectInventories.SnakeDeltaFunctions);
+			AddFunctionReturnTypes(map, LegacyDialectInventories.EraFlDeltaFunctions);
+			AddFunctionReturnTypes(map, LegacyDialectInventories.EraBlueDeltaFunctions);
+			AddFunctionReturnTypes(map, LegacyDialectInventories.MegatenDeltaFunctions);
+			AddFunctionReturnTypes(map, LegacyDialectInventories.V18Functions);
+			return map;
+		}
+
+		static void AddFunctionReturnTypes(
+			Dictionary<string, string> map,
+			IEnumerable<LegacyFunctionInventoryEntry> entries)
+		{
+			foreach (LegacyFunctionInventoryEntry entry in entries)
+			{
+				string key = entry.Name.Trim().ToUpperInvariant();
+				if (map.TryGetValue(key, out string? existing)
+					&& !string.Equals(existing, entry.ReturnType, StringComparison.Ordinal))
+				{
+					throw new InvalidOperationException(
+						$"Engine function return type conflict for '{key}': '{existing}' vs '{entry.ReturnType}'.");
+				}
+				map[key] = entry.ReturnType;
+			}
+		}
+
 
 		/// <summary>引擎包 API 版本（v1 = 1；破坏性变更时递增并拒载旧包）。</summary>
 		internal const int EngineModuleApiVersion = 1;
-
-		/// <summary>
-		/// 最近一次成功组装的包模块 id 白名单（供 Program.ConfigureCompatibilityPlan 的
-		/// LegacyCompatibilityProfile.Create 透传给 Compose；白名单外的额外模块仍被严格
-		/// 拒绝——信任边界）。legacy 会话单计划语义下与 plan 绑定同生命周期。
-		/// </summary>
-		internal static IReadOnlyCollection<string>? ActivePackModuleIds { get; private set; }
-
-		/// <summary>
-		/// 最近一次成功组装的包 builtin:* 变体选择（指令 → 变体名，跨包合并、同键异值已在校验段
-		/// 拒载）。与 ActivePackModuleIds 同生命周期，供投影注入（Compose → SubstituteInstruction）。
-		/// </summary>
-		internal static IReadOnlyDictionary<string, string>? ActiveVariantSelections { get; private set; }
 
 		/// <summary>
 		/// 是否显式启用了兼容包（存在启用路径）。Program.Main 早绑定路径的换绑预判：
@@ -133,102 +160,79 @@ namespace MinorShift.Emuera.Compatibility
 			return ReadEnabledPackPaths().Count > 0;
 		}
 
-		/// <summary>
-		/// 启动期配置：无包原样返回基线；有包则加载→身份比对→组装。任何失败回退基线
-		/// （降级不变量）并记错误日志。成功时包 ALC 保持加载到进程结束（v1 策略贡献
-		/// 尚无宿主消费，卸载时机随宿主接线深化再收紧）。
-		/// </summary>
-		internal static CompatibilityPlan ConfigureForLaunch(CompatibilityPlan baselinePlan, string gameRoot)
-		{
-			IReadOnlyList<string> paths = ReadEnabledPackPaths();
-			if (paths.Count == 0)
-			{
-				// 零包早退同样复位跨会话静态投影状态：同进程"带包游戏 A → 退回启动器 →
-				// 无包游戏 B"时，A 的白名单/变体选择残留会让 B 的计划哈希显示纯基线、
-				// 投影却注入 A 的包表面（违反无包路径逐字节等价铁律）。三个失败分支同权复位。
-				ActivePackModuleIds = null;
-				ActiveVariantSelections = null;
-				return baselinePlan;
-			}
+	/// <summary>
+	/// 启动期配置结果：组装/回退计划 + 会话持有的包租约（无包或失败路径 Session 为 null）。
+	/// 调用方必须把两者一起交给 <see cref="Program.ConfigureCompatibilityPlan"/>——session
+	/// 的生命周期由 Program 的 Stop/Restart/退出清理路径（ClearCompatibilityPlan）确定性回收。
+	/// </summary>
+	/// <param name="Plan">本会话绑定的计划（成功 = 组装计划；无包/失败 = 基线）。</param>
+	/// <param name="Session">成功加载的包集合所有者；null = 本会话无包程序集需要回收。</param>
+	internal sealed record CompatPackLaunchResult(CompatibilityPlan Plan, CompatPackSession? Session);
 
-			// 顶层兜底：包路径上的任何异常（清单 getter、贡献回放、宿主自身缺陷……）一律
-			// 降级回纯基线 + 错误日志，绝不让异常逃逸到 Program.Main（降级不变量）。
-			CompatPackSet? loadedSet = null;
-			try
-			{
-				var context = BuildValidationContext();
-				if (!CompatPackLoader.TryLoadSet(paths, context, out CompatPackSet? set, out IReadOnlyList<string> loadErrors))
-				{
-					ActivePackModuleIds = null;
-					ActiveVariantSelections = null;
-					global::GenericUtils.Error("[LOAD] CompatPack disabled (load rejected): " + string.Join("; ", loadErrors));
-					return baselinePlan;
-				}
-				loadedSet = set;
+	/// <summary>
+	/// 启动期配置：无包原样返回基线；有包则加载→身份比对→组装。任何失败回退基线
+	/// （降级不变量）并记错误日志。成功路径把已加载句柄集合包装为 <see cref="CompatPackSession"/>
+	/// 一并返回——plan 是纯数据，但包程序集（ALC/入口实例）的存活由会话绑定对象确定性
+	/// 回收（Stop/替换时 UnloadAll，设计 §5.4）。
+	/// </summary>
+internal static CompatPackLaunchResult ConfigureForLaunch(CompatibilityPlan baselinePlan, string gameRoot)
+        {
+                IReadOnlyList<string> paths = ReadEnabledPackPaths();
+                if (paths.Count == 0)
+                        return new CompatPackLaunchResult(baselinePlan, null);
 
-				if (!VerifyGameIdentity(set!, gameRoot, out List<string> identityErrors))
-				{
-					ActivePackModuleIds = null;
-					ActiveVariantSelections = null;
-					set!.UnloadAll();
-					global::GenericUtils.Error("[LOAD] CompatPack disabled (game identity mismatch): " + string.Join("; ", identityErrors));
-					return baselinePlan;
-				}
+                // 顶层兜底：包路径上的任何异常（清单 getter、贡献回放、宿主自身缺陷……）一律
+                // 降级回基线 + 错误日志，绝不让异常逃逸到 Program.Main（降级不变量）。
+                CompatPackSet? loadedSet = null;
+                try
+                {
+                        var context = BuildValidationContext(baselinePlan.ProfileId);
+                        if (!CompatPackLoader.TryLoadSet(paths, context, out CompatPackSet? set, out IReadOnlyList<string> loadErrors))
+                        {
+                                global::GenericUtils.Error("[LOAD] CompatPack disabled (load rejected): " + string.Join("; ", loadErrors));
+                                return new CompatPackLaunchResult(baselinePlan, null);
+                        }
+                        loadedSet = set;
 
-				if (!CompatPackPlanAssembler.TryAssemble(baselinePlan, set!.Handles, out CompatibilityPlan assembled, out IReadOnlyList<string> assemblyErrors))
-				{
-					ActivePackModuleIds = null;
-					ActiveVariantSelections = null;
-					set!.UnloadAll();
-					global::GenericUtils.Error("[LOAD] CompatPack disabled (assembly rejected): " + string.Join("; ", assemblyErrors));
-					return baselinePlan;
-				}
+                        if (!VerifyGameIdentity(set!, gameRoot, out List<string> identityErrors))
+                        {
+                                set!.UnloadAll();
+                                global::GenericUtils.Error("[LOAD] CompatPack disabled (game identity mismatch): " + string.Join("; ", identityErrors));
+                                return new CompatPackLaunchResult(baselinePlan, null);
+                        }
 
-				foreach (CompatPackHandle handle in set!.Handles)
-				{
-					global::GenericUtils.Info(
-						$"[LOAD] CompatPack enabled: id={handle.Manifest.PackId} version={handle.Manifest.PackVersion} "
-						+ $"engineApi={handle.Manifest.TargetEngineApi} sha256={handle.PackSha256}");
-				}
-				ActivePackModuleIds = set!.Handles.Select(handle => handle.Manifest.PackId).ToArray();
-				// 跨包变体选择合并（同键同值幂等、同键异值校验段已拒；组装器哈希同源）。
-				var selections = new Dictionary<string, string>(StringComparer.Ordinal);
-				foreach (CompatPackHandle handle in set!.Handles)
-				{
-					foreach (KeyValuePair<string, string> selection in handle.Manifest.VariantSelections)
-						selections[selection.Key] = selection.Value;
-				}
-				ActiveVariantSelections = selections.Count > 0 ? selections : null;
-				return assembled;
-			}
-			catch (Exception exception)
-			{
-				ActivePackModuleIds = null;
-				ActiveVariantSelections = null;
-				try
-				{
-					loadedSet?.UnloadAll();
-				}
-				catch (Exception unloadException)
-				{
-					global::GenericUtils.Error("[LOAD] CompatPack unload after failure threw: " + unloadException.Message);
-				}
-				global::GenericUtils.Error("[LOAD] CompatPack disabled (unexpected failure): "
-					+ exception.GetType().Name + ": " + exception.Message);
-				return baselinePlan;
-			}
-		}
+                        if (!CompatPackPlanAssembler.TryAssemble(baselinePlan, set!.Handles, out CompatibilityPlan assembled, out IReadOnlyList<string> assemblyErrors))
+                        {
+                                set!.UnloadAll();
+                                global::GenericUtils.Error("[LOAD] CompatPack disabled (assembly rejected): " + string.Join("; ", assemblyErrors));
+                                return new CompatPackLaunchResult(baselinePlan, null);
+                        }
 
-		/// <summary>
-		/// 复位跨会话静态投影（包模块白名单与变体选择）。与计划绑定同生命周期：计划被
-		/// 清理/复位时调用，保证早绑定（EmueraMain 显示默认值路径）不会消费上一会话的
-		/// 残留投影。ConfigureForLaunch 的零包/失败分支各自同权复位，此处覆盖会话收尾路径。
-		/// </summary>
-		internal static void ResetActiveSessionProjection()
-		{
-			ActivePackModuleIds = null;
-			ActiveVariantSelections = null;
-		}
+                        foreach (CompatPackHandle handle in set!.Handles)
+                        {
+                                global::GenericUtils.Info(
+                                        $"[LOAD] CompatPack enabled: id={handle.Manifest.PackId} version={handle.Manifest.PackVersion} "
+                                        + $"engineApi={handle.Manifest.TargetEngineApi} sha256={handle.PackSha256}");
+                        }
+                        // 计划自身已携带 pack 模块白名单与 variantSelections；包程序集的存活
+                        // 移交 CompatPackSession（随计划绑定会话，Stop/替换时确定性 UnloadAll）。
+                        return new CompatPackLaunchResult(assembled, new CompatPackSession(assembled, set.Handles));
+                }
+                catch (Exception exception)
+                {
+                        try
+                        {
+                                loadedSet?.UnloadAll();
+                        }
+                        catch (Exception unloadException)
+                        {
+                                global::GenericUtils.Error("[LOAD] CompatPack unload after failure threw: " + unloadException.Message);
+                        }
+                        global::GenericUtils.Error("[LOAD] CompatPack disabled (unexpected failure): "
+                                + exception.GetType().Name + ": " + exception.Message);
+                        return new CompatPackLaunchResult(baselinePlan, null);
+                }
+        }
 
 		/// <summary>
 		/// gameIdentity 比对（设计 §3.3）：声明身份的包与 GameBase.csv 比对，不匹配整体

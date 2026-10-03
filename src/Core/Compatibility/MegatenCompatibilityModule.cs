@@ -97,6 +97,9 @@ public static class MegatenCompatibilityModule
             requiredCapabilityIds: new[]
             {
                 ContinueAfterStartupFaultCapability,
+                LabelLookupCaseBehavior,
+                RefOutNameBehavior,
+                PrivateSystemShadowBehavior,
             },
             defaultSaveProfileId: SaveProfileId);
     }

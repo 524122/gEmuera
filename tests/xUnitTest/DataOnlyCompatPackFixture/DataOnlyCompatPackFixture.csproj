@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 数据包夹具：程序集只有内嵌 manifest，没有 ICompatPack 入口类。 -->
+    <EmbeddedResource Include="compatpack.manifest.json" LogicalName="compatpack.manifest.json" />
+  </ItemGroup>
+</Project>

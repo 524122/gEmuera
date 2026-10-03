@@ -422,4 +422,77 @@ public class CompatPackRulesTests
         Assert.True(CompatPackRules.Validate(Manifest(), new ICompatPackContribution[] { surface }, Context(), out var errors),
             string.Join("; ", errors));
     }
+    [Fact]
+    public void Validate_BaseProfileMismatch_Rejects()
+    {
+        string json = "{\"packId\":\"test.profile\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"baseProfileId\":\"snake\"}";
+        var manifest = CompatPackManifest.TryParse(json, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+        var context = new CompatPackValidationContext(
+            1,
+            new HashSet<string>(StringComparer.Ordinal),
+            new HashSet<string>(StringComparer.Ordinal) { "builtin:snake" },
+            new HashSet<string>(StringComparer.Ordinal) { "CALLSHARP", "SETBGIMAGE", "PRINT" },
+            new HashSet<string>(StringComparer.Ordinal) { "EXISTVAR" },
+            baselineProfileId: "v24pure");
+
+        Assert.False(CompatPackRules.Validate(manifest, Array.Empty<ICompatPackContribution>(), context, out var errors));
+        Assert.Contains(errors, e => e.Contains("baseProfileId"));
+    }
+
+    [Fact]
+    public void Validate_BaseSurfaceHashMismatch_Rejects()
+    {
+        // 精确对账（E2-R6）：manifest 声明非空 baseSurfaceHash 且与当前 v24 表面快照不一致
+        // → 拒载（错误文案含 baseSurfaceHash）；声明与基线一致 → 放行；不声明 → 不触发本规则。
+        string mismatchJson = "{\"packId\":\"test.hash\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"baseSurfaceHash\":\"" + new string('0', 64) + "\"}";
+        var mismatchManifest = CompatPackManifest.TryParse(mismatchJson, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+
+        Assert.False(CompatPackRules.Validate(mismatchManifest, Array.Empty<ICompatPackContribution>(), Context(), out var errors));
+        Assert.Contains(errors, e => e.Contains("baseSurfaceHash"));
+
+        string matchingJson = "{\"packId\":\"test.hash\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"baseSurfaceHash\":\"" + LegacySurfaceHash.ComputeV24SurfaceHash() + "\"}";
+        var matchingManifest = CompatPackManifest.TryParse(matchingJson, out var parsedMatch, out _)
+            ? parsedMatch! : throw new InvalidOperationException();
+        Assert.True(CompatPackRules.Validate(matchingManifest, Array.Empty<ICompatPackContribution>(), Context(), out var matchErrors),
+            string.Join("; ", matchErrors));
+    }
+
+    [Fact]
+    public void Validate_ManifestSurfaceFunctionWithoutReturnTypeMetadata_Rejects()
+    {
+        string json = "{\"packId\":\"test.surface-return\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"surface\":{\"addFunctions\":[\"SQL_CONNECT\"]}}";
+        var manifest = CompatPackManifest.TryParse(json, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+        var context = new CompatPackValidationContext(
+            1,
+            new HashSet<string>(StringComparer.Ordinal),
+            new HashSet<string>(StringComparer.Ordinal) { "builtin:snake" },
+            new HashSet<string>(StringComparer.Ordinal) { "CALLSHARP", "SETBGIMAGE", "PRINT" },
+            new HashSet<string>(StringComparer.Ordinal) { "EXISTVAR" },
+            knownFunctionHandlers: new HashSet<string>(StringComparer.Ordinal) { "SQL_CONNECT" },
+            knownFunctionReturnTypes: new Dictionary<string, string>(StringComparer.Ordinal) { ["OTHER"] = "Integer" });
+        var contribution = new ManifestSurfaceContribution(manifest.Surface, context.KnownFunctionReturnTypes);
+
+        Assert.False(CompatPackRules.Validate(manifest, new ICompatPackContribution[] { contribution }, context, out var errors));
+        Assert.Contains(errors, e => e.Contains("返回类型元数据") && e.Contains("SQL_CONNECT"));
+    }
+
+    [Fact]
+    public void Validate_SaveProfileIdV1_RejectsInsteadOfSilentNoOp()
+    {
+        string json = "{\"packId\":\"test.save-profile\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"saveProfileId\":\"gemuera.custom\"}";
+        var manifest = CompatPackManifest.TryParse(json, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+
+        Assert.False(CompatPackRules.Validate(manifest, Array.Empty<ICompatPackContribution>(), Context(), out var errors));
+        Assert.Contains(errors, e => e.Contains("saveProfileId") && e.Contains("v1"));
+    }
+
 }

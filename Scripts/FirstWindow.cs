@@ -100,6 +100,11 @@ public partial class FirstWindow : Control
 		SelectedGamePath = path.TrimEnd('/', '\\');
 		SelectedCoreProfileName = normalizedProfileName;
 		MinorShift.Emuera.Program.SetLauncherCompatibilityProfile(normalizedProfileName);
+		// runner/in-process switch 的 per-session pack 通道刷新（E2-R3）：每次会话绑定都
+		// 按目标游戏重算启用清单并写环境变量——切换到 B 不得沿用上一局 A 的
+		// GEMUERA_COMPAT_PACKS（B 无选择时清除变量，回纯 v24；外部诊断 env 的合并语义与
+		// launcher 注入一致）。只读 launcher.cfg，不写回，不改变下一次交互启动。
+		ApplyCompatPackEnvironment(SelectedGamePath);
 		return true;
 	}
 
@@ -660,29 +665,43 @@ public partial class FirstWindow : Control
 
 	/// <summary>
 	/// 进程启动时的外部覆盖快照（类加载即取，早于任何注入调用）。非空 = 外部诊断/联调
-	/// 显式设置，launcher 注入对其让位（CompatPackHost 契约：外部显式设置优先）。
+	/// 显式设置。合并语义（E2-R3）：不再让 launcher 注入整体永久让位——仅当当前游戏没有
+	/// 按游戏选择时作为诊断输入透传（见 <see cref="ApplyCompatPackEnvironment"/>）。
 	/// </summary>
 	static readonly string externalCompatPacksOverride =
 		System.Environment.GetEnvironmentVariable(
 			MinorShift.Emuera.Compatibility.CompatPackHost.EnabledPacksEnvironmentVariable);
 
 	/// <summary>
-	/// 按游戏把启用清单注入进程环境变量（launcher 与引擎同进程；Host 管线不变）。
-	/// 外部显式设置存在时不碰变量；无选择（且无外部值）时清除变量，回到纯 v24。
+	/// 按游戏把启用清单按合并语义（CompatPackLauncherConfig.MergeSelection）注入进程
+	/// 环境变量（launcher 与引擎同进程；Host 管线不变）：
+	///   - launcher 按游戏选择非空 → 优先，外部 env 不再永久早退遮蔽（E2-R3）；并存时记
+	///     Warn 日志，兼容包状态提示行同步显示警告；
+	///   - 该游戏无选择 → 外部 env 仅作诊断输入透传（既有契约）；
+	///   - 两路皆空 → 清除变量，回到纯 v24。
 	/// </summary>
 	static void ApplyCompatPackEnvironment(string gameRoot)
 	{
-		if (!string.IsNullOrEmpty(externalCompatPacksOverride))
-			return;
-		GEmuera.Core.Compatibility.Packs.CompatPackLauncherConfig.TryGetSelectionForGame(
+		bool hasStoredSelection = GEmuera.Core.Compatibility.Packs.CompatPackLauncherConfig.TryGetSelectionForGame(
 			gEmuera.GodotHost.LauncherSettingsStore.LoadCompatPackSelections(),
 			gameRoot,
 			out var paths);
+		string merged = GEmuera.Core.Compatibility.Packs.CompatPackLauncherConfig.MergeSelection(
+			hasStoredSelection
+				? GEmuera.Core.Compatibility.Packs.CompatPackLauncherConfig.SerializeSelection(paths)
+				: null,
+			externalCompatPacksOverride);
+		if (hasStoredSelection && !string.IsNullOrEmpty(externalCompatPacksOverride))
+		{
+			GenericUtils.Warn(
+				EmueraLogCategory.UI,
+				() => "Launcher: CompatPack 注入 → 按游戏选择优先（game="
+					+ gEmuera.Diagnostics.DiagnosticLogRouter.RedactPath(gameRoot)
+					+ "，外部 GEMUERA_COMPAT_PACKS 仅作诊断输入，未生效）");
+		}
 		System.Environment.SetEnvironmentVariable(
 			MinorShift.Emuera.Compatibility.CompatPackHost.EnabledPacksEnvironmentVariable,
-			paths.Count > 0
-				? GEmuera.Core.Compatibility.Packs.CompatPackLauncherConfig.SerializeSelection(paths)
-				: null);
+			merged.Length > 0 ? merged : null);
 	}
 
 	static string NormalizeManualCoreProfileName(string profileName)
@@ -1406,9 +1425,26 @@ public partial class FirstWindow : Control
 
 		string effectiveProfile = GetSelectedCoreProfileName(entry);
 		string routeDescription = GetEntryRouteDescription(entry);
+		string packWarning = "";
+		int selectedPackCount = GetSelectedCompatPackCount();
+		if (selectedPackCount > 0 && !string.Equals(effectiveProfile, CoreProfileV24Pure, System.StringComparison.Ordinal))
+		{
+			packWarning = $"；已选 {selectedPackCount} 项兼容包，但包要求 v24pure 基线——本次组合将被拒载并回退 {effectiveProfile}。";
+		}
+		// 外部 GEMUERA_COMPAT_PACKS 与按游戏选择并存时的合并结果提示（E2-R3）：
+		// 注入链以按游戏选择为准，外部变量只作诊断输入——UI 在报告兼容包状态的既有
+		// 提示行同步警告，避免外部覆盖被静默忽略却无人知晓。
+		if (!string.IsNullOrEmpty(externalCompatPacksOverride)
+			&& GEmuera.Core.Compatibility.Packs.CompatPackLauncherConfig.TryGetSelectionForGame(
+				gEmuera.GodotHost.LauncherSettingsStore.LoadCompatPackSelections(),
+				entry.GameRoot,
+				out _))
+		{
+			packWarning += "；检测到外部 GEMUERA_COMPAT_PACKS 环境变量与按游戏保存的兼容包选择并存：本次启动以按游戏选择为准，外部变量仅作诊断输入。";
+		}
 		statusLabel.Text = AdvancedCompatibilityEnabled
-			? $"高级兼容模式：本次启动使用 {effectiveProfile}（目录路由为 {entry.ProfileId}，来源 {routeDescription}）。"
-			: $"目录路由：{routeDescription} → {effectiveProfile}";
+			? $"高级兼容模式：本次启动使用 {effectiveProfile}（目录路由为 {entry.ProfileId}，来源 {routeDescription}）{packWarning}"
+			: $"目录路由：{routeDescription} → {effectiveProfile}{packWarning}";
 	}
 
 	static void SetSelectedGamePath(string path, string coreProfileName = CoreProfileV24Pure)

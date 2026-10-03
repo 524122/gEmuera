@@ -28,11 +28,40 @@ public static class CompatPackRules
         if (context.ReservedModuleIds.Contains(manifest.PackId))
             collected.Add("packId 与内置方言模块保留名冲突：" + manifest.PackId);
 
+        // 包声明的是相对哪个基线 profile 的差量；v1 只支持 v24pure。
+        // 若与实际会话基线不一致，加载期拒载，避免在 v18/snake 等基线上静默错叠。
+        if (!string.Equals(manifest.BaseProfileId, context.BaselineProfileId, StringComparison.Ordinal))
+        {
+            collected.Add("包声明 baseProfileId=" + manifest.BaseProfileId
+                + " 与当前会话基线 " + context.BaselineProfileId + " 不一致（v1 包只允许叠加 v24pure 基线）。");
+        }
+
+        // baseSurfaceHash 精确对账（E2-R6）：manifest 声明非空 baseSurfaceHash 时必须等于
+        // 当前 v24 基线表面快照（<see cref="CompatPackValidationContext.BaselineSurfaceHash"/>，
+        // 生成清单的规范化 SHA256）——包声称"基于某表面"而引擎表面已漂移时，其 add/hide 差量
+        // 前提即失效，静默错叠比拒载更危险。不声明（null，可选字段）不触发本规则。
+        if (manifest.BaseSurfaceHash is not null
+            && !string.Equals(manifest.BaseSurfaceHash, context.BaselineSurfaceHash, StringComparison.Ordinal))
+        {
+            collected.Add("包 " + manifest.PackId + " 的 baseSurfaceHash 与当前 v24 表面快照不一致（声明 "
+                + manifest.BaseSurfaceHash + "，当前基线 " + context.BaselineSurfaceHash
+                + "；包需按新表面快照重发布，或由维护方再生生成清单后更新声明）。");
+        }
+
         // 原则（3）：引擎包 API 主版本不匹配拒载（当前为整数版本，精确匹配即主版本匹配）。
         if (manifest.TargetEngineApi != context.EngineModuleApiVersion)
         {
             collected.Add("targetEngineApi=" + manifest.TargetEngineApi + " 与引擎包 API 版本 "
                 + context.EngineModuleApiVersion + " 不匹配，包需按新 API 重编译后分发。");
+        }
+
+        // saveProfileId v1 未接线：legacy 存档路径尚不消费 CompatibilityPlan.SaveProfileId，
+        // 声明后只会进 plan 元数据/哈希而不改变真实存档格式。按死契约纪律显式拒载，
+        // 避免"看起来生效"的静默误导；v2 宿主接线后删除本条即可恢复。
+        if (manifest.SaveProfileId is not null)
+        {
+            collected.Add("包 " + manifest.PackId + " 声明 saveProfileId=" + manifest.SaveProfileId
+                + "，但 v1 legacy 存档路径尚不消费 plan.SaveProfileId（v2 预留）；携带即拒载。");
         }
 
         // 原则（1）：manifest 声明的 capability 必须在引擎词汇表内。
@@ -220,6 +249,10 @@ public static class CompatPackRules
                 && !context.KnownFunctionHandlers.Contains(registered))
                 collected.Add("包 " + manifest.PackId + " 注册函数 " + registered
                     + " 无引擎 handler（函数名拼错或引擎未收录；内置模块可声明的名字均在全集内）。");
+            else if (context.KnownFunctionReturnTypes.Count > 0
+                && !context.KnownFunctionReturnTypes.ContainsKey(registered))
+                collected.Add("包 " + manifest.PackId + " 注册函数 " + registered
+                    + " 缺少引擎返回类型元数据（manifest-only 表面需要宿主词汇表包含该函数）。");
         }
 
         // 交叉对账：表面动作 × 变体声明。同一指令的 handler 来源必须无歧义——

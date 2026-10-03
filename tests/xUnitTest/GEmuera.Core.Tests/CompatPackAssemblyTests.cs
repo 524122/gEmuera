@@ -10,6 +10,7 @@ namespace GEmuera.Core.Tests;
 /// plan 哈希变化 → 禁用（空包集）后与纯 v24 基线逐字节等价（同实例同哈希）。
 /// 引擎侧投影接线（handler/变体生效于解析器）不在本层，属宿主接线增量。
 /// </summary>
+[Collection("CompatPack")]
 public class CompatPackAssemblyTests
 {
     static string PackPath => typeof(CompatPackAssemblyTests).Assembly.Location;
@@ -187,7 +188,8 @@ public class CompatPackAssemblyTests
         IReadOnlyDictionary<string, string>? variantSelections = null,
         IReadOnlyList<ISurfaceContribution>? surface = null,
         IReadOnlyList<ICapabilityContribution>? capabilities = null,
-        IReadOnlyList<IPolicyContribution>? policies = null)
+        IReadOnlyList<IPolicyContribution>? policies = null,
+        string? saveProfileId = null)
     {
         // CompatPackManifest 的构造器在 Emuera 契约程序集内为 internal（测试程序集无
         // InternalsVisibleTo），经 public TryParse 构造；变体选拼进 JSON。
@@ -195,7 +197,10 @@ public class CompatPackAssemblyTests
             ? ""
             : ",\"variantSelections\":{" + string.Join(",", variantSelections.Select(pair =>
                   "\"" + pair.Key + "\":\"" + pair.Value + "\"")) + "}";
-        string json = "{\"packId\":\"" + packId + "\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1" + variantsJson + "}";
+        string saveJson = string.IsNullOrWhiteSpace(saveProfileId)
+            ? ""
+            : ",\"saveProfileId\":\"" + saveProfileId + "\"";
+        string json = "{\"packId\":\"" + packId + "\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1" + variantsJson + saveJson + "}";
         var manifest = CompatPackManifest.TryParse(json, out var parsed, out var parseErrors)
             ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
         return new CompatPackHandle(
@@ -351,4 +356,32 @@ public class CompatPackAssemblyTests
         });
         Assert.Null(exception);
     }
+    [Fact]
+    public void Assemble_PackModuleIdsVariantsAndSaveProfile_AreCarriedInPlan()
+    {
+        var handle = ManualHandle(
+            "test.meta",
+            ShaOf('m'),
+            new Dictionary<string, string> { ["SETBGIMAGE"] = "builtin:snake" },
+            saveProfileId: "gemuera.pack.meta");
+
+        Assert.True(CompatPackPlanAssembler.TryAssemble(Baseline(), new[] { handle }, out var assembled, out var errors),
+            string.Join("; ", errors));
+
+        Assert.Equal(new[] { "test.meta" }, assembled!.Dialect.PackModuleIds);
+        Assert.Equal("builtin:snake", assembled.Dialect.VariantSelections["SETBGIMAGE"]);
+        Assert.Equal("gemuera.pack.meta", assembled.SaveProfileId);
+    }
+
+    [Fact]
+    public void Assemble_ConflictingSaveProfiles_Rejects()
+    {
+        var a = ManualHandle("test.save-a", ShaOf('a'), saveProfileId: "gemuera.save.a");
+        var b = ManualHandle("test.save-b", ShaOf('b'), saveProfileId: "gemuera.save.b");
+
+        Assert.False(CompatPackPlanAssembler.TryAssemble(Baseline(), new[] { a, b }, out var assembled, out var errors));
+        Assert.Null(assembled);
+        Assert.Contains(errors!, e => e.Contains("saveProfileId 冲突"));
+    }
+
 }

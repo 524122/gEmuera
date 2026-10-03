@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 契约夹具：只引用 CompatPack 契约程序集（Emuera.CompatPack，2026-10-03 拆分），
+         证明包作者不依赖引擎核心即可实现 ICompatPack 入口。 -->
+    <ProjectReference Include="..\..\..\src\EmueraCompatPack\EmueraCompatPack.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="compatpack.manifest.json" LogicalName="compatpack.manifest.json" />
+  </ItemGroup>
+</Project>

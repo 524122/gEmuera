@@ -48,7 +48,7 @@ gEmuera App（本体）
   "packId": "game.erafl",              // 沿用现有方言模块 id 风格；全局唯一，注册冲突拒载
   "packVersion": "1.0.0",              // semver
   "targetEngineApi": "1",              // 对应引擎 ModuleApiVersion；兼容判定见 §9
-  "baseSurfaceHash": "<可选>",          // 声明基于哪个 v24 表面快照（生成清单哈希）；不匹配记警告不拒载（对齐提示用）
+  "baseSurfaceHash": "<可选>",          // 声明基于哪个 v24 表面快照（生成清单哈希）；v1 起精确对账——声明非空且与当前引擎基线不一致即拒载（算法见 §12.9），不声明则不校验
   "capabilities": ["input.pointer-button.v1", ...],  // 复用现有 capability id 词汇表；未知 id 拒载（fail-closed）
   "saveProfileId": "gemuera.erafl",    // 可选
   "variantSelections": { "SETBGIMAGE": "builtin:snake" },  // 内置变体选择；自带变体经 §4 贡献声明
@@ -66,7 +66,7 @@ gEmuera App（本体）
 
 ## 4. 程序集契约（C# 接口草案）
 
-落点：**`src/EmueraFacade`（契约程序集，AssemblyName=Emuera，net8.0 桌面 / net9.0 android 条件目标）新增 `Compatibility.Packs` 命名空间**。理由：包作者编译面最小（只引契约程序集，不引宿主全集）；与现有插件契约（IPluginMethod 等）同一落点先例；避免 src/Core 引擎宿主类型。*备选：接口进 src/Core + 变体工厂弱类型桥（`Func<object>`）——不推荐，损失类型安全。*（此为设计决定点，标注待用户确认。）
+落点（2026-10-03 更新，见拆分 ADR `docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md`）：**独立契约程序集 `src/EmueraCompatPack`（AssemblyName=`Emuera.CompatPack`，独立 SemVer 线 1.0.0 起步，net8.0/net9.0 双目标），类型命名空间保持 `Emuera.Compatibility.Packs`**。v1 时契约曾与上游插件 ABI（IPluginMethod 等）同居 `src/EmueraFacade`（AssemblyName=Emuera, 1.824.0.0）；拆分后 facade 经 `TypeForwardedTo` 把全部契约类型链到 `Emuera.CompatPack` 同一实例——拆分前编译的旧包（AssemblyRef=Emuera）继续可载，兼容窗口无限期。理由：包契约可独立语义版本演进，不再牵动上游插件 ABI 版本面；包作者编译面最小（只引契约程序集）。*备选：接口进 src/Core + 变体工厂弱类型桥（`Func<object>`）——不推荐，损失类型安全。*
 
 ```csharp
 namespace Emuera.Compatibility.Packs;
@@ -125,13 +125,16 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 ### 5.2 隔离（ALC）
 
-每包一个 `CompatPackLoadContext : AssemblyLoadContext`（isCollectible: true，支持会话边界 Unload）。程序集绑定规则复用 `PluginLoadContext` 已实证的三条（`Scripts/Emuera/Runtime/Utils/PluginSystem/PluginLoadContext.cs:8-21`）：
+每包一个 `CompatPackLoadContext : AssemblyLoadContext`（isCollectible: true，支持会话边界 Unload）。程序集绑定规则为**契约-only 允许清单**——fail-closed 机制而非约定（与宿主 `PluginLoadContext`（`Scripts/Emuera/Runtime/Utils/PluginSystem/PluginLoadContext.cs:8-21`）同源的姊妹实现，规则更严）：
 
 1. `Emuera/emuera` → EmueraFacade 契约程序集（与包共享类型标识，简单名匹配绑定）；
-2. `netstandard/System.*/Microsoft.*` → 宿主已加载框架程序集（不发起绑定，net 版本回落）；
-3. 其余 → 包目录探测，null 落回默认解析。
+2. `netstandard/System.*/Microsoft.*` → 宿主已加载框架程序集（不发起绑定；未命中由运行时默认解析接手，BCL 名字无宿主泄露面）；
+3. 其余名字 → 包目录探测 `<name>.dll`，命中即仅在该 ALC 内加载（包自带依赖的私有副本，与宿主实例类型不统一）；
+4. 仍未命中 → **抛出 `FileLoadException`，不再返回 null 落回默认解析**（默认解析可见宿主全部已加载程序集，回落即泄露）。
 
-注意：现有 `PluginLoadContext` 是 internal 且服务游戏插件；CompatPack 用同规则的姊妹类，不复用实例。
+宿主内部程序集（如 `GEmuera.Core`）对包不可见：早期 v1 的 `GEmuera.Core` 显式分支与"null 落回默认解析"已于 2026-10-03 硬化删除（`src/Core/Compatibility/Packs/CompatPackLoadContext.cs`）。实测行为（`tests/xUnitTest/GEmuera.Core.Tests/CompatPackAlcIsolationTests.cs`）：部署于空目录的宿主绑定探针（合法 `ICompatPack` 入口但构造器引用 `CompatibilityPlan`）在 `TryLoad` 的入口实例化期被拒载，错误含 `FileLoadException` 消息与被拒绝的程序集名，句柄为 null；契约-only 夹具（只引用契约程序集）加载成功，表面贡献正常折叠进 v24pure 会话计划（指令落位 + 哈希变化）。包确实需要 Core 数据类型时，必须经契约程序集暴露或另签契约，不允许 ALC 回落。
+
+注意：现有 `PluginLoadContext` 是 internal 且服务游戏插件；CompatPack 用姊妹类，不复用实例。
 
 ### 5.3 校验（fail-closed 三原则 + 对账）
 
@@ -141,11 +144,13 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 ### 5.4 组装与会话绑定
 
-包贡献折叠进会话计划（等价今日 `BuiltInDialectCatalog.CreateLegacySessionPlan` 的产物类型 `CompatibilityPlan`，**plan 哈希链语义不变**，`DialectRuntime.cs:432-471`）；每个启用包的程序集哈希 + manifest 规范化内容进 plan 哈希（诊断可复现：同包内容同哈希）。会话生命周期遵守现状：一个 legacy 会话一个计划，`Program.ConfigureCompatibilityPlan` 拒绝换绑不同哈希（`Scripts/Emuera/Program.cs:325-341`）；停机后 Unload ALC 再允许下一局。
+包贡献折叠进会话计划（等价今日 `BuiltInDialectCatalog.CreateLegacySessionPlan` 的产物类型 `CompatibilityPlan`，**plan 哈希链语义不变**，`DialectRuntime.cs:432-471`）；每个启用包的程序集哈希 + manifest 规范化内容进 plan 哈希（诊断可复现：同包内容同哈希）。会话生命周期遵守现状：一个 legacy 会话一个计划，`Program.ConfigureCompatibilityPlan` 拒绝换绑不同哈希（`Scripts/Emuera/Program.cs`）。
+
+**会话持有 pack set 与确定性 Unload（2026-10-03 落地）**：`CompatPackHost.ConfigureForLaunch` 返回 `CompatPackLaunchResult(Plan, Session)`——成功路径把已加载句柄集合包装为 `CompatPackSession`（`src/Core/Compatibility/Packs/CompatPackSession.cs`，构造即接管句柄所有权，调用方不得再自行 UnloadAll），无包/失败路径 `Session` 为 null。`Program.ConfigureCompatibilityPlan(plan, packSession)` 把租约与计划同源绑定（`Program.CurrentCompatPackSession` 可观测）；`ClearCompatibilityPlan`/`ResetSessionState` 先 Dispose session（幂等：`Interlocked.Exchange` 保证对每个租约恰好一次 Unload，日志 `[LOAD] CompatPack session unloaded: count=N`）再清 plan/profile——Back/Restart/ERB 重启/退出路径无条件走到这里，包 ALC 的存活不再依赖 GC 猜测。配置装载后的同哈希重绑（null session）保留既有租约，避免启动中途卸载 ALC。`CompatPackHandle` 与 `CompatPackSet` 实现 `ICompatPackLease`（`CompatPackHandle.Unload`/`CompatPackSet.UnloadAll` 语义不变；集合侧接口方法 `Unload` = `UnloadAll`）。v2 代码贡献（ALC/委托存活）以此为所有权基座。
 
 ## 6. 信任边界
 
-- 用户显式按游戏启用；无全局生效、无静默安装。
+- 用户显式按游戏启用；无全局生效、无静默安装。**2026-10-03 增补（env/路径/runner 通道硬化，E2-R3/R4）**："按游戏"语义已平台正确化——游戏键比较器 `CompatPackLauncherConfig.GameKeyComparer`（Windows=`OrdinalIgnoreCase`，Android/Linux=`Ordinal`）与 `NormalizeGameKey(root, caseSensitiveFilesystem)`：大小写敏感文件系统上仅差大小写的两个游戏根不再共用配置键（原实现无条件 `ToLowerInvariant` 会把 A 的包选择静默套到 B）；包路径比对统一走 `NormalizePackPath`（GetFullPath + 分隔符统一 + 去尾斜杠，大小写语义交给比较器）。启用清单注入统一走 `MergeSelection(stored, external)`：launcher 按游戏选择非空时优先，外部 `GEMUERA_COMPAT_PACKS` 不再永久早退遮蔽选择（无选择时仅作诊断输入透传，并存时状态提示行 + `UI.WARN` 日志同步警告）；runner/in-process switch 每次会话绑定经 `FirstWindow.ConfigureLegacyRunnerSession` 重算注入（无选择即清除），不沿用上一局清单。
 - `[LOAD]` 账本记录：packId/packVersion/程序集 SHA256/targetEngineApi（遵循 docs/logging-convention.md 文案规范）。
 - 程序集在 ALC 内运行，可见面 = EmueraFacade 契约 + 框架库；不向包暴露引擎内部可变静态。
 - 分发不在本契约范围：不做市场/自动更新/签名校验（本地文件 only）。若未来需要签名，挂接点是 5.3 校验段。
@@ -171,6 +176,12 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 每阶段验收：六游戏启动矩阵全绿、方言快照名录零差异、三冒烟 + legacy-runner 门禁、result-review ≥98。
 
+- **P-D 退役设计（spike，2026-10-03）**：`docs/plans/2026-10-03-pd-module-retirement-spec.md`——
+  定义 profile→第一方包映射 schema（`packs/pack-profile-map.example.json`）与加载优先级、
+  包缺失/版本不符/身份不符三类回退路径与用户文案、逐 profile 退役顺序与 red/green 门禁、
+  `BuiltInDialectCatalog`/`LegacyCompatibilityModules`/`expectedModuleClosures` 删除清单。
+  **退役执行以该 spec 通过 OWNER 评审为前提**，任何退役任务不得偏离其门禁矩阵。
+
 ## 9. 兼容性承诺
 
 - `targetEngineApi` **v1 为单整数、精确匹配**（引擎 1 ↔ 包 1；引擎递增即拒载旧包并给升级指引）。原"次版本 = 只增不改"承诺推迟到 v2（需 schema 升级为 major.minor 双段后再兑现），见 §12 勘误 5。引擎内置变体名 `"builtin:*"` 属公共词汇表，改名视同主版本。
@@ -179,7 +190,7 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 ## 10. 开放问题（需裁定，不阻塞本文评审）
 
-1. ~~契约落点：EmueraFacade（推荐）vs src/Core 弱类型桥~~ **已裁定并落地：EmueraFacade**（§4 推荐项，PR #12 起实施）。
+1. ~~契约落点：EmueraFacade（推荐）vs src/Core 弱类型桥~~ **已裁定并落地：EmueraFacade**（§4 推荐项，PR #12 起实施）；**2026-10-03 起契约拆分至独立程序集 `Emuera.CompatPack`（src/EmueraCompatPack），facade 保留 TypeForwardedTo 兼容旧包**（§4 更新与拆分 ADR `docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md`）。
 2. 包安装位置约定：候选 `compat/packs/<packId>/`（桌面）与 `/storage/emulated/0/emuera/packs/`（Android）；**不得**放 export/（那是导出工作区）。**v1 启动器实现取 exe 同级 `compat_packs/`（桌面，另加编辑器 `res://compat_packs` 调试根）与 `/storage/emulated/0/emuera/packs/`（Android）为扫描根**，仅顶层 `*.dll`；与本条原候选的差异（compat_packs vs compat/packs）在第一方包分发定稿时统一。
 3. ~~launcher UI 的按游戏包选择交互~~ **已落地**：扫描候选 + 勾选（CheckButton 48px 触控行）+ 手动路径合并 + 桌面 FileDialog；默认推荐映射（六游戏矩阵 profile→包）仍待第一方包迁移（P-A 起）。
 4. v18 壳包是否携带全量清单于 manifest（417 指令/160 函数的单文件体积可接受性）。
@@ -200,6 +211,176 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 3. **对账与降级加固**：§5.3(2) 的引擎 handler 对账已落地，基准 = Core 生成清单的六 profile 并集（不可用 funcDic 静态构造器：其比较器初始化读 Config.ICVariable，校验期早于配置装载，提前触发会把比较器钉在默认值）；组装段回放全程 try/catch（异常→组装错误→拒载，不再依赖宿主顶层兜底）；Compose 投影注入点异常降级为"当前 profile 纯基线 + 无包白名单"而非炸启动；ConfigureForLaunch 顶层兜底 + 零包/失败/清理路径全量复位跨会话静态投影（计划解绑联动复位）。
 4. **GameBase.csv 编码**：身份比对读取链 = BOM → 严格 UTF-8 → Shift-JIS 932（与 GodotHost GameContentProbe 同源；EraStreamReader 在本移植被钉为 UTF-8 故不可复用），SJIS 日文游戏的 gameIdentity 绑定不再必然失配。
 5. **`targetEngineApi` v1 语义**：单整数精确匹配（见 §9 改写）；原"次版本只增不改"承诺推迟 v2。
-6. **ALC 生命周期 v1 现状**：成功路径包 ALC 保持到进程结束（§5.4"停机后 Unload"推迟到宿主接线深化；同进程重启会话会为新会话重载新 ALC，旧实例按 v1 策略滞留）。ALC 解析面：未匹配名落回默认解析，包技术上可绑定宿主已加载程序集——信任边界 §6 的"可见面"是约定而非机制强制，v1 接受并在本条明示。
+6. **ALC 生命周期 v1 现状**：成功路径包 ALC 保持到进程结束（§5.4"停机后 Unload"推迟到宿主接线深化；同进程重启会话会为新会话重载新 ALC，旧实例按 v1 策略滞留）。ALC 解析面原状（v1.1 时点）：未匹配名落回默认解析，包技术上可绑定宿主已加载程序集——信任边界 §6 的"可见面"是约定而非机制强制。**2026-10-03 勘误增补：该回落已硬化为机制**——允许清单（契约程序集 + BCL + 包目录依赖）之外的绑定一律 `FileLoadException` 拒载（fail-closed），`GEmuera.Core` 显式分支与默认解析回落均已删除；拒载错误含被拒绝的程序集名与最内层异常（`CompatPackLoader.DescribeException` 保留 TargetInvocationException 包裹下的 FileLoadException 诊断）。实测证据见 §5.2 与 `CompatPackAlcIsolationTests`。规则 3（包目录 `<name>.dll`）语义不变：包目录内的宿主程序集文件按"包自带依赖"加载为该 ALC 私有实例，类型不与宿主统一，不构成宿主内部可变静态的泄露通道。**2026-10-03 二次增补：本条的"ALC 滞留到进程结束"缓释已关闭**——成功加载的句柄集合现由会话绑定对象 `CompatPackSession` 持有（§5.4），会话 Stop/Restart/退出清理路径（`Program.ClearCompatibilityPlan`/`ResetSessionState`）先 Dispose session 再清计划绑定，对每个租约幂等恰好一次 Unload；同进程重启不再滞留旧 ALC。
 7. **capability 消费面分裂（v1 已知限制）**：capability 词汇表 = 六 profile 并集；消费面有两类——策略类 capability（ContinuesAfterStartupFault 等）由 Plan.CapabilityIds 直读即生效，方言策略类只在对应模块 Apply 时激活。同一 id 可能"部分生效"；包作者以 §3.3 capability id 清单为准，分裂在 v2 统一。
 8. **启动器包选择（§10.3 落地）**：扫描候选 + 勾选 + 手动路径合并（存储格式不变）；恢复选中即回填编辑框（程序化 Select 不触发信号曾导致"启动即清空已存选择"）；相对路径在启动器侧按启动器根绝对化后才入存储/env。
+9. **`baseSurfaceHash` v1 精确对账（2026-10-03 落地，E2-R6）**：该字段从"对齐提示"升级为精确对账——manifest 声明非空 `baseSurfaceHash` 且不等于当前 v24 基线表面快照即拒载（错误文案 `baseSurfaceHash 与当前 v24 表面快照不一致`，附声明值与当前基线值）；不声明（可选字段）不触发校验。基线哈希由 `LegacySurfaceHash.ComputeV24SurfaceHash()`（`src/Core/Compatibility/Packs/LegacySurfaceHash.cs`）从生成清单 `LegacyDialectInventories` 计算，宿主 `CompatPackHost.BuildValidationContext` 显式注入 `CompatPackValidationContext.BaselineSurfaceHash`。**规范化算法（第三方可复算）**：取生成清单 `V24InstructionNames` 按 Ordinal 排序；取 `V24Functions` 每条折叠为 `Name|ReturnType` 复合串按 Ordinal 排序；拼接 UTF-8 文本（LF、无 BOM）`instruction=<名1>,<名2>,…\nfunction=<名|返回类型>,…\n`（逗号分隔、无空格、两行各以单个 \n 结尾）；SHA256 取小写十六进制 64 字符。当前基线值 `8024d88063bd63d08d202e56565e353b7669c9c2b4506f235d8989214f0a78a1` 由 `LegacySurfaceHashTests.LegacySurfaceHash_V24_IsStable` 钉住——生成清单变化时该测试先红，必须先走 `LegacyDialectInventoryGenerator` 再生流程、再重新发布/更新包声明（发布端 CI 生成流水线仍开放，见 §13.9）。
+
+
+## 13. v1.1 实施增补（2026-10-02：数据包 + 会话所有权 + capability 激活解耦）
+
+本节记录在 §12 基础上落地的第一批地基增补；目标是把 CompatPack 从"只有引擎内部模块
+可用的表面选择器"推进为"社区可写数据包、且行为激活不依赖内置模块在场"的可持续地基。
+
+### 13.1 manifest-only 数据包（无需 C# 入口）
+
+- 程序集只内嵌 `compatpack.manifest.json`、不含任何 `ICompatPack` 实现类时，加载器按
+  数据包处理（`ManifestOnlyCompatPack`）；表面/能力/变体全部来自 manifest。
+- manifest 新增静态 `surface` 名单（纯数据，解析期规范化）：
+  - `addInstructions` / `hideInstructions`（指令名 Trim+Upper）
+  - `addFunctions` / `hideFunctions`（函数名保持原样；新增函数返回类型由引擎六 profile
+    清单解析，包作者不再手填）
+- 仍允许程序集携带 `ICompatPack` 实现类（动态/getter 场景）；但大多数社区包不需要写代码。
+- schema 与 `CompatPackManifest` 同步扩展；未知成员/空白名/重复名依旧 fail-closed。
+
+### 13.2 基线约束（baseProfileId）
+
+- manifest 新增可选 `baseProfileId`，缺省 `v24pure`；加载校验要求它与当前会话基线一致，
+  不一致整包拒载。这消除了"校验基准 v24、组装基准却是 snake/v18"的静默错叠。
+- launcher 在已选 pack 且有效 profile 非 v24pure 时显示明确回退警告；pack 选择应始终
+  以 v24pure 为基座。
+
+### 13.3 saveProfileId v1 显式拒载（组装器已预留聚合语义）
+
+- v1 legacy 存档路径尚不消费 `CompatibilityPlan.SaveProfileId`；按死契约纪律，manifest
+  携带非空 `saveProfileId` 即拒载，避免"进 plan/哈希但存档格式不变"的静默误导。
+- 组装器已实现 v2 预留的聚合语义：跨包同键同值幂等、异值拒载；有声明则覆盖基线
+  save profile，并进入 plan envelope hash。v2 宿主接线存档路径后删除规则层拒载即可恢复。
+- `baseSurfaceHash` 的提示语义已被 §12.9 的 v1 精确对账取代（2026-10-03）：声明非空且与
+  当前 v24 基线表面快照不一致即拒载；不声明则不校验。
+
+### 13.4 投影数据 plan 内聚（删除 process-wide 静态）
+
+- `DialectPlan` 新增 `PackModuleIds` 与 `VariantSelections` 两个具名字段；组装器把包模块
+  白名单与内置变体选择固化进 plan。
+- `LegacyCompatibilityProfile.Create(plan, scoped)` 只从 plan 重建投影；删除
+  `CompatPackHost.ActivePackModuleIds` / `ActiveVariantSelections` / `ResetActiveSessionProjection`
+  及其手动复位点。信任校验仍保留：plan 未声明的额外模块、或把内置模块列入
+  PackModuleIds，Compose 仍拒载。
+- 成功加载的 `CompatPackSet` 不再需要跨会话持有：v1 包不参与运行期执行，plan 已是
+  纯数据；v2 代码贡献若落地，需由会话绑定对象持有 set 并确定性 Unload。
+
+### 13.5 capability 激活与内置模块解耦（P-D 前提）
+
+- 三个策略（snake/erafl/megaten）不再由各自 `module.Apply` 安装；`Compose` 统一从
+  `plan.CapabilityIds` 构造 policy，`moduleSelected` 只决定 `IsEnabled` 的模块语义。
+- 具体 flag 始终由 capability 派生。因此社区数据包在 v24pure 基线上声明 e.g.
+  `math.times-clamp.v1` / `display.extended-history.v1` 即可激活对应行为，无需内置
+  snake/erafl 模块在场。
+- snake 的 DialectFunctionContract（DFC 重载差异名集）同样从 `module.Apply` 解耦：
+  模块选中或完整 snake capability 集在场时，在 `Compose` 统一激活；完整 snake 数据包
+  可在 v24pure 上获得与 snake profile 一致的 DFC 语义。
+- megaten 三个门控行为补上 behavior capability id（`parser.label-lookup-case.v1`、
+  `parser.ref-out-name.v1`、`parser.private-system-shadow.v1`），megaten profile 显式声明。
+- 内置 profile 行为逐字节保持不变；`LegacyDialectSurfaceSmoke` 增加
+  "v24pure + 包 capability 激活 policy flag" 哨兵回钉。
+
+### 13.6 默认路径会话清理 P0 修复
+
+- `EmueraMain.StopLegacySession` 不再用 `!backend.IsRunning` 提前返回：Back/Restart/ERB
+  重启会先 `EmueraThread.End()`，旧逻辑会跳过 `GlobalStatic.Reset + ClearCompatibilityPlan`，
+  导致 plan 残留、同进程下一次启动 hash 防御失败。
+- `LegacySessionBackend.StopLegacyBaselineAsync` 对已停止线程幂等，现无条件调用。
+
+### 13.7 本批验收
+
+- GEmuera.Core.Tests：98（95 + 数据包加载/plan 元数据/save profile/capability 规则/数据包夹具）。
+- EmueraFacade.Tests：35（33 + surface/baseProfile 解析）。
+- LegacyDialectSurfaceSmoke / LegacyDialectRuntimeSmoke / CoreContractSmoke 全绿；
+  `gemuera-c#.csproj` Release 构建 0 错误。
+- 新增 `tests/xUnitTest/DataOnlyCompatPackFixture`：只有内嵌 manifest、无入口类的真实
+  程序集，端到端证明 manifest-only 加载路径。
+- **2026-10-03 增补（会话持有 pack set 与确定性 Unload，计划 E2-R2）**：`CompatPackSession`
+  落地（§5.4）——`CompatPackHandle`/`CompatPackSet` 实现 `ICompatPackLease`；
+  `ConfigureForLaunch` 返回 `CompatPackLaunchResult(Plan, Session)`；`Program` 持有租约并在
+  `ClearCompatibilityPlan`/`ResetSessionState` 先 Dispose（幂等恰好一次 Unload）再清
+  plan/profile。验收：GEmuera.Core.Tests 104（103 + `Dispose_UnloadsEachLeaseOnceIdempotently`）、
+  EmueraFacade.Tests 35、三冒烟全绿、宿主 Release 构建 0 错误。
+- **2026-10-03 增补（P0 静态回归守卫，计划批次 2 Task 11）**：新增
+  `tools/compat-pack/Test-CompatPackLifecycle.ps1`（`-ProjectRoot <项目根>`，exit 0/1），
+  静态断言 §13.6 的 P0 修复不回退：(1) `EmueraMain.StopLegacySession` 方法体内不得出现
+  `IsRunning` 条件早退（注释/字符串字面量剥离后按大括号配对提取方法体再检查，方法内的
+  P0 说明注释本身提到 `!backend.IsRunning` 不会误报）；(2) `LegacySessionBackend.StopLegacyBaselineAsync`
+  必须调用 `ClearCompatibilityPlan`；(3) `CompatPackHost` 不得再现
+  `ActivePackModuleIds`/`ActiveVariantSelections`/`ResetActiveSessionProjection`；
+  (4) `DialectPlan` 必须声明 `PackModuleIds` 与 `VariantSelections`。验收命令：
+  `powershell -NoProfile -ExecutionPolicy Bypass -File tools/compat-pack/Test-CompatPackLifecycle.ps1 -ProjectRoot <项目根>`，
+  已接入 `tools/governance/Test-Governance.ps1`（其无参调用即执行本守卫）。
+
+### 13.8 社区最小数据包示例
+
+```jsonc
+{
+  "packId": "community.example",
+  "packVersion": "1.0.0",
+  "targetEngineApi": 1,
+  "baseProfileId": "v24pure",
+  "capabilities": ["math.times-clamp.v1", "display.extended-history.v1"],
+  "surface": {
+    "addInstructions": ["SETANIMETIMER"],
+    "hideInstructions": ["CALLSHARP"],
+    "addFunctions": ["SQL_CONNECT"],
+    "hideFunctions": ["EXISTVAR"]
+  },
+  "variantSelections": { "SETBGIMAGE": "builtin:snake" }
+}
+```
+
+- 该程序集不需要任何 C# 类型；把 JSON 以 `LogicalName=compatpack.manifest.json`
+  内嵌进一个 `net8.0`/`net9.0-android` 类库即可。仓库内可直接复制的模板工程为
+  `packs/CommunityPackTemplate/`（manifest-only，packId=community.template），社区
+  入口文档为 `packs/README.md`；带最小 `ICompatPack` 入口类的对照夹具为
+  `tests/xUnitTest/CompatPackContractOnlyFixture/`（packId=community.contract-fixture，
+  只引用 Emuera 契约程序集，供 ALC 正向用例复用）。
+- `baseProfileId` 必须与 launcher 实际会话基线一致（v1 只支持 v24pure）；否则整包拒载回退。
+- `capabilities` 只接受引擎已收录 id；`surface` 名字必须命中引擎 handler/基线对账。
+- 完整功能后续（自定义 handler/策略）仍需 v2 的 `IInstructionVariantContribution`/`IPolicyContribution`
+  接线；v1 携带即拒载，不会静默 no-op。
+
+### 13.9 未完成（下一批候选）
+
+- P0 静态回归守卫（§13.7，2026-10-03）只覆盖文本级回归，**不能替代真机 e2e**：
+  pack 游戏启动 → Back/Restart → 同进程二次启动（hash 防御）路径的 Android 真机实测仍开放。
+
+- `IInstructionVariantContribution` / `IPolicyContribution` v2 运行时接线与会话持有
+  pack set（code contribution 生命周期）。
+- `baseSurfaceHash` 运行时校验端已完成（§12.9，2026-10-03：精确对账 + 仓内钉子测试）；
+  仍开放：发布端/CI 的声明值生成流水线；`targetEngineApi` 与 interpreter engine identity 统一。
+- ALC allow-list 硬化（GEmuera.Core/默认解析回落）、跨契约程序集拆分。
+  —— **硬化部分已于 2026-10-03 完成**（§5.2/§12.6：清单外绑定 FileLoadException 拒载）；
+  跨契约程序集拆分仍开放。
+- ~~launcher/runner 的 per-game env 通道去全局化、Android 路径大小写规范化~~ **已于 2026-10-03 完成**（E2-R3/R4）：`MergeSelection` 选择优先（外部 env 仅诊断输入 + UI 警告）、平台正确游戏键（`GameKeyComparer`/`NormalizeGameKey(caseSensitiveFilesystem)`/`NormalizePackPath`）、runner/in-process switch per-session 注入刷新——语义见 §6 增补；Android 真机路径行为**待 Android 实测**。
+- 内置模块退役（P-D）的 profile/闭包迁移；本批只解除了 capability 激活的机制阻塞。
+- 治理口径：`tools/dialect-inventory/*CompatibilityPack*` 是 M0 静态证据工具，其
+  `BuiltInCompiledOnly`/`runtimeModuleLoading=NotImplemented` 描述的是当时证据边界，
+  不是运行时 CompatPack 契约；运行时以本文件与 `compatpack.manifest.schema.json` 为准。
+
+### 13.10 v18 第一方数据包与等价门禁（2026-10-03）
+
+- `packs/gemuera.v18/`（manifest-only 数据包，packId=`pack.gemuera.v18`）内嵌的
+  `compatpack.manifest.json` 是**生成物**，由 `tools/compat-pack/Generate-V18PackManifest`
+  从生成清单 `LegacyDialectInventories`（唯一事实源）计算 v24−v18 差集：
+  hideInstructions=144、hideFunctions=106、add* 恒为空（v18 ⊆ v24 取证成立；add* 非空时
+  生成器以非零退出码失败并列出违规名）。闭包不变量由生成器自检：
+  v24 指令 561−144=417=v18、v24 函数 266−106=160=v18。输出规范化（键 Ordinal 排序、
+  LF、UTF-8 无 BOM、末尾单换行），重跑生成器即恢复，禁止手改。
+- packId 说明：不能取 `gemuera.v18`——与内置方言模块 id 撞名（Compose 的包模块白名单
+  禁止包含内置模块 id，加载校验的保留名对账同样拒载），故用 `pack.` 前缀。
+- 等价门禁（两层）：
+  1. `GEmuera.Core.Tests/V18PackManifestTests`：真实包 DLL → `CompatPackLoader` →
+     `CompatPackPlanAssembler`（基线 v24pure），断言组装后 `Dialect.Instructions/Functions`
+     键集合与内置 `CreateLegacySessionPlan("v18")` 逐名相等（排序数组 `Assert.Equal`）。
+  2. `LegacyDialectSurfaceSmoke.AssertV18PackEquivalence()`（`AssertPackProjection()` 之后
+     调用）：同链路再断言投影为 `LegacyCompatibilityProfile` 后（`ApplyPackSurface` 从
+     plan−基线差量反推隐藏）的指令/函数可见性在两侧计划键并集上逐名相等。
+- 历史差量对账（与 `LegacyV18CompatibilityModule` 手抄名单的交叉诊断，非事实源）：
+  - 手抄名单为 39 指令 + 110 函数；生成清单差集为 144 指令 + 106 函数。指令侧多出的
+    105 名是 v24 后增**函数**经 METHOD 投影进指令清单的同名条目（生成清单双侧声明），
+    指令/函数两侧同 hide，行为等价。
+  - 手抄函数名单多出的 4 名（`CHKGLOBALDATA`/`CHKVARDATA`/`FIND_VARDATA`/`GROTATE`）
+    是 v24 参考源码有、gEmuera 引擎投影（生成清单）中根本不存在的名字：对引擎而言
+    隐藏它们是 no-op，且包规则要求 hide ⊆ v24 基线（生成清单），故生成器不纳入。
+    两会话的键集合恰因此逐名闭合，等价仍是精确断言、无任何容差放宽。
+- 宿主 glob 提醒：`tools/compat-pack/**` 已加入 `gemuera-c#.csproj` 的 `Compile Remove`
+  兜底（工具 Program.cs 的顶层语句若被宿主收录会以全局命名空间 `Program` 遮蔽
+  `MinorShift.Emuera.Program`，表现为 CS0117）。

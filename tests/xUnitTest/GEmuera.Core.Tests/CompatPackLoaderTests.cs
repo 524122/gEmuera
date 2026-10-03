@@ -6,14 +6,20 @@ using Xunit;
 namespace GEmuera.Core.Tests;
 
 /// <summary>
-/// 加载器全链路矩阵（docs/designs/compat-pack-interface.md §5）：以本测试程序集为真实包
-/// 样本（内嵌清单 + HelloCompatPack 入口），经独立 ALC 加载自身文件验证
-/// 显式发现→隔离→清单解析→入口发现→语义校验→哈希固化。fail-closed 三原则
-/// （未知 capability 拒载 / 对账冲突拒载 / targetEngineApi 不匹配拒载）各有正反向用例。
+/// 加载器全链路矩阵（docs/designs/compat-pack-interface.md §5）：正向加载样本为 Task 1
+/// 契约夹具 CompatPackContractOnlyFixture（内嵌清单 + ContractOnlyPack 入口，只引用契约
+/// 程序集），经独立 ALC 验证显式发现→隔离→清单解析→入口发现→语义校验→哈希固化。
+/// 本测试程序集（内嵌 HelloCompatPack 清单）保留为负向样本：拒载向用例（fail-closed
+/// 三原则正反向）在规则段被拒，不依赖绑定回落。ALC 允许清单的隔离行为另见
+/// CompatPackAlcIsolationTests（探针拒载 / 契约夹具正向对照）。
 /// </summary>
+[Collection("CompatPack")]
 public class CompatPackLoaderTests
 {
     static string PackPath => typeof(CompatPackLoaderTests).Assembly.Location;
+
+    /// <summary>正向加载样本：Task 1 契约夹具（packId community.contract-fixture，无 capability 声明）。</summary>
+    static string FixturePath => typeof(CompatPackContractOnlyFixture.ContractOnlyPack).Assembly.Location;
 
     static CompatPackValidationContext RealContext() => new(
         engineModuleApiVersion: 1,
@@ -43,14 +49,15 @@ public class CompatPackLoaderTests
     }
 
     [Fact]
-    public void TryLoad_HelloPack_WithRealV24Baseline_Succeeds()
+    public void TryLoad_ContractOnlyFixture_WithRealV24Baseline_Succeeds()
     {
-        Assert.True(CompatPackLoader.TryLoad(PackPath, RealContext(), out var handle, out var errors),
+        Assert.True(CompatPackLoader.TryLoad(FixturePath, RealContext(), out var handle, out var errors),
             string.Join("; ", errors));
 
-        Assert.Equal("test.hello-pack", handle!.Manifest.PackId);
+        Assert.Equal("community.contract-fixture", handle!.Manifest.PackId);
         Assert.Single(handle.Surface);
-        Assert.Single(handle.Capabilities);
+        // 契约夹具只声明表面贡献，不携带 capability（正向量与 hello 样本的差异点）。
+        Assert.Empty(handle.Capabilities);
         // v1 死契约（评审 P2-6）：变体/策略贡献加载即拒载，正向夹具不得携带——句柄侧恒为空。
         Assert.Empty(handle.Variants);
         Assert.Empty(handle.Policies);
@@ -61,10 +68,81 @@ public class CompatPackLoaderTests
     }
 
     [Fact]
+    public void TryLoad_HashesAndLoadsSameBytes_EvenIfFileChanges()
+    {
+        // TOCTOU 修复（E2-R5）：哈希与加载必须来自同一份字节。override 字节是真实契约夹具
+        // DLL（合法包，packId community.contract-fixture）读一次的缓存；磁盘测试路径写入的
+        // 却是另一份不同 manifest/packId 的 DLL（v18 数据包，packId pack.gemuera.v18）。
+        // TryLoad 的结果——manifest 与双哈希——必须全部来自 override 字节，与磁盘文件无关。
+        byte[] overrideBytes = File.ReadAllBytes(FixturePath);
+        string expectedAssemblySha256 =
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(overrideBytes)).ToLowerInvariant();
+
+        string diskPath = Path.Combine(
+            Path.GetTempPath(), "compat-pack-toctou-" + Guid.NewGuid().ToString("N") + ".dll");
+        File.WriteAllBytes(diskPath, File.ReadAllBytes(typeof(GemueraV18Pack.GemueraV18PackMarker).Assembly.Location));
+        CompatPackLoader.BytesReaderOverrideForTest = _ => overrideBytes;
+        CompatPackHandle? handle = null;
+        try
+        {
+            Assert.True(CompatPackLoader.TryLoad(diskPath, RealContext(), out handle, out var errors),
+                string.Join("; ", errors));
+
+            // manifest 来自 override 字节（契约夹具），不是磁盘上的 v18 包。
+            Assert.Equal("community.contract-fixture", handle!.Manifest.PackId);
+            // 双哈希都按 override 字节推演（file ‖ 内嵌清单原始字节），与磁盘 v18 字节无关。
+            Assert.Equal(expectedAssemblySha256, handle.AssemblySha256);
+            Assert.Equal(ExpectedPackSha256(overrideBytes), handle.PackSha256);
+        }
+        finally
+        {
+            CompatPackLoader.BytesReaderOverrideForTest = null;
+            handle?.Unload();
+            // 按路径加载（修复前行为）会在 Windows 上内存映射磁盘文件，Unload 收尾前删除
+            // 可能被拒；stream 加载（修复后）从不打开磁盘文件，此 catch 仅防御清理路径。
+            try { File.Delete(diskPath); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>
+    /// 与 <see cref="CompatPackHandle"/> 文档同式（file‖resource）的独立推演：用一次性探针
+    /// ALC 从同一份字节提取内嵌清单原始字节（纯元数据操作，不解析依赖、不执行代码），
+    /// 不经过被测加载器，避免同源假设自我循环。
+    /// </summary>
+    static string ExpectedPackSha256(byte[] packBytes)
+    {
+        var probe = new System.Runtime.Loader.AssemblyLoadContext("toctou-hash-probe", isCollectible: true);
+        try
+        {
+            System.Reflection.Assembly probeAssembly = probe.LoadFromStream(new MemoryStream(packBytes));
+            byte[] manifestBytes = Array.Empty<byte>();
+            foreach (string name in probeAssembly.GetManifestResourceNames())
+            {
+                if (!string.Equals(name, CompatPackManifest.ManifestResourceName, StringComparison.Ordinal))
+                    continue;
+                using Stream? stream = probeAssembly.GetManifestResourceStream(name);
+                using var memory = new MemoryStream();
+                stream!.CopyTo(memory);
+                manifestBytes = memory.ToArray();
+                break;
+            }
+            byte[] concatenated = new byte[packBytes.Length + manifestBytes.Length];
+            packBytes.CopyTo(concatenated, 0);
+            manifestBytes.CopyTo(concatenated, packBytes.Length);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(concatenated)).ToLowerInvariant();
+        }
+        finally
+        {
+            probe.Unload();
+        }
+    }
+
+    [Fact]
     public void TryLoad_SamePack_Twice_HashesDeterministic()
     {
-        Assert.True(CompatPackLoader.TryLoad(PackPath, RealContext(), out var first, out _));
-        Assert.True(CompatPackLoader.TryLoad(PackPath, RealContext(), out var second, out _));
+        Assert.True(CompatPackLoader.TryLoad(FixturePath, RealContext(), out var first, out _));
+        Assert.True(CompatPackLoader.TryLoad(FixturePath, RealContext(), out var second, out _));
 
         Assert.Equal(first!.PackSha256, second!.PackSha256);
         Assert.Equal(first.AssemblySha256, second.AssemblySha256);
@@ -178,7 +256,7 @@ public class CompatPackLoaderTests
     [Fact]
     public void TryLoadSet_SinglePack_Succeeds()
     {
-        Assert.True(CompatPackLoader.TryLoadSet(new[] { PackPath }, RealContext(), out var set, out var errors),
+        Assert.True(CompatPackLoader.TryLoadSet(new[] { FixturePath }, RealContext(), out var set, out var errors),
             string.Join("; ", errors));
         Assert.Single(set!.Handles);
         set.UnloadAll();
@@ -187,7 +265,7 @@ public class CompatPackLoaderTests
     [Fact]
     public void TryLoadSet_DuplicatePackId_RejectsWholeSet()
     {
-        Assert.False(CompatPackLoader.TryLoadSet(new[] { PackPath, PackPath }, RealContext(), out var set, out var errors));
+        Assert.False(CompatPackLoader.TryLoadSet(new[] { FixturePath, FixturePath }, RealContext(), out var set, out var errors));
         Assert.Null(set);
         Assert.Contains(errors, e => e.Contains("packId 重复"));
     }
@@ -215,4 +293,60 @@ public class CompatPackLoaderTests
         protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
             => throw new InvalidOperationException("boom");
     }
+    [Fact]
+    public void ResolvePackEntry_AssemblyWithoutEntry_ReturnsManifestOnlyPack()
+    {
+        string json = "{\"packId\":\"test.data-only\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"surface\":{\"addInstructions\":[\"SETANIMETIMER\"]}}";
+        var manifest = CompatPackManifest.TryParse(json, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+
+        var errors = new List<string>();
+        ICompatPack? pack = CompatPackLoader.ResolvePackEntry(typeof(object).Assembly, manifest, errors);
+
+        Assert.Empty(errors);
+        Assert.IsType<ManifestOnlyCompatPack>(pack);
+        Assert.Same(manifest, pack!.Manifest);
+    }
+
+    [Fact]
+    public void ManifestOnlyPack_WithManifestSurface_ValidatesThroughCombinedContributions()
+    {
+        string json = "{\"packId\":\"test.data-surface\",\"packVersion\":\"1.0.0\",\"targetEngineApi\":1,"
+            + "\"baseProfileId\":\"v24pure\","
+            + "\"surface\":{\"addInstructions\":[\"SETANIMETIMER\"],\"hideInstructions\":[\"CALLSHARP\"],"
+            + "\"addFunctions\":[\"SQL_CONNECT\"],\"hideFunctions\":[\"EXISTVAR\"]}}";
+        var manifest = CompatPackManifest.TryParse(json, out var parsed, out var parseErrors)
+            ? parsed! : throw new InvalidOperationException(string.Join("; ", parseErrors));
+        var context = RealContext();
+        ICompatPack pack = new ManifestOnlyCompatPack(manifest);
+        IReadOnlyList<ICompatPackContribution> manifestContributions =
+            CompatPackLoader.CreateManifestContributions(manifest, context);
+
+        Assert.Single(manifestContributions);
+        Assert.IsType<ManifestSurfaceContribution>(manifestContributions[0]);
+        Assert.True(
+            CompatPackLoader.ValidatePackEntry(
+                pack, manifest, context, out var combined, out var errors, manifestContributions),
+            string.Join("; ", errors));
+        Assert.Single(combined);
+        Assert.IsType<ManifestSurfaceContribution>(combined[0]);
+    }
+
+    [Fact]
+    public void TryLoad_ManifestOnlyAssembly_LoadsWithoutEntryType()
+    {
+        string packPath = typeof(DataOnlyFixture.DataOnlyCompatPackFixtureMarker).Assembly.Location;
+        Assert.True(CompatPackLoader.TryLoad(packPath, RealContext(), out var handle, out var errors),
+            string.Join("; ", errors));
+
+        Assert.Equal("test.data-only", handle!.Manifest.PackId);
+        Assert.IsType<ManifestOnlyCompatPack>(handle.Pack);
+        Assert.Single(handle.Surface);
+        Assert.IsType<ManifestSurfaceContribution>(handle.Surface[0]);
+        Assert.Contains("SETANIMETIMER", handle.Manifest.Surface.AddInstructions);
+        Assert.Contains("CALLSHARP", handle.Manifest.Surface.HideInstructions);
+        handle.Unload();
+    }
+
 }
