@@ -9,7 +9,7 @@
     <!-- 宿主绑定探针（负向夹具）：故意引用宿主内部程序集 GEmuera.Core，制造 ALC 绑定需求。
          允许清单硬化后该包必须在 TryLoad 阶段被拒载（FileLoadException，fail-closed）。 -->
     <ProjectReference Include="..\..\..\src\Core\GEmuera.Core.csproj" />
-    <ProjectReference Include="..\..\..\src\EmueraFacade\Emuera.csproj" />
+    <ProjectReference Include="..\..\..\src\EmueraCompatPack\EmueraCompatPack.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="compatpack.manifest.json" LogicalName="compatpack.manifest.json" />

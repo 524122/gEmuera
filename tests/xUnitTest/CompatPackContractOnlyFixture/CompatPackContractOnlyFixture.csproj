@@ -6,8 +6,9 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <!-- 契约夹具：只引用 Emuera 契约程序集（字面名 Emuera），证明包作者不依赖引擎核心即可实现 ICompatPack 入口。 -->
-    <ProjectReference Include="..\..\..\src\EmueraFacade\Emuera.csproj" />
+    <!-- 契约夹具：只引用 CompatPack 契约程序集（Emuera.CompatPack，2026-10-03 拆分），
+         证明包作者不依赖引擎核心即可实现 ICompatPack 入口。 -->
+    <ProjectReference Include="..\..\..\src\EmueraCompatPack\EmueraCompatPack.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="compatpack.manifest.json" LogicalName="compatpack.manifest.json" />
