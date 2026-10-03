@@ -14,6 +14,7 @@ namespace GEmuera.Core.Tests;
 /// 负向探针 = CompatPackHostBindingProbe（故意引用 GEmuera.Core）必须在 TryLoad 阶段拒载。
 /// 类型跨 ALC 不统一：断言一律按 ContributionId / 指令名，禁止 is Type。
 /// </summary>
+[Collection("CompatPack")]
 public class CompatPackAlcIsolationTests
 {
     static CompatPackValidationContext RealContext() => new(

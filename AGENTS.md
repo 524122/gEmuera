@@ -22,7 +22,7 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
 | `docs/xEmueraCodeWiki`                          | 外部参考   | XEmuera-R：一款专门为Emuera1824+v24+EE+EM适配的模拟。这是使用gpt5.6-sol读取其代码并编写的架构指导文档 |
 | `governance/`                                   | 按需     | Agent 自我进化机制：任务复盘记录（evolution-log/）+ 用户提示词模式库（prompt-patterns/）。任务结束提交 PR 前按 `governance/README.md` 写进化记录 |
 | `addons/gdUnit4/ADDON.md`                       | 按需     | GDUnit4 插件使用指南（WHY/WHEN/WHERE/HOW），用 GDUnit 做 TDD 时阅读                  |
-| `ERBAPI.md`                                     | ERB解释器接口 | 需要为新的Era游戏做适配，且当前的Erb语法解析无法实现时，又或者需要更新Erb语法解释器时，指导Agent对接              |
+| `docs/ERBAPI.md`                                | ERB解释器接口 | 需要为新的Era游戏做适配，且当前的Erb语法解析无法实现时，又或者需要更新Erb语法解释器时，指导Agent对接              |
 | `docs/logging-convention.md`                    | 按需     | 日志内容层规范：文案句式、EventId 命名空间、语言政策、文件落点清单、旁路禁令。新增诊断日志或排查日志问题前阅读                |
 | `readme/README.md`（另有 en/ja 版）              | 项目概述   | 项目结构、构建、致谢；结构变更后请同步更新                                       |
 
@@ -91,8 +91,8 @@ Emuera 核心编译器以 C# 编写，为减少开发成本、方便 AI 对接�
 核心运行链：
 
 ```text
-project.godot -> first_window.tscn -> FirstWindow._Ready()
-  -> main.tscn -> EmueraMain._Ready() -> EmueraThread.Start()
+project.godot -> assets/scenes/first_window.tscn -> FirstWindow._Ready()
+  -> assets/scenes/main.tscn -> EmueraMain._Ready() -> EmueraThread.Start()
   -> Program.Main() -> Process.Initialize()
   -> Process.DoScript() / runScriptProc()
   -> EmueraConsole / GenericUtils / EmueraContent
@@ -134,7 +134,7 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
 6. **C# 文件规模与细分**：新建文件硬上限 1500 行；既有 >2000 行文件"只减不增"，触碰时按功能域
    顺手拆分（`Type.Feature.cs` partial 模式，纯移动不混逻辑改动）。拆分前必须核对仓库六类路径
    钉扎/链接机制（方言证据链、契约测试、tools 工程源链接、场景脚本引用等），详见
-   [FILE_STANDARD.md](FILE_STANDARD.md) §6。
+   [FILE_STANDARD.md](docs/FILE_STANDARD.md) §6。
 7. **游戏内容与运行产物不得进入项目根（res://）**：Godot 编辑器会递归扫描导入 res:// 下全部资源，
    一个 era 游戏意味着上千 CSV/上万文件，会令编辑器卡死并在游戏目录生成大量 `*.translation` 垃圾
    （2026-09-07 实证：经 junction 链入后编辑器导入 1457 个 translation 文件）。因此：游戏本体只放
@@ -147,7 +147,7 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
 
 > **CodeGraph 不可用时的降级检索**（是否安装因机器而异，先试再定）：改用
 > `grep`（按正则找内容）→ `glob`（按路径找文件）→ `read`（按行号读区间），
-> 配合 `Scripts/`、`src/Core/` 的目录结构判断。另见 `FILE_STANDARD.md` §6.7：
+> 配合 `Scripts/`、`src/Core/` 的目录结构判断。另见 `docs/FILE_STANDARD.md` §6.7：
 > `.codegraph/` 是可再生缓存，即便装了也需在大型拆分后重建，否则旧索引会系统性误导检索。
 
 ## 协作规则
@@ -164,7 +164,7 @@ project.godot -> first_window.tscn -> FirstWindow._Ready()
 
 | 职责     | 文件                                                                        |
 | ------ | ------------------------------------------------------------------------- |
-| 主场景    | `first_window.tscn`、`main.tscn`                                           |
+| 主场景    | `assets/scenes/first_window.tscn`、`assets/scenes/main.tscn`              |
 | 主入口    | `Scripts/FirstWindow.cs`、`Scripts/EmueraMain.cs`                          |
 | 后台线程   | `Scripts/EmueraThread.cs`                                                 |
 | UI 渲染  | `Scripts/EmueraContent.cs`                                                |

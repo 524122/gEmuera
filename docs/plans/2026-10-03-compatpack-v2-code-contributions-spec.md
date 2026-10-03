@@ -1,5 +1,12 @@
 # 兼容包 v2 代码贡献契约设计（Spike）
 
+> **勘误（2026-10-03 契约程序集拆分后）**：本文成稿时契约尚未拆分，文中所有
+> `src/EmueraFacade/Compatibility/Packs/` 路径引用（§1.1/§2.2/§4.1/§8.3 等，含
+> 「契约程序集（EmueraFacade）」表述）均已过时：契约现位于独立契约程序集
+> **`Emuera.CompatPack`（`src/EmueraCompatPack/`）**，由
+> `docs/plans/2026-10-03-compatpack-contract-assembly-split-adr.md` 确立。阅读时把上述
+> 路径与程序集归属一律读作 `src/EmueraCompatPack/`，其余设计不受影响。
+
 > 状态：**Spike 设计稿，待 OWNER 评审**（2026-10-03）。本文只做设计，不含任何运行时改动——
 > 对应提交只含本 spec，零生产代码变更；v1 的两条 fail-closed 拒载
 > （`src/Core/Compatibility/Packs/CompatPackRules.cs:113-120` 策略贡献、`:137-144` 变体贡献）

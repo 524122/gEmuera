@@ -11,6 +11,7 @@ namespace GEmuera.Core.Tests;
 /// 组装后的 "v24pure + v18 包" 会话表面必须与内置 v18 profile 逐名相等。
 /// 不硬编码 LegacyV18CompatibilityModule 的手抄差量名单（仅作交叉诊断）。
 /// </summary>
+[Collection("CompatPack")]
 public class V18PackManifestTests
 {
     static CompatPackValidationContext V18PackContext() => new(

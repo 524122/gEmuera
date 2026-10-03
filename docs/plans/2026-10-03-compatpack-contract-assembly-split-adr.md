@@ -20,7 +20,7 @@ CompatPack 契约（`ICompatPack` / `CompatPackManifest` / `CompatPackVariants`�
 
 ### 2.2 版本策略
 
-- 新契约程序集**独立 SemVer 线**：`AssemblyVersion=1.0.0.0`、`FileVersion=1.0.0`。v1 契约面（现有 13 个 public 类型）即 1.0；v2 贡献接线时按语义化版本升 minor——**不再牵动 facade 的 1.824**。
+- 新契约程序集**独立 SemVer 线**：`AssemblyVersion=1.0.0.0`、`FileVersion=1.0.0`。v1 契约面（现有 14 个 public 类型）即 1.0；v2 贡献接线时按语义化版本升 minor——**不再牵动 facade 的 1.824**。
 - facade 完全不动：`AssemblyName=Emuera`、`AssemblyVersion=1.824.0.0`、`FileVersion=1.824.0.0` 保持逐字节同值，上游插件 ABI 叙事不变。
 
 ### 2.3 TypeForwardedTo 策略（旧包兼容窗口）

@@ -10,6 +10,7 @@ namespace GEmuera.Core.Tests;
 /// plan 哈希变化 → 禁用（空包集）后与纯 v24 基线逐字节等价（同实例同哈希）。
 /// 引擎侧投影接线（handler/变体生效于解析器）不在本层，属宿主接线增量。
 /// </summary>
+[Collection("CompatPack")]
 public class CompatPackAssemblyTests
 {
     static string PackPath => typeof(CompatPackAssemblyTests).Assembly.Location;

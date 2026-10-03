@@ -9,6 +9,7 @@ namespace GEmuera.Core.Tests;
 /// 无入口类）与 tests/xUnitTest/CompatPackContractOnlyFixture（最小 ICompatPack 契约夹具）
 /// 都能经 CompatPackLoader 完整加载，作为社区包作者与后续 ALC 正向用例的可复制基线。
 /// </summary>
+[Collection("CompatPack")]
 public class CommunityPackTemplateTests
 {
     static CompatPackValidationContext CommunityContext() => new(

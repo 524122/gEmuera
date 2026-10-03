@@ -13,6 +13,7 @@ namespace GEmuera.Core.Tests;
 /// 三原则正反向）在规则段被拒，不依赖绑定回落。ALC 允许清单的隔离行为另见
 /// CompatPackAlcIsolationTests（探针拒载 / 契约夹具正向对照）。
 /// </summary>
+[Collection("CompatPack")]
 public class CompatPackLoaderTests
 {
     static string PackPath => typeof(CompatPackLoaderTests).Assembly.Location;
