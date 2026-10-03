@@ -176,6 +176,12 @@ per-game 启用配置（launcher 侧：游戏 → 包列表）给出**包文件�
 
 每阶段验收：六游戏启动矩阵全绿、方言快照名录零差异、三冒烟 + legacy-runner 门禁、result-review ≥98。
 
+- **P-D 退役设计（spike，2026-10-03）**：`docs/plans/2026-10-03-pd-module-retirement-spec.md`——
+  定义 profile→第一方包映射 schema（`packs/pack-profile-map.example.json`）与加载优先级、
+  包缺失/版本不符/身份不符三类回退路径与用户文案、逐 profile 退役顺序与 red/green 门禁、
+  `BuiltInDialectCatalog`/`LegacyCompatibilityModules`/`expectedModuleClosures` 删除清单。
+  **退役执行以该 spec 通过 OWNER 评审为前提**，任何退役任务不得偏离其门禁矩阵。
+
 ## 9. 兼容性承诺
 
 - `targetEngineApi` **v1 为单整数、精确匹配**（引擎 1 ↔ 包 1；引擎递增即拒载旧包并给升级指引）。原"次版本 = 只增不改"承诺推迟到 v2（需 schema 升级为 major.minor 双段后再兑现），见 §12 勘误 5。引擎内置变体名 `"builtin:*"` 属公共词汇表，改名视同主版本。
